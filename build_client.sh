@@ -4,9 +4,11 @@ mkdir -p public
 
 BUILD_ENV="CGO_ENABLED=0"
 
-GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+if [ -z "$APP_VERSION" ]; then
+    APP_VERSION=$(git describe --tags --always 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+fi
 
-LDFLAGS="-s -w -X 'main.Version=${GIT_COMMIT}'"
+LDFLAGS="-s -w -X 'main.Version=${APP_VERSION}'"
 
 PLATFORMS=(
     "windows/amd64"
