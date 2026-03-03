@@ -1,5 +1,10 @@
 # V2V Chat — Anonymous WebSocket Chat System
+<p align="right">
+🌐
+<a href="README.vi.md">Tiếng Việt</a>
+</p>
 
+# V2V Chat — Anonymous WebSocket Chat System
 A lightweight, terminal-based anonymous chat system built with Go. Clients connect over WebSocket, are identified by a username and a 4-character IP hash suffix, and communicate in real time through a central server.
 
 ---
@@ -52,23 +57,19 @@ A lightweight, terminal-based anonymous chat system built with Go. Clients conne
 
 ## 🚀 Client Setup
 
-1. Visit the homepage at [https://chat.example.com](https://chat.example.com) and find the **Install Client** line.
+1. Download the client from the [releases page](https://github.com/CleveTok3125/V2V/releases). Choose the build that matches your OS and architecture.
 
-2. Download the client from the [releases page](https://github.com/CleveTok3125/V2V/releases). Choose the build that matches your OS and architecture.
-
-3. Open your favourite terminal. On macOS/Linux use Terminal; on Windows use Command Prompt. Example:  navigate to your download folder:
+2. Assuming you downloaded it to the `Downloads` folder: (Change V2V to the name of the binary you downloaded)
    ```
    cd Downloads
+   chmod +x V2V # Linux and macOS only
+   ./V2V --help
    ```
 
-4. Make the file executable (macOS and Linux only):
+3. Connect to the server:
    ```
-   chmod +x [filename]
-   ```
-
-5. Connect to the server:
-   ```
-   ./[filename] -s https://chat.example.com
+   ./V2V -s <SERVER>
+   # Example: ./V2V -s chat.example.com
    ```
 
 ---
