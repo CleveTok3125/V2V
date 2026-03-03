@@ -4,7 +4,6 @@
 <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-# V2V Chat — Anonymous WebSocket Chat System
 A lightweight, terminal-based anonymous chat system built with Go. Clients connect over WebSocket, are identified by a username and a 4-character IP hash suffix, and communicate in real time through a central server.
 
 
