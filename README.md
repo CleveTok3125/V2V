@@ -11,6 +11,7 @@ A lightweight, terminal-based anonymous chat system built with Go. Clients conne
 
 - ⚡ Real-time messaging over WebSocket
 - 🧑 Anonymous identity (username + IP hash)
+- 🔒 Designed with privacy in mind 
 - 🖥 Terminal-based client
 - 🌐 Cross-platform binaries
 - 🔒 Rate limiting & connection controls
@@ -41,7 +42,7 @@ A lightweight, terminal-based anonymous chat system built with Go. Clients conne
 
 ---
 
-## 🧰 System Requirements
+## System Requirements 
 
 ### Client
 
@@ -55,13 +56,11 @@ A lightweight, terminal-based anonymous chat system built with Go. Clients conne
 
 ---
 
-## 🚀 Client Setup
+## Client Setup
 
 1. Download the client from the [releases page](https://github.com/CleveTok3125/V2V/releases). Choose the build that matches your OS and architecture.
 
-2. Assuming you downloaded it to the `Downloads` folder: (Change V2V to the name of the binary you downloaded)
-2. Assuming you downloaded it to the `Downloads` folder:
-   (Change V2V to the name of the binary you downloaded)
+2. Assume that you downloaded it to the `Downloads` folder, change the name of the binary you downloaded to V2V and run the following commands:
 
    ```
    cd Downloads
@@ -69,21 +68,26 @@ A lightweight, terminal-based anonymous chat system built with Go. Clients conne
    ./V2V --help
    ```
 
-3. Connect to the server:
-   chmod +x V2V # Linux and MacOS only
-   ./V2V --help
+3. Connect to the server with two modes: Guest Mode and Secure Mode
+   
+   **Guest Mode**:
    ```
-
-3. Connect to the server:
-
-   ```
-   ./V2V -s <SERVER>
+   ./V2V -s <SERVER> # no authentication
    # Example: ./V2V -s chat.elsutm.io.vn
    ```
 
+   **Secure Mode**:
+   ```
+   ./V2V -s -k ./key.json <SERVER> # key given by admin
+   # Example: ./V2V -s -k ./key.json chat.elsutm.io.vn
+   ```
+
+   > **Attention**: The `./key.json` file must be secretly kept to protect your privacy.
+
+
 ---
 
-## 🚀 Server Setup
+## Server Setup
 
 ### 1. Install Go
 
@@ -105,6 +109,10 @@ go get github.com/gorilla/websocket
 go get github.com/joho/godotenv
 go mod tidy
 ```
+### 3. Role and Key configuration
+Configure both of them using the provided template below.
+- [Key](https://github.com/CleveTok3125/V2V/blob/main/template/key.json)
+- [Role](https://github.com/CleveTok3125/V2V/blob/main/template/roles.json) 
 
 ---
 
@@ -138,3 +146,5 @@ TIMEZONE=Asia/Ho_Chi_Minh
 ```
 
 > **Note:** `TIMEZONE` accepts any [IANA timezone name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) (e.g. `America/New_York`, `UTC`). If omitted or invalid, the server falls back to the system local time. All other variables are required — the server will exit on startup if any are missing.
+
+
