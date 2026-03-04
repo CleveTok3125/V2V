@@ -25,7 +25,7 @@ var Version = "dev"
 
 var CLI struct {
 	Version   kong.VersionFlag `help:"Hiển thị phiên bản (Git Commit Hash)" short:"v"`
-	Server    string           `help:"Link server WebSocket" required:"" short:"s"`
+	Server    string           `help:"Link server WebSocket" short:"s"`
 	Username  string           `help:"Tên người dùng của bạn" default:"Anonymous" short:"u"`
 	UserAgent string           `help:"Tùy chỉnh User-Agent" default:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" short:"a"`
 	Info      bool             `help:"Kiểm tra thông tin trạng thái của Server" short:"i"`
@@ -185,8 +185,18 @@ func main() {
 		"version": Version,
 	})
 
+	if CLI.GenKey {
+		generateKeyInteractive()
+		return
+	}
+
 	if CLI.Info {
 		checkServerInfo(CLI.Server)
+		return
+	}
+
+	if CLI.Server == "" {
+		fmt.Println("❌ Lỗi: Vui lòng cung cấp link server bằng cờ -s (VD: -s ws://localhost:8080)")
 		return
 	}
 
