@@ -51,6 +51,7 @@ A lightweight, terminal-based anonymous chat system built with Go. Clients conne
 ### Server
 
 - **Go** 1.25.4 or later (recommended)
+- **SSL/TLS** for secured messaging experience (recommended)
 
 ---
 
