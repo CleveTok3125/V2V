@@ -1,8 +1,11 @@
 # V2V Chat — Anonymous WebSocket Chat System
+<p align="right">
+🌐
+<a href="README.vi.md">Tiếng Việt</a>
+</p>
 
-A command line-oriented anonymous chat system for Vietnamese users
+A lightweight, terminal-based anonymous chat system built with Go. Clients connect over WebSocket, are identified by a username and a 4-character IP hash suffix, and communicate in real time through a central server.
 
----
 
 ## ✨ Features
 
@@ -48,6 +51,7 @@ A command line-oriented anonymous chat system for Vietnamese users
 ### Server
 
 - **Go** 1.25.4 or later (recommended)
+- **SSL/TLS** for secured messaging experience (recommended)
 
 ---
 
@@ -55,11 +59,17 @@ A command line-oriented anonymous chat system for Vietnamese users
 
 1. Download the client from the [releases page](https://github.com/CleveTok3125/V2V/releases). Choose the build that matches your OS and architecture.
 
+2. Assuming you downloaded it to the `Downloads` folder: (Change V2V to the name of the binary you downloaded)
 2. Assuming you downloaded it to the `Downloads` folder:
    (Change V2V to the name of the binary you downloaded)
 
    ```
    cd Downloads
+   chmod +x V2V # Linux and macOS only
+   ./V2V --help
+   ```
+
+3. Connect to the server:
    chmod +x V2V # Linux and MacOS only
    ./V2V --help
    ```
