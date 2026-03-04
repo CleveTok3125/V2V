@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"regexp"
 	"sync"
 	"time"
 
@@ -85,8 +84,6 @@ var (
 			return true
 		},
 	}
-
-	AnsiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 	RoleRegistry = make(map[string]RoleDefinition)
 )
