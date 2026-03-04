@@ -66,14 +66,19 @@ func lastAfterDash(s string) string {
 	return s
 }
 
-// sanitizeString depends on global AnsiRegex
 func sanitizeString(text string) string {
-	text = AnsiRegex.ReplaceAllString(text, "")
 	return strings.Map(func(r rune) rune {
 		if r == '\n' || unicode.IsGraphic(r) {
-			if !unicode.Is(unicode.Mn, r) && !unicode.Is(unicode.Me, r) {
-				return r
+			if unicode.Is(unicode.Cf, r) {
+				return -1
 			}
+			if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) {
+				return -1
+			}
+			if unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) {
+				return -1
+			}
+			return r
 		}
 		return -1
 	}, text)
