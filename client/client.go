@@ -71,15 +71,6 @@ func normalizeURL(input string) string {
 	return input
 }
 
-func extractSender(msg string) string {
-	if strings.HasPrefix(msg, "[") {
-		if idx := strings.Index(msg, "]:"); idx != -1 {
-			return msg[1:idx]
-		}
-	}
-	return ""
-}
-
 func checkServerInfo(input string) {
 	input = strings.TrimSpace(input)
 
@@ -251,6 +242,7 @@ func main() {
 					priv := ed25519.PrivateKey(privBytes)
 
 					dataToSign := append([]byte(challenge.Nonce), []byte(identity.Role)...)
+					dataToSign = append(dataToSign, []byte(respPacket.Username)...)
 					sig := ed25519.Sign(priv, dataToSign)
 					respPacket.Signature = hex.EncodeToString(sig)
 

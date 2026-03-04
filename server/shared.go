@@ -1,7 +1,9 @@
 package main
 
 import (
+	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 )
 
 type AppConfig struct {
+	AllowedOrigins      []string
 	MaxConnectionsPerIP int
 	MaxMessageLength    int
 	MaxMessageLine      int
@@ -55,6 +58,16 @@ type AuthPacket struct {
 	Username  string `json:"username,omitempty"`
 }
 
+type NonceMeta struct {
+	ExpiresAt time.Time
+	IP        string
+}
+
+type RateLimitRecord struct {
+	FailCount  int
+	UnlockTime time.Time
+}
+
 var Cfg AppConfig
 
 // need define serverstate struct in the future
@@ -81,11 +94,28 @@ var (
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 		CheckOrigin: func(r *http.Request) bool {
-			return true
+			origin := r.Header.Get("Origin")
+
+			if origin == "" {
+				return true
+			}
+
+			for _, o := range Cfg.AllowedOrigins {
+				if origin == strings.TrimSpace(o) {
+					return true
+				}
+			}
+
+			log.Printf("⛔ [SECURITY] Chặn kết nối từ Origin không hợp lệ: %s", origin)
+			return false
 		},
 	}
 
 	RoleRegistry = make(map[string]RoleDefinition)
+
+	ActiveNonces sync.Map
+	AuthFails    = make(map[string]RateLimitRecord)
+	AuthFailsMu  sync.Mutex
 )
 
 func GetDefaultPermission() Permission {

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -112,6 +112,17 @@ func loadRoles() {
 func chatHandler(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIP(r)
 
+	AuthFailsMu.Lock()
+	record := AuthFails[clientIP]
+
+	if time.Now().Before(record.UnlockTime) {
+		AuthFailsMu.Unlock()
+		log.Printf("⛔ [BAN] Từ chối %s. Vui lòng đợi đến %s.", clientIP, record.UnlockTime.Format("15:04:05"))
+		http.Error(w, "IP của bạn đang bị khóa tạm thời do xác thực sai nhiều lần.", http.StatusTooManyRequests)
+		return
+	}
+	AuthFailsMu.Unlock()
+
 	LastConnectMu.Lock()
 	if lastTime, exists := LastConnectTime[clientIP]; exists {
 		if time.Since(lastTime) < Cfg.ConnectionCooldown {
@@ -152,9 +163,28 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	perms, authPacket, err := HandleAuth(conn)
+	perms, authPacket, err := HandleAuth(conn, clientIP)
 	if err != nil {
+		if authPacket.Role != "" {
+			AuthFailsMu.Lock()
+			record := AuthFails[clientIP]
+			record.FailCount++
+
+			if record.FailCount >= 5 {
+				record.UnlockTime = time.Now().Add(5 * time.Minute)
+				record.FailCount = 0
+			}
+			AuthFails[clientIP] = record
+			AuthFailsMu.Unlock()
+
+			conn.WriteMessage(websocket.TextMessage, []byte("[Hệ thống]: Xác thực thất bại! Đã ngắt kết nối."))
+			return
+		}
 		return
+	} else if authPacket.Role != "" {
+		AuthFailsMu.Lock()
+		delete(AuthFails, clientIP)
+		AuthFailsMu.Unlock()
 	}
 
 	username := sanitizeString(authPacket.Username)
@@ -166,7 +196,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	if perms.CustomPrefix != "" {
 		displayName = perms.CustomPrefix + username
 	} else {
-		hash := md5.Sum([]byte(clientIP))
+		hash := sha256.Sum256([]byte(clientIP))
 		ipSuffix := hex.EncodeToString(hash[:])[:4]
 		displayName = fmt.Sprintf("%s#%s", username, ipSuffix)
 	}
@@ -272,6 +302,7 @@ func main() {
 	}
 
 	Cfg = AppConfig{
+		AllowedOrigins:      strings.Split(os.Getenv("ALLOWED_ORIGINS"), ","),
 		MaxConnectionsPerIP: getEnvAsInt("MAX_CONNECTIONS_PER_IP"),
 		MaxMessageLength:    getEnvAsInt("MAX_MESSAGE_LENGTH"),
 		MaxMessageLine:      getEnvAsInt("MAX_MESSAGE_LINE"),
