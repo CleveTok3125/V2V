@@ -122,7 +122,7 @@ func generateKeyInteractive() {
 		role = "admin"
 	}
 
-	fmt.Print("Role này có quyền chat không giới hạn? (Y/n) ")
+	fmt.Printf("%s này có quyền chat không giới hạn? (Y/n) ", role)
 	unlimitedStr, _ := reader.ReadString('\n')
 	unlimitedStr = strings.TrimSpace(strings.ToLower(unlimitedStr))
 	unlimited := true
@@ -130,9 +130,12 @@ func generateKeyInteractive() {
 		unlimited = false
 	}
 
-	fmt.Print("Nhập Prefix hiển thị (vd: \"[Admin]\"): ")
+	fmt.Print("Nhập Prefix hiển thị (Mặc định: \"[Admin] \"): ")
 	prefix, _ := reader.ReadString('\n')
 	prefix = strings.TrimSuffix(strings.TrimSuffix(prefix, "\n"), "\r")
+	if prefix == "" {
+		prefix = "[Admin] "
+	}
 
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -155,6 +158,7 @@ func generateKeyInteractive() {
 		fmt.Println("❌ Lỗi lưu file key.json:", err)
 		return
 	}
+	fmt.Println("\nĐã lưu: ./key.json (GIỮ BÍ MẬT FILE NÀY!)")
 
 	serverConfig := map[string]interface{}{
 		role: map[string]interface{}{
@@ -169,15 +173,13 @@ func generateKeyInteractive() {
 		},
 	}
 
-	serverJSON, _ := json.MarshalIndent(serverConfig, "", "  ")
-	jsonStr := string(serverJSON)
-	jsonStr = strings.TrimPrefix(jsonStr, "{")
-	jsonStr = strings.TrimSuffix(jsonStr, "}")
-	jsonStr = strings.TrimSpace(jsonStr)
-
-	fmt.Println("\nĐã tạo và lưu thành công file: ./key.json (GIỮ BÍ MẬT FILE NÀY!)")
-	fmt.Println("Cấu hình trên server:")
-	fmt.Println(jsonStr)
+	serverFileData, _ := json.MarshalIndent(serverConfig, "", "  ")
+	err = os.WriteFile("roles.json", serverFileData, 0o600)
+	if err != nil {
+		fmt.Println("❌ Lỗi lưu file roles.json:", err)
+		return
+	}
+	fmt.Println("Đã lưu ./roles.json")
 }
 
 func main() {
