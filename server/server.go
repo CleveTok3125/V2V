@@ -3,158 +3,49 @@ package main
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
-	"regexp"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 	_ "time/tzdata"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 )
 
-type AppConfig struct {
-	MaxConnectionsPerIP int
-	MaxMessageLength    int
-	MaxMessageLine      int
-	MessageCooldown     time.Duration
-	MaxHistoryBytes     int
-	MaxHistorySend      int
-	MaxUsernameLength   int
-	ConnectionCooldown  time.Duration
-	Port                string
-	StatusURL           string
-	DownloadURL         string
-	HomepageURL         string
-	InstanceID          string
-	Timezone            *time.Location
-}
-
-var cfg AppConfig
-
-var (
-	serverStartTime = time.Now()
-
-	clients   = make(map[*websocket.Conn]string)
-	clientsMu sync.Mutex
-
-	ipCounts   = make(map[string]int)
-	ipCountsMu sync.Mutex
-
-	lastConnectTime = make(map[string]time.Time)
-	lastConnectMu   sync.Mutex
-
-	chatHistory     []string
-	chatHistorySize int
-	historyMu       sync.RWMutex
-
-	lastMessageDate   string
-	lastMessageDateMu sync.Mutex
-
-	upgrader = websocket.Upgrader{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
-		CheckOrigin: func(r *http.Request) bool {
-			return true
-		},
-	}
-
-	ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
-)
-
-func getEnvAsLocationOptional(key string, fallback string) *time.Location {
-	val, exists := os.LookupEnv(key)
-	if !exists || val == "" {
-		val = fallback
-	}
-	loc, err := time.LoadLocation(val)
-	if err != nil {
-		log.Printf("⚠️ Cảnh báo: Múi giờ '%s' không hợp lệ. Đang dùng mặc định (Local).", val)
-		return time.Local
-	}
-	return loc
-}
-
-func getSmartEnv(key string) string {
-	val, exists := os.LookupEnv(key)
-	if !exists || val == "" {
-		log.Fatalf("❌ CRITICAL ERROR: Thiếu biến môi trường bắt buộc: %s", key)
-	}
-
-	sysVal := os.Getenv(val)
-	if sysVal != "" {
-		return sysVal
-	}
-	return val
-}
-
-func getEnvAsInt(key string) int {
-	val, exists := os.LookupEnv(key)
-	if !exists || val == "" {
-		log.Fatalf("❌ CRITICAL ERROR: Thiếu biến môi trường bắt buộc: %s", key)
-	}
-	parsed, err := strconv.Atoi(val)
-	if err != nil {
-		log.Fatalf("❌ Lỗi định dạng số ở biến %s: %v", key, err)
-	}
-	return parsed
-}
-
-func getEnvAsDuration(key string) time.Duration {
-	val, exists := os.LookupEnv(key)
-	if !exists || val == "" {
-		log.Fatalf("❌ CRITICAL ERROR: Thiếu biến môi trường bắt buộc: %s", key)
-	}
-	parsed, err := time.ParseDuration(val)
-	if err != nil {
-		log.Fatalf("❌ Lỗi định dạng thời gian ở biến %s (ví dụ đúng: 200ms, 5s): %v", key, err)
-	}
-	return parsed
-}
-
-func lastAfterDash(s string) string {
-	if i := strings.LastIndex(s, "-"); i != -1 {
-		return s[i+1:]
-	}
-	return s
-}
-
 func addMessageToHistory(msg string) {
-	historyMu.Lock()
-	defer historyMu.Unlock()
+	HistoryMu.Lock()
+	defer HistoryMu.Unlock()
 
 	msgSize := len(msg)
-	chatHistory = append(chatHistory, msg)
-	chatHistorySize += msgSize
+	ChatHistory = append(ChatHistory, msg)
+	ChatHistorySize += msgSize
 
-	for chatHistorySize > cfg.MaxHistoryBytes && len(chatHistory) > 0 {
-		oldestSize := len(chatHistory[0])
-		chatHistorySize -= oldestSize
+	for ChatHistorySize > Cfg.MaxHistoryBytes && len(ChatHistory) > 0 {
+		oldestSize := len(ChatHistory[0])
+		ChatHistorySize -= oldestSize
 
-		chatHistory[0] = ""
-		chatHistory = chatHistory[1:]
+		ChatHistory[0] = ""
+		ChatHistory = ChatHistory[1:]
 	}
 }
 
 func broadcast(message string, sender *websocket.Conn) {
 	addMessageToHistory(message)
 
-	clientsMu.Lock()
-	defer clientsMu.Unlock()
+	ClientsMu.Lock()
+	defer ClientsMu.Unlock()
 
-	for conn := range clients {
+	for conn := range Clients {
 		if conn != sender {
 			if err := conn.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
 				conn.Close()
-				delete(clients, conn)
+				delete(Clients, conn)
 			}
 		}
 	}
@@ -163,11 +54,11 @@ func broadcast(message string, sender *websocket.Conn) {
 func checkAndBroadcastDate(now time.Time) {
 	currentDate := now.Format("02/01/2006")
 
-	lastMessageDateMu.Lock()
-	defer lastMessageDateMu.Unlock()
+	LastMessageDateMu.Lock()
+	defer LastMessageDateMu.Unlock()
 
-	if lastMessageDate == "" || lastMessageDate != currentDate {
-		lastMessageDate = currentDate
+	if LastMessageDate == "" || LastMessageDate != currentDate {
+		LastMessageDate = currentDate
 
 		dateMsg := fmt.Sprintf("\x1b[36m--- Ngày %s ---\x1b[0m", currentDate)
 
@@ -195,89 +86,108 @@ func getClientIP(r *http.Request) string {
 	return parsedIP.String()
 }
 
-func sanitizeString(text string) string {
-	text = ansiRegex.ReplaceAllString(text, "")
-	return strings.Map(func(r rune) rune {
-		if r == '\n' || unicode.IsGraphic(r) {
-			if !unicode.Is(unicode.Mn, r) && !unicode.Is(unicode.Me, r) {
-				return r
-			}
+func loadRoles() {
+	paths := []string{"./roles.json", "/etc/secrets/roles.json"}
+	var data []byte
+	var err error
+
+	for _, p := range paths {
+		data, err = os.ReadFile(p)
+		if err == nil {
+			log.Printf("✅ Đã tải cấu hình quyền hạn từ: %s", p)
+			break
 		}
-		return -1
-	}, text)
+	}
+
+	if err != nil {
+		log.Println("ℹ️ Không tìm thấy roles.json ở bất kỳ thư mục nào (Sẽ hoạt động với quyền User mặc định)")
+		return
+	}
+
+	if err := json.Unmarshal(data, &RoleRegistry); err != nil {
+		log.Fatalf("❌ Lỗi cấu trúc file roles.json: %v", err)
+	}
 }
 
 func chatHandler(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIP(r)
 
-	lastConnectMu.Lock()
-	if lastTime, exists := lastConnectTime[clientIP]; exists {
-		if time.Since(lastTime) < cfg.ConnectionCooldown {
-			lastConnectMu.Unlock()
+	LastConnectMu.Lock()
+	if lastTime, exists := LastConnectTime[clientIP]; exists {
+		if time.Since(lastTime) < Cfg.ConnectionCooldown {
+			LastConnectMu.Unlock()
 			log.Printf("⛔ Từ chối: %s kết nối ra/vào quá nhanh.\n", clientIP)
 			http.Error(w, "Bạn thao tác ra/vào quá nhanh! Vui lòng đợi vài giây rồi thử lại.", http.StatusTooManyRequests)
 			return
 		}
 	}
-	lastConnectTime[clientIP] = time.Now()
-	lastConnectMu.Unlock()
+	LastConnectTime[clientIP] = time.Now()
+	LastConnectMu.Unlock()
 
-	ipCountsMu.Lock()
-	if ipCounts[clientIP] >= cfg.MaxConnectionsPerIP {
-		ipCountsMu.Unlock()
-		log.Printf("⛔ Từ chối: %s đã vượt quá giới hạn %d kết nối.\n", clientIP, cfg.MaxConnectionsPerIP)
+	IpCountsMu.Lock()
+	if IpCounts[clientIP] >= Cfg.MaxConnectionsPerIP {
+		IpCountsMu.Unlock()
+		log.Printf("⛔ Từ chối: %s đã vượt quá giới hạn %d kết nối.\n", clientIP, Cfg.MaxConnectionsPerIP)
 		http.Error(w, "Bạn đã mở quá nhiều kết nối từ địa chỉ IP này.", http.StatusTooManyRequests)
 		return
 	}
-	ipCounts[clientIP]++
-	ipCountsMu.Unlock()
+	IpCounts[clientIP]++
+	IpCountsMu.Unlock()
 
 	defer func() {
-		ipCountsMu.Lock()
-		ipCounts[clientIP]--
-		if ipCounts[clientIP] <= 0 {
-			delete(ipCounts, clientIP)
+		IpCountsMu.Lock()
+		IpCounts[clientIP]--
+		if IpCounts[clientIP] <= 0 {
+			delete(IpCounts, clientIP)
 		}
-		ipCountsMu.Unlock()
+		IpCountsMu.Unlock()
 	}()
 
 	log.Printf("🔌 New request | Client IP: %s | Proxy IP: %s | Upgrade: %s\n", clientIP, r.RemoteAddr, r.Header.Get("Upgrade"))
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := Upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("❌ Upgrade error:", err)
 		return
 	}
 	defer conn.Close()
 
-	_, nameMsg, err := conn.ReadMessage()
+	perms, authPacket, err := HandleAuth(conn)
 	if err != nil {
 		return
 	}
-	username := sanitizeString(string(nameMsg))
-	if utf8.RuneCountInString(username) > cfg.MaxUsernameLength {
-		runes := []rune(username)
-		username = string(runes[:cfg.MaxUsernameLength])
-	}
+
+	username := sanitizeString(authPacket.Username)
 	if username == "" {
 		username = "Anonymous"
 	}
 
-	hash := md5.Sum([]byte(clientIP))
-	ipSuffix := hex.EncodeToString(hash[:])[:4]
-	displayName := fmt.Sprintf("%s#%s", username, ipSuffix)
+	var displayName string
+	if perms.CustomPrefix != "" {
+		displayName = perms.CustomPrefix + username
+	} else {
+		hash := md5.Sum([]byte(clientIP))
+		ipSuffix := hex.EncodeToString(hash[:])[:4]
+		displayName = fmt.Sprintf("%s#%s", username, ipSuffix)
+	}
 
-	clientsMu.Lock()
-	clients[conn] = displayName
-	clientsMu.Unlock()
+	session := &ClientSession{
+		Conn:        conn,
+		DisplayName: displayName,
+		Perms:       perms,
+	}
 
-	historyMu.RLock()
-	historyLen := len(chatHistory)
+	ClientsMu.Lock()
+	Clients[conn] = session
+	ClientsMu.Unlock()
+
+	HistoryMu.RLock()
+	historyLen := len(ChatHistory)
 
 	if historyLen > 0 {
 		startIndex := 0
-		if historyLen > cfg.MaxHistorySend {
-			startIndex = historyLen - cfg.MaxHistorySend
+		if historyLen > Cfg.MaxHistorySend {
+			startIndex = historyLen - Cfg.MaxHistorySend
 		}
 
 		conn.WriteMessage(websocket.TextMessage, []byte("--- Lịch sử chat gần đây ---"))
@@ -285,14 +195,14 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		for i := startIndex; i < historyLen; i++ {
 			time.Sleep(5 * time.Millisecond)
 
-			conn.WriteMessage(websocket.TextMessage, []byte(chatHistory[i]))
+			conn.WriteMessage(websocket.TextMessage, []byte(ChatHistory[i]))
 		}
 
 		conn.WriteMessage(websocket.TextMessage, []byte("--- Kết thúc lịch sử ---"))
 	}
-	historyMu.RUnlock()
+	HistoryMu.RUnlock()
 
-	joinTime := time.Now().In(cfg.Timezone)
+	joinTime := time.Now().In(Cfg.Timezone)
 	checkAndBroadcastDate(joinTime)
 	joinTimeStr := joinTime.Format("15:04")
 
@@ -311,27 +221,29 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		text := string(msg)
 		text = sanitizeString(text)
 
-		if utf8.RuneCountInString(text) > cfg.MaxMessageLength {
-			warning := fmt.Sprintf("[Hệ thống]: Tin nhắn của bạn quá dài (tối đa %d ký tự). Hãy chia nhỏ ra nhé!", cfg.MaxMessageLength)
-			conn.WriteMessage(websocket.TextMessage, []byte(warning))
-			continue
-		}
+		if !session.Perms.CanMessageUnlimited {
+			if utf8.RuneCountInString(text) > Cfg.MaxMessageLength {
+				warning := fmt.Sprintf("[Hệ thống]: Tin nhắn của bạn quá dài (tối đa %d ký tự). Hãy chia nhỏ ra nhé!", Cfg.MaxMessageLength)
+				conn.WriteMessage(websocket.TextMessage, []byte(warning))
+				continue
+			}
 
-		if strings.Count(text, "\n") > cfg.MaxMessageLine {
-			warning := "[Hệ thống]: Tin nhắn chứa quá nhiều dòng. Vui lòng gộp lại để tránh làm trôi khung chat!"
-			conn.WriteMessage(websocket.TextMessage, []byte(warning))
-			continue
-		}
+			if strings.Count(text, "\n") > Cfg.MaxMessageLine {
+				warning := "[Hệ thống]: Tin nhắn chứa quá nhiều dòng. Vui lòng gộp lại để tránh làm trôi khung chat!"
+				conn.WriteMessage(websocket.TextMessage, []byte(warning))
+				continue
+			}
 
-		if time.Since(lastMessageTime) < cfg.MessageCooldown {
-			warning := fmt.Sprintf("[Hệ thống]: Bạn đang chat quá nhanh! Vui lòng đợi %v giữa các tin nhắn.", cfg.MessageCooldown)
-			conn.WriteMessage(websocket.TextMessage, []byte(warning))
-			continue
+			if time.Since(lastMessageTime) < Cfg.MessageCooldown {
+				warning := fmt.Sprintf("[Hệ thống]: Bạn đang chat quá nhanh! Vui lòng đợi %v giữa các tin nhắn.", Cfg.MessageCooldown)
+				conn.WriteMessage(websocket.TextMessage, []byte(warning))
+				continue
+			}
 		}
 
 		lastMessageTime = time.Now()
 
-		now := time.Now().In(cfg.Timezone)
+		now := time.Now().In(Cfg.Timezone)
 		checkAndBroadcastDate(now)
 		timeStr := now.Format("15:04")
 
@@ -340,11 +252,11 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		broadcast(chatMsg, conn)
 	}
 
-	clientsMu.Lock()
-	delete(clients, conn)
-	clientsMu.Unlock()
+	ClientsMu.Lock()
+	delete(Clients, conn)
+	ClientsMu.Unlock()
 
-	leaveTime := time.Now().In(cfg.Timezone)
+	leaveTime := time.Now().In(Cfg.Timezone)
 	checkAndBroadcastDate(leaveTime)
 	leaveTimeStr := leaveTime.Format("15:04")
 
@@ -359,7 +271,7 @@ func main() {
 		_ = godotenv.Load("/etc/secrets/.env")
 	}
 
-	cfg = AppConfig{
+	Cfg = AppConfig{
 		MaxConnectionsPerIP: getEnvAsInt("MAX_CONNECTIONS_PER_IP"),
 		MaxMessageLength:    getEnvAsInt("MAX_MESSAGE_LENGTH"),
 		MaxMessageLine:      getEnvAsInt("MAX_MESSAGE_LINE"),
@@ -376,6 +288,8 @@ func main() {
 		Timezone:            getEnvAsLocationOptional("TIMEZONE", "Asia/Ho_Chi_Minh"),
 	}
 
+	loadRoles()
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -384,28 +298,28 @@ func main() {
 			return
 		}
 
-		uptime := time.Since(serverStartTime).Round(time.Second)
+		uptime := time.Since(ServerStartTime).Round(time.Second)
 
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "WebSocket server is running...\n")
 		fmt.Fprintln(w, "Mô tả      : Hệ thống chat ẩn danh")
 		fmt.Fprintln(w, "Giao thức  : WebSocket")
-		fmt.Fprintf(w, "Instance ID: %s\n", cfg.InstanceID)
+		fmt.Fprintf(w, "Instance ID: %s\n", Cfg.InstanceID)
 		fmt.Fprintf(w, "Uptime     : %s\n", uptime.String())
-		fmt.Fprintf(w, "Múi giờ    : %s\n", cfg.Timezone)
-		fmt.Fprintf(w, "Trạng thái : %s\n", cfg.StatusURL)
+		fmt.Fprintf(w, "Múi giờ    : %s\n", Cfg.Timezone)
+		fmt.Fprintf(w, "Trạng thái : %s\n", Cfg.StatusURL)
 		fmt.Fprintln(w, "------------------------------------")
-		fmt.Fprintf(w, "Tải Client : %s\n", cfg.DownloadURL)
-		fmt.Fprintf(w, "Homepage   : %s\n", cfg.HomepageURL)
+		fmt.Fprintf(w, "Tải Client : %s\n", Cfg.DownloadURL)
+		fmt.Fprintf(w, "Homepage   : %s\n", Cfg.HomepageURL)
 	})
 
 	server := &http.Server{
-		Addr:              ":" + cfg.Port,
+		Addr:              ":" + Cfg.Port,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Println("🚀 Server đang chạy tại port", cfg.Port)
+	log.Println("🚀 Server đang chạy tại port", Cfg.Port)
 	log.Fatal(server.ListenAndServe())
 }

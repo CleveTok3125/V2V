@@ -1,0 +1,5 @@
+{
+    "role": "admin",
+    "private_key": "Your 128-character hexadecimal private key",
+    "hmac_shield": "The security chain matches the server"
+}

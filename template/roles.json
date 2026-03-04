@@ -1,0 +1,12 @@
+{
+    "admin": {
+        "identities": [
+            {
+                "public_key": "d619... (Replace with your Hex Public Key)",
+                "hmac_shield": "a8f2... (Replace it with your HMAC security chain.)"
+            }
+        ],
+        "can_message_unlimited": true,
+        "custom_prefix": "\u001b[31m[Admin]\u001b[0m "
+    }
+}
