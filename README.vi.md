@@ -11,6 +11,7 @@ Một hệ thống nhắn tin gọn nhẹ, ẩn danh dựa dùng terminal đư�
 
 -   ⚡ Nhắn tin theo thời gian thực qua WebSocket
 -   🧑 Danh tính ẩn danh (username + hash IP)
+- 🔒 Đặt quyền riêng tư làm trọng tâm ngay từ đầu
 -   🖥 Máy khách dùng Terminal
 -   🌐 Tệp cài đặt đa nền tảng
 -   🔒 Giới hạn tốc độ & kiểm soát kết nối
@@ -37,11 +38,11 @@ Một hệ thống nhắn tin gọn nhẹ, ẩn danh dựa dùng terminal đư�
 - [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
 - [Thiết lập máy khách](#thiết-lập-máy-khách)
 - [Thiết lập máy chủ](#thiết-lập-máy-chủ)
-  - [Cấu hình môi trường](#environment-configuration)
+  - [Cấu hình môi trường](#cấu-hình-môi-trường)
 
 ---
 
-## 🧰 Yêu cầu hệ thống
+## Yêu cầu hệ thống
 
 ### Client
 - **HĐH:** macOS, Linux, Windows, hoặc Android
@@ -54,7 +55,7 @@ Một hệ thống nhắn tin gọn nhẹ, ẩn danh dựa dùng terminal đư�
 
 ---
 
-## 🚀 Thiết lập Client
+## Thiết lập Client
 
 1. Tải client từ trang [releases page](https://github.com/CleveTok3125/V2V/releases). Chọn phiên bản phù hợp với HĐH và kiến trúc của bạn.
 
@@ -65,15 +66,24 @@ Một hệ thống nhắn tin gọn nhẹ, ẩn danh dựa dùng terminal đư�
    ./V2V --help
    ```
 
-3. Kết nối với Server:
+3. Kết nối với Server bằng 2 chế độ Khách và Bảo mật:
+   
+   **Chế độ Khách**:
    ```
-   ./V2V -s <SERVER>
-   # Example: ./V2V -s https://chat.example.com
+   ./V2V -s <SERVER> # no authentication
+   # Example: ./V2V -s chat.example.com
    ```
 
+   **Chế độ Bảo mật**:
+   ```
+   ./V2V -s -k ./key.json <SERVER> # key given by admin
+   # Example: ./V2V -s -k ./key.json chat.example.com
+   ```
+
+   > **Chú ý**: File `./key.json` phải được cất giữ an toàn để bảo vệ quyền riêng tư.
 ---
 
-## 🚀 Thiết lập Server
+## Thiết lập Server
 
 ### 1. Cài đặt Go
 
@@ -93,7 +103,10 @@ go get github.com/gorilla/websocket
 go get github.com/joho/godotenv
 go mod tidy
 ```
-
+### 3. Cấu hình Vai trò và Khoá
+Cấu hình cả hai bằng mẫu được cung cấp dưới đây.
+- [Key](https://github.com/CleveTok3125/V2V/blob/main/template/key.json)
+- [Role](https://github.com/CleveTok3125/V2V/blob/main/template/roles.json) 
 ---
 
 ### Cấu hình môi trường
