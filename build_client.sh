@@ -35,7 +35,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
 
     echo "Building: $GOOS/$GOARCH..."
 
-    env $BUILD_ENV GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="$LDFLAGS" -o $OUTPUT_NAME client/client.go
+    env $BUILD_ENV GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="$LDFLAGS" -o $OUTPUT_NAME ./client
 
     if [ $? -ne 0 ]; then
         echo "Error while building $GOOS/$GOARCH"

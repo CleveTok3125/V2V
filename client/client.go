@@ -2,6 +2,12 @@ package main
 
 import (
 	"bufio"
+	"crypto/ed25519"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha512"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +29,24 @@ var CLI struct {
 	Username  string           `help:"Tên người dùng của bạn" default:"Anonymous" short:"u"`
 	UserAgent string           `help:"Tùy chỉnh User-Agent" default:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" short:"a"`
 	Info      bool             `help:"Kiểm tra thông tin trạng thái của Server" short:"i"`
+
+	KeyFile string `help:"Đường dẫn file chứa khóa xác thực" short:"k"`
+	GenKey  bool   `help:"Tạo file key.json và hiển thị cấu hình cho Server" short:"g"`
+}
+
+type AuthPacket struct {
+	Type      string `json:"type"`
+	Nonce     string `json:"nonce,omitempty"`
+	Role      string `json:"role,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Hmac      string `json:"hmac,omitempty"`
+	Username  string `json:"username,omitempty"`
+}
+
+type ClientIdentity struct {
+	Role       string `json:"role"`
+	PrivateKey string `json:"private_key"`
+	HmacShield string `json:"hmac_shield"`
 }
 
 func normalizeURL(input string) string {
@@ -88,6 +112,74 @@ func checkServerInfo(input string) {
 	fmt.Println("\n" + string(body))
 }
 
+func generateKeyInteractive() {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Print("Nhập tên role (Mặc định: admin): ")
+	role, _ := reader.ReadString('\n')
+	role = strings.TrimSpace(role)
+	if role == "" {
+		role = "admin"
+	}
+
+	fmt.Print("Role này có quyền chat không giới hạn? (Y/n) ")
+	unlimitedStr, _ := reader.ReadString('\n')
+	unlimitedStr = strings.TrimSpace(strings.ToLower(unlimitedStr))
+	unlimited := true
+	if unlimitedStr == "n" {
+		unlimited = false
+	}
+
+	fmt.Print("Nhập Prefix hiển thị (vd: \"[Admin]\"): ")
+	prefix, _ := reader.ReadString('\n')
+	prefix = strings.TrimSuffix(strings.TrimSuffix(prefix, "\n"), "\r")
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		fmt.Println("❌ Lỗi sinh khóa:", err)
+		return
+	}
+
+	hmacBytes := make([]byte, 16)
+	rand.Read(hmacBytes)
+	hmacShield := hex.EncodeToString(hmacBytes)
+
+	clientKey := ClientIdentity{
+		Role:       role,
+		PrivateKey: hex.EncodeToString(priv),
+		HmacShield: hmacShield,
+	}
+	clientFileData, _ := json.MarshalIndent(clientKey, "", "  ")
+	err = os.WriteFile("key.json", clientFileData, 0o600)
+	if err != nil {
+		fmt.Println("❌ Lỗi lưu file key.json:", err)
+		return
+	}
+
+	serverConfig := map[string]interface{}{
+		role: map[string]interface{}{
+			"identities": []map[string]string{
+				{
+					"public_key":  hex.EncodeToString(pub),
+					"hmac_shield": hmacShield,
+				},
+			},
+			"can_message_unlimited": unlimited,
+			"custom_prefix":         prefix,
+		},
+	}
+
+	serverJSON, _ := json.MarshalIndent(serverConfig, "", "  ")
+	jsonStr := string(serverJSON)
+	jsonStr = strings.TrimPrefix(jsonStr, "{")
+	jsonStr = strings.TrimSuffix(jsonStr, "}")
+	jsonStr = strings.TrimSpace(jsonStr)
+
+	fmt.Println("\nĐã tạo và lưu thành công file: ./key.json (GIỮ BÍ MẬT FILE NÀY!)")
+	fmt.Println("Cấu hình trên server:")
+	fmt.Println(jsonStr)
+}
+
 func main() {
 	kong.Parse(&CLI, kong.Vars{
 		"version": Version,
@@ -119,7 +211,61 @@ func main() {
 	}
 	defer conn.Close()
 
-	conn.WriteMessage(websocket.TextMessage, []byte(username))
+	var challenge AuthPacket
+	err = conn.ReadJSON(&challenge)
+	if err != nil || challenge.Type != "auth_challenge" {
+		fmt.Println("❌ Lỗi: Server không gửi Auth Challenge hợp lệ.")
+		return
+	}
+
+	respPacket := AuthPacket{
+		Username: username,
+	}
+
+	if CLI.KeyFile != "" {
+		keyData, err := os.ReadFile(CLI.KeyFile)
+		if err != nil {
+			fmt.Printf("⚠️ Không thể đọc file key (%s). Sẽ đăng nhập với quyền khách.\n", err)
+		} else {
+			var identity ClientIdentity
+			if err := json.Unmarshal(keyData, &identity); err != nil {
+				fmt.Println("⚠️ File key sai định dạng JSON. Sẽ đăng nhập với quyền khách.")
+			} else if identity.Role != "" && identity.PrivateKey != "" && identity.HmacShield != "" {
+
+				respPacket.Role = identity.Role
+				privBytes, err := hex.DecodeString(identity.PrivateKey)
+
+				if err == nil && len(privBytes) == ed25519.PrivateKeySize {
+					priv := ed25519.PrivateKey(privBytes)
+
+					dataToSign := append([]byte(challenge.Nonce), []byte(identity.Role)...)
+					sig := ed25519.Sign(priv, dataToSign)
+					respPacket.Signature = hex.EncodeToString(sig)
+
+					h := hmac.New(sha512.New, []byte(identity.HmacShield))
+					h.Write(sig)
+					h.Write([]byte(challenge.Nonce))
+					respPacket.Hmac = hex.EncodeToString(h.Sum(nil))
+
+					fmt.Printf("🔑 Đang yêu cầu cấp quyền: [%s]...\n", identity.Role)
+				} else {
+					fmt.Println("⚠️ Private Key trong file không hợp lệ (Phải là chuỗi Hex 128 ký tự).")
+				}
+			}
+		}
+	}
+
+	err = conn.WriteJSON(respPacket)
+	if err != nil {
+		fmt.Println("❌ Lỗi gửi dữ liệu xác thực:", err)
+		return
+	}
+
+	var authSuccess AuthPacket
+	conn.ReadJSON(&authSuccess)
+	if authSuccess.Type == "auth_success" {
+		username = authSuccess.Username
+	}
 
 	fmt.Println("Đã kết nối với username:", username)
 	fmt.Println("Gõ tin nhắn để chat, /help để hiện trợ giúp\n")
