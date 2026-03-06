@@ -4,28 +4,34 @@ import (
 	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-func HandleAuth(conn *websocket.Conn, clientIP string) (Permission, AuthPacket, error) {
+func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permission, AuthPacket, error) {
 	nonceBytes := make([]byte, 64)
 	rand.Read(nonceBytes)
 	nonceHex := hex.EncodeToString(nonceBytes)
 
-	ActiveNonces.Store(nonceHex, NonceMeta{
+	s.ActiveNonces.Store(nonceHex, NonceMeta{
 		ExpiresAt: time.Now().Add(10 * time.Second),
 		IP:        clientIP,
 	})
 
 	go func(n string) {
 		time.Sleep(11 * time.Second)
-		ActiveNonces.Delete(n)
+		s.ActiveNonces.Delete(n)
 	}(nonceHex)
 
 	if err := conn.WriteJSON(AuthPacket{Type: "auth_challenge", Nonce: nonceHex}); err != nil {
@@ -43,7 +49,7 @@ func HandleAuth(conn *websocket.Conn, clientIP string) (Permission, AuthPacket, 
 		return perms, resp, nil
 	}
 
-	metaRaw, exists := ActiveNonces.LoadAndDelete(resp.Nonce)
+	metaRaw, exists := s.ActiveNonces.LoadAndDelete(resp.Nonce)
 	if !exists {
 		log.Printf("⚠️ [AUTH ALERT] %s: Nonce không tồn tại hoặc đã bị sử dụng (Dấu hiệu Replay Attack).", clientIP)
 		return perms, resp, fmt.Errorf("auth_error: invalid_nonce")
@@ -60,7 +66,10 @@ func HandleAuth(conn *websocket.Conn, clientIP string) (Permission, AuthPacket, 
 		return perms, resp, fmt.Errorf("auth_error: ip_mismatch")
 	}
 
-	roleDef, exists := RoleRegistry[resp.Role]
+	s.RoleRegistryMu.RLock()
+	roleDef, exists := s.RoleRegistry[resp.Role]
+	s.RoleRegistryMu.RUnlock()
+
 	if !exists {
 		log.Printf("⚠️ [AUTH FAIL] %s: Yêu cầu Role không tồn tại [%s]", clientIP, resp.Role)
 		return perms, resp, fmt.Errorf("auth_error: invalid_role")
@@ -103,4 +112,129 @@ func HandleAuth(conn *websocket.Conn, clientIP string) (Permission, AuthPacket, 
 func hexToBytes(s string) []byte {
 	b, _ := hex.DecodeString(s)
 	return b
+}
+
+// To prevent IP spoofing, only accept IPs sent from Cloudflare
+// Change this getClientIP function if you are not using Cloudflare
+func getClientIP(r *http.Request) string {
+	var ip string
+
+	if cfIP := r.Header.Get("CF-Connecting-IP"); cfIP != "" {
+		ip = cfIP
+	} else {
+		ip, _, _ = net.SplitHostPort(r.RemoteAddr)
+	}
+
+	parsedIP := net.ParseIP(strings.TrimSpace(ip))
+	if parsedIP == nil {
+		fallbackIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+		return fallbackIP
+	}
+
+	return parsedIP.String()
+}
+
+func (s *ChatServer) LoadRoles() {
+	paths := []string{"./roles.json", "/etc/secrets/roles.json"}
+	var data []byte
+	var err error
+
+	for _, p := range paths {
+		data, err = os.ReadFile(p)
+		if err == nil {
+			log.Printf("✅ Đã tải cấu hình quyền hạn từ: %s", p)
+			break
+		}
+	}
+
+	if err != nil {
+		log.Println("ℹ️ Không tìm thấy roles.json ở bất kỳ thư mục nào (Sẽ hoạt động với quyền User mặc định)")
+		return
+	}
+
+	s.RoleRegistryMu.Lock()
+	defer s.RoleRegistryMu.Unlock()
+	if err := json.Unmarshal(data, &s.RoleRegistry); err != nil {
+		log.Fatalf("❌ Lỗi cấu trúc file roles.json: %v", err)
+	}
+}
+
+func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string) bool {
+	s.AuthFailsMu.Lock()
+	record := s.AuthFails[clientIP]
+
+	if time.Now().Before(record.UnlockTime) {
+		s.AuthFailsMu.Unlock()
+		log.Printf("⛔ [BAN] Từ chối %s. Vui lòng đợi đến %s.", clientIP, record.UnlockTime.Format("15:04:05"))
+		http.Error(w, "IP của bạn đang bị khóa tạm thời do xác thực sai nhiều lần.", http.StatusTooManyRequests)
+		return false
+	}
+	s.AuthFailsMu.Unlock()
+
+	s.LastConnectMu.Lock()
+	if lastTime, exists := s.LastConnectTime[clientIP]; exists {
+		if time.Since(lastTime) < Cfg.ConnectionCooldown {
+			s.LastConnectMu.Unlock()
+			log.Printf("⛔ Từ chối: %s kết nối ra/vào quá nhanh.\n", clientIP)
+			http.Error(w, "Bạn thao tác ra/vào quá nhanh! Vui lòng đợi vài giây rồi thử lại.", http.StatusTooManyRequests)
+			return false
+		}
+	}
+	s.LastConnectTime[clientIP] = time.Now()
+	s.LastConnectMu.Unlock()
+
+	return true
+}
+
+func (s *ChatServer) handleAuthPenalty(clientIP string) {
+	s.AuthFailsMu.Lock()
+	defer s.AuthFailsMu.Unlock()
+
+	record := s.AuthFails[clientIP]
+	record.FailCount++
+
+	if record.FailCount >= 5 {
+		record.UnlockTime = time.Now().Add(5 * time.Minute)
+		record.FailCount = 0
+	}
+	s.AuthFails[clientIP] = record
+}
+
+func (s *ChatServer) generateDisplayName(username string, clientIP string, perms Permission) string {
+	name := sanitizeString(username)
+	if name == "" {
+		name = "Anonymous"
+	}
+
+	if perms.CustomPrefix != "" {
+		return perms.CustomPrefix + name
+	}
+
+	hash := sha256.Sum256([]byte(clientIP))
+	ipSuffix := hex.EncodeToString(hash[:])[:4]
+	return fmt.Sprintf("%s#%s", name, ipSuffix)
+}
+
+func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP string) (*ClientSession, error) {
+	perms, authPacket, err := s.HandleAuth(conn, clientIP)
+	if err != nil {
+		if authPacket.Role != "" {
+			s.handleAuthPenalty(clientIP)
+			conn.WriteMessage(websocket.TextMessage, []byte("[Hệ thống]: Xác thực thất bại! Đã ngắt kết nối."))
+		}
+		conn.Close()
+		return nil, err
+	}
+
+	if authPacket.Role != "" {
+		s.AuthFailsMu.Lock()
+		delete(s.AuthFails, clientIP)
+		s.AuthFailsMu.Unlock()
+	}
+
+	return &ClientSession{
+		Conn:        conn,
+		DisplayName: s.generateDisplayName(authPacket.Username, clientIP, perms),
+		Perms:       perms,
+	}, nil
 }
