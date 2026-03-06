@@ -57,28 +57,30 @@ func (s *ChatServer) CheckAndBroadcastDate(now time.Time) {
 
 func (s *ChatServer) SendChatHistory(conn *websocket.Conn) {
 	s.HistoryMu.RLock()
-	defer s.HistoryMu.RUnlock()
 
 	historyLen := len(s.ChatHistory)
 
-	if historyLen > 0 {
-		startIndex := 0
-		if historyLen > Cfg.MaxHistorySend {
-			startIndex = historyLen - Cfg.MaxHistorySend
-		}
-
-		historyCopy := make([]string, historyLen-startIndex)
-		copy(historyCopy, s.ChatHistory[startIndex:])
-
+	if historyLen == 0 {
 		s.HistoryMu.RUnlock()
-
-		conn.WriteMessage(websocket.TextMessage, []byte("--- Lịch sử chat gần đây ---"))
-
-		for _, msg := range historyCopy {
-			time.Sleep(5 * time.Millisecond)
-			conn.WriteMessage(websocket.TextMessage, []byte(msg))
-		}
-
-		conn.WriteMessage(websocket.TextMessage, []byte("--- Kết thúc lịch sử ---"))
+		return
 	}
+
+	startIndex := 0
+	if historyLen > Cfg.MaxHistorySend {
+		startIndex = historyLen - Cfg.MaxHistorySend
+	}
+
+	historyCopy := make([]string, historyLen-startIndex)
+	copy(historyCopy, s.ChatHistory[startIndex:])
+
+	s.HistoryMu.RUnlock()
+
+	conn.WriteMessage(websocket.TextMessage, []byte("--- Lịch sử chat gần đây ---"))
+
+	for _, msg := range historyCopy {
+		time.Sleep(5 * time.Millisecond)
+		conn.WriteMessage(websocket.TextMessage, []byte(msg))
+	}
+
+	conn.WriteMessage(websocket.TextMessage, []byte("--- Kết thúc lịch sử ---"))
 }
