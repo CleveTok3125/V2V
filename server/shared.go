@@ -68,20 +68,20 @@ type RateLimitRecord struct {
 	UnlockTime time.Time
 }
 
-var Cfg AppConfig
+type ChatServer struct {
+	StartTime time.Time
 
-// need define serverstate struct in the future
-var (
-	ServerStartTime = time.Now()
-
-	Clients   = make(map[*websocket.Conn]*ClientSession)
+	Clients   map[*websocket.Conn]*ClientSession
 	ClientsMu sync.Mutex
 
-	IpCounts   = make(map[string]int)
+	IpCounts   map[string]int
 	IpCountsMu sync.Mutex
 
-	LastConnectTime = make(map[string]time.Time)
+	LastConnectTime map[string]time.Time
 	LastConnectMu   sync.Mutex
+
+	AuthFails   map[string]RateLimitRecord
+	AuthFailsMu sync.Mutex
 
 	ChatHistory     []string
 	ChatHistorySize int
@@ -90,33 +90,46 @@ var (
 	LastMessageDate   string
 	LastMessageDateMu sync.Mutex
 
-	Upgrader = websocket.Upgrader{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
-		CheckOrigin: func(r *http.Request) bool {
-			origin := r.Header.Get("Origin")
+	ActiveNonces sync.Map
+	Upgrader     websocket.Upgrader
 
-			if origin == "" {
-				return true
-			}
+	RoleRegistry   map[string]RoleDefinition
+	RoleRegistryMu sync.RWMutex
+}
 
-			for _, o := range Cfg.AllowedOrigins {
-				if origin == strings.TrimSpace(o) {
+func NewChatServer() *ChatServer {
+	return &ChatServer{
+		StartTime:       time.Now(),
+		Clients:         make(map[*websocket.Conn]*ClientSession),
+		IpCounts:        make(map[string]int),
+		LastConnectTime: make(map[string]time.Time),
+		AuthFails:       make(map[string]RateLimitRecord),
+		ChatHistory:     make([]string, 0),
+		RoleRegistry:    make(map[string]RoleDefinition),
+		Upgrader: websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+
+				if origin == "" {
 					return true
 				}
-			}
 
-			log.Printf("⛔ [SECURITY] Chặn kết nối từ Origin không hợp lệ: %s", origin)
-			return false
+				for _, o := range Cfg.AllowedOrigins {
+					if origin == strings.TrimSpace(o) {
+						return true
+					}
+				}
+
+				log.Printf("⛔ [SECURITY] Chặn kết nối từ Origin không hợp lệ: %s", origin)
+				return false
+			},
 		},
 	}
+}
 
-	RoleRegistry = make(map[string]RoleDefinition)
-
-	ActiveNonces sync.Map
-	AuthFails    = make(map[string]RateLimitRecord)
-	AuthFailsMu  sync.Mutex
-)
+var Cfg AppConfig
 
 func GetDefaultPermission() Permission {
 	return Permission{
