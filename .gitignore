@@ -37,6 +37,7 @@ public/*
 .tmp/
 key.json
 roles.json
+*.log
 
 # Template
 !template/*
