@@ -223,6 +223,7 @@ func main() {
 
 	respPacket := AuthPacket{
 		Username: username,
+		Nonce:    challenge.Nonce,
 	}
 
 	if CLI.KeyFile != "" {
