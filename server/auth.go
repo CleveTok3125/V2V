@@ -14,13 +14,17 @@ import (
 	"net/http"
 	"os"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 )
 
 func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permission, AuthPacket, error) {
 	nonceBytes := make([]byte, 64)
-	rand.Read(nonceBytes)
+
+	if _, err := rand.Read(nonceBytes); err != nil {
+		return GetDefaultPermission(), AuthPacket{}, fmt.Errorf("auth_error: entropy_exhaustion")
+	}
 	nonceHex := hex.EncodeToString(nonceBytes)
 
 	s.ActiveNonces.Store(nonceHex, NonceMeta{
@@ -28,10 +32,9 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 		IP:        clientIP,
 	})
 
-	go func(n string) {
-		time.Sleep(11 * time.Second)
-		s.ActiveNonces.Delete(n)
-	}(nonceHex)
+	time.AfterFunc(11*time.Second, func() {
+		s.ActiveNonces.Delete(nonceHex)
+	})
 
 	if err := conn.WriteJSON(AuthPacket{Type: "auth_challenge", Nonce: nonceHex}); err != nil {
 		return GetDefaultPermission(), AuthPacket{}, err
@@ -46,6 +49,14 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 
 	if resp.Role == "" {
 		return perms, resp, nil
+	}
+
+	if len(resp.Role) > 64 {
+		return perms, resp, fmt.Errorf("auth_error: invalid_role_length")
+	}
+
+	if utf8.RuneCountInString(resp.Username) > Cfg.MaxUsernameLength {
+		return perms, resp, fmt.Errorf("auth_error: payload_too_large")
 	}
 
 	metaRaw, exists := s.ActiveNonces.LoadAndDelete(resp.Nonce)
@@ -80,37 +91,30 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 		return perms, resp, fmt.Errorf("auth_error: invalid_signature")
 	}
 
-	signedData := append([]byte(nonceHex), []byte(resp.Role)...)
-	signedData = append(signedData, []byte(resp.Username)...)
-	isAuthenticated := false
+	signedData := nonceHex + "|" + resp.Role + "|" + resp.Username
+	signedBytes := []byte(signedData)
 
 	for _, id := range roleDef.Identities {
-		pub, _ := hex.DecodeString(id.PublicKey)
-		if ed25519.Verify(pub, signedData, sig) {
+		pub, err := hex.DecodeString(id.PublicKey)
+		if err != nil || len(pub) != ed25519.PublicKeySize {
+			continue
+		}
+
+		if ed25519.Verify(pub, signedBytes, sig) {
 			h := hmac.New(sha512.New, []byte(id.HmacShield))
 			h.Write(sig)
 			h.Write([]byte(nonceHex))
 
-			if hmac.Equal(h.Sum(nil), hexToBytes(resp.Hmac)) {
-				perms = roleDef.Permission
-				isAuthenticated = true
-				break
+			hmacBytes, err := hex.DecodeString(resp.Hmac)
+			if err == nil && hmac.Equal(h.Sum(nil), hmacBytes) {
+				log.Printf("✅ [AUTH SUCCESS] %s đăng nhập thành công role: [%s]", clientIP, resp.Role)
+				return roleDef.Permission, resp, nil
 			}
 		}
 	}
 
-	if isAuthenticated {
-		log.Printf("✅ [AUTH SUCCESS] %s đăng nhập thành công role: [%s]", clientIP, resp.Role)
-		return perms, resp, nil
-	} else {
-		log.Printf("🚨 [BRUTE-FORCE ALERT] %s: Sai Key/HMAC khi cố lấy quyền [%s]!", clientIP, resp.Role)
-		return perms, resp, fmt.Errorf("auth_error: verification_failed")
-	}
-}
-
-func hexToBytes(s string) []byte {
-	b, _ := hex.DecodeString(s)
-	return b
+	log.Printf("🚨 [BRUTE-FORCE ALERT] %s: Sai Key/HMAC khi cố lấy quyền [%s]!", clientIP, resp.Role)
+	return perms, resp, fmt.Errorf("auth_error: verification_failed")
 }
 
 // To prevent IP spoofing, only accept IPs sent from Cloudflare

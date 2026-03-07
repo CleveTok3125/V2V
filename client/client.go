@@ -241,9 +241,8 @@ func main() {
 				if err == nil && len(privBytes) == ed25519.PrivateKeySize {
 					priv := ed25519.PrivateKey(privBytes)
 
-					dataToSign := append([]byte(challenge.Nonce), []byte(identity.Role)...)
-					dataToSign = append(dataToSign, []byte(respPacket.Username)...)
-					sig := ed25519.Sign(priv, dataToSign)
+					dataToSign := challenge.Nonce + "|" + identity.Role + "|" + respPacket.Username
+					sig := ed25519.Sign(priv, []byte(dataToSign))
 					respPacket.Signature = hex.EncodeToString(sig)
 
 					h := hmac.New(sha512.New, []byte(identity.HmacShield))
