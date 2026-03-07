@@ -1,145 +1,101 @@
-# V2V Chat — Hệ thống Nhắn tin Ẩn danh dùng WebSocket  
-<p align="right">
+# 🚀 V2V Anonymous WebSocket Chat
+<p align="left">
 🌐
-<a href="README.md">English</a> 
+<a href="README.md">English</a>
 </p>
+Hệ thống chat ẩn danh WebSocket thời gian thực, hiệu năng cao, được xây dựng hoàn toàn bằng Go. Bao gồm một WebSocket server nhẹ và một client CLI (Terminal) thuần túy. Hệ thống tích hợp các biện pháp bảo mật mạnh mẽ như mã hóa bất đối xứng để xác thực không cần mật khẩu, cơ chế chống spam, và phân quyền theo vai trò.
 
-Một hệ thống nhắn tin gọn nhẹ, ẩn danh dựa dùng terminal được phát triển bằng Go. Client kết nối qua WebSocket, được nhận diện bằng username và hash IP suffix 4 kí tự và liên lạc theo thời gian thực thông qua một máy chủ trung gian. 
+## ✨ Tính năng nổi bật
 
-
-## ✨ Các tính năng nổi bật
-
--   ⚡ Nhắn tin theo thời gian thực qua WebSocket
--   🧑 Danh tính ẩn danh (username + hash IP)
-- 🔒 Đặt quyền riêng tư làm trọng tâm ngay từ đầu
--   🖥 Máy khách dùng Terminal
--   🌐 Tệp cài đặt đa nền tảng
--   🔒 Giới hạn tốc độ & kiểm soát kết nối
--   📜 Lịch sử tin nhắn cấu hình được
--   ☁️ Proxy ngược và có sẵn Cloudflare
--   🐳 Hỗ trợ triển khai trong Docker
-
-## 📦 Tổng quan Kiến trúc
-
-    Client (Terminal App)
-            │
-            ▼
-       WebSocket Connection
-            │
-            ▼
-       V2V Chat Server (Go)
-            │
-            ├── Rate limiting
-            ├── Message handling
-            └── Chat history
-
-## 📖 Mục lục
-
-- [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
-- [Thiết lập máy khách](#thiết-lập-máy-khách)
-- [Thiết lập máy chủ](#thiết-lập-máy-chủ)
-  - [Cấu hình môi trường](#cấu-hình-môi-trường)
+* **Nhanh & Nhẹ:** Triển khai thuần Go sử dụng `gorilla/websocket` cho giao tiếp hai chiều thời gian thực.
+* **Xác thực bất đối xứng (không cần mật khẩu):** Sử dụng Ed25519 và HMAC theo cơ chế Challenge-Response. Cho phép Admin/Mod đăng nhập an toàn mà không cần truyền private key qua mạng, ngăn chặn hiệu quả các tấn công Replay và MITM.
+* **Ẩn danh an toàn:** Người dùng mặc định là ẩn danh. Tên hiển thị tự động được gắn thêm một đoạn hash ngắn từ địa chỉ IP (ví dụ: `Anonymous#1a2b`), giúp phân biệt người dùng mà không lộ IP thật.
+* **Chống spam & lạm dụng:**
+    * Giới hạn số lượng kết nối tối đa theo địa chỉ IP.
+    * Giới hạn độ dài tin nhắn và số dòng.
+    * Cooldown cho tin nhắn và kết nối.
+    * Tạm khóa IP khi xác thực thất bại nhiều lần liên tiếp.
+* **Lịch sử chat trên bộ nhớ:** Tự động lưu và gửi các tin nhắn gần nhất cho người dùng mới kết nối.
+* **Client CLI đa nền tảng:** Client chạy trên terminal với giao diện chat tích hợp và các lệnh cục bộ.
 
 ---
 
-## Yêu cầu hệ thống
+## 🚀 Bắt đầu nhanh
 
-### Client
-- **HĐH:** macOS, Linux, Windows, hoặc Android
-- **Kiến trúc:** `arm64` hoặc `x64` 
+Bạn có thể dùng các file binary dựng sẵn hoặc tự build từ mã nguồn.
 
+### Lựa chọn 1: Dùng binary dựng sẵn
 
-### Server
-- **Go** 1.25.4 hoặc mới hơn (khuyến nghị)
-- **SSL/TLS** cho trải nghiệm nhắn tin an toàn (khuyến nghị)
+Các binary đã biên dịch cho nhiều nền tảng (Windows, Linux, macOS, Android) có sẵn tại [releases](https://github.com/CleveTok3125/V2V/releases).
 
----
+Chạy file thực thi phù hợp với hệ điều hành và kiến trúc của bạn (ví dụ: `./V2V-linux-amd64` hoặc `V2V-windows-amd64.exe`).
 
-## Thiết lập Client
+### Lựa chọn 2: Tự build từ mã nguồn
 
-1. Tải client từ trang [releases page](https://github.com/CleveTok3125/V2V/releases). Chọn phiên bản phù hợp với HĐH và kiến trúc của bạn.
+Bạn có thể build dễ dàng bằng các script có sẵn:
 
-2. Giả sử bạn tải về thư mục Tải xuống (Downloads), đổi tên tệp cài đặt thành V2V:
-   ```
-   cd Downloads
-   chmod +x V2V # đổi mode để chạy, chỉ Linux và macOS 
-   ./V2V --help
-   ```
-
-3. Kết nối với Server bằng 2 chế độ Khách và Bảo mật:
-   
-   **Chế độ Khách**:
-   ```
-   ./V2V -s <SERVER> # no authentication
-   # Example: ./V2V -s chat.elsutm.io.vn
-   ```
-
-   **Chế độ Bảo mật**:
-   ```
-   ./V2V -s -k ./key.json <SERVER> # key given by admin
-   # Example: ./V2V -s -k ./key.json chat.elsutm.io.vn
-   ```
-
-   > **Chú ý**: File `./key.json` phải được cất giữ an toàn để bảo vệ quyền riêng tư.
----
-
-## Thiết lập Server
-
-### 1. Cài đặt Go
-
-**macOS** (yêu cầu macOS 12 hoặc mới hơn):
+**Build Server:**
 ```bash
-brew install go
-go version   # kiểm tra xem cài được chưa
+bash build_server.sh
 ```
 
-**Linux:** Cài đặt Go từ trình quản lí gói với [go.dev/dl](https://go.dev/dl).
-
-### 2. Cài đặt các dependencies
-
-Trong đường dẫn của project, chạy các lệnh sau:
+**Build Client:**
 ```bash
-go get github.com/gorilla/websocket
-go get github.com/joho/godotenv
-go mod tidy
+bash build_client.sh
 ```
-### 3. Cấu hình Vai trò và Khoá
-Cấu hình cả hai bằng mẫu được cung cấp dưới đây.
-- [Key](https://github.com/CleveTok3125/V2V/blob/main/template/key.json)
-- [Role](https://github.com/CleveTok3125/V2V/blob/main/template/roles.json) 
----
-
-### Cấu hình môi trường
-
-Tạo một tệp tên `.env` (không có gì cả, chỉ `.env`) trong cùng thư mục với tệp server. Dùng ngay mẫu dưới đây:
-
-```env
-# Connection & Rate Limiting
-MAX_CONNECTIONS_PER_IP=<int>
-CONNECTION_COOLDOWN=<int>s
-
-# Messaging
-MAX_MESSAGE_LENGTH=<int>
-MAX_MESSAGE_LINE=<int>
-MESSAGE_COOLDOWN=<int>ms
-
-# Chat History
-MAX_HISTORY_BYTES=<int>
-MAX_HISTORY_SEND=<int>
-
-# Identity
-MAX_USERNAME_LENGTH=<int>
-
-# UI & Display
-STATUS_URL=<URL str>
-DOWNLOAD_URL=<URL str>
-HOMEPAGE_URL=<URL str>
-INSTANCE_ID=<i dont know>
-TIMEZONE=Asia/Ho_Chi_Minh
-```
-
-> **Chú ý:** `TIMEZONE` nhận toàn bộ [múi giờ IANA](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) (e.g. `America/New_York`, `UTC`). Nếu bỏ qua hoặc không hợp lệ, server tự chuyển về giờ địa phương của nó. Tất cả các biến đều được yêu cầu. Server sẽ thoát lúc khởi chạy nếu bất cứ thứ gì bị thiếu. 
 
 ---
 
+## 💻 Hướng dẫn sử dụng CLI Client
 
+Client chạy trực tiếp trong terminal của bạn.
+
+### Các lệnh kết nối cơ bản
+
+**Tham gia với tư cách khách:**
+```bash
+./client -s ws://localhost:8080 -u "TênCủaBạn"
+```
+
+**Kiểm tra trạng thái server:**
+```bash
+./client -s ws://localhost:8080 -i
+```
+
+**Tham gia với User-Agent tùy chỉnh:**
+```bash
+./client -s ws://localhost:8080 -u "TênCủaBạn" -a "Custom-Agent/1.0"
+```
+
+### Lệnh trong phòng chat
+
+Sau khi kết nối, gõ `/help` để xem hướng dẫn sử dụng.
+
+---
+
+## 💻 Vận hành Server
+
+### ⚙️ Cấu hình môi trường
+
+Trước khi khởi động server, bạn cần thiết lập các biến môi trường:
+
+1. Template cấu hình có sẵn tại `template/.env`.
+2. Sao chép file này vào **thư mục gốc** của project hoặc `/etc/secrets/`, đổi tên thành `.env`.
+3. Mở file `.env` và điều chỉnh các thông số cho phù hợp (cổng server, giới hạn rate, allowed origins, v.v.). Server sẽ tự động tải các cài đặt này khi khởi động.
+
+### 🔐 Xác thực theo vai trò (Admin/Mod)
+
+Hệ thống cấp quyền đặc biệt thông qua khóa mã hóa thay vì mật khẩu.
+
+1. **Tạo cặp khóa:** Chạy client với flag `-g` để tạo cặp khóa bảo mật.
+    ```bash
+    ./client -g
+    ```
+    *Lệnh này sẽ tạo ra `key.json` (Private Key — hãy giữ cẩn thận) và `roles.json` (cấu hình Public Key).*
+
+2. **Cài đặt trên server:** Đặt file `roles.json` vào thư mục `./` hoặc `/etc/secrets/` trên server để server có thể xác minh danh tính của bạn.
+
+3. **Đăng nhập:** Kết nối tới server bằng file private key:
+    ```bash
+    ./client -s ws://localhost:8080 -u "TênAdmin" -k /đường/dẫn/tới/key.json
+    ```
