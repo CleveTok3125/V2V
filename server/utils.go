@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"os"
 	"strconv"
@@ -59,6 +61,14 @@ func getEnvAsDuration(key string) time.Duration {
 	return parsed
 }
 
+func getEnvOptional(key string, fallback string) string {
+	val, exists := os.LookupEnv(key)
+	if !exists || val == "" {
+		return fallback
+	}
+	return val
+}
+
 func lastAfterDash(s string) string {
 	if i := strings.LastIndex(s, "-"); i != -1 {
 		return s[i+1:]
@@ -82,4 +92,11 @@ func sanitizeString(text string) string {
 		}
 		return -1
 	}, text)
+}
+
+func generateRandomID(length int) string {
+	bytesNeeded := (length + 1) / 2
+	b := make([]byte, bytesNeeded)
+	rand.Read(b)
+	return hex.EncodeToString(b)[:length]
 }

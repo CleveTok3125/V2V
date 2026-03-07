@@ -26,6 +26,8 @@ type AppConfig struct {
 	HomepageURL         string
 	InstanceID          string
 	Timezone            *time.Location
+	LogFilePath         string
+	MaxLogSizeMB        int
 }
 
 type Identity struct {

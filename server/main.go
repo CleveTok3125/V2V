@@ -78,6 +78,14 @@ func main() {
 		_ = godotenv.Load("/etc/secrets/.env")
 	}
 
+	rawInstanceID := getEnvOptional("INSTANCE_ID", "AUTO")
+	var instanceID string
+	if rawInstanceID == "AUTO" {
+		instanceID = generateRandomID(6)
+	} else {
+		instanceID = lastAfterDash(getSmartEnv("INSTANCE_ID"))
+	}
+
 	Cfg = AppConfig{
 		AllowedOrigins:      strings.Split(os.Getenv("ALLOWED_ORIGINS"), ","),
 		MaxConnectionsPerIP: getEnvAsInt("MAX_CONNECTIONS_PER_IP"),
@@ -92,8 +100,10 @@ func main() {
 		StatusURL:           getSmartEnv("STATUS_URL"),
 		DownloadURL:         getSmartEnv("DOWNLOAD_URL"),
 		HomepageURL:         getSmartEnv("HOMEPAGE_URL"),
-		InstanceID:          lastAfterDash(getSmartEnv("INSTANCE_ID")),
+		InstanceID:          instanceID,
 		Timezone:            getEnvAsLocationOptional("TIMEZONE", "Asia/Ho_Chi_Minh"),
+		LogFilePath:         getSmartEnv("LOG_FILE_PATH"),
+		MaxLogSizeMB:        getEnvAsInt("MAX_LOG_SIZE_MB"),
 	}
 
 	chatApp := NewChatServer()
@@ -124,6 +134,8 @@ func main() {
 		fmt.Fprintf(w, "Tải Client : %s\n", Cfg.DownloadURL)
 		fmt.Fprintf(w, "Homepage   : %s\n", Cfg.HomepageURL)
 	})
+
+	InitLogger(Cfg.LogFilePath, Cfg.MaxLogSizeMB)
 
 	server := &http.Server{
 		Addr:              ":" + Cfg.Port,
