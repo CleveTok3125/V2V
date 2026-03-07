@@ -41,7 +41,7 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 	s.registerClient(session, clientIP)
 
-	defer s.unregisterClient(session, clientIP)
+	go session.WritePump()
 
 	s.ReadPump(session, clientIP)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -26,15 +27,16 @@ func (s *ChatServer) AddMessageToHistory(msg string) {
 
 func (s *ChatServer) Broadcast(message string, sender *websocket.Conn) {
 	s.AddMessageToHistory(message)
+	msgBytes := []byte(message)
 
-	s.ClientsMu.Lock()
-	defer s.ClientsMu.Unlock()
+	s.ClientsMu.RLock()
+	defer s.ClientsMu.RUnlock()
 
-	for conn := range s.Clients {
+	for conn, client := range s.Clients {
 		if conn != sender {
-			if err := conn.WriteMessage(websocket.TextMessage, []byte(message)); err != nil {
-				conn.Close()
-				delete(s.Clients, conn)
+			select {
+			case client.Send <- msgBytes:
+			default:
 			}
 		}
 	}
@@ -55,7 +57,7 @@ func (s *ChatServer) CheckAndBroadcastDate(now time.Time) {
 	}
 }
 
-func (s *ChatServer) SendChatHistory(conn *websocket.Conn) {
+func (s *ChatServer) SendChatHistory(session *ClientSession) {
 	s.HistoryMu.RLock()
 
 	historyLen := len(s.ChatHistory)
@@ -72,15 +74,9 @@ func (s *ChatServer) SendChatHistory(conn *websocket.Conn) {
 
 	historyCopy := make([]string, historyLen-startIndex)
 	copy(historyCopy, s.ChatHistory[startIndex:])
-
 	s.HistoryMu.RUnlock()
 
-	conn.WriteMessage(websocket.TextMessage, []byte("--- Lịch sử chat gần đây ---"))
+	combinedHistory := strings.Join(historyCopy, "\n")
 
-	for _, msg := range historyCopy {
-		time.Sleep(5 * time.Millisecond)
-		conn.WriteMessage(websocket.TextMessage, []byte(msg))
-	}
-
-	conn.WriteMessage(websocket.TextMessage, []byte("--- Kết thúc lịch sử ---"))
+	session.Send <- []byte("--- Lịch sử chat gần đây ---\n" + combinedHistory + "\n--- Kết thúc lịch sử ---")
 }
