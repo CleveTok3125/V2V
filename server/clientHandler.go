@@ -39,7 +39,7 @@ func (s *ChatServer) registerClient(session *ClientSession, clientIP string) {
 	s.Clients[session.Conn] = session
 	s.ClientsMu.Unlock()
 
-	s.SendChatHistory(session.Conn)
+	s.SendChatHistory(session)
 
 	joinTime := time.Now().In(Cfg.Timezone)
 	s.CheckAndBroadcastDate(joinTime)
@@ -60,6 +60,8 @@ func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
 	delete(s.Clients, session.Conn)
 	s.ClientsMu.Unlock()
 
+	close(session.Send)
+
 	leaveTime := time.Now().In(Cfg.Timezone)
 	s.CheckAndBroadcastDate(leaveTime)
 
@@ -68,31 +70,45 @@ func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
 	s.Broadcast(leaveMsg, nil)
 }
 
-func (s *ChatServer) KeepAlive(conn *websocket.Conn) {
-	pongWait := 60 * time.Second
-	pingPeriod := 50 * time.Second
+func (c *ClientSession) WritePump() {
+	ticker := time.NewTicker(50 * time.Second)
+	defer func() {
+		ticker.Stop()
+		c.Conn.Close()
+	}()
 
-	conn.SetReadDeadline(time.Now().Add(pongWait))
+	for {
+		select {
+		case message, ok := <-c.Send:
+			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if !ok {
+				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			c.Conn.WriteMessage(websocket.TextMessage, message)
 
-	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(pongWait))
-		return nil
-	})
-
-	go func() {
-		ticker := time.NewTicker(pingPeriod)
-		defer ticker.Stop()
-		for range ticker.C {
-			if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
-				conn.Close()
+		case <-ticker.C:
+			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
 		}
-	}()
+	}
 }
 
 func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
-	s.KeepAlive(session.Conn)
+	defer func() {
+		s.unregisterClient(session, clientIP)
+		session.Conn.Close()
+	}()
+
+	pongWait := 60 * time.Second
+	session.Conn.SetReadLimit(int64(Cfg.MaxMessageLength * 3))
+	session.Conn.SetReadDeadline(time.Now().Add(pongWait))
+	session.Conn.SetPongHandler(func(string) error {
+		session.Conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
 
 	lastMessageTime := time.Time{}
 
@@ -102,25 +118,21 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			break
 		}
 
-		text := string(msg)
-		text = sanitizeString(text)
+		text := sanitizeString(string(msg))
 
 		if !session.Perms.CanMessageUnlimited {
 			if utf8.RuneCountInString(text) > Cfg.MaxMessageLength {
-				warning := fmt.Sprintf("[Hệ thống]: Tin nhắn của bạn quá dài (tối đa %d ký tự). Hãy chia nhỏ ra nhé!", Cfg.MaxMessageLength)
-				session.Conn.WriteMessage(websocket.TextMessage, []byte(warning))
+				session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn của bạn quá dài (tối đa %d ký tự).", Cfg.MaxMessageLength))
 				continue
 			}
 
 			if strings.Count(text, "\n") > Cfg.MaxMessageLine {
-				warning := "[Hệ thống]: Tin nhắn chứa quá nhiều dòng. Vui lòng gộp lại để tránh làm trôi khung chat!"
-				session.Conn.WriteMessage(websocket.TextMessage, []byte(warning))
+				session.Send <- []byte("[Hệ thống]: Tin nhắn chứa quá nhiều dòng. Vui lòng gộp lại!")
 				continue
 			}
 
 			if time.Since(lastMessageTime) < Cfg.MessageCooldown {
-				warning := fmt.Sprintf("[Hệ thống]: Bạn đang chat quá nhanh! Vui lòng đợi %v giữa các tin nhắn.", Cfg.MessageCooldown)
-				session.Conn.WriteMessage(websocket.TextMessage, []byte(warning))
+				session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Bạn đang chat quá nhanh! Vui lòng đợi %v.", Cfg.MessageCooldown))
 				continue
 			}
 		}
@@ -129,9 +141,8 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 
 		now := time.Now().In(Cfg.Timezone)
 		s.CheckAndBroadcastDate(now)
-		timeStr := now.Format("15:04")
 
-		chatMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m %s: %s", timeStr, session.DisplayName, text)
+		chatMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m %s: %s", now.Format("15:04"), session.DisplayName, text)
 		log.Printf("💬 [MSG từ %s]: %s\n", clientIP, chatMsg)
 		s.Broadcast(chatMsg, session.Conn)
 	}

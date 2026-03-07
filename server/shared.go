@@ -47,6 +47,7 @@ type ClientSession struct {
 	Conn        *websocket.Conn
 	DisplayName string
 	Perms       Permission
+	Send        chan []byte
 }
 
 type AuthPacket struct {
@@ -72,7 +73,7 @@ type ChatServer struct {
 	StartTime time.Time
 
 	Clients   map[*websocket.Conn]*ClientSession
-	ClientsMu sync.Mutex
+	ClientsMu sync.RWMutex
 
 	IpCounts   map[string]int
 	IpCountsMu sync.Mutex

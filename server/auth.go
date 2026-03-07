@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -117,46 +116,26 @@ func hexToBytes(s string) []byte {
 // To prevent IP spoofing, only accept IPs sent from Cloudflare
 // Change this getClientIP function if you are not using Cloudflare
 func getClientIP(r *http.Request) string {
-	var ip string
-
+	remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 	if cfIP := r.Header.Get("CF-Connecting-IP"); cfIP != "" {
-		ip = cfIP
-	} else {
-		ip, _, _ = net.SplitHostPort(r.RemoteAddr)
+		return cfIP
 	}
-
-	parsedIP := net.ParseIP(strings.TrimSpace(ip))
-	if parsedIP == nil {
-		fallbackIP, _, _ := net.SplitHostPort(r.RemoteAddr)
-		return fallbackIP
-	}
-
-	return parsedIP.String()
+	return remoteIP
 }
 
 func (s *ChatServer) LoadRoles() {
 	paths := []string{"./roles.json", "/etc/secrets/roles.json"}
-	var data []byte
-	var err error
-
 	for _, p := range paths {
-		data, err = os.ReadFile(p)
+		data, err := os.ReadFile(p)
 		if err == nil {
+			s.RoleRegistryMu.Lock()
+			json.Unmarshal(data, &s.RoleRegistry)
+			s.RoleRegistryMu.Unlock()
 			log.Printf("✅ Đã tải cấu hình quyền hạn từ: %s", p)
-			break
+			return
 		}
 	}
-
-	if err != nil {
-		log.Println("ℹ️ Không tìm thấy roles.json ở bất kỳ thư mục nào (Sẽ hoạt động với quyền User mặc định)")
-		return
-	}
-
-	s.RoleRegistryMu.Lock()
-	defer s.RoleRegistryMu.Unlock()
-	if err := json.Unmarshal(data, &s.RoleRegistry); err != nil {
-		log.Fatalf("❌ Lỗi cấu trúc file roles.json: %v", err)
-	}
+	log.Println("ℹ️ Không tìm thấy roles.json (Sẽ hoạt động với quyền User mặc định)")
 }
 
 func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string) bool {
@@ -236,5 +215,6 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP string) (
 		Conn:        conn,
 		DisplayName: s.generateDisplayName(authPacket.Username, clientIP, perms),
 		Perms:       perms,
+		Send:        make(chan []byte, 256),
 	}, nil
 }
