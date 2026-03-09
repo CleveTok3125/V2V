@@ -12,6 +12,7 @@ import (
 
 type AppConfig struct {
 	AllowedOrigins      []string
+	RequireTLS          bool
 	MaxConnectionsPerIP int
 	MaxMessageLength    int
 	MaxMessageLine      int
@@ -19,6 +20,7 @@ type AppConfig struct {
 	MaxHistoryBytes     int
 	MaxHistorySend      int
 	MaxUsernameLength   int
+	MaxTripcodeLength   int
 	ConnectionCooldown  time.Duration
 	Port                string
 	StatusURL           string
@@ -48,6 +50,7 @@ type RoleDefinition struct {
 type ClientSession struct {
 	Conn        *websocket.Conn
 	DisplayName string
+	Tripcode    string
 	Perms       Permission
 	Send        chan []byte
 }
@@ -59,6 +62,7 @@ type AuthPacket struct {
 	Signature string `json:"signature,omitempty"`
 	Hmac      string `json:"hmac,omitempty"`
 	Username  string `json:"username,omitempty"`
+	Tripcode  string `json:"tripcode,omitempty"`
 }
 
 type NonceMeta struct {

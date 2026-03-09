@@ -143,6 +143,9 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		s.CheckAndBroadcastDate(now)
 
 		chatMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m %s: %s", now.Format("15:04"), session.DisplayName, text)
+		if session.Tripcode != "" {
+			chatMsg += fmt.Sprintf("\n  └─ ✍️ %s", session.Tripcode)
+		}
 		log.Printf("💬 [MSG từ %s]: %s\n", clientIP, chatMsg)
 		s.Broadcast(chatMsg, session.Conn)
 	}

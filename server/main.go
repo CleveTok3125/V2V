@@ -12,8 +12,31 @@ import (
 	"github.com/joho/godotenv"
 )
 
+func IsSecuredConnect(w http.ResponseWriter, r *http.Request, clientIP string) bool {
+	if !Cfg.RequireTLS {
+		log.Printf("⚠️ Server đang không buộc sử dụng kết nối mã hoá")
+		return true
+	}
+
+	isTLS := r.TLS != nil
+	isProxyTLS := strings.ToLower(r.Header.Get("X-Forwarded-Proto")) == "https"
+	isLocalhost := clientIP == "127.0.0.1" || clientIP == "::1"
+
+	if isTLS || isProxyTLS || isLocalhost {
+		return true
+	}
+
+	log.Printf("⚠️ Khóa kết nối không an toàn từ %s (Policy: RequireTLS)", clientIP)
+	http.Error(w, "Server bắt buộc sử dụng kết nối mã hóa (wss://).", http.StatusUpgradeRequired)
+	return false
+}
+
 func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIP(r)
+
+	if !IsSecuredConnect(w, r, clientIP) {
+		return
+	}
 
 	if !s.CheckConnectionRate(w, clientIP) {
 		return
@@ -88,6 +111,7 @@ func main() {
 
 	Cfg = AppConfig{
 		AllowedOrigins:      strings.Split(os.Getenv("ALLOWED_ORIGINS"), ","),
+		RequireTLS:          getEnvAsBoolOptional("REQUIRE_TLS", false),
 		MaxConnectionsPerIP: getEnvAsInt("MAX_CONNECTIONS_PER_IP"),
 		MaxMessageLength:    getEnvAsInt("MAX_MESSAGE_LENGTH"),
 		MaxMessageLine:      getEnvAsInt("MAX_MESSAGE_LINE"),
@@ -95,6 +119,7 @@ func main() {
 		MaxHistoryBytes:     getEnvAsInt("MAX_HISTORY_BYTES"),
 		MaxHistorySend:      getEnvAsInt("MAX_HISTORY_SEND"),
 		MaxUsernameLength:   getEnvAsInt("MAX_USERNAME_LENGTH"),
+		MaxTripcodeLength:   getEnvAsIntOptional("MAX_TRIPCODE_LENGTH", 64),
 		ConnectionCooldown:  getEnvAsDuration("CONNECTION_COOLDOWN"),
 		Port:                getSmartEnv("PORT"),
 		StatusURL:           getSmartEnv("STATUS_URL"),
