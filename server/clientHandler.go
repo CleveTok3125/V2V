@@ -45,7 +45,7 @@ func (s *ChatServer) registerClient(session *ClientSession, clientIP string) {
 	s.CheckAndBroadcastDate(joinTime)
 
 	joinMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã tham gia phòng chat!", joinTime.Format("15:04"), session.DisplayName)
-	log.Printf("🟢 [JOIN] %s (IP: %s)\n", session.DisplayName, clientIP)
+	log.Printf("🟢 [JOIN] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
 	s.Broadcast(joinMsg, session.Conn)
 }
 
@@ -142,11 +142,18 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		now := time.Now().In(Cfg.Timezone)
 		s.CheckAndBroadcastDate(now)
 
-		chatMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m %s: %s", now.Format("15:04"), session.DisplayName, text)
+		tripcodeSuffix := ""
 		if session.Tripcode != "" {
-			chatMsg += fmt.Sprintf("\n  └─ ✍️ %s", session.Tripcode)
+			tripcodeSuffix = "\n  └─ ✍️ " + session.Tripcode
 		}
-		log.Printf("💬 [MSG từ %s]: %s\n", clientIP, chatMsg)
+
+		newLinePrefix := " "
+		if strings.Contains(text, "\n") {
+			newLinePrefix = "⏎\n      "
+		}
+
+		chatMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m %s:%s%s%s", now.Format("15:04"), session.DisplayName, newLinePrefix, strings.ReplaceAll(text, "\n", "\n      "), tripcodeSuffix)
+		log.Printf("💬 [MSG từ %s] %s (%s): %s\n", clientIP, session.DisplayName, session.Tripcode, strings.ReplaceAll(text, "\n", "⏎"))
 		s.Broadcast(chatMsg, session.Conn)
 	}
 }

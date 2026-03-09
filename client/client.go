@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
@@ -306,10 +307,11 @@ func main() {
 				continue
 			}
 
-			paddedText := "| " + strings.ReplaceAll(text, "\n", "\n  ")
-
 			fmt.Print("\r\033[K")
-			fmt.Println(paddedText)
+			lines := strings.Split(text, "\n")
+			for _, line := range lines {
+				fmt.Printf("| %s\n", line)
+			}
 			fmt.Print("| > ")
 		}
 	}()
@@ -359,8 +361,20 @@ func main() {
 
 			fmt.Print("\033[1A\r\033[K")
 
-			paddedText := "| Bạn: " + strings.ReplaceAll(text, "\n", "\n|      ")
-			fmt.Println(paddedText)
+			lines := strings.Split(text, "\n")
+			for i, line := range lines {
+				if i == 0 {
+					fmt.Printf("| Bạn: %s\n", line)
+				} else {
+					fmt.Printf("|      %s\n", line)
+				}
+			}
+
+			if CLI.Tripcode != "" {
+				hashTrip := sha256.Sum256([]byte(CLI.Tripcode))
+				tripCodeHex := hex.EncodeToString(hashTrip[:])[:8]
+				fmt.Printf("|  └─ ✍  ◆ %s\n", tripCodeHex)
+			}
 
 			fmt.Print("| > ")
 
