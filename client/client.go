@@ -14,11 +14,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/chzyer/readline"
 	"github.com/gorilla/websocket"
 )
 
@@ -275,13 +277,28 @@ func main() {
 		username = authSuccess.Username
 	}
 
-	fmt.Println("Đã kết nối với username:", username)
-	fmt.Println("Gõ tin nhắn để chat, /help để hiện trợ giúp\n")
-	fmt.Print("| > ")
-
 	quitting := make(chan bool, 1)
 	var hideJoinLeave bool
 	var hideMu sync.RWMutex
+
+	greeting := func(w io.Writer, uname string) {
+		fmt.Fprintln(w, "Đã kết nối với username:", uname)
+		fmt.Fprintln(w, "Gõ tin nhắn để chat, /help để hiện trợ giúp\n")
+	}
+
+	historyFile := filepath.Join(os.TempDir(), "V2V_chat_history.tmp")
+
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          "| > ",
+		HistoryFile:     historyFile,
+		InterruptPrompt: "^C",
+		EOFPrompt:       "/quit",
+	})
+	if err != nil {
+		fmt.Println("❌ Lỗi khởi tạo readline:", err)
+		return
+	}
+	defer rl.Close()
 
 	go func() {
 		for {
@@ -291,8 +308,7 @@ func main() {
 				case <-quitting:
 					return
 				default:
-					fmt.Print("\r\033[K")
-					fmt.Println("\n ❌ Mất kết nối server")
+					fmt.Fprintf(rl.Stdout(), "\r\033[K\n ❌ Mất kết nối server\n")
 					os.Exit(1)
 				}
 			}
@@ -307,37 +323,44 @@ func main() {
 				continue
 			}
 
-			fmt.Print("\r\033[K")
 			lines := strings.Split(text, "\n")
 			for _, line := range lines {
-				fmt.Printf("| %s\n", line)
+				fmt.Fprintf(rl.Stdout(), "| %s\n", line)
 			}
-			fmt.Print("| > ")
+			rl.Refresh()
 		}
 	}()
 
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		text := scanner.Text()
+	greeting(rl.Stdout(), username)
+
+	for {
+		text, err := rl.Readline()
+		if err != nil {
+			break
+		}
+
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
 
 		if text == "/quit" || text == "/q" {
 			quitting <- true
 			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 
-			fmt.Print("\r\033[K")
-			fmt.Println("👋 Đang ngắt kết nối... Tạm biệt!")
-
+			fmt.Fprintf(rl.Stdout(), "👋 Đang ngắt kết nối... Tạm biệt!\n")
 			time.Sleep(500 * time.Millisecond)
 			break
 		}
 
 		if text == "/help" || text == "/h" {
-			fmt.Print("\r\033[K")
-			fmt.Println("  [Trợ giúp]: Danh sách các lệnh có thể sử dụng:")
-			fmt.Println("   - /help, /h      : Hiển thị bảng trợ giúp này")
-			fmt.Println("   - /quit, /q      : Rời phòng chat và tắt ứng dụng")
-			fmt.Println("   - /hideJoin, /hj : Bật/tắt chế độ ẩn thông báo người khác ra vào phòng")
-			fmt.Print("| > ")
+			fmt.Fprintln(rl.Stdout(), "  [Trợ giúp]: Danh sách các lệnh có thể sử dụng:")
+			fmt.Fprintln(rl.Stdout(), "    - /help, /h      : Hiển thị bảng trợ giúp này")
+			fmt.Fprintln(rl.Stdout(), "    - /clear, /c     : Xóa sạch màn hình chat")
+			fmt.Fprintln(rl.Stdout(), "    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy")
+			fmt.Fprintln(rl.Stdout(), "    - /quit, /q      : Rời phòng chat và tắt ứng dụng")
+			fmt.Fprintln(rl.Stdout(), "    - /hideJoin, /hj : Bật/tắt chế độ ẩn thông báo người khác ra vào phòng")
+			fmt.Fprintln(rl.Stdout(), "    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng")
 			continue
 		}
 
@@ -349,42 +372,70 @@ func main() {
 				status = "ĐÃ HIỆN"
 			}
 			hideMu.Unlock()
-
-			fmt.Print("\r\033[K")
-			fmt.Printf("| [Local]: %s thông báo người dùng ra/vào phòng.\n", status)
-			fmt.Print("| > ")
+			fmt.Fprintf(rl.Stdout(), "| [Local]: %s thông báo người dùng ra/vào phòng.\n", status)
 			continue
 		}
 
-		if strings.TrimSpace(text) != "" {
-			text = strings.ReplaceAll(text, "\\n", "\n")
+		if text == "/clear" || text == "/c" {
+			fmt.Fprint(rl.Stdout(), "\033[H\033[2J")
+			greeting(rl.Stdout(), username)
+			continue
+		}
 
-			fmt.Print("\033[1A\r\033[K")
+		if text == "/clearhistory" || text == "/ch" {
+			os.Remove(historyFile)
+			fmt.Fprintf(rl.Stdout(), "🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile)
+			continue
+		}
 
-			lines := strings.Split(text, "\n")
-			for i, line := range lines {
-				if i == 0 {
-					fmt.Printf("| Bạn: %s\n", line)
-				} else {
-					fmt.Printf("|      %s\n", line)
+		typedLinesCount := 1
+
+		if strings.HasPrefix(text, "```") {
+			var rawLines []string
+			rawLines = append(rawLines, text)
+
+			rl.SetPrompt("| ... ")
+			for {
+				nextLine, err := rl.Readline()
+				if err != nil {
+					break
+				}
+				typedLinesCount++
+				rawLines = append(rawLines, nextLine)
+
+				if strings.HasSuffix(strings.TrimSpace(nextLine), "```") {
+					break
 				}
 			}
 
-			if CLI.Tripcode != "" {
-				hashTrip := sha256.Sum256([]byte(CLI.Tripcode))
-				tripCodeHex := hex.EncodeToString(hashTrip[:])[:8]
-				fmt.Printf("|  └─ ✍  ◆ %s\n", tripCodeHex)
-			}
-
-			fmt.Print("| > ")
-
-			err := conn.WriteMessage(websocket.TextMessage, []byte(text))
-			if err != nil {
-				fmt.Println("❌ Lỗi gửi tin nhắn:", err)
-				break
-			}
-		} else {
-			fmt.Print("\r\033[K| > ")
+			rl.SetPrompt("| > ")
+			text = strings.Join(rawLines, "\n")
 		}
+
+		for range typedLinesCount {
+			fmt.Fprint(rl.Stdout(), "\033[1A\033[2K\r")
+		}
+
+		lines := strings.Split(text, "\n")
+		for i, line := range lines {
+			if i == 0 {
+				fmt.Fprintf(rl.Stdout(), "| Bạn: %s\n", line)
+			} else {
+				fmt.Fprintf(rl.Stdout(), "|      %s\n", line)
+			}
+		}
+
+		if CLI.Tripcode != "" {
+			hashTrip := sha256.Sum256([]byte(CLI.Tripcode))
+			tripCodeHex := hex.EncodeToString(hashTrip[:])[:8]
+			fmt.Fprintf(rl.Stdout(), "|  └─ ✍  ◆ %s\n", tripCodeHex)
+		}
+
+		err = conn.WriteMessage(websocket.TextMessage, []byte(text))
+		if err != nil {
+			fmt.Println("❌ Lỗi gửi tin nhắn:", err)
+			break
+		}
+
 	}
 }
