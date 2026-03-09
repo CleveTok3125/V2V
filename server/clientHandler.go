@@ -66,7 +66,7 @@ func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
 	s.CheckAndBroadcastDate(leaveTime)
 
 	leaveMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã rời phòng chat.", leaveTime.Format("15:04"), session.DisplayName)
-	log.Printf("🔴 [LEAVE] %s (IP: %s)\n", session.DisplayName, clientIP)
+	log.Printf("🔴 [LEAVE] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
 	s.Broadcast(leaveMsg, nil)
 }
 
@@ -120,6 +120,10 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 
 		text := sanitizeString(string(msg))
 
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+
 		if !session.Perms.CanMessageUnlimited {
 			if utf8.RuneCountInString(text) > Cfg.MaxMessageLength {
 				session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn của bạn quá dài (tối đa %d ký tự).", Cfg.MaxMessageLength))
@@ -153,7 +157,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		}
 
 		chatMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m %s:%s%s%s", now.Format("15:04"), session.DisplayName, newLinePrefix, strings.ReplaceAll(text, "\n", "\n      "), tripcodeSuffix)
-		log.Printf("💬 [MSG từ %s] %s (%s): %s\n", clientIP, session.DisplayName, session.Tripcode, strings.ReplaceAll(text, "\n", "⏎"))
+		log.Printf("💬 [MSG từ %s] %s (%s): %s\n", clientIP, session.DisplayName, session.Tripcode, strings.ReplaceAll(text, "\n", "\\n"))
 		s.Broadcast(chatMsg, session.Conn)
 	}
 }
