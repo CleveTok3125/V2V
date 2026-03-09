@@ -27,6 +27,7 @@ var CLI struct {
 	Version   kong.VersionFlag `help:"Hiển thị phiên bản (Git Commit Hash)" short:"v"`
 	Server    string           `help:"Link server WebSocket" short:"s"`
 	Username  string           `help:"Tên người dùng của bạn" default:"Anonymous" short:"u"`
+	Tripcode  string           `help:"Mật khẩu bí mật để tạo Chữ ký Tripcode (tùy chọn)" short:"t"`
 	UserAgent string           `help:"Tùy chỉnh User-Agent" default:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" short:"a"`
 	Info      bool             `help:"Kiểm tra thông tin trạng thái của Server" short:"i"`
 
@@ -41,6 +42,7 @@ type AuthPacket struct {
 	Signature string `json:"signature,omitempty"`
 	Hmac      string `json:"hmac,omitempty"`
 	Username  string `json:"username,omitempty"`
+	Tripcode  string `json:"tripcode,omitempty"`
 }
 
 type ClientIdentity struct {
@@ -223,6 +225,7 @@ func main() {
 
 	respPacket := AuthPacket{
 		Username: username,
+		Tripcode: CLI.Tripcode,
 		Nonce:    challenge.Nonce,
 	}
 

@@ -49,6 +49,19 @@ func getEnvAsInt(key string) int {
 	return parsed
 }
 
+func getEnvAsIntOptional(key string, fallback int) int {
+	val, exists := os.LookupEnv(key)
+	if !exists || val == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(val)
+	if err != nil {
+		log.Printf("⚠️ Lỗi định dạng số ở biến %s. Dùng mặc định: %d", key, fallback)
+		return fallback
+	}
+	return parsed
+}
+
 func getEnvAsDuration(key string) time.Duration {
 	val, exists := os.LookupEnv(key)
 	if !exists || val == "" {
@@ -92,6 +105,19 @@ func sanitizeString(text string) string {
 		}
 		return -1
 	}, text)
+}
+
+func getEnvAsBoolOptional(key string, fallback bool) bool {
+	val, exists := os.LookupEnv(key)
+	if !exists || val == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		log.Printf("⚠️ Lỗi định dạng boolean ở biến %s. Dùng mặc định: %v", key, fallback)
+		return fallback
+	}
+	return parsed
 }
 
 func generateRandomID(length int) string {

@@ -198,6 +198,21 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 	return fmt.Sprintf("%s#%s", name, ipSuffix)
 }
 
+func generateTripcode(secret string, length int) string {
+	if secret == "" || length <= 0 {
+		return ""
+	}
+
+	hashTrip := sha256.Sum256([]byte(secret))
+	fullHex := hex.EncodeToString(hashTrip[:])
+
+	if length > len(fullHex) {
+		length = len(fullHex)
+	}
+
+	return "◆ " + fullHex[:length]
+}
+
 func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP string) (*ClientSession, error) {
 	perms, authPacket, err := s.HandleAuth(conn, clientIP)
 	if err != nil {
@@ -209,6 +224,14 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP string) (
 		return nil, err
 	}
 
+	if len(authPacket.Tripcode) > Cfg.MaxTripcodeLength {
+		errMsg := fmt.Sprintf("[Hệ thống]: Mật khẩu Tripcode quá dài (tối đa %d byte). Bị từ chối!", Cfg.MaxTripcodeLength)
+		conn.WriteMessage(websocket.TextMessage, []byte(errMsg))
+		conn.Close()
+		log.Printf("⚠️ [AUTH FAIL] %s: Tripcode secret quá dài (%d bytes) - Từ chối để chống trùng lặp.", clientIP, len(authPacket.Tripcode))
+		return nil, fmt.Errorf("auth_error: tripcode_too_long")
+	}
+
 	if authPacket.Role != "" {
 		s.AuthFailsMu.Lock()
 		delete(s.AuthFails, clientIP)
@@ -218,6 +241,7 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP string) (
 	return &ClientSession{
 		Conn:        conn,
 		DisplayName: s.generateDisplayName(authPacket.Username, clientIP, perms),
+		Tripcode:    generateTripcode(authPacket.Tripcode, 8),
 		Perms:       perms,
 		Send:        make(chan []byte, 256),
 	}, nil
