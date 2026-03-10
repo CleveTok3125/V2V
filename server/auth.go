@@ -238,9 +238,18 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP string) (
 		s.AuthFailsMu.Unlock()
 	}
 
+	finalUsername := s.generateDisplayName(authPacket.Username, clientIP, perms)
+	err = conn.WriteJSON(AuthPacket{
+		Type:     "auth_success",
+		Username: finalUsername,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return &ClientSession{
 		Conn:        conn,
-		DisplayName: s.generateDisplayName(authPacket.Username, clientIP, perms),
+		DisplayName: finalUsername,
 		Tripcode:    generateTripcode(authPacket.Tripcode, 8),
 		Perms:       perms,
 		Send:        make(chan []byte, 256),

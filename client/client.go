@@ -272,7 +272,10 @@ func main() {
 	}
 
 	var authSuccess AuthPacket
-	conn.ReadJSON(&authSuccess)
+	err = conn.ReadJSON(&authSuccess)
+	if err != nil {
+		fmt.Println("⚠️ Cảnh báo lúc đọc Auth (Có thể Server gửi nhầm thứ tự):", err)
+	}
 	if authSuccess.Type == "auth_success" {
 		username = authSuccess.Username
 	}
