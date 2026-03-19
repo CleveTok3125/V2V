@@ -8,13 +8,15 @@ Hệ thống chat ẩn danh WebSocket thời gian thực, hiệu năng cao, đư
 ## ✨ Tính năng nổi bật
 
 * **Nhanh & Nhẹ:** Triển khai thuần Go sử dụng `gorilla/websocket` cho giao tiếp hai chiều thời gian thực.
-* **Xác thực bất đối xứng (không cần mật khẩu):** Sử dụng Ed25519 và HMAC theo cơ chế Challenge-Response. Cho phép Admin/Mod đăng nhập an toàn mà không cần truyền private key qua mạng, ngăn chặn hiệu quả các tấn công Replay và MITM.
-* **Ẩn danh an toàn:** Người dùng mặc định là ẩn danh. Tên hiển thị tự động được gắn thêm một đoạn hash ngắn từ địa chỉ IP (ví dụ: `Anonymous#1a2b`), giúp phân biệt người dùng mà không lộ IP thật.
+* **Xác thực bất đối xứng (không cần mật khẩu):** Sử dụng Ed25519 và HMAC theo cơ chế Challenge-Response. Cho phép Admin/Mod đăng nhập an toàn mà không cần truyền private key qua mạng, ngăn chặn hiệu quả các tấn công Replay và MITM. 
+* **Ẩn danh an toàn:** Người dùng mặc định là ẩn danh. Tên hiển thị tự động được gắn thêm một đoạn hash ngắn từ địa chỉ IP (ví dụ: `Anonymous#1a2b`), giúp phân biệt người dùng mà không lộ IP thật. Bây giờ người dùng có thêm quyền lựa chọn hệ thống xác thực tripcode.
 * **Chống spam & lạm dụng:**
     * Giới hạn số lượng kết nối tối đa theo địa chỉ IP.
     * Giới hạn độ dài tin nhắn và số dòng.
     * Cooldown cho tin nhắn và kết nối.
     * Tạm khóa IP khi xác thực thất bại nhiều lần liên tiếp.
+    * Chống IP spoofing và DoS.
+    * Tạm thời chặn kết nối không mã hoá để ngăn tấn công MITM và nghe lén
 * **Lịch sử chat trên bộ nhớ:** Tự động lưu và gửi các tin nhắn gần nhất cho người dùng mới kết nối.
 * **Client CLI đa nền tảng:** Client chạy trên terminal với giao diện chat tích hợp và các lệnh cục bộ.
 
