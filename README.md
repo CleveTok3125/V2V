@@ -9,15 +9,17 @@ A high-performance, real-time anonymous chat system built entirely in Go. It fea
 
 * **Lightning Fast & Lightweight:** Pure Go implementation utilizing `gorilla/websocket` for real-time bidirectional communication.
 * **Asymmetric Authentication (Passwordless):** Uses Ed25519 and HMAC for a Challenge-Response authentication mechanism. This allows Admins/Mods to log in securely without sending private keys over the network, effectively preventing Replay and MITM attacks.
-* **Secure Anonymity:** Users are anonymous by default. Display names are automatically appended with a short hash of the user's IP address (e.g., `Anonymous#1a2b`), making it easy to distinguish users without exposing real IP addresses.
+* **Secure Anonymity:** Users are anonymous by default. Display names are automatically appended with a short hash of the user's IP address (e.g., `Anonymous#1a2b`), making it easy to distinguish users without exposing real IP addresses. Now users can choose tripcode identity system.
 * **Anti-Spam & Abuse Protection:**
     * Maximum connection limits per IP address.
     * Message length and line-break limits.
     * Message and connection cooldowns.
     * Temporary IP lockouts for repeated failed authentication attempts.
+    * IP spoofing and DoS preventation.
+    * Immediately block unencrypted connections to prevent MITM attacks and secret sniffing
 
 * **In-Memory Chat History:** Automatically stores and sends the most recent messages to newly connected users.
-* **Cross-Platform CLI Client:** A terminal-based client featuring an integrated chat UI and local commands.
+* **Cross-Platform CLI Client:** A terminal-based client featuring an integrated chat UI suitable for multi-line messages and local commands.
 
 ---
 
