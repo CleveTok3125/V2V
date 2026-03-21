@@ -55,7 +55,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 		return perms, resp, fmt.Errorf("auth_error: invalid_role_length")
 	}
 
-	if utf8.RuneCountInString(resp.Username) > Cfg.MaxUsernameLength {
+	if utf8.RuneCountInString(resp.Username) > Cfg.Dynamic.Load().MaxUsernameLength {
 		return perms, resp, fmt.Errorf("auth_error: payload_too_large")
 	}
 
@@ -156,7 +156,7 @@ func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string)
 
 	s.LastConnectMu.Lock()
 	if lastTime, exists := s.LastConnectTime[clientIP]; exists {
-		if time.Since(lastTime) < Cfg.ConnectionCooldown {
+		if time.Since(lastTime) < Cfg.Dynamic.Load().ConnectionCooldown {
 			s.LastConnectMu.Unlock()
 			log.Printf("⛔ Từ chối: %s kết nối ra/vào quá nhanh.\n", clientIP)
 			http.Error(w, "Bạn thao tác ra/vào quá nhanh! Vui lòng đợi vài giây rồi thử lại.", http.StatusTooManyRequests)
@@ -224,8 +224,8 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP string) (
 		return nil, err
 	}
 
-	if len(authPacket.Tripcode) > Cfg.MaxTripcodeLength {
-		errMsg := fmt.Sprintf("[Hệ thống]: Mật khẩu Tripcode quá dài (tối đa %d byte). Bị từ chối!", Cfg.MaxTripcodeLength)
+	if len(authPacket.Tripcode) > Cfg.Dynamic.Load().MaxTripcodeLength {
+		errMsg := fmt.Sprintf("[Hệ thống]: Mật khẩu Tripcode quá dài (tối đa %d byte). Bị từ chối!", Cfg.Dynamic.Load().MaxTripcodeLength)
 		conn.WriteMessage(websocket.TextMessage, []byte(errMsg))
 		conn.Close()
 		log.Printf("⚠️ [AUTH FAIL] %s: Tripcode secret quá dài (%d bytes) - Từ chối để chống trùng lặp.", clientIP, len(authPacket.Tripcode))

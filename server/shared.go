@@ -10,28 +10,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type AppConfig struct {
-	AllowedOrigins      []string
-	RequireTLS          bool
-	MaxConnectionsPerIP int
-	MaxMessageLength    int
-	MaxMessageLine      int
-	MessageCooldown     time.Duration
-	MaxHistoryBytes     int
-	MaxHistorySend      int
-	MaxUsernameLength   int
-	MaxTripcodeLength   int
-	ConnectionCooldown  time.Duration
-	Port                string
-	StatusURL           string
-	DownloadURL         string
-	HomepageURL         string
-	InstanceID          string
-	Timezone            *time.Location
-	LogFilePath         string
-	MaxLogSizeMB        int
-}
-
 type Identity struct {
 	PublicKey  string `json:"public_key"`
 	HmacShield string `json:"hmac_shield"`
@@ -123,7 +101,7 @@ func NewChatServer() *ChatServer {
 					return true
 				}
 
-				for _, o := range Cfg.AllowedOrigins {
+				for _, o := range Cfg.Static.AllowedOrigins {
 					if origin == strings.TrimSpace(o) {
 						return true
 					}
@@ -135,8 +113,6 @@ func NewChatServer() *ChatServer {
 		},
 	}
 }
-
-var Cfg AppConfig
 
 func GetDefaultPermission() Permission {
 	return Permission{

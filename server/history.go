@@ -16,7 +16,7 @@ func (s *ChatServer) AddMessageToHistory(msg string) {
 	s.ChatHistory = append(s.ChatHistory, msg)
 	s.ChatHistorySize += msgSize
 
-	for s.ChatHistorySize > Cfg.MaxHistoryBytes && len(s.ChatHistory) > 0 {
+	for s.ChatHistorySize > Cfg.Dynamic.Load().MaxHistoryBytes && len(s.ChatHistory) > 0 {
 		oldestSize := len(s.ChatHistory[0])
 		s.ChatHistorySize -= oldestSize
 
@@ -67,9 +67,11 @@ func (s *ChatServer) SendChatHistory(session *ClientSession) {
 		return
 	}
 
+	dynCfg := Cfg.Dynamic.Load()
+
 	startIndex := 0
-	if historyLen > Cfg.MaxHistorySend {
-		startIndex = historyLen - Cfg.MaxHistorySend
+	if historyLen > dynCfg.MaxHistorySend {
+		startIndex = historyLen - dynCfg.MaxHistorySend
 	}
 
 	historyCopy := make([]string, historyLen-startIndex)
