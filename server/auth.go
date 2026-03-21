@@ -128,14 +128,20 @@ func getClientIP(r *http.Request) string {
 }
 
 func (s *ChatServer) LoadRoles() {
-	paths := []string{"./roles.json", "/etc/secrets/roles.json"}
-	for _, p := range paths {
+	for _, p := range RolesFilePaths {
 		data, err := os.ReadFile(p)
 		if err == nil {
+			var tempRegistry map[string]RoleDefinition
+			if err := json.Unmarshal(data, &tempRegistry); err != nil {
+				log.Printf("❌ [HOT-RELOAD LỖI] Cú pháp file %s không hợp lệ: %v. Đang giữ nguyên Roles cũ!", p, err)
+				return
+			}
+
 			s.RoleRegistryMu.Lock()
-			json.Unmarshal(data, &s.RoleRegistry)
+			s.RoleRegistry = tempRegistry
 			s.RoleRegistryMu.Unlock()
-			log.Printf("✅ Đã tải cấu hình quyền hạn từ: %s", p)
+
+			log.Printf("✅ Đã nạp cấu hình quyền hạn (Roles) từ: %s", p)
 			return
 		}
 	}

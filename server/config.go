@@ -37,3 +37,8 @@ type AppConfig struct {
 }
 
 var Cfg AppConfig
+
+var (
+	EnvFilePaths   = []string{"/etc/secrets/.env", ".env"}
+	RolesFilePaths = []string{"/etc/secrets/roles.json", "./roles.json"}
+)
