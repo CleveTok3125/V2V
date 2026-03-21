@@ -134,9 +134,11 @@ func loadDynamicConfig() DynamicConfig {
 }
 
 func ReloadDynamicConfig() {
-	_ = godotenv.Overload(".env")
-	if _, err := os.Stat("/etc/secrets/.env"); err == nil {
-		_ = godotenv.Overload("/etc/secrets/.env")
+	for _, p := range EnvFilePaths {
+		if _, err := os.Stat(p); err == nil {
+			_ = godotenv.Overload(p)
+			break
+		}
 	}
 
 	newDynamic := loadDynamicConfig()
@@ -151,8 +153,7 @@ func (s *ChatServer) WatchEnvFile() {
 
 	go func() {
 		for range ticker.C {
-			paths := []string{".env", "/etc/secrets/.env"}
-			for _, p := range paths {
+			for _, p := range EnvFilePaths {
 				info, err := os.Stat(p)
 				if err == nil {
 					if lastModTime.IsZero() {
@@ -172,10 +173,39 @@ func (s *ChatServer) WatchEnvFile() {
 	}()
 }
 
+func (s *ChatServer) WatchRolesFile() {
+	var lastModTime time.Time
+	ticker := time.NewTicker(10 * time.Second)
+
+	go func() {
+		for range ticker.C {
+			for _, p := range RolesFilePaths {
+				info, err := os.Stat(p)
+				if err == nil {
+					if lastModTime.IsZero() {
+						lastModTime = info.ModTime()
+						break
+					}
+
+					if info.ModTime().After(lastModTime) {
+						lastModTime = info.ModTime()
+						log.Printf("🔄 [HOT-RELOAD] Phát hiện thay đổi trong %s, đang nạp lại roles...", p)
+
+						s.LoadRoles()
+					}
+					break
+				}
+			}
+		}
+	}()
+}
+
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		_ = godotenv.Load("/etc/secrets/.env")
+	for _, p := range EnvFilePaths {
+		if err := godotenv.Load(p); err == nil {
+			log.Printf("✅ Đã nạp cấu hình môi trường từ: %s", p)
+			break
+		}
 	}
 
 	Cfg.Static = loadStaticConfig()
@@ -187,6 +217,7 @@ func main() {
 
 	chatApp.LoadRoles()
 	chatApp.WatchEnvFile()
+	chatApp.WatchRolesFile()
 	chatApp.StartCleanupTasks()
 
 	mux := http.NewServeMux()
