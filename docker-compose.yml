@@ -1,0 +1,14 @@
+services:
+  V2V:
+    build: .
+    image: v2v_image
+    container_name: v2v_server
+    restart: always
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+    volumes:
+      - ./.env:/app/.env
+      - ./roles.json:/app/roles.json
+      - ./logs:/app/logs
+    environment:
+      - TZ=${TIMEZONE:-Asia/Ho_Chi_Minh}
