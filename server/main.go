@@ -95,42 +95,54 @@ func (s *ChatServer) StartCleanupTasks() {
 	}()
 }
 
-func loadStaticConfig() StaticConfig {
+func loadStaticConfig() (StaticConfig, error) {
+	loader := &envLoader{}
 	rawInstanceID := getEnvOptional("INSTANCE_ID", "AUTO")
 	var instanceID string
 	if rawInstanceID == "AUTO" {
 		instanceID = generateRandomID(6)
 	} else {
-		instanceID = lastAfterDash(getSmartEnv("INSTANCE_ID"))
+		instanceID = lastAfterDash(loader.Smart("INSTANCE_ID"))
 	}
 
-	return StaticConfig{
+	cfg := StaticConfig{
 		AllowedOrigins: strings.Split(os.Getenv("ALLOWED_ORIGINS"), ","),
 		RequireTLS:     getEnvAsBoolOptional("REQUIRE_TLS", false),
-		Port:           getSmartEnv("PORT"),
+		Port:           loader.Smart("PORT"),
 		InstanceID:     instanceID,
 		Timezone:       getEnvAsLocationOptional("TIMEZONE", "Asia/Ho_Chi_Minh"),
-		LogFilePath:    getSmartEnv("LOG_FILE_PATH"),
-		MaxLogSizeMB:   getEnvAsInt("MAX_LOG_SIZE_MB"),
+		LogFilePath:    loader.Smart("LOG_FILE_PATH"),
+		MaxLogSizeMB:   loader.Int("MAX_LOG_SIZE_MB"),
 	}
+	if err := loader.Err(); err != nil {
+		return StaticConfig{}, err
+	}
+
+	return cfg, nil
 }
 
-func loadDynamicConfig() DynamicConfig {
-	return DynamicConfig{
-		StatusURL:   getSmartEnv("STATUS_URL"),
-		DownloadURL: getSmartEnv("DOWNLOAD_URL"),
-		HomepageURL: getSmartEnv("HOMEPAGE_URL"),
+func loadDynamicConfig() (DynamicConfig, error) {
+	loader := &envLoader{}
 
-		MaxConnectionsPerIP: getEnvAsInt("MAX_CONNECTIONS_PER_IP"),
-		MaxMessageLength:    getEnvAsInt("MAX_MESSAGE_LENGTH"),
-		MaxMessageLine:      getEnvAsInt("MAX_MESSAGE_LINE"),
-		MessageCooldown:     getEnvAsDuration("MESSAGE_COOLDOWN"),
-		MaxHistoryBytes:     getEnvAsInt("MAX_HISTORY_BYTES"),
-		MaxHistorySend:      getEnvAsInt("MAX_HISTORY_SEND"),
-		MaxUsernameLength:   getEnvAsInt("MAX_USERNAME_LENGTH"),
+	cfg := DynamicConfig{
+		StatusURL:           loader.Smart("STATUS_URL"),
+		DownloadURL:         loader.Smart("DOWNLOAD_URL"),
+		HomepageURL:         loader.Smart("HOMEPAGE_URL"),
+		MaxConnectionsPerIP: loader.Int("MAX_CONNECTIONS_PER_IP"),
+		MaxMessageLength:    loader.Int("MAX_MESSAGE_LENGTH"),
+		MaxMessageLine:      loader.Int("MAX_MESSAGE_LINE"),
+		MessageCooldown:     loader.Duration("MESSAGE_COOLDOWN"),
+		MaxHistoryBytes:     loader.Int("MAX_HISTORY_BYTES"),
+		MaxHistorySend:      loader.Int("MAX_HISTORY_SEND"),
+		MaxUsernameLength:   loader.Int("MAX_USERNAME_LENGTH"),
 		MaxTripcodeLength:   getEnvAsIntOptional("MAX_TRIPCODE_LENGTH", 64),
-		ConnectionCooldown:  getEnvAsDuration("CONNECTION_COOLDOWN"),
+		ConnectionCooldown:  loader.Duration("CONNECTION_COOLDOWN"),
 	}
+	if err := loader.Err(); err != nil {
+		return DynamicConfig{}, err
+	}
+
+	return cfg, nil
 }
 
 func ReloadDynamicConfig() {
@@ -141,7 +153,11 @@ func ReloadDynamicConfig() {
 		}
 	}
 
-	newDynamic := loadDynamicConfig()
+	newDynamic, err := loadDynamicConfig()
+	if err != nil {
+		log.Printf("❌ [HOT-RELOAD] Không thể nạp lại dynamic config: %v", err)
+		return
+	}
 
 	Cfg.Dynamic.Store(&newDynamic)
 	log.Println("🔄 [HOT-RELOAD] Đã cập nhật thành công các thông số logic!")
@@ -208,9 +224,16 @@ func main() {
 		}
 	}
 
-	Cfg.Static = loadStaticConfig()
+	staticCfg, err := loadStaticConfig()
+	if err != nil {
+		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+	}
+	Cfg.Static = staticCfg
 
-	initialDynamic := loadDynamicConfig()
+	initialDynamic, err := loadDynamicConfig()
+	if err != nil {
+		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+	}
 	Cfg.Dynamic.Store(&initialDynamic)
 
 	chatApp := NewChatServer()
@@ -246,7 +269,9 @@ func main() {
 		fmt.Fprintf(w, "Homepage   : %s\n", dynCfg.HomepageURL)
 	})
 
-	InitLogger(Cfg.Static.LogFilePath, Cfg.Static.MaxLogSizeMB)
+	if err := InitLogger(Cfg.Static.LogFilePath, Cfg.Static.MaxLogSizeMB); err != nil {
+		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+	}
 
 	server := &http.Server{
 		Addr:              ":" + Cfg.Static.Port,

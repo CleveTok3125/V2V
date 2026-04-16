@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -15,9 +16,9 @@ type RotatingLogger struct {
 	mu       sync.Mutex
 }
 
-func InitLogger(logFile string, maxSizeMB int) {
+func InitLogger(logFile string, maxSizeMB int) error {
 	if logFile == "" {
-		return
+		return nil
 	}
 
 	rl := &RotatingLogger{
@@ -26,11 +27,12 @@ func InitLogger(logFile string, maxSizeMB int) {
 	}
 
 	if err := rl.open(); err != nil {
-		log.Fatalf("❌ Không thể mở file log: %v", err)
+		return fmt.Errorf("không thể mở file log: %w", err)
 	}
 
 	multiWriter := io.MultiWriter(os.Stdout, rl)
 	log.SetOutput(multiWriter)
+	return nil
 }
 
 func (l *RotatingLogger) open() error {
