@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -10,6 +11,56 @@ import (
 	"time"
 	"unicode"
 )
+
+type envLoader struct {
+	err error
+}
+
+func (l *envLoader) Smart(key string) string {
+	if l.err != nil {
+		return ""
+	}
+
+	val, err := getSmartEnv(key)
+	if err != nil {
+		l.err = err
+		return ""
+	}
+
+	return val
+}
+
+func (l *envLoader) Int(key string) int {
+	if l.err != nil {
+		return 0
+	}
+
+	val, err := getEnvAsInt(key)
+	if err != nil {
+		l.err = err
+		return 0
+	}
+
+	return val
+}
+
+func (l *envLoader) Duration(key string) time.Duration {
+	if l.err != nil {
+		return 0
+	}
+
+	val, err := getEnvAsDuration(key)
+	if err != nil {
+		l.err = err
+		return 0
+	}
+
+	return val
+}
+
+func (l *envLoader) Err() error {
+	return l.err
+}
 
 func getEnvAsLocationOptional(key string, fallback string) *time.Location {
 	val, exists := os.LookupEnv(key)
@@ -24,29 +75,29 @@ func getEnvAsLocationOptional(key string, fallback string) *time.Location {
 	return loc
 }
 
-func getSmartEnv(key string) string {
+func getSmartEnv(key string) (string, error) {
 	val, exists := os.LookupEnv(key)
 	if !exists || val == "" {
-		log.Fatalf("❌ CRITICAL ERROR: Thiếu biến môi trường bắt buộc: %s", key)
+		return "", fmt.Errorf("thiếu biến môi trường bắt buộc: %s", key)
 	}
 
 	sysVal := os.Getenv(val)
 	if sysVal != "" {
-		return sysVal
+		return sysVal, nil
 	}
-	return val
+	return val, nil
 }
 
-func getEnvAsInt(key string) int {
+func getEnvAsInt(key string) (int, error) {
 	val, exists := os.LookupEnv(key)
 	if !exists || val == "" {
-		log.Fatalf("❌ CRITICAL ERROR: Thiếu biến môi trường bắt buộc: %s", key)
+		return 0, fmt.Errorf("thiếu biến môi trường bắt buộc: %s", key)
 	}
 	parsed, err := strconv.Atoi(val)
 	if err != nil {
-		log.Fatalf("❌ Lỗi định dạng số ở biến %s: %v", key, err)
+		return 0, fmt.Errorf("lỗi định dạng số ở biến %s: %w", key, err)
 	}
-	return parsed
+	return parsed, nil
 }
 
 func getEnvAsIntOptional(key string, fallback int) int {
@@ -62,16 +113,16 @@ func getEnvAsIntOptional(key string, fallback int) int {
 	return parsed
 }
 
-func getEnvAsDuration(key string) time.Duration {
+func getEnvAsDuration(key string) (time.Duration, error) {
 	val, exists := os.LookupEnv(key)
 	if !exists || val == "" {
-		log.Fatalf("❌ CRITICAL ERROR: Thiếu biến môi trường bắt buộc: %s", key)
+		return 0, fmt.Errorf("thiếu biến môi trường bắt buộc: %s", key)
 	}
 	parsed, err := time.ParseDuration(val)
 	if err != nil {
-		log.Fatalf("❌ Lỗi định dạng thời gian ở biến %s (ví dụ đúng: 200ms, 5s): %v", key, err)
+		return 0, fmt.Errorf("lỗi định dạng thời gian ở biến %s (ví dụ đúng: 200ms, 5s): %w", key, err)
 	}
-	return parsed
+	return parsed, nil
 }
 
 func getEnvOptional(key string, fallback string) string {
