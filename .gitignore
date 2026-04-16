@@ -42,3 +42,4 @@ roles.json
 # Template
 !template/*
 template/*.log
+.co*
