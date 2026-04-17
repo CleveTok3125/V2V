@@ -7,8 +7,8 @@ services:
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
     volumes:
-      - ./.env:/app/.env
-      - ./roles.json:/app/roles.json
+      - ./.env:/app/.env:ro
+      - ./roles.json:/app/roles.json:ro
       - ./logs:/app/logs
       - ./data:/app/data
     environment:
