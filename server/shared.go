@@ -71,6 +71,7 @@ type ChatServer struct {
 	ChatHistory     []string
 	ChatHistorySize int
 	HistoryMu       sync.RWMutex
+	HistoryStore    *HistoryStore
 
 	LastMessageDate   string
 	LastMessageDateMu sync.Mutex

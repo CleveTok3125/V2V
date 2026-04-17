@@ -6,13 +6,15 @@ import (
 )
 
 type StaticConfig struct {
-	Port           string
-	RequireTLS     bool
-	AllowedOrigins []string
-	InstanceID     string
-	Timezone       *time.Location
-	LogFilePath    string
-	MaxLogSizeMB   int
+	Port                 string
+	RequireTLS           bool
+	AllowedOrigins       []string
+	InstanceID           string
+	Timezone             *time.Location
+	LogFilePath          string
+	MaxLogSizeMB         int
+	HistoryFilePath      string
+	MaxHistoryFileSizeMB int
 }
 
 type DynamicConfig struct {

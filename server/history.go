@@ -2,13 +2,14 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-func (s *ChatServer) AddMessageToHistory(msg string) {
+func (s *ChatServer) appendMessageToHistory(msg string) {
 	s.HistoryMu.Lock()
 	defer s.HistoryMu.Unlock()
 
@@ -23,6 +24,42 @@ func (s *ChatServer) AddMessageToHistory(msg string) {
 		s.ChatHistory[0] = ""
 		s.ChatHistory = s.ChatHistory[1:]
 	}
+}
+
+func (s *ChatServer) AddMessageToHistory(msg string) {
+	s.appendMessageToHistory(msg)
+	if s.HistoryStore != nil {
+		s.HistoryStore.Enqueue(msg, time.Now().In(Cfg.Static.Timezone))
+	}
+}
+
+func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
+	store, err := NewHistoryStore(path, maxSizeMB)
+	if err != nil {
+		return err
+	}
+
+	s.HistoryStore = store
+
+	if store == nil {
+		return nil
+	}
+
+	messages, err := store.LoadMessages()
+	if err != nil {
+		return fmt.Errorf("không thể nạp history từ disk: %w", err)
+	}
+
+	for _, message := range messages {
+		s.appendMessageToHistory(message)
+	}
+
+	loggedCount := len(s.ChatHistory)
+	if loggedCount > 0 {
+		log.Printf("📚 Đã phục hồi %d tin nhắn history từ disk", loggedCount)
+	}
+
+	return nil
 }
 
 func (s *ChatServer) Broadcast(message string, sender *websocket.Conn) {

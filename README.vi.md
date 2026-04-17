@@ -118,7 +118,9 @@ chạy các lệnh sau đây trong thư mục gốc của project. Nó sẽ biê
     docker compose logs -f V2V
     ```
 
-docker-compose.yml được cấu hình để mount file .env và roles.json trực tiếp vào container đang chạy. Mặc định, file Docker mount ở thư mục logs. Vì vậy, bạn phải đổi đường dẫn của nhật kí để trỏ đến vị trí trong thư mục logs.
+docker-compose.yml được cấu hình để mount trực tiếp `.env` và `roles.json` vào container đang chạy.
+Nó cũng mount `./logs` và `./data`, nên log xoay vòng và chat history được lưu xuống disk sẽ còn sau khi restart hoặc recreate container.
+Mặc định template dùng `LOG_FILE_PATH=./logs/app.log` và `HISTORY_FILE_PATH=./data/history.jsonl`.
 
 Bạn không cần khởi động lại container khi cập nhật roles hoặc biến môi trường.
 

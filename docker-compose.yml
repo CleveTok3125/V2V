@@ -10,5 +10,6 @@ services:
       - ./.env:/app/.env
       - ./roles.json:/app/roles.json
       - ./logs:/app/logs
+      - ./data:/app/data
     environment:
       - TZ=${TIMEZONE:-Asia/Ho_Chi_Minh}
