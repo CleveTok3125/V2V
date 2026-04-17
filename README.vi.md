@@ -118,13 +118,13 @@ chạy các lệnh sau đây trong thư mục gốc của project. Nó sẽ biê
     docker compose logs -f V2V
     ```
 
-docker-compose.yml được cấu hình để mount trực tiếp `.env` và `roles.json` vào container đang chạy.
+docker-compose.yml được cấu hình để mount trực tiếp `.env` và `roles.json` vào container đang chạy dưới dạng chỉ đọc.
 Nó cũng mount `./logs` và `./data`, nên log xoay vòng và chat history được lưu xuống disk sẽ còn sau khi restart hoặc recreate container.
 Mặc định template dùng `LOG_FILE_PATH=./logs/app.log` và `HISTORY_FILE_PATH=./data/history.jsonl`.
 
 Bạn không cần khởi động lại container khi cập nhật roles hoặc biến môi trường.
 
-Chỉ cần chỉnh sửa file .env hoặc roles.json trên máy chủ, lưu lại file, và máy chủ sẽ *tự động* phát hiện các thay đổi và tải lại các cấu hình ngay lập tức.
+Chỉ cần chỉnh sửa file `.env` hoặc `roles.json` trên máy chủ, lưu lại file, và máy chủ sẽ *tự động* phát hiện các thay đổi và tải lại các cấu hình ngay lập tức.
 
 - Dừng và xoá container một cách an toàn:
 

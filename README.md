@@ -126,13 +126,13 @@ verify that the container is running:
     docker compose logs -f V2V
     ```
 
-The docker-compose.yml is configured to mount your local `.env` and `roles.json` directly into the running container.
+The docker-compose.yml is configured to mount your local `.env` and `roles.json` directly into the running container as read-only files.
 It also mounts `./logs` and `./data` so rotated logs and persisted chat history survive container restarts and recreates.
 By default, the template uses `LOG_FILE_PATH=./logs/app.log` and `HISTORY_FILE_PATH=./data/history.jsonl`.
 
 You do not need to restart the container when updating roles or environment variables.
 
-Simply edit .env or roles.json on your host machine, save the file, and the server will _automatically_ detect the changes and reload the configurations on the fly.
+Simply edit `.env` or `roles.json` on your host machine, save the file, and the server will _automatically_ detect the changes and reload the configurations on the fly.
 
 - To stop and remove the container gracefully:
 
