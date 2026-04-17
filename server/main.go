@@ -106,13 +106,15 @@ func loadStaticConfig() (StaticConfig, error) {
 	}
 
 	cfg := StaticConfig{
-		AllowedOrigins: strings.Split(os.Getenv("ALLOWED_ORIGINS"), ","),
-		RequireTLS:     getEnvAsBoolOptional("REQUIRE_TLS", false),
-		Port:           loader.Smart("PORT"),
-		InstanceID:     instanceID,
-		Timezone:       getEnvAsLocationOptional("TIMEZONE", "Asia/Ho_Chi_Minh"),
-		LogFilePath:    loader.Smart("LOG_FILE_PATH"),
-		MaxLogSizeMB:   loader.Int("MAX_LOG_SIZE_MB"),
+		AllowedOrigins:       strings.Split(os.Getenv("ALLOWED_ORIGINS"), ","),
+		RequireTLS:           getEnvAsBoolOptional("REQUIRE_TLS", false),
+		Port:                 loader.Smart("PORT"),
+		InstanceID:           instanceID,
+		Timezone:             getEnvAsLocationOptional("TIMEZONE", "Asia/Ho_Chi_Minh"),
+		LogFilePath:          loader.Smart("LOG_FILE_PATH"),
+		MaxLogSizeMB:         loader.Int("MAX_LOG_SIZE_MB"),
+		HistoryFilePath:      loader.Smart("HISTORY_FILE_PATH"),
+		MaxHistoryFileSizeMB: loader.Int("MAX_HISTORY_FILE_SIZE_MB"),
 	}
 	if err := loader.Err(); err != nil {
 		return StaticConfig{}, err
@@ -236,7 +238,14 @@ func main() {
 	}
 	Cfg.Dynamic.Store(&initialDynamic)
 
+	if err := InitLogger(Cfg.Static.LogFilePath, Cfg.Static.MaxLogSizeMB); err != nil {
+		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+	}
+
 	chatApp := NewChatServer()
+	if err := chatApp.InitHistoryStore(Cfg.Static.HistoryFilePath, Cfg.Static.MaxHistoryFileSizeMB); err != nil {
+		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+	}
 
 	chatApp.LoadRoles()
 	chatApp.WatchEnvFile()
@@ -268,10 +277,6 @@ func main() {
 		fmt.Fprintf(w, "Tải Client : %s\n", dynCfg.DownloadURL)
 		fmt.Fprintf(w, "Homepage   : %s\n", dynCfg.HomepageURL)
 	})
-
-	if err := InitLogger(Cfg.Static.LogFilePath, Cfg.Static.MaxLogSizeMB); err != nil {
-		log.Fatalf("❌ CRITICAL ERROR: %v", err)
-	}
 
 	server := &http.Server{
 		Addr:              ":" + Cfg.Static.Port,

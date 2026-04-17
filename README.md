@@ -126,8 +126,9 @@ verify that the container is running:
     docker compose logs -f V2V
     ```
 
-The docker-compose.yml is configured to mount your local .env and roles.json directly into the running container. 
-By default,  Docker file mounts on logs folder. Therefore, you must change the log path to point to the location inside the logs directory.
+The docker-compose.yml is configured to mount your local `.env` and `roles.json` directly into the running container.
+It also mounts `./logs` and `./data` so rotated logs and persisted chat history survive container restarts and recreates.
+By default, the template uses `LOG_FILE_PATH=./logs/app.log` and `HISTORY_FILE_PATH=./data/history.jsonl`.
 
 You do not need to restart the container when updating roles or environment variables.
 
