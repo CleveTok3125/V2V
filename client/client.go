@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -33,6 +32,7 @@ var CLI struct {
 	Tripcode  string           `help:"Mật khẩu bí mật để tạo Chữ ký Tripcode (tùy chọn)" short:"t"`
 	UserAgent string           `help:"Tùy chỉnh User-Agent" default:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" short:"a"`
 	Info      bool             `help:"Kiểm tra thông tin trạng thái của Server" short:"i"`
+	ShowJoin  bool             `help:"Hiện thông báo người dùng ra/vào phòng" short:"j"`
 
 	KeyFile string `help:"Đường dẫn file chứa khóa xác thực" short:"k"`
 	GenKey  bool   `help:"Tạo file key.json và hiển thị cấu hình cho Server" short:"g"`
@@ -52,6 +52,18 @@ type ClientIdentity struct {
 	Role       string `json:"role"`
 	PrivateKey string `json:"private_key"`
 	HmacShield string `json:"hmac_shield"`
+}
+
+func isJoinLeaveSystemLine(line string) bool {
+	return strings.Contains(line, "[Hệ thống]:") && (strings.Contains(line, "đã tham gia") || strings.Contains(line, "đã rời"))
+}
+
+func isDateBannerLine(line string) bool {
+	return strings.Contains(line, "--- Ngày ") && strings.Contains(line, " ---")
+}
+
+func isHistoryBoundaryLine(line string) bool {
+	return strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Kết thúc lịch sử ---")
 }
 
 func normalizeURL(input string) string {
@@ -281,8 +293,7 @@ func main() {
 	}
 
 	quitting := make(chan bool, 1)
-	showJoinLeave := true
-	var hideMu sync.RWMutex
+	showJoinLeave := CLI.ShowJoin
 
 	greeting := func(w io.Writer, uname string) {
 		fmt.Fprintln(w, "Đã kết nối với username:", uname)
@@ -304,6 +315,8 @@ func main() {
 	defer rl.Close()
 
 	go func() {
+		var pendingDateBanner string
+
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -316,18 +329,26 @@ func main() {
 				}
 			}
 
-			text := string(msg)
-
-			hideMu.RLock()
-			isShowing := showJoinLeave
-			hideMu.RUnlock()
-
-			if !isShowing && strings.Contains(text, "[Hệ thống]:") && (strings.Contains(text, "đã tham gia") || strings.Contains(text, "đã rời")) {
-				continue
-			}
-
-			lines := strings.Split(text, "\n")
+			lines := strings.Split(string(msg), "\n")
 			for _, line := range lines {
+				if !showJoinLeave && isDateBannerLine(line) {
+					pendingDateBanner = line
+					continue
+				}
+				if !showJoinLeave && isJoinLeaveSystemLine(line) {
+					continue
+				}
+				if !showJoinLeave && isHistoryBoundaryLine(line) {
+					if strings.Contains(line, "--- Kết thúc lịch sử ---") {
+						pendingDateBanner = ""
+					}
+					fmt.Fprintf(rl.Stdout(), "| %s\n", line)
+					continue
+				}
+				if !showJoinLeave && pendingDateBanner != "" {
+					fmt.Fprintf(rl.Stdout(), "| %s\n", pendingDateBanner)
+					pendingDateBanner = ""
+				}
 				fmt.Fprintf(rl.Stdout(), "| %s\n", line)
 			}
 			rl.Refresh()
@@ -362,20 +383,8 @@ func main() {
 			fmt.Fprintln(rl.Stdout(), "    - /clear, /c     : Xóa sạch màn hình chat")
 			fmt.Fprintln(rl.Stdout(), "    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy")
 			fmt.Fprintln(rl.Stdout(), "    - /quit, /q      : Rời phòng chat và tắt ứng dụng")
-			fmt.Fprintln(rl.Stdout(), "    - /showjoin, /sj : Bật/tắt chế độ hiện thông báo người khác ra vào phòng")
+			fmt.Fprintln(rl.Stdout(), "    - Dùng cờ -j, --show-join khi chạy để hiện thông báo người khác ra vào phòng")
 			fmt.Fprintln(rl.Stdout(), "    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng")
-			continue
-		}
-
-		if text == "/showjoin" || text == "/sj" {
-			hideMu.Lock()
-			showJoinLeave = !showJoinLeave
-			status := "ĐÃ TẮT"
-			if showJoinLeave {
-				status = "ĐÃ BẬT"
-			}
-			hideMu.Unlock()
-			fmt.Fprintf(rl.Stdout(), "| [Local]: %s hiển thị thông báo người dùng ra/vào phòng.\n", status)
 			continue
 		}
 
