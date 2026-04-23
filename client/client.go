@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -294,6 +295,7 @@ func main() {
 
 	quitting := make(chan bool, 1)
 	showJoinLeave := CLI.ShowJoin
+	var showJoinMu sync.RWMutex
 
 	greeting := func(w io.Writer, uname string) {
 		fmt.Fprintln(w, "Đã kết nối với username:", uname)
@@ -329,23 +331,27 @@ func main() {
 				}
 			}
 
+			showJoinMu.RLock()
+			isShowingJoin := showJoinLeave
+			showJoinMu.RUnlock()
+
 			lines := strings.Split(string(msg), "\n")
 			for _, line := range lines {
-				if !showJoinLeave && isDateBannerLine(line) {
+				if !isShowingJoin && isDateBannerLine(line) {
 					pendingDateBanner = line
 					continue
 				}
-				if !showJoinLeave && isJoinLeaveSystemLine(line) {
+				if !isShowingJoin && isJoinLeaveSystemLine(line) {
 					continue
 				}
-				if !showJoinLeave && isHistoryBoundaryLine(line) {
+				if !isShowingJoin && isHistoryBoundaryLine(line) {
 					if strings.Contains(line, "--- Kết thúc lịch sử ---") {
 						pendingDateBanner = ""
 					}
 					fmt.Fprintf(rl.Stdout(), "| %s\n", line)
 					continue
 				}
-				if !showJoinLeave && pendingDateBanner != "" {
+				if !isShowingJoin && pendingDateBanner != "" {
 					fmt.Fprintf(rl.Stdout(), "| %s\n", pendingDateBanner)
 					pendingDateBanner = ""
 				}
@@ -383,8 +389,20 @@ func main() {
 			fmt.Fprintln(rl.Stdout(), "    - /clear, /c     : Xóa sạch màn hình chat")
 			fmt.Fprintln(rl.Stdout(), "    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy")
 			fmt.Fprintln(rl.Stdout(), "    - /quit, /q      : Rời phòng chat và tắt ứng dụng")
-			fmt.Fprintln(rl.Stdout(), "    - Dùng cờ -j, --show-join khi chạy để hiện thông báo người khác ra vào phòng")
+			fmt.Fprintln(rl.Stdout(), "    - /showjoin, /sj : Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp")
 			fmt.Fprintln(rl.Stdout(), "    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng")
+			continue
+		}
+
+		if text == "/showjoin" || text == "/sj" {
+			showJoinMu.Lock()
+			showJoinLeave = !showJoinLeave
+			status := "ĐÃ TẮT"
+			if showJoinLeave {
+				status = "ĐÃ BẬT"
+			}
+			showJoinMu.Unlock()
+			fmt.Fprintf(rl.Stdout(), "| [Local]: %s hiển thị thông báo người dùng ra/vào phòng cho các tin kế tiếp.\n", status)
 			continue
 		}
 
