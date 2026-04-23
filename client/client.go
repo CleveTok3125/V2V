@@ -281,7 +281,7 @@ func main() {
 	}
 
 	quitting := make(chan bool, 1)
-	var hideJoinLeave bool
+	showJoinLeave := true
 	var hideMu sync.RWMutex
 
 	greeting := func(w io.Writer, uname string) {
@@ -319,10 +319,10 @@ func main() {
 			text := string(msg)
 
 			hideMu.RLock()
-			isHiding := hideJoinLeave
+			isShowing := showJoinLeave
 			hideMu.RUnlock()
 
-			if isHiding && strings.Contains(text, "[Hệ thống]:") && (strings.Contains(text, "đã tham gia") || strings.Contains(text, "đã rời")) {
+			if !isShowing && strings.Contains(text, "[Hệ thống]:") && (strings.Contains(text, "đã tham gia") || strings.Contains(text, "đã rời")) {
 				continue
 			}
 
@@ -362,20 +362,20 @@ func main() {
 			fmt.Fprintln(rl.Stdout(), "    - /clear, /c     : Xóa sạch màn hình chat")
 			fmt.Fprintln(rl.Stdout(), "    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy")
 			fmt.Fprintln(rl.Stdout(), "    - /quit, /q      : Rời phòng chat và tắt ứng dụng")
-			fmt.Fprintln(rl.Stdout(), "    - /hideJoin, /hj : Bật/tắt chế độ ẩn thông báo người khác ra vào phòng")
+			fmt.Fprintln(rl.Stdout(), "    - /showjoin, /sj : Bật/tắt chế độ hiện thông báo người khác ra vào phòng")
 			fmt.Fprintln(rl.Stdout(), "    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng")
 			continue
 		}
 
-		if text == "/hideJoin" || text == "/hj" {
+		if text == "/showjoin" || text == "/sj" {
 			hideMu.Lock()
-			hideJoinLeave = !hideJoinLeave
-			status := "ĐÃ ẨN"
-			if !hideJoinLeave {
-				status = "ĐÃ HIỆN"
+			showJoinLeave = !showJoinLeave
+			status := "ĐÃ TẮT"
+			if showJoinLeave {
+				status = "ĐÃ BẬT"
 			}
 			hideMu.Unlock()
-			fmt.Fprintf(rl.Stdout(), "| [Local]: %s thông báo người dùng ra/vào phòng.\n", status)
+			fmt.Fprintf(rl.Stdout(), "| [Local]: %s hiển thị thông báo người dùng ra/vào phòng.\n", status)
 			continue
 		}
 
