@@ -20,6 +20,9 @@ import (
 )
 
 func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permission, AuthPacket, error) {
+	// Allow a small grace window beyond the 10s nonce TTL so slow clients
+	// still fail cleanly instead of hanging the auth read forever.
+	const authResponseTimeout = 12 * time.Second
 	nonceBytes := make([]byte, 64)
 
 	if _, err := rand.Read(nonceBytes); err != nil {
@@ -40,10 +43,12 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 		return GetDefaultPermission(), AuthPacket{}, err
 	}
 
+	conn.SetReadDeadline(time.Now().Add(authResponseTimeout))
 	var resp AuthPacket
 	if err := conn.ReadJSON(&resp); err != nil {
 		return GetDefaultPermission(), resp, err
 	}
+	conn.SetReadDeadline(time.Time{})
 
 	perms := GetDefaultPermission()
 
