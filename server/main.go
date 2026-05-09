@@ -134,6 +134,7 @@ func loadDynamicConfig() (DynamicConfig, error) {
 		MaxMessageLength:    loader.Int("MAX_MESSAGE_LENGTH"),
 		MaxMessageLine:      loader.Int("MAX_MESSAGE_LINE"),
 		MessageCooldown:     loader.Duration("MESSAGE_COOLDOWN"),
+		IdleChatTimeout:     loader.Duration("IDLE_CHAT_TIMEOUT"),
 		MaxHistoryBytes:     loader.Int("MAX_HISTORY_BYTES"),
 		MaxHistorySend:      loader.Int("MAX_HISTORY_SEND"),
 		MaxUsernameLength:   loader.Int("MAX_USERNAME_LENGTH"),

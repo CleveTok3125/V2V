@@ -26,6 +26,7 @@ type DynamicConfig struct {
 	MaxMessageLength    int
 	MaxMessageLine      int
 	MessageCooldown     time.Duration
+	IdleChatTimeout     time.Duration
 	MaxHistoryBytes     int
 	MaxHistorySend      int
 	MaxUsernameLength   int

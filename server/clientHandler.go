@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -105,10 +106,26 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 	}()
 
 	pongWait := 60 * time.Second
+	lastChatActivity := time.Now()
+
+	updateReadDeadline := func() {
+		dynCfg := Cfg.Dynamic.Load()
+		deadline := time.Now().Add(pongWait)
+
+		if dynCfg.IdleChatTimeout > 0 {
+			idleDeadline := lastChatActivity.Add(dynCfg.IdleChatTimeout)
+			if idleDeadline.Before(deadline) {
+				deadline = idleDeadline
+			}
+		}
+
+		session.Conn.SetReadDeadline(deadline)
+	}
+
 	session.Conn.SetReadLimit(int64(Cfg.Dynamic.Load().MaxMessageLength * 3))
-	session.Conn.SetReadDeadline(time.Now().Add(pongWait))
+	updateReadDeadline()
 	session.Conn.SetPongHandler(func(string) error {
-		session.Conn.SetReadDeadline(time.Now().Add(pongWait))
+		updateReadDeadline()
 		return nil
 	})
 
@@ -117,6 +134,12 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 	for {
 		_, msg, err := session.Conn.ReadMessage()
 		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				dynCfg := Cfg.Dynamic.Load()
+				if dynCfg.IdleChatTimeout > 0 && time.Since(lastChatActivity) >= dynCfg.IdleChatTimeout {
+					log.Printf("⏱️ [IDLE TIMEOUT] %s %s (IP: %s) bị ngắt do không chat trong %v.\n", session.DisplayName, session.Tripcode, clientIP, dynCfg.IdleChatTimeout)
+				}
+			}
 			break
 		}
 
@@ -125,8 +148,12 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		text := sanitizeString(string(msg))
 
 		if strings.TrimSpace(text) == "" {
+			updateReadDeadline()
 			continue
 		}
+
+		lastChatActivity = time.Now()
+		updateReadDeadline()
 
 		if !session.Perms.CanMessageUnlimited {
 			if utf8.RuneCountInString(text) > dynCfg.MaxMessageLength {
