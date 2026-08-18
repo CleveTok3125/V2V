@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -152,21 +154,30 @@ func (h *HistoryStore) loadFile(path string, messages *[]string) error {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		var record historyRecord
-		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-			log.Printf("⚠️ [HISTORY] Bỏ qua record lỗi trong %s: %v", path, err)
-			continue
+	// Read line-by-line with a Reader instead of a Scanner: a Scanner aborts
+	// with "token too long" (and bricks startup) on any line >64KB, e.g. a
+	// leftover oversized record. ReadBytes has no token cap, and the file is
+	// bounded by rotation, so a single bad line can never prevent startup.
+	reader := bufio.NewReader(file)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			line = bytes.TrimSuffix(line, []byte{'\n'})
+			if len(line) > 0 {
+				var record historyRecord
+				if err := json.Unmarshal(line, &record); err != nil {
+					log.Printf("⚠️ [HISTORY] Bỏ qua record lỗi trong %s: %v", path, err)
+				} else if record.Message != "" {
+					*messages = append(*messages, record.Message)
+				}
+			}
 		}
-		if record.Message == "" {
-			continue
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return readErr
 		}
-		*messages = append(*messages, record.Message)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return err
 	}
 
 	return nil
