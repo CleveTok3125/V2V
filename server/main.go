@@ -78,7 +78,10 @@ func (s *ChatServer) StartCleanupTasks() {
 
 			s.AuthFailsMu.Lock()
 			for ip, record := range s.AuthFails {
-				if now.After(record.UnlockTime) {
+				// Only purge records that actually reached a ban and have
+				// expired; in-progress counters (zero UnlockTime) must survive
+				// so a slow brute-force cannot reset them every tick.
+				if !record.UnlockTime.IsZero() && now.After(record.UnlockTime) {
 					delete(s.AuthFails, ip)
 				}
 			}

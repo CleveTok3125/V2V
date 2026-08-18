@@ -44,6 +44,10 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 	}
 
 	conn.SetReadDeadline(time.Now().Add(authResponseTimeout))
+	// Cap the pre-auth response size. Without a limit here the server would
+	// buffer an arbitrarily large auth packet (the chat-phase ReadLimit is only
+	// set later, in ReadPump) and could be memory-exhausted pre-authentication.
+	conn.SetReadLimit(64 * 1024)
 	var resp AuthPacket
 	if err := conn.ReadJSON(&resp); err != nil {
 		return GetDefaultPermission(), resp, err
@@ -52,18 +56,16 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 
 	perms := GetDefaultPermission()
 
-	if resp.Role == "" {
-		return perms, resp, nil
+	if utf8.RuneCountInString(resp.Username) > Cfg.Dynamic.Load().MaxUsernameLength {
+		return perms, resp, fmt.Errorf("auth_error: payload_too_large")
 	}
 
 	if len(resp.Role) > 64 {
 		return perms, resp, fmt.Errorf("auth_error: invalid_role_length")
 	}
 
-	if utf8.RuneCountInString(resp.Username) > Cfg.Dynamic.Load().MaxUsernameLength {
-		return perms, resp, fmt.Errorf("auth_error: payload_too_large")
-	}
-
+	// Validate the nonce for every client (guest or role) so replayed, expired
+	// or cross-IP nonces are rejected uniformly.
 	metaRaw, exists := s.ActiveNonces.LoadAndDelete(resp.Nonce)
 	if !exists {
 		log.Printf("⚠️ [AUTH ALERT] %s: Nonce không tồn tại hoặc đã bị sử dụng (Dấu hiệu Replay Attack).", clientIP)
@@ -79,6 +81,10 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 	if meta.IP != clientIP {
 		log.Printf("🚨 [SECURITY BREACH] %s đang cố sử dụng Nonce được cấp cho IP %s! (Dấu hiệu cướp Token/MITM).", clientIP, meta.IP)
 		return perms, resp, fmt.Errorf("auth_error: ip_mismatch")
+	}
+
+	if resp.Role == "" {
+		return perms, resp, nil
 	}
 
 	s.RoleRegistryMu.RLock()
@@ -198,6 +204,13 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 	name := sanitizeString(username)
 	if name == "" {
 		name = "Anonymous"
+	}
+
+	// Defensive cap: never let the sanitized name exceed the configured limit,
+	// so oversized input cannot inflate every broadcast/history/log message.
+	maxLen := Cfg.Dynamic.Load().MaxUsernameLength
+	if maxLen > 0 && utf8.RuneCountInString(name) > maxLen {
+		name = string([]rune(name)[:maxLen])
 	}
 
 	if perms.CustomPrefix != "" {
