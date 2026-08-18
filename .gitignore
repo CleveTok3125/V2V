@@ -38,6 +38,7 @@ public/*
 key.json
 roles.json
 *.log
+logs/
 
 # Template
 !template/*
