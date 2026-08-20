@@ -20,8 +20,6 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/chzyer/readline"
-	"github.com/gorilla/websocket"
 )
 
 var Version = "dev"
@@ -54,6 +52,47 @@ type ClientIdentity struct {
 	PrivateKey string `json:"private_key"`
 	HmacShield string `json:"hmac_shield"`
 }
+
+// WebSocket message type constants (RFC 6455) so the shared chat logic does
+// not depend on a specific websocket implementation.
+const (
+	wsTextMessage  = 1
+	wsCloseMessage = 8
+)
+
+// wsConn is the minimal socket surface the chat loop needs. The desktop build
+// satisfies it with gorilla/websocket; the wasm build uses a shim over the
+// browser's native WebSocket.
+type wsConn interface {
+	ReadJSON(v any) error
+	WriteJSON(v any) error
+	ReadMessage() (messageType int, p []byte, err error)
+	WriteMessage(messageType int, data []byte) error
+	Close() error
+}
+
+// inputTerminal abstracts the interactive input/output the chat loop uses.
+// The desktop build wraps chzyer/readline (full line editing); the wasm build
+// pipes bytes/lines to and from the browser terminal emulator.
+type inputTerminal interface {
+	ReadLine() (string, error)
+	SetPrompt(p string)
+	Refresh()
+	Close()
+	Writer() io.Writer
+}
+
+// dialWS opens the WebSocket connection (platform-specific, see ws_other.go /
+// ws_wasm.go).
+//
+// newInputTerminal creates the interactive terminal (platform-specific, see
+// input_other.go / input_wasm.go).
+//
+// parseFlags resolves CLI arguments / web config (platform-specific, see
+// config_other.go / config_wasm.go).
+
+// historyFile is the readline history path used on the desktop build.
+var historyFile = filepath.Join(os.TempDir(), "V2V_chat_history.tmp")
 
 func isJoinLeaveSystemLine(line string) bool {
 	return strings.Contains(line, "[Hệ thống]:") && (strings.Contains(line, "đã tham gia") || strings.Contains(line, "đã rời"))
@@ -192,9 +231,7 @@ func generateKeyInteractive() {
 }
 
 func main() {
-	kong.Parse(&CLI, kong.Vars{
-		"version": Version,
-	})
+	parseFlags()
 
 	if CLI.GenKey {
 		generateKeyInteractive()
@@ -214,10 +251,7 @@ func main() {
 	wsURL := normalizeURL(CLI.Server)
 	username := strings.TrimSpace(CLI.Username)
 
-	headers := http.Header{}
-	headers.Add("User-Agent", CLI.UserAgent)
-
-	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	conn, resp, err := dialWS(wsURL)
 	if err != nil {
 		fmt.Println("❌ Không thể kết nối:", err)
 		if resp != nil {
@@ -293,6 +327,14 @@ func main() {
 		username = authSuccess.Username
 	}
 
+	term, err := newInputTerminal()
+	if err != nil {
+		fmt.Println("❌ Lỗi khởi tạo terminal:", err)
+		return
+	}
+	defer term.Close()
+	out := term.Writer()
+
 	quitting := make(chan bool, 1)
 	showJoinLeave := CLI.ShowJoin
 	var showJoinMu sync.RWMutex
@@ -301,20 +343,6 @@ func main() {
 		fmt.Fprintln(w, "Đã kết nối với username:", uname)
 		fmt.Fprintln(w, "Gõ tin nhắn để chat, /help để hiện trợ giúp\n")
 	}
-
-	historyFile := filepath.Join(os.TempDir(), "V2V_chat_history.tmp")
-
-	rl, err := readline.NewEx(&readline.Config{
-		Prompt:          "| > ",
-		HistoryFile:     historyFile,
-		InterruptPrompt: "^C",
-		EOFPrompt:       "/quit",
-	})
-	if err != nil {
-		fmt.Println("❌ Lỗi khởi tạo readline:", err)
-		return
-	}
-	defer rl.Close()
 
 	go func() {
 		var pendingDateBanner string
@@ -326,7 +354,7 @@ func main() {
 				case <-quitting:
 					return
 				default:
-					fmt.Fprintf(rl.Stdout(), "\r\033[K\n ❌ Mất kết nối server\n")
+					fmt.Fprintf(out, "\r\033[K\n ❌ Mất kết nối server\n")
 					os.Exit(1)
 				}
 			}
@@ -348,23 +376,23 @@ func main() {
 					if strings.Contains(line, "--- Kết thúc lịch sử ---") {
 						pendingDateBanner = ""
 					}
-					fmt.Fprintf(rl.Stdout(), "| %s\n", line)
+					fmt.Fprintf(out, "| %s\n", line)
 					continue
 				}
 				if !isShowingJoin && pendingDateBanner != "" {
-					fmt.Fprintf(rl.Stdout(), "| %s\n", pendingDateBanner)
+					fmt.Fprintf(out, "| %s\n", pendingDateBanner)
 					pendingDateBanner = ""
 				}
-				fmt.Fprintf(rl.Stdout(), "| %s\n", line)
+				fmt.Fprintf(out, "| %s\n", line)
 			}
-			rl.Refresh()
+			term.Refresh()
 		}
 	}()
 
-	greeting(rl.Stdout(), username)
+	greeting(out, username)
 
 	for {
-		text, err := rl.Readline()
+		text, err := term.ReadLine()
 		if err != nil {
 			break
 		}
@@ -376,21 +404,21 @@ func main() {
 
 		if text == "/quit" || text == "/q" {
 			quitting <- true
-			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			conn.WriteMessage(wsCloseMessage, []byte{})
 
-			fmt.Fprintf(rl.Stdout(), "👋 Đang ngắt kết nối... Tạm biệt!\n")
+			fmt.Fprintf(out, "👋 Đang ngắt kết nối... Tạm biệt!\n")
 			time.Sleep(500 * time.Millisecond)
 			break
 		}
 
 		if text == "/help" || text == "/h" {
-			fmt.Fprintln(rl.Stdout(), "  [Trợ giúp]: Danh sách các lệnh có thể sử dụng:")
-			fmt.Fprintln(rl.Stdout(), "    - /help, /h      : Hiển thị bảng trợ giúp này")
-			fmt.Fprintln(rl.Stdout(), "    - /clear, /c     : Xóa sạch màn hình chat")
-			fmt.Fprintln(rl.Stdout(), "    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy")
-			fmt.Fprintln(rl.Stdout(), "    - /quit, /q      : Rời phòng chat và tắt ứng dụng")
-			fmt.Fprintln(rl.Stdout(), "    - /showjoin, /sj : Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp")
-			fmt.Fprintln(rl.Stdout(), "    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng")
+			fmt.Fprintln(out, "  [Trợ giúp]: Danh sách các lệnh có thể sử dụng:")
+			fmt.Fprintln(out, "    - /help, /h      : Hiển thị bảng trợ giúp này")
+			fmt.Fprintln(out, "    - /clear, /c     : Xóa sạch màn hình chat")
+			fmt.Fprintln(out, "    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy")
+			fmt.Fprintln(out, "    - /quit, /q      : Rời phòng chat và tắt ứng dụng")
+			fmt.Fprintln(out, "    - /showjoin, /sj : Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp")
+			fmt.Fprintln(out, "    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng")
 			continue
 		}
 
@@ -402,19 +430,19 @@ func main() {
 				status = "ĐÃ BẬT"
 			}
 			showJoinMu.Unlock()
-			fmt.Fprintf(rl.Stdout(), "| [Local]: %s hiển thị thông báo người dùng ra/vào phòng cho các tin kế tiếp.\n", status)
+			fmt.Fprintf(out, "| [Local]: %s hiển thị thông báo người dùng ra/vào phòng cho các tin kế tiếp.\n", status)
 			continue
 		}
 
 		if text == "/clear" || text == "/c" {
-			fmt.Fprint(rl.Stdout(), "\033[H\033[2J")
-			greeting(rl.Stdout(), username)
+			fmt.Fprint(out, "\033[H\033[2J")
+			greeting(out, username)
 			continue
 		}
 
 		if text == "/clearhistory" || text == "/ch" {
 			os.Remove(historyFile)
-			fmt.Fprintf(rl.Stdout(), "🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile)
+			fmt.Fprintf(out, "🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile)
 			continue
 		}
 
@@ -424,9 +452,9 @@ func main() {
 			var rawLines []string
 			rawLines = append(rawLines, text)
 
-			rl.SetPrompt("| ... ")
+			term.SetPrompt("| ... ")
 			for {
-				nextLine, err := rl.Readline()
+				nextLine, err := term.ReadLine()
 				if err != nil {
 					break
 				}
@@ -438,30 +466,30 @@ func main() {
 				}
 			}
 
-			rl.SetPrompt("| > ")
+			term.SetPrompt("| > ")
 			text = strings.Join(rawLines, "\n")
 		}
 
 		for range typedLinesCount {
-			fmt.Fprint(rl.Stdout(), "\033[1A\033[2K\r")
+			fmt.Fprint(out, "\033[1A\033[2K\r")
 		}
 
 		lines := strings.Split(text, "\n")
 		for i, line := range lines {
 			if i == 0 {
-				fmt.Fprintf(rl.Stdout(), "| Bạn: %s\n", line)
+				fmt.Fprintf(out, "| Bạn: %s\n", line)
 			} else {
-				fmt.Fprintf(rl.Stdout(), "|      %s\n", line)
+				fmt.Fprintf(out, "|      %s\n", line)
 			}
 		}
 
 		if CLI.Tripcode != "" {
 			hashTrip := sha256.Sum256([]byte(CLI.Tripcode))
 			tripCodeHex := hex.EncodeToString(hashTrip[:])[:8]
-			fmt.Fprintf(rl.Stdout(), "|  └─ ✍  ◆ %s\n", tripCodeHex)
+			fmt.Fprintf(out, "|  └─ ✍  ◆ %s\n", tripCodeHex)
 		}
 
-		err = conn.WriteMessage(websocket.TextMessage, []byte(text))
+		err = conn.WriteMessage(wsTextMessage, []byte(text))
 		if err != nil {
 			fmt.Println("❌ Lỗi gửi tin nhắn:", err)
 			break

@@ -6,8 +6,6 @@ import (
 	"mime"
 	"net/http"
 	"os"
-	"path"
-	"path/filepath"
 	"strings"
 	"time"
 	_ "time/tzdata"
@@ -70,32 +68,6 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 	go session.WritePump()
 
 	s.ReadPump(session, clientIP)
-}
-
-// cacheControl sets caching headers for /web/ assets. Versioned assets that
-// actually exist get long-lived caching; index.html stays fresh so a new
-// build is picked up immediately; missing files get a direct 404 with
-// no-store so a CDN can never cache a stale 404 as immutable (Go's net/http
-// strips Cache-Control set on ServeFile error responses).
-func cacheControl(next http.Handler, root string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ext := strings.ToLower(path.Ext(r.URL.Path))
-		rel := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
-
-		if info, err := os.Stat(filepath.Join(root, rel)); err == nil {
-			if !info.IsDir() && rel != "version.js" &&
-				(ext == ".wasm" || ext == ".js" || ext == ".css") {
-				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			} else if info.IsDir() || rel == "index.html" {
-				w.Header().Set("Cache-Control", "no-cache")
-			}
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		w.Header().Set("Cache-Control", "no-store")
-		http.NotFound(w, r)
-	})
 }
 
 func (s *ChatServer) StartCleanupTasks() {
@@ -288,7 +260,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	mime.AddExtensionType(".wasm", "application/wasm")
-	mux.Handle("/web/", http.StripPrefix("/web/", cacheControl(http.FileServer(http.Dir("webterm")), "webterm")))
+	mux.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("webterm"))))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
