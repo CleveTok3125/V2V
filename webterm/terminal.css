@@ -53,6 +53,22 @@ html, body {
   border-color: #4f7dff;
 }
 
+#connect-form label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: #aab2c4;
+  cursor: pointer;
+}
+
+#connect-form label.check input {
+  width: auto;
+  margin: 0;
+  accent-color: #4f7dff;
+}
+
 #connect-btn {
   width: 100%;
   margin-top: 20px;
