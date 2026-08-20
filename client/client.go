@@ -408,6 +408,7 @@ func main() {
 
 			fmt.Fprintf(out, "👋 Đang ngắt kết nối... Tạm biệt!\n")
 			time.Sleep(500 * time.Millisecond)
+			notifyQuit()
 			break
 		}
 

@@ -56,6 +56,12 @@
       if (term) term.write(s);
     };
 
+    // The Go client calls this after /quit so the page reloads back to the
+    // connect panel instead of leaving a dead terminal on screen.
+    window.v2vExit = function () {
+      location.reload();
+    };
+
     return host;
   }
 

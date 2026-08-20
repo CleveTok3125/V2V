@@ -34,3 +34,7 @@ func (t *readlineTerm) Refresh() { t.rl.Refresh() }
 func (t *readlineTerm) Close() { t.rl.Close() }
 
 func (t *readlineTerm) Writer() io.Writer { return t.rl.Stdout() }
+
+// notifyQuit lets the platform hook do any cleanup when the client quits.
+// On desktop the process exits naturally; nothing extra is needed.
+func notifyQuit() {}
