@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 	"syscall/js"
+	"unicode/utf8"
 )
 
 // jsOutputWriter forwards every byte chunk written by the Go client to the
@@ -152,8 +153,15 @@ func (t *wasmTerm) lineLoop() {
 			case '\x7f', '\b':
 				t.mu.Lock()
 				if len(t.buf) > 0 {
-					t.buf = t.buf[:len(t.buf)-1]
-					t.out.Write([]byte("\b \b"))
+					// Remove the last full rune, not a single byte: a
+					// multi-byte character (ế, emoji, ...) occupies one or
+					// more display cells, so byte-based slicing would drift
+					// the cursor backwards into the prompt on backspace.
+					_, size := utf8.DecodeLastRune(t.buf)
+					t.buf = t.buf[:len(t.buf)-size]
+					t.out.Write([]byte("\r\x1b[K"))
+					t.out.Write([]byte(t.prompt))
+					t.out.Write(t.buf)
 				}
 				t.mu.Unlock()
 			case '\x03':
@@ -163,7 +171,7 @@ func (t *wasmTerm) lineLoop() {
 				t.out.Write([]byte("\r\n"))
 				t.mu.Unlock()
 			default:
-				if r >= 0x20 && r != '\uFFFD' {
+				if r >= 0x20 {
 					t.mu.Lock()
 					t.buf = append(t.buf, []byte(string(r))...)
 					t.out.Write([]byte(string(r)))

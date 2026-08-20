@@ -115,6 +115,10 @@ func (s *ChatServer) SendChatHistory(session *ClientSession) {
 	copy(historyCopy, s.ChatHistory[startIndex:])
 	s.HistoryMu.RUnlock()
 
+	for i := range historyCopy {
+		historyCopy[i] = stripBrokenChars(historyCopy[i])
+	}
+
 	combinedHistory := strings.Join(historyCopy, "\n")
 
 	session.Send <- []byte("--- Lịch sử chat gần đây ---\n" + combinedHistory + "\n--- Kết thúc lịch sử ---")

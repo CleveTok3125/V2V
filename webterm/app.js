@@ -14,77 +14,6 @@
     : "dev";
 
   var term = null;
-  var pendingHigh = null;
-
-  // xterm delivers keystrokes one UTF-16 code unit at a time, so astral
-  // characters (emoji, ...) can arrive as a split surrogate pair. Recombine
-  // the pair here, before the Go WASM bridge encodes the string as UTF-8
-  // (TextEncoder would otherwise replace each lone surrogate with U+FFFD).
-  //
-  // A lone surrogate or U+FFFD is unrecoverable: it only appears when a
-  // broken IME composition already lost the character. Forwarding it would
-  // corrupt the stored message and break the terminal render, so it is
-  // discarded instead. The result is NFC-normalized so IMEs that deliver
-  // decomposed forms (e.g. macOS) still display consistently.
-  function cleanInput(data) {
-    var out = "";
-    var i = 0;
-    if (pendingHigh !== null) {
-      var first = data.charCodeAt(0);
-      if (first >= 0xdc00 && first <= 0xdfff) {
-        out += String.fromCharCode(pendingHigh, first);
-        i = 1;
-      }
-      pendingHigh = null;
-    }
-    for (; i < data.length; i++) {
-      var c = data.charCodeAt(i);
-      if (c >= 0xd800 && c <= 0xdbff) {
-        if (i + 1 < data.length) {
-          var c1 = data.charCodeAt(i + 1);
-          if (c1 >= 0xdc00 && c1 <= 0xdfff) {
-            out += data[i] + data[i + 1];
-            i++;
-          }
-        } else {
-          pendingHigh = c;
-        }
-      } else if (c >= 0xdc00 && c <= 0xdfff) {
-        // lone low surrogate -> drop
-      } else if (c === 0xfffd) {
-        // replacement character from a broken IME -> drop
-      } else {
-        out += data[i];
-      }
-    }
-    return out.normalize ? out.normalize("NFC") : out;
-  }
-
-  // Output guard: never let a lone surrogate or U+FFFD reach the terminal
-  // renderer. Corrupted characters (e.g. legacy messages stored before the
-  // input guard) would otherwise break xterm's Unicode handling and the UI.
-  function sanitizeOutput(s) {
-    var out = "";
-    for (var i = 0; i < s.length; i++) {
-      var c = s.charCodeAt(i);
-      if (c >= 0xd800 && c <= 0xdbff) {
-        if (i + 1 < s.length) {
-          var c1 = s.charCodeAt(i + 1);
-          if (c1 >= 0xdc00 && c1 <= 0xdfff) {
-            out += s[i] + s[i + 1];
-            i++;
-          }
-        }
-      } else if (c >= 0xdc00 && c <= 0xdfff) {
-        // lone low surrogate -> drop
-      } else if (c === 0xfffd) {
-        // replacement character -> drop
-      } else {
-        out += s[i];
-      }
-    }
-    return out;
-  }
 
   var panel = document.getElementById("connect-panel");
   var wrap = document.getElementById("terminal-wrap");
@@ -120,12 +49,11 @@
     term.open(host);
 
     term.onData(function (data) {
-      data = cleanInput(data);
       if (data) window.v2vSendKeys(data);
     });
 
     window.v2vOutput = function (s) {
-      if (term) term.write(sanitizeOutput(s));
+      if (term) term.write(s);
     };
 
     return host;
