@@ -32,7 +32,16 @@
     term.write("V2V web terminal (self-test). Gõ thử vài ký tự...\r\n\r\n");
 
     term.onData(function (data) {
-      term.write(data);
+      for (var i = 0; i < data.length; i++) {
+        var ch = data[i];
+        if (ch === "\r") {
+          term.write("\r\n");
+        } else if (ch === "\x7f") {
+          term.write("\b \b");
+        } else {
+          term.write(ch);
+        }
+      }
     });
   }
 
