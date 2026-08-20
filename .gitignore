@@ -45,3 +45,8 @@ logs/
 template/*.log
 .co*
 data/
+
+# Web terminal build outputs
+webterm/app.wasm
+webterm/wasm_exec.js
+webterm/version.js

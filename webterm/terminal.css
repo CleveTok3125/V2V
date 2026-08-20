@@ -7,14 +7,92 @@ html, body {
   padding: 0;
   height: 100%;
   background: #101014;
+  color: #d8dee8;
+  font-family: "DejaVu Sans", Arial, sans-serif;
 }
 
-#terminal {
+#connect-panel {
+  max-width: 420px;
+  margin: 12vh auto 0;
+  padding: 28px;
+  background: #1a1a21;
+  border: 1px solid #2c2c36;
+  border-radius: 10px;
+}
+
+#connect-panel h1 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.hint {
+  color: #8b93a5;
+  font-size: 13px;
+  margin: 0 0 20px;
+}
+
+#connect-form label {
+  display: block;
+  margin: 12px 0 4px;
+  font-size: 13px;
+  color: #aab2c4;
+}
+
+#connect-form input {
+  width: 100%;
+  padding: 8px 10px;
+  background: #121218;
+  color: #e6ecf5;
+  border: 1px solid #33333f;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+#connect-form input:focus {
+  outline: none;
+  border-color: #4f7dff;
+}
+
+#connect-btn {
+  width: 100%;
+  margin-top: 20px;
+  padding: 10px;
+  background: #4f7dff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+#connect-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+#status-line {
+  margin-top: 16px;
+  font-size: 13px;
+  color: #8b93a5;
+  min-height: 1em;
+}
+
+#status-line.error {
+  color: #ff6b6b;
+}
+
+#terminal-wrap {
   position: fixed;
   inset: 0;
   padding: 12px;
 }
 
+#terminal {
+  width: 100%;
+  height: 100%;
+}
+
+/* xterm overrides */
 .xterm {
   height: 100%;
 }
