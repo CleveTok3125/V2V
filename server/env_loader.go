@@ -143,6 +143,9 @@ func lastAfterDash(s string) string {
 func sanitizeString(text string) string {
 	return strings.Map(func(r rune) rune {
 		if r == '\n' || unicode.IsGraphic(r) {
+			if r == 0xFFFD {
+				return -1
+			}
 			if unicode.Is(unicode.Cf, r) {
 				return -1
 			}
@@ -155,6 +158,18 @@ func sanitizeString(text string) string {
 			return r
 		}
 		return -1
+	}, text)
+}
+
+// stripBrokenChars removes only replacement characters and invalid UTF-8
+// sequences, keeping everything else (including ANSI escape codes) intact.
+// Used on history replay so legacy corrupted messages cannot reach clients.
+func stripBrokenChars(text string) string {
+	return strings.Map(func(r rune) rune {
+		if r == 0xFFFD {
+			return -1
+		}
+		return r
 	}, text)
 }
 
