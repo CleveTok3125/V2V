@@ -4,19 +4,41 @@
 (function () {
   "use strict";
 
-  var term = new Terminal({
-    cursorBlink: true,
-    fontSize: 14,
-    fontFamily: '"JetBrains Mono", "DejaVu Sans Mono", monospace',
-    scrollback: 10000,
-    theme: { background: "#101014" },
-  });
+  function fail(msg) {
+    var host = document.getElementById("terminal");
+    var out = document.createElement("pre");
+    out.textContent = msg;
+    if (host) host.appendChild(out);
+    else document.body.textContent = msg;
+  }
 
-  term.open(document.getElementById("terminal"));
+  function boot() {
+    var host = document.getElementById("terminal");
+    if (!host) {
+      fail("Lỗi: #terminal không tồn tại trong DOM.");
+      return;
+    }
 
-  term.write("V2V web terminal (self-test). Gõ thử vài ký tự...\r\n\r\n");
+    var term = new Terminal({
+      cursorBlink: true,
+      fontSize: 14,
+      fontFamily: '"JetBrains Mono", "DejaVu Sans Mono", monospace',
+      scrollback: 10000,
+      theme: { background: "#101014" },
+    });
 
-  term.onData(function (data) {
-    term.write(data);
-  });
+    term.open(host);
+
+    term.write("V2V web terminal (self-test). Gõ thử vài ký tự...\r\n\r\n");
+
+    term.onData(function (data) {
+      term.write(data);
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
+  }
 })();
