@@ -17,6 +17,9 @@ func parseFlags() {
 	CLI.Server = cfg.Get("serverUrl").String()
 	CLI.Username = cfg.Get("username").String()
 	CLI.Tripcode = cfg.Get("tripcode").String()
+	if v := cfg.Get("showJoin"); v.Truthy() {
+		CLI.ShowJoin = v.Bool()
+	}
 
 	if CLI.Server == "" {
 		CLI.Server = js.Global().Get("location").Get("origin").String() + "/"
