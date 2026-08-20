@@ -113,6 +113,15 @@ func (t *wasmTerm) Refresh() {}
 
 func (t *wasmTerm) Close() { t.keysFn.Release() }
 
+// notifyQuit lets the platform hook do any cleanup when the client quits.
+// On the web build the page is reloaded so the user lands back on the
+// connect panel; the JS side exposes window.v2vExit for that purpose.
+func notifyQuit() {
+	if fn := js.Global().Get("v2vExit"); fn.Truthy() {
+		fn.Invoke()
+	}
+}
+
 // lineLoop consumes raw keystrokes and emulates a TTY line discipline:
 // echoes printable runes, handles backspace, swallows escape sequences,
 // sends completed lines to ReadLine on Enter.
