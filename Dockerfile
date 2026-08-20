@@ -9,5 +9,6 @@ FROM alpine:latest
 WORKDIR /app
 RUN apk --no-cache add tzdata ca-certificates
 COPY --from=builder /build/public/server.bin ./server.bin
+COPY --from=builder /build/webterm ./webterm
 RUN touch .env roles.json
 CMD ["./server.bin"]
