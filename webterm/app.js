@@ -13,6 +13,9 @@
 
   var term = null;
   var lineBuffer = "";
+  var pendingPrompt = "";
+  var promptActive = false;
+  var escBuffer = "";
 
   var panel = document.getElementById("connect-panel");
   var wrap = document.getElementById("terminal-wrap");
@@ -38,8 +41,8 @@
     term = new Terminal({
       cursorBlink: true,
       fontSize: 14,
-      fontFamily: '"JetBrains Mono", "DejaVu Sans Mono", monospace',
-      convertEol: false,
+      fontFamily: '"JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace',
+      convertEol: true,
       scrollback: 10000,
       theme: { background: "#101014" },
     });
@@ -49,10 +52,31 @@
     term.onData(function (data) {
       for (var i = 0; i < data.length; i++) {
         var ch = data[i];
+
+        if (escBuffer.length > 0) {
+          // Consuming an escape sequence (arrow keys, Home/End, ...).
+          escBuffer += ch;
+          var finished = false;
+          if (escBuffer[1] === "[") {
+            // CSI: ESC [ ... final byte in 0x40..0x7e
+            var code = ch.charCodeAt(0);
+            finished = (code >= 0x40 && code <= 0x7e);
+          } else {
+            // SS3 (ESC O x) or a single-char escape.
+            finished = true;
+          }
+          if (finished) escBuffer = "";
+          continue;
+        }
+        if (ch === "\x1b") {
+          escBuffer = ch;
+          continue;
+        }
         if (ch === "\r") {
           term.write("\r\n");
           window.v2vSendLine(lineBuffer);
           lineBuffer = "";
+          promptActive = false;
         } else if (ch === "\x7f") {
           if (lineBuffer.length > 0) {
             lineBuffer = lineBuffer.slice(0, -1);
@@ -62,9 +86,6 @@
           // Ctrl+C: clear the current line.
           term.write("\r\n");
           lineBuffer = "";
-        } else if (ch === "\x1b") {
-          // Start of an escape sequence (arrow keys, etc.): consume it silently.
-          lineBuffer += ch;
         } else if (ch >= " ") {
           lineBuffer += ch;
           term.write(ch);
@@ -73,7 +94,23 @@
     });
 
     window.v2vOutput = function (s) {
-      if (term) term.write(s);
+      if (!term) return;
+      if (s === "| > " || s === "| ... ") {
+        // The Go client just printed an input prompt.
+        pendingPrompt = s;
+        promptActive = true;
+        term.write(s);
+        return;
+      }
+      if (lineBuffer.length > 0) {
+        // Incoming text while the user is typing: keep the draft line intact.
+        term.write("\r\x1b[K");
+        term.write(s);
+        if (promptActive) term.write(pendingPrompt);
+        term.write(lineBuffer);
+      } else {
+        term.write(s);
+      }
     };
 
     return host;
