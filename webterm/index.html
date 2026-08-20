@@ -8,8 +8,33 @@
   <link rel="stylesheet" href="/web/terminal.css" data-cfasync="false" />
 </head>
 <body>
-  <div id="terminal"></div>
+  <div id="connect-panel">
+    <h1>V2V Web Chat</h1>
+    <p class="hint">Giao diện web cho máy chủ chat ẩn danh. Kết nối với quyền khách.</p>
+
+    <form id="connect-form" autocomplete="off">
+      <label for="server-url">Server WebSocket</label>
+      <input id="server-url" type="text" placeholder="https://chat.elsutm.io.vn/" value="" />
+
+      <label for="username">Tên hiển thị</label>
+      <input id="username" type="text" placeholder="Anonymous" maxlength="12" value="" />
+
+      <label for="tripcode">Tripcode (tùy chọn)</label>
+      <input id="tripcode" type="password" placeholder="Mật khẩu bí mật tạo chữ ký" value="" />
+
+      <button type="submit" id="connect-btn">Kết nối</button>
+    </form>
+
+    <p id="status-line"></p>
+  </div>
+
+  <div id="terminal-wrap" style="display:none">
+    <div id="terminal"></div>
+  </div>
+
   <script src="/web/vendor/xterm.js" data-cfasync="false"></script>
+  <script src="/web/version.js" data-cfasync="false"></script>
   <script src="/web/app.js" data-cfasync="false"></script>
+  <script src="/web/wasm_exec.js" data-cfasync="false"></script>
 </body>
 </html>
