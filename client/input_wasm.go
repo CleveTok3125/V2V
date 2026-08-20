@@ -163,7 +163,7 @@ func (t *wasmTerm) lineLoop() {
 				t.out.Write([]byte("\r\n"))
 				t.mu.Unlock()
 			default:
-				if r >= 0x20 {
+				if r >= 0x20 && r != '\uFFFD' {
 					t.mu.Lock()
 					t.buf = append(t.buf, []byte(string(r))...)
 					t.out.Write([]byte(string(r)))
