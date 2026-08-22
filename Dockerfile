@@ -3,6 +3,11 @@ WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# Version is stamped on the host where .git lives and passed in as a build
+# arg (see docker-compose.yml); build_web.sh falls back to a unique dev
+# stamp when it is empty, so the bundle never silently reports a stale hash.
+ARG GIT_HASH=""
+ENV GIT_HASH=${GIT_HASH}
 RUN chmod +x build_server.sh && CGO_ENABLED=0 GOOS=linux sh ./build_server.sh
 
 FROM alpine:latest
