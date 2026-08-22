@@ -50,3 +50,7 @@ data/
 webterm/app.wasm
 webterm/wasm_exec.js
 webterm/version.js
+
+# Precompressed wasm bundle variants
+webterm/app.wasm.gz
+webterm/app.wasm.br
