@@ -260,7 +260,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	mime.AddExtensionType(".wasm", "application/wasm")
-	mux.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("webterm"))))
+	mux.Handle("/web/", http.StripPrefix("/web/", webFilesHandler("webterm")))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
