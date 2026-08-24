@@ -101,6 +101,8 @@ html, body {
   position: fixed;
   inset: 0;
   padding: 12px;
+  /* Never let the grid spill outside the viewport before/while fitting. */
+  overflow: hidden;
 }
 
 #terminal {

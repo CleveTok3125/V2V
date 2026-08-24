@@ -30,6 +30,83 @@
     statusLine.className = isError ? "error" : "";
   }
 
+  var FONT_FAMILY = '"JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
+
+  // Monospace advance width ~= 0.6em, used for the initial font-size guess.
+  var CHAR_ASPECT = 0.6;
+  var resizeTimer = null;
+
+  // measureCell returns the rendered size of one character cell for the
+  // terminal font at the given px size, measured with a detached probe span.
+  function measureCell(fontSize) {
+    var probe = document.createElement("span");
+    probe.style.cssText =
+      "position:absolute;top:-9999px;left:0;visibility:hidden;white-space:pre;" +
+      "font-family:" + FONT_FAMILY + ";" +
+      "font-size:" + fontSize + "px;line-height:normal;";
+    probe.textContent = "MMMMMMMMMM";
+    document.body.appendChild(probe);
+    var rect = probe.getBoundingClientRect();
+    var cell = { w: rect.width / 10, h: rect.height };
+    document.body.removeChild(probe);
+    return cell;
+  }
+
+  // resizeTerminal implements dynamic scale + fit: the font size is derived
+  // from the container so the grid fills the available space, with signals
+  // from devicePixelRatio (crispness floor, browser-zoom aware) and pointer
+  // coarseness (mobile gets fewer, larger columns). It runs before any wasm
+  // output so long messages wrap correctly from the first line, and again on
+  // every resize/orientation change (debounced); xterm reflows the buffer,
+  // and v2vRefresh lets the Go side redraw prompt + draft afterwards.
+  function resizeTerminal() {
+    if (!term) return;
+    var host = document.getElementById("terminal");
+    if (!host) return;
+    var W = host.clientWidth;
+    var H = host.clientHeight;
+    if (W < 50 || H < 50) return;
+
+    var dpr = window.devicePixelRatio || 1;
+    var coarse = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+
+    // DPI floor: glyphs must stay at least ~9 device pixels tall.
+    var minFont = Math.max(13, Math.ceil(10.8 / dpr));
+
+    var targetCols = coarse ? 42 : 105;
+    if (!coarse && W < 700) targetCols = 90;
+
+    var fontSize = W / (targetCols * CHAR_ASPECT);
+    fontSize = Math.min(fontSize, coarse ? 24 : 34);
+    fontSize = Math.min(fontSize, H / (1.2 * 10)); // keep >= ~10 visible rows
+    fontSize = Math.max(minFont, Math.floor(fontSize));
+
+    if (term.options.fontSize !== fontSize) {
+      term.options.fontSize = fontSize;
+    }
+
+    var cell = measureCell(fontSize);
+    var cols = Math.max(20, Math.floor(W / cell.w));
+    var rows = Math.max(8, Math.floor(H / cell.h));
+    if (term.cols !== cols || term.rows !== rows) {
+      term.resize(cols, rows);
+    }
+    term.scrollToBottom();
+
+    // Let the Go client repaint prompt + draft at the new grid geometry.
+    if (typeof window.v2vRefresh === "function") {
+      window.v2vRefresh();
+    }
+  }
+
+  function scheduleResize() {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      resizeTimer = null;
+      resizeTerminal();
+    }, 150);
+  }
+
   function startTerminal() {
     var host = document.getElementById("terminal");
     if (!host) {
@@ -40,13 +117,22 @@
     term = new Terminal({
       cursorBlink: true,
       fontSize: 14,
-      fontFamily: '"JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace',
+      fontFamily: FONT_FAMILY,
       convertEol: true,
       scrollback: 10000,
       theme: { background: "#101014" },
     });
 
     term.open(host);
+
+    window.addEventListener("resize", scheduleResize);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", scheduleResize);
+    }
+    window.addEventListener("orientationchange", scheduleResize);
+
+    // Size the grid to the real viewport before any output exists.
+    resizeTerminal();
 
     term.onData(function (data) {
       if (data) window.v2vSendKeys(data);
