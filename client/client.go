@@ -341,7 +341,7 @@ func main() {
 
 	greeting := func(w io.Writer, uname string) {
 		fmt.Fprintln(w, "Đã kết nối với username:", uname)
-		fmt.Fprintln(w, "Gõ tin nhắn để chat, /help để hiện trợ giúp\n")
+		fmt.Fprint(w, "Gõ tin nhắn để chat, /help để hiện trợ giúp\n\n")
 	}
 
 	go func() {
