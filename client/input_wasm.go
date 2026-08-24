@@ -29,10 +29,11 @@ func (w jsOutputWriter) Write(p []byte) (int, error) {
 // drawing, so the JS glue stays minimal and the input state lives in a
 // single place.
 type wasmTerm struct {
-	out    jsOutputWriter
-	keyCh  chan string
-	lineCh chan string
-	keysFn js.Func
+	out       jsOutputWriter
+	keyCh     chan string
+	lineCh    chan string
+	keysFn    js.Func
+	refreshFn js.Func
 
 	mu     sync.Mutex
 	prompt string
@@ -62,6 +63,14 @@ func newInputTerminal() (inputTerminal, error) {
 		return nil
 	})
 	js.Global().Set("v2vSendKeys", t.keysFn)
+
+	// v2vRefresh lets the JS side (resize/orientation changes) ask the Go
+	// client to repaint the prompt + draft at the new grid geometry.
+	t.refreshFn = js.FuncOf(func(this js.Value, args []js.Value) any {
+		go t.Refresh()
+		return nil
+	})
+	js.Global().Set("v2vRefresh", t.refreshFn)
 
 	go t.lineLoop()
 
@@ -112,7 +121,10 @@ func (t *wasmTerm) SetPrompt(p string) {
 
 func (t *wasmTerm) Refresh() {}
 
-func (t *wasmTerm) Close() { t.keysFn.Release() }
+func (t *wasmTerm) Close() {
+	t.keysFn.Release()
+	t.refreshFn.Release()
+}
 
 // notifyQuit lets the platform hook do any cleanup when the client quits.
 // On the web build the page is reloaded so the user lands back on the
@@ -358,7 +370,7 @@ func runeWidth(r rune) int {
 		r >= 0xFE30 && r <= 0xFE4F, // CJK Compat Forms
 		r >= 0xFF00 && r <= 0xFF60, // Fullwidth Forms
 		r >= 0xFFE0 && r <= 0xFFE6, // Fullwidth signs
-		r > 0xFFFF:                // astral (emoji, ...)
+		r > 0xFFFF:                 // astral (emoji, ...)
 		return 2
 	}
 	return 1
