@@ -13,6 +13,12 @@
     ? window.V2V_VERSION
     : "dev";
 
+  // The Go client invokes this once its input bridge is wired up; re-fit at
+  // that moment so the real grid size reaches the editor before any output.
+  window.v2vWasmReady = function () {
+    resizeTerminal();
+  };
+
   var term = null;
 
   var panel = document.getElementById("connect-panel");
@@ -93,7 +99,11 @@
     }
     term.scrollToBottom();
 
-    // Let the Go client repaint prompt + draft at the new grid geometry.
+    // Tell the Go editor the new grid width (it wraps multi-row drafts on
+    // it), then let it repaint prompt + draft at the new geometry.
+    if (typeof window.v2vSetSize === "function") {
+      window.v2vSetSize(term.cols, term.rows);
+    }
     if (typeof window.v2vRefresh === "function") {
       window.v2vRefresh();
     }
