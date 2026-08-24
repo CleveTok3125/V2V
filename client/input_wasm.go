@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall/js"
-	"unicode"
 )
 
 // jsOutputWriter forwards every byte chunk written by the Go client to the
@@ -34,6 +34,11 @@ type wasmTerm struct {
 	lineCh    chan string
 	keysFn    js.Func
 	refreshFn js.Func
+	setSizeFn js.Func
+
+	// termCols mirrors the live xterm grid width (bridged by v2vSetSize);
+	// every redraw needs it to reason about soft-wrapped multi-row drafts.
+	termCols atomic.Int32
 
 	mu     sync.Mutex
 	prompt string
@@ -72,7 +77,25 @@ func newInputTerminal() (inputTerminal, error) {
 	})
 	js.Global().Set("v2vRefresh", t.refreshFn)
 
+	// v2vSetSize receives the live grid size from the JS terminal after
+	// every fit, so redraws know how many columns a draft row spans.
+	t.setSizeFn = js.FuncOf(func(this js.Value, args []js.Value) any {
+		if len(args) > 0 {
+			if c := args[0].Int(); c > 0 {
+				t.termCols.Store(int32(c))
+			}
+		}
+		return nil
+	})
+	js.Global().Set("v2vSetSize", t.setSizeFn)
+
 	go t.lineLoop()
+
+	// Tell JS the editor is wired up; the page re-fits now that Go can be
+	// told the real grid size (before any output is produced).
+	if fn := js.Global().Get("v2vWasmReady"); fn.Truthy() {
+		fn.Invoke()
+	}
 
 	return t, nil
 }
@@ -87,23 +110,28 @@ func (t *wasmTerm) Write(p []byte) (int, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.active {
-		t.out.Write([]byte("\r\x1b[K"))
+	if !t.active {
+		return t.out.Write(p)
 	}
-	n, _ := t.out.Write(p)
-	if t.active {
-		if len(p) == 0 || p[len(p)-1] != '\n' {
-			t.out.Write([]byte("\r\n"))
-		}
-		t.drawLocked()
+
+	// Move the whole draft block (which may span several rows when the
+	// prompt + draft exceed the terminal width) out of the way, print the
+	// incoming text below it, then repaint the draft.
+	up := t.wipeOffsetLocked()
+	t.wipeLocked(up)
+	t.out.Write(p)
+	if len(p) == 0 || p[len(p)-1] != '\n' {
+		t.out.Write([]byte("\r\n"))
 	}
-	return n, nil
+	t.paintFreshLocked()
+	return len(p), nil
 }
 
 func (t *wasmTerm) ReadLine() (string, error) {
 	t.mu.Lock()
 	t.active = true
-	t.drawLocked()
+	t.wipeLocked(0)
+	t.paintFreshLocked()
 	t.mu.Unlock()
 
 	line, ok := <-t.lineCh
@@ -119,11 +147,24 @@ func (t *wasmTerm) SetPrompt(p string) {
 	t.mu.Unlock()
 }
 
-func (t *wasmTerm) Refresh() {}
+// Refresh repaints the draft block, e.g. after the JS terminal resized and
+// reflowed the buffer: with the new column count the cursor's row offset is
+// recomputed from scratch, matching where xterm placed the logical position.
+func (t *wasmTerm) Refresh() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.active {
+		return
+	}
+	up := t.wipeOffsetLocked()
+	t.wipeLocked(up)
+	t.paintFreshLocked()
+}
 
 func (t *wasmTerm) Close() {
 	t.keysFn.Release()
 	t.refreshFn.Release()
+	t.setSizeFn.Release()
 }
 
 // notifyQuit lets the platform hook do any cleanup when the client quits.
@@ -169,11 +210,17 @@ func (t *wasmTerm) lineLoop() {
 				t.esc = "\x1b"
 			case '\r', '\n':
 				t.mu.Lock()
+				up := t.wipeOffsetLocked()
 				line := string(t.line)
+				// Repaint the submitted line in one pass so the cursor
+				// ends up just below the block, then move to a new line.
+				t.wipeLocked(up)
+				t.out.Write([]byte(t.prompt))
+				t.out.Write([]byte(line))
+				t.out.Write([]byte("\r\n"))
 				t.line = t.line[:0]
 				t.cur = 0
 				t.active = false
-				t.out.Write([]byte("\r\n"))
 				t.mu.Unlock()
 				t.lineCh <- line
 			case '\x7f', '\b':
@@ -185,9 +232,11 @@ func (t *wasmTerm) lineLoop() {
 			case '\x03':
 				// Ctrl+C: clear the current line.
 				t.mu.Lock()
+				up := t.wipeOffsetLocked()
+				t.wipeLocked(up)
 				t.line = t.line[:0]
 				t.cur = 0
-				t.out.Write([]byte("\r\n"))
+				t.out.Write([]byte(t.prompt))
 				t.mu.Unlock()
 			default:
 				if r >= 0x20 {
@@ -266,11 +315,12 @@ func csiInt(params string) int {
 func (t *wasmTerm) insertRune(r rune) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	up := t.wipeOffsetLocked()
 	t.line = append(t.line, 0)
 	copy(t.line[t.cur+1:], t.line[t.cur:])
 	t.line[t.cur] = r
 	t.cur++
-	t.drawLocked()
+	t.repaintLocked(up)
 }
 
 func (t *wasmTerm) deletePrev() {
@@ -279,9 +329,10 @@ func (t *wasmTerm) deletePrev() {
 	if t.cur <= 0 {
 		return
 	}
+	up := t.wipeOffsetLocked()
 	t.line = append(t.line[:t.cur-1], t.line[t.cur:]...)
 	t.cur--
-	t.drawLocked()
+	t.repaintLocked(up)
 }
 
 func (t *wasmTerm) deleteAt() {
@@ -290,88 +341,92 @@ func (t *wasmTerm) deleteAt() {
 	if t.cur >= len(t.line) {
 		return
 	}
+	up := t.wipeOffsetLocked()
 	t.line = append(t.line[:t.cur], t.line[t.cur+1:]...)
-	t.drawLocked()
+	t.repaintLocked(up)
 }
 
 func (t *wasmTerm) cursorLeft(n int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	up := t.wipeOffsetLocked()
 	t.cur -= n
 	if t.cur < 0 {
 		t.cur = 0
 	}
-	t.drawLocked()
+	t.repaintLocked(up)
 }
 
 func (t *wasmTerm) cursorRight(n int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	up := t.wipeOffsetLocked()
 	t.cur += n
 	if t.cur > len(t.line) {
 		t.cur = len(t.line)
 	}
-	t.drawLocked()
+	t.repaintLocked(up)
 }
 
 func (t *wasmTerm) home() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	up := t.wipeOffsetLocked()
 	t.cur = 0
-	t.drawLocked()
+	t.repaintLocked(up)
 }
 
 func (t *wasmTerm) end() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	up := t.wipeOffsetLocked()
 	t.cur = len(t.line)
-	t.drawLocked()
+	t.repaintLocked(up)
 }
 
-// drawLocked redraws the prompt + draft line and positions the cursor at the
-// edit point using display-cell arithmetic (the terminal cursor is cell-based,
-// so wide/astral characters count as two cells).
-func (t *wasmTerm) drawLocked() {
-	t.out.Write([]byte("\r\x1b[K"))
+// currentCols returns the live terminal width, defaulting to the classic 80
+// until the JS side reports the real grid size.
+func (t *wasmTerm) currentCols() int {
+	if c := int(t.termCols.Load()); c > 0 {
+		return c
+	}
+	return 80
+}
+
+// wipeOffsetLocked computes how many rows sit between the block top and the
+// cursor for the CURRENT draft state. Callers must capture it before any
+// mutation: the erase has to start from where the cursor physically is,
+// which reflects the pre-edit content.
+func (t *wasmTerm) wipeOffsetLocked() int {
+	cells := runeStrCells(t.prompt) + lineCells(t.line[:t.cur])
+	return editRowsWithin(cells, t.currentCols())
+}
+
+// wipeLocked erases everything from the block top down to the end of the
+// screen. up is the row distance to travel first; after this the cursor sits
+// at the block origin, column 0.
+func (t *wasmTerm) wipeLocked(up int) {
+	if up > 0 {
+		t.out.Write([]byte(fmt.Sprintf("\x1b[%dA\r", up)))
+	} else {
+		t.out.Write([]byte("\r"))
+	}
+	t.out.Write([]byte("\x1b[J"))
+}
+
+// paintFreshLocked writes prompt + draft assuming the cursor already sits at
+// the block origin; sequential output leaves it exactly at the edit point,
+// which keeps mid-line cursors correct across wrapped rows without any
+// explicit cursor positioning.
+func (t *wasmTerm) paintFreshLocked() {
 	t.out.Write([]byte(t.prompt))
-	t.out.Write([]byte(string(t.line)))
-	if cells := lineCells(t.line) - lineCells(t.line[:t.cur]); cells > 0 {
-		t.out.Write([]byte(fmt.Sprintf("\x1b[%dD", cells)))
-	}
+	t.out.Write([]byte(string(t.line[:t.cur])))
+	t.out.Write([]byte(string(t.line[t.cur:])))
 }
 
-func lineCells(rs []rune) int {
-	n := 0
-	for _, r := range rs {
-		n += runeWidth(r)
-	}
-	return n
-}
-
-// runeWidth returns the display cell width of a rune (0 = zero-width,
-// 1 = narrow, 2 = East Asian wide/fullwidth). Approximation without pulling
-// in an external width table.
-func runeWidth(r rune) int {
-	if r == 0 {
-		return 1
-	}
-	if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) || unicode.Is(unicode.Cf, r) {
-		return 0
-	}
-	switch {
-	case r >= 0x1100 && r <= 0x115F, // Hangul Jamo
-		r >= 0x2E80 && r <= 0x303E, // CJK Radicals .. CJK Symbols
-		r >= 0x3041 && r <= 0x33FF, // Hiragana .. CJK Compatibility
-		r >= 0x3400 && r <= 0x4DBF, // CJK Ext A
-		r >= 0x4E00 && r <= 0x9FFF, // CJK Unified
-		r >= 0xA000 && r <= 0xA4CF, // Yi
-		r >= 0xAC00 && r <= 0xD7A3, // Hangul Syllables
-		r >= 0xF900 && r <= 0xFAFF, // CJK Compat Ideographs
-		r >= 0xFE30 && r <= 0xFE4F, // CJK Compat Forms
-		r >= 0xFF00 && r <= 0xFF60, // Fullwidth Forms
-		r >= 0xFFE0 && r <= 0xFFE6, // Fullwidth signs
-		r > 0xFFFF:                 // astral (emoji, ...)
-		return 2
-	}
-	return 1
+// repaintLocked wipes the previous rendering and paints the current one in a
+// single sequence.
+func (t *wasmTerm) repaintLocked(up int) {
+	t.wipeLocked(up)
+	t.paintFreshLocked()
 }
