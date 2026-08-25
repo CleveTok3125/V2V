@@ -15,13 +15,23 @@ type Identity struct {
 	HmacShield string `json:"hmac_shield"`
 }
 
+// PasskeyIdentity is a WebAuthn credential accepted for a role. Only public
+// material lives here: the private key never leaves the user's authenticator,
+// mirroring how Identity holds just a public key.
+type PasskeyIdentity struct {
+	CredentialID string `json:"credential_id"` // base64url of the credential ID
+	PublicKey    string `json:"public_key"`    // COSE_Key CBOR, base64url
+	AddedAt      string `json:"added_at,omitempty"`
+}
+
 type Permission struct {
 	CanMessageUnlimited bool   `json:"can_message_unlimited"`
 	CustomPrefix        string `json:"custom_prefix"`
 }
 
 type RoleDefinition struct {
-	Identities []Identity `json:"identities"`
+	Identities []Identity        `json:"identities"`
+	Passkeys   []PasskeyIdentity `json:"passkeys,omitempty"`
 	Permission
 }
 
@@ -41,11 +51,21 @@ type AuthPacket struct {
 	Hmac      string `json:"hmac,omitempty"`
 	Username  string `json:"username,omitempty"`
 	Tripcode  string `json:"tripcode,omitempty"`
+
+	// WebAuthn assertion (all base64url). When present, the nonce is
+	// verified as the SHA-256 of the challenge the authenticator signed.
+	PasskeyID         string `json:"passkey_id,omitempty"`
+	PasskeyAuthData   string `json:"passkey_auth_data,omitempty"`
+	PasskeyClientData string `json:"passkey_client_data,omitempty"`
+	PasskeySig        string `json:"passkey_sig,omitempty"`
 }
 
 type NonceMeta struct {
 	ExpiresAt time.Time
 	IP        string
+	// PairMode marks nonces issued by /pair/new for desktop login: the
+	// assertion may come from a browser on a different device/IP.
+	PairMode bool
 }
 
 type RateLimitRecord struct {
@@ -78,6 +98,10 @@ type ChatServer struct {
 
 	ActiveNonces sync.Map
 	Upgrader     websocket.Upgrader
+
+	// PairResults holds finished passkey assertions awaiting pickup by the
+	// desktop client that created the pair nonce (single-use, short TTL).
+	PairResults sync.Map
 
 	RoleRegistry   map[string]RoleDefinition
 	RoleRegistryMu sync.RWMutex
