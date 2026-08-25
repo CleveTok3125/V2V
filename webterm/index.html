@@ -27,7 +27,11 @@
         Hiện thông báo người dùng ra/vào phòng
       </label>
 
-      <button type="submit" id="connect-btn">Kết nối</button>
+      <input id="passkey-role" placeholder="Role (khi đăng nhập bằng passkey)" style="display:none" />
+      <div style="display:flex;gap:8px">
+        <button type="submit" id="connect-btn">Kết nối</button>
+        <button type="button" id="passkey-btn">🔑 Passkey</button>
+      </div>
     </form>
 
     <p id="status-line"></p>
