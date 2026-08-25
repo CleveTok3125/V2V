@@ -262,6 +262,11 @@ func main() {
 	mime.AddExtensionType(".wasm", "application/wasm")
 	mux.Handle("/web/", http.StripPrefix("/web/", webFilesHandler("webterm")))
 
+	LoadWebauthnEnv()
+	mux.HandleFunc("/pair/new", chatApp.handlePairNew)
+	mux.HandleFunc("/pair/submit", chatApp.handlePairSubmit)
+	mux.HandleFunc("/pair/status", chatApp.handlePairStatus)
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
 			chatApp.ServeWS(w, r)
@@ -274,7 +279,7 @@ func main() {
 
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "WebSocket server is running...\n")
+		fmt.Fprint(w, "WebSocket server is running...\n\n")
 		fmt.Fprintln(w, "Mô tả      : Hệ thống chat ẩn danh")
 		fmt.Fprintln(w, "Giao thức  : WebSocket")
 		fmt.Fprintf(w, "Instance ID: %s\n", Cfg.Static.InstanceID)

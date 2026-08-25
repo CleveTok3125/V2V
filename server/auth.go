@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -78,9 +79,46 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 		log.Printf("⚠️ [AUTH FAIL] %s: Nonce đã hết hạn.", clientIP)
 		return perms, resp, fmt.Errorf("auth_error: expired_nonce")
 	}
-	if meta.IP != clientIP {
+
+	// Pair-mode nonces come from /pair/new (desktop login): the assertion is
+	// produced by a browser that may live on another device, so the strict
+	// IP binding of regular handshakes does not apply.
+	if !meta.PairMode && meta.IP != clientIP {
 		log.Printf("🚨 [SECURITY BREACH] %s đang cố sử dụng Nonce được cấp cho IP %s! (Dấu hiệu cướp Token/MITM).", clientIP, meta.IP)
 		return perms, resp, fmt.Errorf("auth_error: ip_mismatch")
+	}
+
+	// WebAuthn passkey branch: an assertion in the packet is verified against
+	// the passkeys[] identities of the claimed role, granting the exact same
+	// Permission as a key-file identity would.
+	if resp.PasskeyID != "" || resp.PasskeySig != "" {
+		if !WAConfig.Enabled {
+			log.Printf("⚠️ [AUTH FAIL] %s: passkey bị tắt (thiếu WEBAUTHN_RPID/ORIGIN).", clientIP)
+			return perms, resp, fmt.Errorf("auth_error: passkey_disabled")
+		}
+		s.RoleRegistryMu.RLock()
+		roleDef, exists := s.RoleRegistry[resp.Role]
+		s.RoleRegistryMu.RUnlock()
+		if !exists {
+			return perms, resp, fmt.Errorf("auth_error: invalid_role")
+		}
+		for _, pk := range roleDef.Passkeys {
+			if pk.CredentialID != resp.PasskeyID {
+				continue
+			}
+			pub, err := base64.RawURLEncoding.DecodeString(pk.PublicKey)
+			if err != nil {
+				continue
+			}
+			if verr := verifyAssertion(pub, resp.Nonce, resp.PasskeyAuthData, resp.PasskeyClientData, resp.PasskeySig); verr == nil {
+				log.Printf("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey, role: [%s]", clientIP, resp.Role)
+				return roleDef.Permission, resp, nil
+			} else {
+				log.Printf("🚨 [PASSKEY FAIL] %s: %v", clientIP, verr)
+			}
+		}
+		log.Printf("🚨 [BRUTE-FORCE ALERT] %s: assertion passkey không khớp credential nào của role [%s]!", clientIP, resp.Role)
+		return perms, resp, fmt.Errorf("auth_error: verification_failed")
 	}
 
 	if resp.Role == "" {
