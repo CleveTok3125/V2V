@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"localchat/linkify"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -187,7 +189,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			newLinePrefix = "⏎\n      "
 		}
 
-		chatMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m %s:%s%s%s", now.Format("15:04"), session.DisplayName, newLinePrefix, strings.ReplaceAll(text, "\n", "\n      "), tripcodeSuffix)
+		chatMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m %s:%s%s%s", now.Format("15:04"), session.DisplayName, newLinePrefix, strings.ReplaceAll(linkify.Linkify(text), "\n", "\n      "), tripcodeSuffix)
 		log.Printf("💬 [MSG từ %s] %s (%s): %s\n", clientIP, session.DisplayName, session.Tripcode, strings.ReplaceAll(text, "\n", "\\n"))
 		s.Broadcast(chatMsg, session.Conn)
 	}

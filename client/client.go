@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"localchat/linkify"
+
 	"github.com/alecthomas/kong"
 )
 
@@ -477,6 +479,7 @@ func main() {
 
 		lines := strings.Split(text, "\n")
 		for i, line := range lines {
+			line = linkify.Linkify(line)
 			if i == 0 {
 				fmt.Fprintf(out, "| Bạn: %s\n", line)
 			} else {
