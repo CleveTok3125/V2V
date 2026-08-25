@@ -37,6 +37,9 @@ var CLI struct {
 
 	KeyFile string `help:"Đường dẫn file chứa khóa xác thực" short:"k"`
 	GenKey  bool   `help:"Tạo file key.json và hiển thị cấu hình cho Server" short:"g"`
+
+	Passkey bool   `help:"Đăng nhập bằng WebAuthn passkey (web)" `
+	Role    string `help:"Role cần yêu cầu khi dùng passkey"`
 }
 
 type AuthPacket struct {
@@ -47,6 +50,11 @@ type AuthPacket struct {
 	Hmac      string `json:"hmac,omitempty"`
 	Username  string `json:"username,omitempty"`
 	Tripcode  string `json:"tripcode,omitempty"`
+
+	PasskeyID         string `json:"passkey_id,omitempty"`
+	PasskeyAuthData   string `json:"passkey_auth_data,omitempty"`
+	PasskeyClientData string `json:"passkey_client_data,omitempty"`
+	PasskeySig        string `json:"passkey_sig,omitempty"`
 }
 
 type ClientIdentity struct {
@@ -311,6 +319,23 @@ func main() {
 					fmt.Println("⚠️ Private Key trong file không hợp lệ (Phải là chuỗi Hex 128 ký tự).")
 				}
 			}
+		}
+	}
+
+	// WebAuthn passkey login (web build): hand the handshake nonce to the
+	// page, let the browser ceremony sign it, and attach the assertion.
+	if CLI.Passkey {
+		fmt.Printf("🔑 Đang chờ passkey cho role [%s]...\n", CLI.Role)
+		respPacket.Role = CLI.Role
+		if a, ok := requestAssertion(challenge.Nonce, CLI.Role); ok {
+			respPacket.PasskeyID = a.PasskeyID
+			respPacket.PasskeyAuthData = a.AuthData
+			respPacket.PasskeyClientData = a.ClientData
+			respPacket.PasskeySig = a.Sig
+			fmt.Println("✅ Passkey đã ký — gửi xác thực...")
+		} else {
+			fmt.Println("⚠️ Passkey thất bại/hủy — sẽ đăng nhập với quyền khách.")
+			respPacket.Role = ""
 		}
 	}
 

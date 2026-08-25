@@ -30,6 +30,24 @@
   var tripInput = document.getElementById("tripcode");
   var connectBtn = document.getElementById("connect-btn");
   var showJoinToggle = document.getElementById("showjoin");
+  var passkeyBtn = document.getElementById("passkey-btn");
+  var passkeyRoleInput = document.getElementById("passkey-role");
+  var usePasskey = false;
+
+  if (passkeyBtn) {
+    passkeyBtn.addEventListener("click", function () {
+      var hidden = passkeyRoleInput.style.display === "none";
+      if (hidden) {
+        passkeyRoleInput.style.display = "block";
+        passkeyRoleInput.focus();
+        passkeyBtn.textContent = "🔑 Passkey (đã chọn)";
+        usePasskey = true;
+      } else {
+        usePasskey = !usePasskey;
+        passkeyBtn.textContent = usePasskey ? "🔑 Passkey (đã chọn)" : "🔑 Passkey";
+      }
+    });
+  }
 
   function setStatus(msg, isError) {
     statusLine.textContent = msg;
@@ -115,6 +133,93 @@
       resizeTimer = null;
       resizeTerminal();
     }, 150);
+  }
+
+  var b64url = function (buf) {
+    var bytes = new Uint8Array(buf), bin = "";
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  };
+  var rnd = function (n) { var u = new Uint8Array(n); crypto.getRandomValues(u); return u; };
+  var sha256b64url = function (text) {
+    return crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)).then(b64url);
+  };
+
+  // --- Passkey login bridge -----------------------------------------------
+  // The Go client calls v2vRequestAssertion(nonce, role) during the WebSocket
+  // handshake and waits on v2vAssertionReady(json).
+  window.v2vRequestAssertion = function (nonceHex, role) {
+    var respond = function (payload) {
+      if (typeof window.v2vAssertionReady === "function") {
+        window.v2vAssertionReady(JSON.stringify(payload));
+      }
+    };
+    crypto.subtle.digest("SHA-256", new TextEncoder().encode(nonceHex))
+      .then(function (challenge) {
+        return navigator.credentials.get({
+          publicKey: {
+            challenge: challenge,
+            rpId: location.hostname,
+            userVerification: "preferred",
+            timeout: 60000
+          }
+        });
+      })
+      .then(function (cred) {
+        respond({
+          passkey_id: b64url(cred.rawId),
+          passkey_auth_data: b64url(cred.response.authenticatorData),
+          passkey_client_data: b64url(cred.response.clientDataJSON),
+          passkey_sig: b64url(cred.response.signature)
+        });
+      })
+      .catch(function () { respond({}); });
+  };
+
+  // --- Desktop pair mode (#pair=<nonce>) ----------------------------------
+  // Desktop prints this URL; the assertion is posted back to the server so
+  // the desktop's own handshake can consume the same nonce.
+  function runPairMode(nonce, role) {
+    panel.style.display = "none";
+    wrap.style.display = "block";
+    setStatus("Đang chờ passkey cho desktop…");
+    sha256b64url(nonce).then(function (challenge) {
+      return navigator.credentials.get({
+        publicKey: {
+          challenge: challenge,
+          rpId: location.hostname,
+          userVerification: "preferred",
+          timeout: 120000
+        }
+      });
+    }).then(function (cred) {
+      return fetch("/pair/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nonce: nonce,
+          role: role || "",
+          passkey_id: b64url(cred.rawId),
+          auth_data: b64url(cred.response.authenticatorData),
+          client_data: b64url(cred.response.clientDataJSON),
+          sig: b64url(cred.response.signature)
+        })
+      });
+    }).then(function (resp) {
+      if (!resp.ok) throw new Error("server từ chối (" + resp.status + ")");
+      setStatus("✅ Đã xác thực — quay lại cửa sổ V2V trên máy của bạn.");
+    }).catch(function (e) {
+      setStatus("Lỗi pair: " + e.message, true);
+    });
+  }
+
+  var initialHash = location.hash || "";
+  if (initialHash.indexOf("#pair=") === 0) {
+    var params = new URLSearchParams(initialHash.slice(1));
+    var pairNonce = params.get("pair") || "";
+    var pairRole = params.get("role") || "";
+    location.hash = ""; // clean up so reloads start fresh
+    if (pairNonce) runPairMode(pairNonce, pairRole);
   }
 
   function startTerminal() {
