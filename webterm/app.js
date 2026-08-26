@@ -140,6 +140,13 @@
     for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
     return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   };
+  var b64urlToBytes = function (s) {
+    s = s.replace(/-/g, "+").replace(/_/g, "/");
+    while (s.length % 4) s += "=";
+    var bin = atob(s), u = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return u;
+  };
   var rnd = function (n) { var u = new Uint8Array(n); crypto.getRandomValues(u); return u; };
   var sha256b64url = function (text) {
     return crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)).then(b64url);
@@ -213,6 +220,49 @@
     });
   }
 
+  // --- Desktop-issued enrollment (#enroll=<code>) -------------------------
+  // Admin issues a one-time ticket (server -enroll); the member opens the
+  // URL, the browser popup creates a REAL passkey in their password manager,
+  // and only the public half is stored server-side.
+  function runEnrollMode(code) {
+    panel.style.display = "none";
+    wrap.style.display = "block";
+    setStatus("Đang tải phiên đăng ký passkey…");
+    fetch("/webauthn/enroll/begin?ticket=" + encodeURIComponent(code))
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
+        return r.json();
+      })
+      .then(function (opts) {
+        var pk = opts.publicKey;
+        pk.challenge = b64urlToBytes(pk.challenge);
+        pk.user.id = b64urlToBytes(pk.user.id);
+        setStatus("Xác nhận trên password manager của bạn…");
+        return navigator.credentials.create({ publicKey: pk });
+      })
+      .then(function (cred) {
+        setStatus("Đang lưu passkey…");
+        return fetch("/webauthn/enroll/finish", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ticket: code,
+            id: cred.id,
+            client_data_json: b64url(cred.response.clientDataJSON),
+            attestation_object: b64url(cred.response.attestationObject)
+          })
+        }).then(function (r) {
+          if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
+        });
+      })
+      .then(function () {
+        setStatus("✅ Passkey đã tạo. Đóng trang này và đăng nhập bằng nút 🔑 Passkey.");
+      })
+      .catch(function (e) {
+        setStatus("Lỗi enroll: " + e.message, true);
+      });
+  }
+
   var initialHash = location.hash || "";
   if (initialHash.indexOf("#pair=") === 0) {
     var params = new URLSearchParams(initialHash.slice(1));
@@ -220,6 +270,11 @@
     var pairRole = params.get("role") || "";
     location.hash = ""; // clean up so reloads start fresh
     if (pairNonce) runPairMode(pairNonce, pairRole);
+  } else if (initialHash.indexOf("#enroll=") === 0) {
+    var eParams = new URLSearchParams(initialHash.slice(1));
+    var enrollCode = eParams.get("enroll") || "";
+    location.hash = "";
+    if (enrollCode) runEnrollMode(enrollCode);
   }
 
   function startTerminal() {
