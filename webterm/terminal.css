@@ -86,6 +86,23 @@ html, body {
   cursor: default;
 }
 
+/* Secondary action sharing the connect button's geometry. */
+#passkey-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  background: transparent;
+  color: #4f7dff;
+  border: 1px solid #4f7dff;
+  border-radius: 6px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+#passkey-btn:hover {
+  background: rgba(79, 125, 255, 0.12);
+}
+
 #status-line {
   margin-top: 16px;
   font-size: 13px;
