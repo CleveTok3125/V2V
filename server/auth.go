@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -88,6 +89,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 	// the passkeys[] identities of the claimed role, granting the exact same
 	// Permission as a key-file identity would.
 	if resp.PasskeyID != "" || resp.PasskeySig != "" {
+		var lastErr error
 		if !WAConfig.Enabled {
 			log.Printf("⚠️ [AUTH FAIL] %s: passkey bị tắt (thiếu WEBAUTHN_RPID/ORIGIN).", clientIP)
 			return perms, resp, fmt.Errorf("auth_error: passkey_disabled")
@@ -98,6 +100,8 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 		if !exists {
 			return perms, resp, fmt.Errorf("auth_error: invalid_role")
 		}
+		// Candidate 1: hand-imported identities in roles.json (software
+		// passkey from a desktop key.json). No server-side counter.
 		for _, pk := range roleDef.Passkeys {
 			if pk.CredentialID != resp.PasskeyID {
 				continue
@@ -106,12 +110,37 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 			if err != nil {
 				continue
 			}
-			if verr := verifyAssertion(pub, resp.Nonce, resp.PasskeyAuthData, resp.PasskeyClientData, resp.PasskeySig); verr == nil {
-				log.Printf("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey, role: [%s]", clientIP, resp.Role)
+			if _, verr := verifyAssertion(pub, resp.Nonce, resp.PasskeyAuthData, resp.PasskeyClientData, resp.PasskeySig); verr == nil {
+				log.Printf("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey mềm, role: [%s]", clientIP, resp.Role)
 				return roleDef.Permission, resp, nil
 			} else {
-				log.Printf("🚨 [PASSKEY FAIL] %s: %v", clientIP, verr)
+				lastErr = verr
 			}
+		}
+
+		// Candidate 2: real passkeys enrolled via the web ceremony. These
+		// live in the managed store with a persisted sign counter, enabling
+		// clone detection.
+		if cred, ok := s.WebAuthn.Credential(resp.Role, resp.PasskeyID); ok {
+			pub, err := base64.RawURLEncoding.DecodeString(cred.PublicKey)
+			if err != nil {
+				return perms, resp, fmt.Errorf("auth_error: verification_failed")
+			}
+			counter, verr := verifyAssertion(pub, resp.Nonce, resp.PasskeyAuthData, resp.PasskeyClientData, resp.PasskeySig)
+			switch {
+			case verr == nil && counter > cred.SignCount:
+				_ = s.WebAuthn.UpdateSignCount(resp.Role, cred.CredentialID, counter)
+				log.Printf("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey thật, role: [%s]", clientIP, resp.Role)
+				return roleDef.Permission, resp, nil
+			case verr == nil:
+				lastErr = errors.New("counter_not_increasing")
+			default:
+				lastErr = verr
+			}
+		}
+
+		if lastErr != nil {
+			log.Printf("🚨 [PASSKEY FAIL] %s: %v", clientIP, lastErr)
 		}
 		log.Printf("🚨 [BRUTE-FORCE ALERT] %s: assertion passkey không khớp credential nào của role [%s]!", clientIP, resp.Role)
 		return perms, resp, fmt.Errorf("auth_error: verification_failed")
@@ -276,8 +305,10 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP string) (
 	if err != nil {
 		if authPacket.Role != "" {
 			s.handleAuthPenalty(clientIP)
-			conn.WriteMessage(websocket.TextMessage, []byte("[Hệ thống]: Xác thực thất bại! Đã ngắt kết nối."))
 		}
+		// Structured rejection: clients show the reason instead of a
+		// cryptic JSON parse error on the close frame.
+		_ = conn.WriteJSON(AuthPacket{Type: "auth_failed", Error: err.Error()})
 		conn.Close()
 		return nil, err
 	}

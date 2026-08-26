@@ -127,14 +127,13 @@ func TestVerifyAssertionES256HappyPath(t *testing.T) {
 	signed := append(append([]byte{}, authData...), cdHash[:]...)
 	sig := signPayload(t, priv, signed)
 
-	err = verifyAssertion(
+	if _, verr := verifyAssertion(
 		coseEC2(t, &priv.PublicKey), testNonce,
 		base64.RawURLEncoding.EncodeToString(authData),
 		base64.RawURLEncoding.EncodeToString(cd),
 		base64.RawURLEncoding.EncodeToString(sig),
-	)
-	if err != nil {
-		t.Fatalf("happy path failed: %v", err)
+	); verr != nil {
+		t.Fatalf("happy path failed: %v", verr)
 	}
 }
 
@@ -150,13 +149,13 @@ func TestVerifyAssertionRS256(t *testing.T) {
 	signed := append(append([]byte{}, authData...), cdHash[:]...)
 	sig := signPayload(t, priv, signed)
 
-	if err := verifyAssertion(
+	if _, verr := verifyAssertion(
 		coseRSA(t, &priv.PublicKey), testNonce,
 		base64.RawURLEncoding.EncodeToString(authData),
 		base64.RawURLEncoding.EncodeToString(cd),
 		base64.RawURLEncoding.EncodeToString(sig),
-	); err != nil {
-		t.Fatalf("RS256 happy path failed: %v", err)
+	); verr != nil {
+		t.Fatalf("RS256 happy path failed: %v", verr)
 	}
 }
 
@@ -173,14 +172,14 @@ func TestVerifyAssertionTampering(t *testing.T) {
 	cdB64 := base64.RawURLEncoding.EncodeToString(cd)
 
 	// wrong nonce (challenge mismatch)
-	if err := verifyAssertion(pubCOSE, "ffffff"+testNonce[6:], adB64, cdB64, sig); err == nil {
+	if _, verr := verifyAssertion(pubCOSE, "ffffff"+testNonce[6:], adB64, cdB64, sig); verr == nil {
 		t.Error("challenge mismatch accepted")
 	}
 	// wrong origin
 	WAConfig.Origin = "https://evil.example.com"
 	cdBad := buildClientData(t, testNonce)
-	if err := verifyAssertion(pubCOSE, testNonce, adB64,
-		base64.RawURLEncoding.EncodeToString(cdBad), sig); err == nil {
+	if _, verr := verifyAssertion(pubCOSE, testNonce, adB64,
+		base64.RawURLEncoding.EncodeToString(cdBad), sig); verr == nil {
 		t.Error("origin mismatch accepted")
 	}
 	WAConfig.Origin = testOrigin
@@ -191,21 +190,21 @@ func TestVerifyAssertionTampering(t *testing.T) {
 	} else {
 		sigBytes[10] = 'A'
 	}
-	if err := verifyAssertion(pubCOSE, testNonce, adB64, cdB64, string(sigBytes)); err == nil {
+	if _, verr := verifyAssertion(pubCOSE, testNonce, adB64, cdB64, string(sigBytes)); verr == nil {
 		t.Error("tampered signature accepted")
 	}
 	// user-present flag cleared
 	badAuth := append([]byte{}, authData...)
 	badAuth[32] = 0
-	if err := verifyAssertion(pubCOSE, testNonce,
-		base64.RawURLEncoding.EncodeToString(badAuth), cdB64, sig); err == nil {
+	if _, verr := verifyAssertion(pubCOSE, testNonce,
+		base64.RawURLEncoding.EncodeToString(badAuth), cdB64, sig); verr == nil {
 		t.Error("missing UP flag accepted")
 	}
 	// wrong rpId in config
 	WAConfig.RPID = "other.example.com"
 	rpChanged := sha256.Sum256([]byte(WAConfig.RPID))
 	_ = rpChanged
-	if err := verifyAssertion(pubCOSE, testNonce, adB64, cdB64, sig); err == nil {
+	if _, verr := verifyAssertion(pubCOSE, testNonce, adB64, cdB64, sig); verr == nil {
 		t.Error("rp id hash mismatch accepted")
 	}
 }
