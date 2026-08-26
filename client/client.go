@@ -52,7 +52,14 @@ type AuthPacket struct {
 	PasskeyClientData string `json:"passkey_client_data,omitempty"`
 	PasskeySig        string `json:"passkey_sig,omitempty"`
 
-	Error string `json:"error,omitempty"`
+	Error    string      `json:"error,omitempty"`
+	AuthType string      `json:"auth_type,omitempty"`
+	Perms    *Permission `json:"perms,omitempty"`
+}
+
+type Permission struct {
+	CanMessageUnlimited bool   `json:"can_message_unlimited"`
+	CustomPrefix        string `json:"custom_prefix"`
 }
 
 // WebSocket message type constants (RFC 6455) so the shared chat logic does
@@ -434,6 +441,17 @@ func main() {
 		notifyQuit()
 		return
 	}
+	var (
+		sessAuthType  = orDefault(authSuccess.AuthType, "guest")
+		sessRole      = authSuccess.Role
+		sessUnlimited = authSuccess.Perms != nil && authSuccess.Perms.CanMessageUnlimited
+		sessPrefix    string
+		sessConnected = time.Now()
+	)
+	if authSuccess.Perms != nil {
+		sessPrefix = authSuccess.Perms.CustomPrefix
+	}
+
 	switch authSuccess.Type {
 	case "auth_failed":
 		fmt.Println("❌ Xác thực bị từ chối:", authSuccess.Error)
@@ -528,6 +546,26 @@ func main() {
 			break
 		}
 
+		if text == "/whoami" || text == "/w" {
+			fmt.Fprintf(out, "| [Local]: Người dùng: %s | Xác thực: %s\n", username, sessAuthType)
+			if sessRole != "" {
+				fmt.Fprintf(out, "| [Local]: Role: %s | Unlimited: %v | Prefix: %q\n", sessRole, sessUnlimited, sessPrefix)
+			}
+			continue
+		}
+
+		if text == "/status" {
+			showJoinMu.RLock()
+			sj := "TẮT"
+			if showJoinLeave {
+				sj = "BẬT"
+			}
+			showJoinMu.RUnlock()
+			fmt.Fprintf(out, "| [Local]: Server: %s | Đã kết nối: %s | Phiên bản: %s | Show-join: %s\n",
+				wsURL, time.Since(sessConnected).Round(time.Second), Version, sj)
+			continue
+		}
+
 		if text == "/help" || text == "/h" {
 			fmt.Fprintln(out, "  [Trợ giúp]: Danh sách các lệnh có thể sử dụng:")
 			fmt.Fprintln(out, "    - /help, /h      : Hiển thị bảng trợ giúp này")
@@ -535,6 +573,8 @@ func main() {
 			fmt.Fprintln(out, "    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy")
 			fmt.Fprintln(out, "    - /quit, /q      : Rời phòng chat và tắt ứng dụng")
 			fmt.Fprintln(out, "    - /showjoin, /sj : Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp")
+			fmt.Fprintln(out, "    - /whoami, /w    : Thông tin danh tính và quyền hiện tại")
+			fmt.Fprintln(out, "    - /status        : Trạng thái kết nối và phiên bản client")
 			fmt.Fprintln(out, "    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng")
 			continue
 		}

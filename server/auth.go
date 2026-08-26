@@ -112,6 +112,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 				continue
 			}
 			if _, verr := verifyAssertion(pub, resp.Nonce, resp.PasskeyAuthData, resp.PasskeyClientData, resp.PasskeySig); verr == nil {
+				resp.AuthType = "passkey_soft"
 				log.Printf("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey mềm, role: [%s]", clientIP, resp.Role)
 				return roleDef.Permission, resp, nil
 			} else {
@@ -131,6 +132,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 			switch {
 			case verr == nil && counter > cred.SignCount:
 				_ = s.WebAuthn.UpdateSignCount(resp.Role, cred.CredentialID, counter)
+				resp.AuthType = "passkey"
 				log.Printf("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey thật, role: [%s]", clientIP, resp.Role)
 				return roleDef.Permission, resp, nil
 			case verr == nil:
@@ -186,6 +188,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 			hmacBytes, err := hex.DecodeString(resp.Hmac)
 			if err == nil && hmac.Equal(h.Sum(nil), hmacBytes) {
 				s.alertConcurrentIdentity(resp.IdentityPub, clientIP)
+				resp.AuthType = "ed25519"
 				log.Printf("✅ [AUTH SUCCESS] %s đăng nhập thành công role: [%s]", clientIP, resp.Role)
 				return roleDef.Permission, resp, nil
 			}
@@ -365,10 +368,16 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 		s.AuthFailsMu.Unlock()
 	}
 
+	if authPacket.AuthType == "" {
+		authPacket.AuthType = "guest"
+	}
 	finalUsername := s.generateDisplayName(authPacket.Username, clientIP, perms)
 	err = conn.WriteJSON(AuthPacket{
 		Type:     "auth_success",
 		Username: finalUsername,
+		Role:     authPacket.Role,
+		AuthType: authPacket.AuthType,
+		Perms:    &perms,
 	})
 	if err != nil {
 		return nil, err
