@@ -231,13 +231,6 @@ func main() {
 		}
 	}
 
-	// Admin enrollment-ticket issuer (runs on the server host, exits after
-	// printing the URL). Not a long-running mode.
-	if len(os.Args) > 1 && (os.Args[1] == "-enroll" || os.Args[1] == "--enroll") {
-		runEnrollIssuer(os.Args[2:])
-		return
-	}
-
 	staticCfg, err := loadStaticConfig()
 	if err != nil {
 		log.Fatalf("❌ CRITICAL ERROR: %v", err)

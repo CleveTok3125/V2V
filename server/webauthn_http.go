@@ -9,10 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"flag"
-	"fmt"
 	"net/http"
-	"os"
 	"time"
 )
 
@@ -160,37 +157,4 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
-}
-
-// runEnrollIssuer is the -enroll mode of the server binary: it issues a
-// one-time enrollment ticket for the given role and prints the URL a member
-// opens in their browser to run the passkey ceremony. Exits when done.
-func runEnrollIssuer(args []string) {
-	fs := flag.NewFlagSet("enroll", flag.ContinueOnError)
-	role := fs.String("role", "", "role gắn với passkey (bắt buộc)")
-	label := fs.String("label", "", "nhãn thiết bị/người (tùy chọn)")
-	if err := fs.Parse(args); err != nil {
-		os.Exit(1)
-	}
-
-	LoadWebauthnEnv()
-	if !WAConfig.Enabled {
-		fmt.Println("❌ Cần WEBAUTHN_RPID và WEBAUTHN_ORIGIN trong .env")
-		os.Exit(1)
-	}
-	if *role == "" {
-		fmt.Println("❌ Thiếu --role")
-		os.Exit(1)
-	}
-
-	path := os.Getenv("WEBAUTHN_STORE")
-	store := NewWebAuthnStore(path)
-	code, err := store.CreatePendingTicket(*role, *label, 10*time.Minute)
-	if err != nil {
-		fmt.Println("❌", err)
-		os.Exit(1)
-	}
-	origin := WAConfig.Origin
-	fmt.Println("✅ Ticket đã tạo (hết hạn sau 10 phút, dùng 1 lần).")
-	fmt.Printf("Gửi link sau cho người được cấp:\n\n  %s/web/#enroll=%s\n\n", origin, code)
 }
