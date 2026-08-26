@@ -178,6 +178,10 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		if err != nil || len(pub) != ed25519.PublicKeySize {
 			continue
 		}
+		if id.Host != "" && !strings.EqualFold(strings.TrimSpace(id.Host), expectedHost) {
+			log.Printf("🚨 [AUTH FAIL] %s: identity gắn với host %q nhưng kết nối tới %q", clientIP, id.Host, expectedHost)
+			continue
+		}
 
 		if ed25519.Verify(pub, signedBytes, sig) {
 			resp.IdentityPub = id.PublicKey
