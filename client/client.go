@@ -36,7 +36,7 @@ var CLI struct {
 	ShowJoin  bool             `help:"Hiện thông báo người dùng ra/vào phòng" short:"j"`
 
 	KeyFile string `help:"Đường dẫn file chứa khóa xác thực" short:"k"`
-	GenKey  bool   `help:"Tạo file key.json và hiển thị cấu hình cho Server" short:"g"`
+	GenKey  bool   `help:"Tạo identity mới (key file hoặc passkey mềm) và in cấu hình cho Server" short:"g"`
 
 	Passkey bool   `help:"Đăng nhập bằng WebAuthn passkey (web)" `
 	Role    string `help:"Role cần yêu cầu khi dùng passkey"`
@@ -170,6 +170,9 @@ func checkServerInfo(input string) {
 	fmt.Println("\n" + string(body))
 }
 
+// generateKeyInteractive creates a new role identity. Two flavors share the
+// same flow, mirroring how roles.json accepts both: a classic ed25519 key
+// file, or a software passkey in WebAuthn wire format.
 func generateKeyInteractive() {
 	reader := bufio.NewReader(os.Stdin)
 
@@ -178,6 +181,13 @@ func generateKeyInteractive() {
 	role = strings.TrimSpace(role)
 	if role == "" {
 		role = "admin"
+	}
+
+	fmt.Print("Loại danh tính — [1] key file ed25519 (mặc định)  [2] passkey mềm: ")
+	kind, _ := reader.ReadString('\n')
+	if strings.TrimSpace(kind) == "2" {
+		generatePasskeyForRole(reader, role)
+		return
 	}
 
 	fmt.Printf("%s này có quyền chat không giới hạn? (Y/n) ", role)
@@ -240,6 +250,45 @@ func generateKeyInteractive() {
 	fmt.Println("Đã lưu ./roles.json")
 }
 
+// generatePasskeyForRole creates a software passkey bound to the given role:
+// the private half stays in ./passkey.json on this machine, the public half
+// is printed as a roles.json snippet for the admin to import.
+func generatePasskeyForRole(reader *bufio.Reader, role string) {
+	rpid := os.Getenv("WEBAUTHN_RPID")
+	origin := os.Getenv("WEBAUTHN_ORIGIN")
+	if rpid == "" {
+		fmt.Print("WEBAUTHN_RPID chưa đặt — nhập RP ID (vd: chat.example.com): ")
+		line, _ := reader.ReadString('\n')
+		rpid = strings.TrimSpace(line)
+	}
+	if origin == "" {
+		fmt.Print("WEBAUTHN_ORIGIN chưa đặt — nhập Origin (vd: https://chat.example.com): ")
+		line, _ := reader.ReadString('\n')
+		origin = strings.TrimSpace(line)
+	}
+
+	pk, err := GeneratePasskey(role, rpid, origin)
+	if err != nil {
+		fmt.Println("❌ Lỗi sinh passkey:", err)
+		return
+	}
+
+	path := "./passkey.json"
+	if err := pk.Save(path); err != nil {
+		fmt.Println("❌ Không ghi được file:", err)
+		return
+	}
+
+	snippet, err := pk.RolesSnippet()
+	if err != nil {
+		fmt.Println("❌ Lỗi dựng cấu hình:", err)
+		return
+	}
+	fmt.Printf("\n💾 Đã lưu khóa bí mật tại %s (chmod 600)\n", path)
+	fmt.Println("📤 Gửi đoạn sau cho admin thêm vào roles.json:")
+	fmt.Println(snippet)
+}
+
 func main() {
 	parseFlags()
 
@@ -290,33 +339,54 @@ func main() {
 	}
 
 	if CLI.KeyFile != "" {
-		keyData, err := os.ReadFile(CLI.KeyFile)
-		if err != nil {
-			fmt.Printf("⚠️ Không thể đọc file key (%s). Sẽ đăng nhập với quyền khách.\n", err)
-		} else {
-			var identity ClientIdentity
-			if err := json.Unmarshal(keyData, &identity); err != nil {
-				fmt.Println("⚠️ File key sai định dạng JSON. Sẽ đăng nhập với quyền khách.")
-			} else if identity.Role != "" && identity.PrivateKey != "" && identity.HmacShield != "" {
+		handled := false
+		if pk, perr := LoadPasskeyFile(CLI.KeyFile); perr == nil {
+			// Software passkey: sign the handshake nonce natively.
+			credID, ad, cd, sig, aerr := pk.BuildAssertion(challenge.Nonce)
+			if aerr == nil {
+				respPacket.Role = pk.Role
+				respPacket.PasskeyID = credID
+				respPacket.PasskeyAuthData = ad
+				respPacket.PasskeyClientData = cd
+				respPacket.PasskeySig = sig
+				_ = pk.Save(CLI.KeyFile) // persist the incremented sign counter
+				fmt.Printf("🔑 Đang yêu cầu cấp quyền bằng passkey: [%s]...\n", pk.Role)
+				handled = true
+			} else {
+				fmt.Printf("⚠️ Passkey lỗi (%v). Sẽ đăng nhập với quyền khách.\n", aerr)
+				handled = true
+			}
+		}
 
-				respPacket.Role = identity.Role
-				privBytes, err := hex.DecodeString(identity.PrivateKey)
+		if !handled {
+			keyData, err := os.ReadFile(CLI.KeyFile)
+			if err != nil {
+				fmt.Printf("⚠️ Không thể đọc file key (%s). Sẽ đăng nhập với quyền khách.\n", err)
+			} else {
+				var identity ClientIdentity
+				if err := json.Unmarshal(keyData, &identity); err != nil {
+					fmt.Println("⚠️ File key sai định dạng JSON. Sẽ đăng nhập với quyền khách.")
+				} else if identity.Role != "" && identity.PrivateKey != "" && identity.HmacShield != "" {
 
-				if err == nil && len(privBytes) == ed25519.PrivateKeySize {
-					priv := ed25519.PrivateKey(privBytes)
+					respPacket.Role = identity.Role
+					privBytes, err := hex.DecodeString(identity.PrivateKey)
 
-					dataToSign := challenge.Nonce + "|" + identity.Role + "|" + respPacket.Username
-					sig := ed25519.Sign(priv, []byte(dataToSign))
-					respPacket.Signature = hex.EncodeToString(sig)
+					if err == nil && len(privBytes) == ed25519.PrivateKeySize {
+						priv := ed25519.PrivateKey(privBytes)
 
-					h := hmac.New(sha512.New, []byte(identity.HmacShield))
-					h.Write(sig)
-					h.Write([]byte(challenge.Nonce))
-					respPacket.Hmac = hex.EncodeToString(h.Sum(nil))
+						dataToSign := challenge.Nonce + "|" + identity.Role + "|" + respPacket.Username
+						sig := ed25519.Sign(priv, []byte(dataToSign))
+						respPacket.Signature = hex.EncodeToString(sig)
 
-					fmt.Printf("🔑 Đang yêu cầu cấp quyền: [%s]...\n", identity.Role)
-				} else {
-					fmt.Println("⚠️ Private Key trong file không hợp lệ (Phải là chuỗi Hex 128 ký tự).")
+						h := hmac.New(sha512.New, []byte(identity.HmacShield))
+						h.Write(sig)
+						h.Write([]byte(challenge.Nonce))
+						respPacket.Hmac = hex.EncodeToString(h.Sum(nil))
+
+						fmt.Printf("🔑 Đang yêu cầu cấp quyền: [%s]...\n", identity.Role)
+					} else {
+						fmt.Println("⚠️ Private Key trong file không hợp lệ (Phải là chuỗi Hex 128 ký tự).")
+					}
 				}
 			}
 		}

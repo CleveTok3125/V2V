@@ -60,14 +60,6 @@ func initAssertionBridge() {
 	js.Global().Set("v2vAssertionReady", fn)
 }
 
-// webauthnAssertion mirrors the server's AuthPacket passkey fields.
-type webauthnAssertion struct {
-	PasskeyID string `json:"passkey_id"`
-	AuthData  string `json:"passkey_auth_data"`
-	ClientData string `json:"passkey_client_data"`
-	Sig       string `json:"passkey_sig"`
-}
-
 // requestAssertion hands the nonce + role to the page and blocks briefly for
 // the ceremony result. An empty return means failure/timeout: the caller
 // falls back to a guest login.
