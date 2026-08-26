@@ -15,13 +15,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 )
 
-func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permission, AuthPacket, error) {
+func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost string) (Permission, AuthPacket, error) {
 	// Allow a small grace window beyond the 10s nonce TTL so slow clients
 	// still fail cleanly instead of hanging the auth read forever.
 	const authResponseTimeout = 12 * time.Second
@@ -165,7 +166,9 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 		return perms, resp, fmt.Errorf("auth_error: invalid_signature")
 	}
 
-	signedData := nonceHex + "|" + resp.Role + "|" + resp.Username
+	// Origin binding v2: the hostname is part of the signed payload so a
+	// key cannot be replayed against a different deployment.
+	signedData := nonceHex + "|" + resp.Role + "|" + resp.Username + "|" + strings.ToLower(expectedHost)
 	signedBytes := []byte(signedData)
 
 	for _, id := range roleDef.Identities {
@@ -175,12 +178,14 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 		}
 
 		if ed25519.Verify(pub, signedBytes, sig) {
+			resp.IdentityPub = id.PublicKey
 			h := hmac.New(sha512.New, []byte(id.HmacShield))
 			h.Write(sig)
 			h.Write([]byte(nonceHex))
 
 			hmacBytes, err := hex.DecodeString(resp.Hmac)
 			if err == nil && hmac.Equal(h.Sum(nil), hmacBytes) {
+				s.alertConcurrentIdentity(resp.IdentityPub, clientIP)
 				log.Printf("✅ [AUTH SUCCESS] %s đăng nhập thành công role: [%s]", clientIP, resp.Role)
 				return roleDef.Permission, resp, nil
 			}
@@ -193,6 +198,39 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 
 // To prevent IP spoofing, only accept IPs sent from Cloudflare
 // Change this getClientIP function if you are not using Cloudflare
+// clientHost extracts the lowercase hostname the client connected through.
+func clientHost(r *http.Request) string {
+	host := strings.ToLower(strings.TrimSpace(r.Host))
+	if h, _, err := net.SplitHostPort(host); err == nil && h != "" {
+		return h
+	}
+	return strings.Trim(host, "[]")
+}
+
+// alertConcurrentIdentity notifies an existing session when its identity
+// logs in from somewhere else. MVP: notify only; kicking is opt-in later.
+func (s *ChatServer) alertConcurrentIdentity(identityPubHex, newClientIP string) {
+	raw, ok := s.ActiveIdentities.Load(identityPubHex)
+	if !ok {
+		return
+	}
+	prev, _ := raw.(*ClientSession)
+	if prev == nil || prev.Conn == nil {
+		return
+	}
+	s.ClientsMu.Lock()
+	_, alive := s.Clients[prev.Conn]
+	s.ClientsMu.Unlock()
+	if !alive {
+		return
+	}
+	select {
+	case prev.Send <- []byte("\x1b[90m[He thong]: Danh tinh cua ban vua duoc dang nhap tu " + newClientIP + ".\x1b[0m"):
+	default:
+	}
+	log.Printf("⚠️ [IDENTITY CONCURRENT] identity đăng nhập song song từ %s (phiên cũ còn sống)", newClientIP)
+}
+
 func getClientIP(r *http.Request) string {
 	remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 	if cfIP := r.Header.Get("CF-Connecting-IP"); cfIP != "" {
@@ -300,8 +338,8 @@ func generateTripcode(secret string, length int) string {
 	return "◆ " + fullHex[:length]
 }
 
-func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP string) (*ClientSession, error) {
-	perms, authPacket, err := s.HandleAuth(conn, clientIP)
+func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expectedHost string) (*ClientSession, error) {
+	perms, authPacket, err := s.HandleAuth(conn, clientIP, expectedHost)
 	if err != nil {
 		if authPacket.Role != "" {
 			s.handleAuthPenalty(clientIP)

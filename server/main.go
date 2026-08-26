@@ -58,7 +58,7 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	session, err := s.authenticateClient(conn, clientIP)
+	session, err := s.authenticateClient(conn, clientIP, clientHost(r))
 	if err != nil {
 		return
 	}

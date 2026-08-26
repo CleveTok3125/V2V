@@ -41,6 +41,9 @@ type ClientSession struct {
 	Tripcode    string
 	Perms       Permission
 	Send        chan []byte
+	// IdentityPub pins the ed25519 identity (pubkey hex) behind this
+	// session; empty for guests and web passkey sessions.
+	IdentityPub string
 }
 
 type AuthPacket struct {
@@ -62,6 +65,10 @@ type AuthPacket struct {
 	// Error carries the rejection reason in type=="auth_failed" packets so
 	// clients can show why authentication was refused.
 	Error string `json:"error,omitempty"`
+
+	// IdentityPub is set server-side on successful ed25519 logins (not
+	// serialized) to track concurrent use of the same identity.
+	IdentityPub string `json:"-"`
 }
 
 type NonceMeta struct {
@@ -99,6 +106,10 @@ type ChatServer struct {
 
 	ActiveNonces sync.Map
 	Upgrader     websocket.Upgrader
+
+	// ActiveIdentities tracks the live session holding each privileged
+	// ed25519 identity (pubkey hex -> session) for concurrency alerts.
+	ActiveIdentities sync.Map
 
 	WebAuthn *WebAuthnStore
 
