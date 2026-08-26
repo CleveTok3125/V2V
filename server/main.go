@@ -231,6 +231,13 @@ func main() {
 		}
 	}
 
+	// Admin enrollment-ticket issuer (runs on the server host, exits after
+	// printing the URL). Not a long-running mode.
+	if len(os.Args) > 1 && (os.Args[1] == "-enroll" || os.Args[1] == "--enroll") {
+		runEnrollIssuer(os.Args[2:])
+		return
+	}
+
 	staticCfg, err := loadStaticConfig()
 	if err != nil {
 		log.Fatalf("❌ CRITICAL ERROR: %v", err)
@@ -263,6 +270,8 @@ func main() {
 	mux.Handle("/web/", http.StripPrefix("/web/", webFilesHandler("webterm")))
 
 	LoadWebauthnEnv()
+	mux.HandleFunc("/webauthn/enroll/begin", chatApp.handleEnrollBegin)
+	mux.HandleFunc("/webauthn/enroll/finish", chatApp.handleEnrollFinish)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {

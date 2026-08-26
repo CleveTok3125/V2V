@@ -58,6 +58,10 @@ type AuthPacket struct {
 	PasskeyAuthData   string `json:"passkey_auth_data,omitempty"`
 	PasskeyClientData string `json:"passkey_client_data,omitempty"`
 	PasskeySig        string `json:"passkey_sig,omitempty"`
+
+	// Error carries the rejection reason in type=="auth_failed" packets so
+	// clients can show why authentication was refused.
+	Error string `json:"error,omitempty"`
 }
 
 type NonceMeta struct {
@@ -95,6 +99,8 @@ type ChatServer struct {
 
 	ActiveNonces sync.Map
 	Upgrader     websocket.Upgrader
+
+	WebAuthn *WebAuthnStore
 
 	RoleRegistry   map[string]RoleDefinition
 	RoleRegistryMu sync.RWMutex

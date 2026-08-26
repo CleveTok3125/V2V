@@ -51,6 +51,8 @@ type AuthPacket struct {
 	PasskeyAuthData   string `json:"passkey_auth_data,omitempty"`
 	PasskeyClientData string `json:"passkey_client_data,omitempty"`
 	PasskeySig        string `json:"passkey_sig,omitempty"`
+
+	Error string `json:"error,omitempty"`
 }
 
 // WebSocket message type constants (RFC 6455) so the shared chat logic does
@@ -422,9 +424,16 @@ func main() {
 	var authSuccess AuthPacket
 	err = conn.ReadJSON(&authSuccess)
 	if err != nil {
-		fmt.Println("⚠️ Cảnh báo lúc đọc Auth (Có thể Server gửi nhầm thứ tự):", err)
+		fmt.Println("❌ Lỗi đọc phản hồi xác thực:", err)
+		notifyQuit()
+		return
 	}
-	if authSuccess.Type == "auth_success" {
+	switch authSuccess.Type {
+	case "auth_failed":
+		fmt.Println("❌ Xác thực bị từ chối:", authSuccess.Error)
+		notifyQuit()
+		return
+	case "auth_success":
 		username = authSuccess.Username
 	}
 
