@@ -65,6 +65,16 @@ func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
 	delete(s.Clients, session.Conn)
 	s.ClientsMu.Unlock()
 
+	// Release the identity slot only if this session still owns it (a newer
+	// login elsewhere may have taken over the registration).
+	if session.IdentityPub != "" {
+		if raw, loaded := s.ActiveIdentities.Load(session.IdentityPub); loaded {
+			if prev, _ := raw.(*ClientSession); prev == session {
+				s.ActiveIdentities.Delete(session.IdentityPub)
+			}
+		}
+	}
+
 	close(session.Send)
 
 	leaveTime := time.Now().In(Cfg.Static.Timezone)
