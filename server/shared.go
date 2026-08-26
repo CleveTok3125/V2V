@@ -63,9 +63,6 @@ type AuthPacket struct {
 type NonceMeta struct {
 	ExpiresAt time.Time
 	IP        string
-	// PairMode marks nonces issued by /pair/new for desktop login: the
-	// assertion may come from a browser on a different device/IP.
-	PairMode bool
 }
 
 type RateLimitRecord struct {
@@ -98,10 +95,6 @@ type ChatServer struct {
 
 	ActiveNonces sync.Map
 	Upgrader     websocket.Upgrader
-
-	// PairResults holds finished passkey assertions awaiting pickup by the
-	// desktop client that created the pair nonce (single-use, short TTL).
-	PairResults sync.Map
 
 	RoleRegistry   map[string]RoleDefinition
 	RoleRegistryMu sync.RWMutex
