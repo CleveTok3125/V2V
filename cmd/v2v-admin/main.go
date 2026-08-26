@@ -40,6 +40,7 @@ type KeygenCmd struct {
 	Out        string `help:"Nơi ghi container" default:"key.json"`
 	Unlimited  bool   `help:"(ed25519) quyền chat không giới hạn"`
 	Prefix     string `help:"(ed25519) prefix hiển thị"`
+	Host       string `help:"(ed25519) hostname gắn với danh tính (trống = không gắn)"`
 	RPID       string `help:"(passkey) RP ID; fallback env WEBAUTHN_RPID"`
 	Origin     string `help:"(passkey) Origin; fallback env WEBAUTHN_ORIGIN"`
 	MergeRoles bool   `help:"Ghép entry vào ./roles.json (mặc định chỉ in snippet)"`
@@ -170,6 +171,9 @@ func (k *KeygenCmd) Run() error {
 		if k.Prefix == "" {
 			k.Prefix = "[Member] "
 		}
+		if k.Host == "" && interactive {
+			k.Host = ask(reader, "Hostname gắn với danh tính (Enter = không gắn)", "")
+		}
 		pub, priv, err := ed25519.GenerateKey(rand.Reader)
 		if err != nil {
 			return err
@@ -183,6 +187,7 @@ func (k *KeygenCmd) Run() error {
 			Role:       k.Role,
 			PrivateKey: hex.EncodeToString(priv),
 			HmacShield: hex.EncodeToString(shieldBytes),
+			Host:       k.Host,
 		}
 	case "passkey":
 		pk, err := identity.GeneratePasskey(k.Role, rpid, origin)
@@ -206,12 +211,16 @@ func (k *KeygenCmd) Run() error {
 		fmt.Print("📤 Gửi đoạn sau cho admin thêm vào roles.json:\n\n")
 		fmt.Println(snippet)
 	default:
+		identityEntry := map[string]string{
+			"public_key":  edPubHex,
+			"hmac_shield": idf.Ed25519.HmacShield,
+		}
+		if idf.Ed25519.Host != "" {
+			identityEntry["host"] = idf.Ed25519.Host
+		}
 		serverCfg := map[string]any{
 			k.Role: map[string]any{
-				"identities": []map[string]string{{
-					"public_key":  edPubHex,
-					"hmac_shield": idf.Ed25519.HmacShield,
-				}},
+				"identities":            []map[string]string{identityEntry},
 				"can_message_unlimited": k.Unlimited,
 				"custom_prefix":         k.Prefix,
 			},
@@ -228,12 +237,20 @@ func (k *KeygenCmd) Run() error {
 		fmt.Println("Đã cập nhật ./roles.json")
 	} else if k.MergeRoles && k.Type == "ed25519" {
 		if err := identity.MergeRolesFile(rolesPath(), k.Role, func(e map[string]any) {
+			identityEntry := map[string]string{
+				"public_key":  edPubHex,
+				"hmac_shield": idf.Ed25519.HmacShield,
+			}
+			if idf.Ed25519.Host != "" {
+				identityEntry["host"] = idf.Ed25519.Host
+			}
+			e["identities"] = []map[string]string{identityEntry}
 			e["can_message_unlimited"] = k.Unlimited
 			e["custom_prefix"] = k.Prefix
 		}); err != nil {
 			return err
 		}
-		fmt.Println("Đã cập nhật ./roles.json (permission)")
+		fmt.Println("Đã cập nhật ./roles.json")
 	}
 	return nil
 }

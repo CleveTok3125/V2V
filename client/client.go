@@ -248,9 +248,24 @@ func main() {
 
 			// Origin binding v2: hostname joins the signed payload so keys
 			// cannot be reused across deployments.
-			bindHost := ""
-			if u, perr := url.Parse(wsURL); perr == nil {
-				bindHost = strings.ToLower(u.Hostname())
+			// Origin binding v2: a host recorded in the identity file wins;
+			// otherwise derive it from the URL being connected to. The host
+			// joins the signed payload so keys cannot be reused across
+			// deployments.
+			bindHost := id.Host
+			if bindHost == "" {
+				if u, perr := url.Parse(wsURL); perr == nil {
+					bindHost = strings.ToLower(u.Hostname())
+				}
+			}
+			if id.Host != "" {
+				urlHost := ""
+				if u, perr := url.Parse(wsURL); perr == nil {
+					urlHost = strings.ToLower(u.Hostname())
+				}
+				if urlHost != "" && urlHost != id.Host {
+					fmt.Printf("⚠️ Danh tính gắn với host %q nhưng đang kết nối tới %q — chữ ký có thể bị từ chối.\n", id.Host, urlHost)
+				}
 			}
 			dataToSign := challenge.Nonce + "|" + id.Role + "|" + respPacket.Username + "|" + bindHost
 			sig := ed25519.Sign(priv, []byte(dataToSign))
