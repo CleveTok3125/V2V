@@ -57,3 +57,4 @@ webterm/app.wasm.br
 
 # Build Artifacts
 v2v-admin
+!v2v-admin/
