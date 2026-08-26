@@ -84,6 +84,46 @@ The client runs directly in your terminal.
 #### Local Chat Commands
 Once connected to a chat room,  you can type `/help` to see manual.
 
+#### Authenticated Identities (key file & passkey)
+
+Beyond guest access, the server accepts two privileged identity flavors —
+both issued by an admin and stored locally in a single `key.json` container
+(one ed25519 slot + one software-passkey slot):
+
+| Flavor            | Created with                       | Login proof                          |
+| ----------------- | ---------------------------------- | ------------------------------------ |
+| `ed25519`         | `V2V -g` → option 1                | Ed25519 signature over the handshake |
+| Software passkey  | `V2V -g` → option 2 (dev bonus)    | ES256 assertion, WebAuthn wire format |
+
+**Login:**
+
+```bash
+./client -s wss://chat.example.com -u "YourName" -k key.json
+```
+
+If the container holds both flavors you'll be asked which one to use.
+Any authentication failure exits the client instead of degrading to a
+guest session.
+
+**In-session commands:** `/whoami` shows your identity, role and
+permissions; `/status` shows connection info and the client version.
+
+**Web clients** log in through real platform passkeys (password-manager
+popup). Enrollment is admin-issued: run this on the server host to print a
+one-time link valid for 10 minutes, then hand it to the member:
+
+```bash
+./server.bin -enroll --role member --label bob-laptop
+```
+
+Requires these environment variables on the server (see `.env.example`):
+
+| Variable          | Example                      | Purpose                                    |
+| ----------------- | ---------------------------- | ------------------------------------------ |
+| `WEBAUTHN_RPID`   | `chat.elsutm.io.vn`          | Domain credentials are bound to            |
+| `WEBAUTHN_ORIGIN` | `https://chat.elsutm.io.vn`  | Origin checked during every ceremony       |
+| `WEBAUTHN_STORE`  | `./data/webauthn.json`       | Ticket + credential store (server-managed) |
+
 ---
 
 ## Server
