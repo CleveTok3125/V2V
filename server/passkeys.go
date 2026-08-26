@@ -14,7 +14,6 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -24,7 +23,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"time"
 
 	"github.com/fxamacker/cbor/v2"
 )
@@ -51,21 +49,6 @@ func LoadWebauthnEnv() {
 	if !WAConfig.Enabled {
 		fmt.Println("ℹ️ WEBAUTHN_RPID/WEBAUTHN_ORIGIN chưa đặt — đăng nhập bằng passkey đang TẮT")
 	}
-}
-
-// NewPairNonce allocates a device-pairable nonce: same lifecycle as a normal
-// auth nonce, but its assertion may arrive from another device/IP.
-func (s *ChatServer) NewPairNonce(ttl time.Duration) (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	nonce := fmt.Sprintf("%x", b)
-	s.ActiveNonces.Store(nonce, NonceMeta{
-		ExpiresAt: time.Now().Add(ttl),
-		PairMode:  true,
-	})
-	return nonce, nil
 }
 
 // ChallengeFromNonce is the single source of truth mapping an auth nonce to

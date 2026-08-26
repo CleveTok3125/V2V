@@ -263,9 +263,6 @@ func main() {
 	mux.Handle("/web/", http.StripPrefix("/web/", webFilesHandler("webterm")))
 
 	LoadWebauthnEnv()
-	mux.HandleFunc("/pair/new", chatApp.handlePairNew)
-	mux.HandleFunc("/pair/submit", chatApp.handlePairSubmit)
-	mux.HandleFunc("/pair/status", chatApp.handlePairStatus)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
