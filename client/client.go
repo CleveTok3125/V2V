@@ -389,7 +389,13 @@ func main() {
 
 			priv := ed25519.PrivateKey(privBytes)
 
-			dataToSign := challenge.Nonce + "|" + id.Role + "|" + respPacket.Username
+			// Origin binding v2: hostname joins the signed payload so keys
+			// cannot be reused across deployments.
+			bindHost := ""
+			if u, perr := url.Parse(wsURL); perr == nil {
+				bindHost = strings.ToLower(u.Hostname())
+			}
+			dataToSign := challenge.Nonce + "|" + id.Role + "|" + respPacket.Username + "|" + bindHost
 			sig := ed25519.Sign(priv, []byte(dataToSign))
 			respPacket.Signature = hex.EncodeToString(sig)
 
