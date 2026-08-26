@@ -2,6 +2,9 @@ services:
   V2V:
     build:
       context: .
+      # Fallback for any layer that still needs egress: the host's network
+      # namespace sidesteps container DNS quirks (e.g. link-local resolvers).
+      network: host
       args:
         GIT_HASH: ${GIT_HASH:-}
     image: v2v_image
