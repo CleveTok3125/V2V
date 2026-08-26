@@ -10,8 +10,9 @@ func parseFlags() {
 	})
 }
 
-// requestAssertion is web-only: the desktop signs assertions natively via
-// PasskeyIdentity.BuildAssertion, so the browser bridge never runs here.
-func requestAssertion(string, string) (webauthnAssertion, bool) {
-	return webauthnAssertion{}, false
+// applyWebPasskey is web-only: the desktop signs assertions natively from
+// its -k identity file, so this path never engages here. Returning true
+// simply means "nothing failed; continue as configured".
+func applyWebPasskey(*AuthPacket, string) bool {
+	return true
 }

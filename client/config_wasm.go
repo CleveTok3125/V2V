@@ -4,9 +4,16 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"syscall/js"
 	"time"
 )
+
+// webPasskey carries the page's intent to log in via WebAuthn.
+var webPasskey struct {
+	Enabled bool
+	Role    string
+}
 
 // parseFlags reads the connection config that the web page placed in
 // window.v2vConfig. The web build never uses key files; privileged logins go
@@ -24,8 +31,8 @@ func parseFlags() {
 		CLI.ShowJoin = v.Bool()
 	}
 	if v := cfg.Get("passkey"); v.Truthy() && v.Bool() {
-		CLI.Passkey = true
-		CLI.Role = cfg.Get("passkeyRole").String()
+		webPasskey.Enabled = true
+		webPasskey.Role = cfg.Get("passkeyRole").String()
 	}
 
 	if CLI.Server == "" {
@@ -60,9 +67,30 @@ func initAssertionBridge() {
 	js.Global().Set("v2vAssertionReady", fn)
 }
 
+// applyWebPasskey runs the browser ceremony when the page requested a
+// passkey login. Returns false only on failure — the caller treats that as
+// fatal (no silent guest fallback).
+func applyWebPasskey(resp *AuthPacket, nonceHex string) bool {
+	if !webPasskey.Enabled {
+		return true // passkey not requested; continue as guest
+	}
+	fmt.Printf("🔑 Đang chờ passkey cho role [%s]...\n", webPasskey.Role)
+	resp.Role = webPasskey.Role
+	a, ok := requestAssertion(nonceHex, webPasskey.Role)
+	if !ok {
+		fmt.Println("❌ Passkey thất bại/hủy.")
+		return false
+	}
+	resp.PasskeyID = a.PasskeyID
+	resp.PasskeyAuthData = a.AuthData
+	resp.PasskeyClientData = a.ClientData
+	resp.PasskeySig = a.Sig
+	fmt.Println("✅ Passkey đã ký — gửi xác thực...")
+	return true
+}
+
 // requestAssertion hands the nonce + role to the page and blocks briefly for
-// the ceremony result. An empty return means failure/timeout: the caller
-// falls back to a guest login.
+// the ceremony result. ok=false means failure/timeout.
 func requestAssertion(nonceHex, role string) (webauthnAssertion, bool) {
 	fn := js.Global().Get("v2vRequestAssertion")
 	if !fn.Truthy() {
