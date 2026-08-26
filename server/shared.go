@@ -69,6 +69,11 @@ type AuthPacket struct {
 	// IdentityPub is set server-side on successful ed25519 logins (not
 	// serialized) to track concurrent use of the same identity.
 	IdentityPub string `json:"-"`
+
+	// AuthType/Perms ride along in auth_success so clients can render
+	// /whoami without extra round-trips.
+	AuthType string      `json:"auth_type,omitempty"`
+	Perms    *Permission `json:"perms,omitempty"`
 }
 
 type NonceMeta struct {

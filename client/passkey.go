@@ -34,6 +34,13 @@ type webauthnAssertion struct {
 
 func timeNowRFC3339() string { return time.Now().Format(time.RFC3339) }
 
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
+}
+
 func pad32(b []byte) []byte {
 	if len(b) >= 32 {
 		return b
