@@ -13,6 +13,9 @@ import (
 type Identity struct {
 	PublicKey  string `json:"public_key"`
 	HmacShield string `json:"hmac_shield"`
+	// Host optionally pins this identity to one deployment hostname;
+	// enforced before signature verification when set.
+	Host string `json:"host,omitempty"`
 }
 
 // PasskeyIdentity is a WebAuthn credential accepted for a role. Only public

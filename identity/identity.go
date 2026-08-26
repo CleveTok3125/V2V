@@ -26,6 +26,9 @@ type Ed25519Identity struct {
 	Role       string `json:"role"`
 	PrivateKey string `json:"private_key"` // hex-encoded seed
 	HmacShield string `json:"hmac_shield"` // hex-encoded
+	// Host pins the identity to one deployment hostname (anti-phishing /
+	// anti-cross-deployment reuse). Empty means unbound (legacy behavior).
+	Host string `json:"host,omitempty"`
 }
 
 // PasskeyIdentity is the private half of a software passkey. The COSE public
