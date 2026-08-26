@@ -9,6 +9,7 @@ Hệ thống chat ẩn danh WebSocket thời gian thực, hiệu năng cao, đư
 
 * **Nhanh và nhẹ:** Triển khai thuần Go sử dụng `gorilla/websocket` cho giao tiếp hai chiều thời gian thực.
 * **Xác thực bất đối xứng (không cần mật khẩu):** Sử dụng Ed25519 và HMAC theo cơ chế Challenge-Response. Cho phép Admin/Mod đăng nhập an toàn mà không cần truyền private key qua mạng, ngăn chặn hiệu quả các tấn công Replay và MITM. 
+* **WebAuthn Passkey thật (Web):** Thành viên đăng nhập từ bất kỳ trình duyệt nào bằng platform passkey (Touch ID / Windows Hello / password manager) — private key không bao giờ rời thiết bị. Link enroll do admin phát.
 * **Ẩn danh an toàn:** Người dùng mặc định là ẩn danh. Tên hiển thị tự động được gắn thêm một đoạn hash ngắn từ địa chỉ IP (ví dụ: `Anonymous#1a2b`), giúp phân biệt người dùng mà không lộ IP thật. Bây giờ người dùng có thêm quyền lựa chọn hệ thống xác thực tripcode.
 * **Chống spam và lạm dụng:**
     * Giới hạn số lượng kết nối tối đa theo địa chỉ IP.
@@ -77,6 +78,49 @@ Client chạy trực tiếp trong terminal của bạn.
 #### Lệnh trong phòng chat
 
 Sau khi kết nối, gõ `/help` để xem hướng dẫn sử dụng.
+
+#### Danh tính có xác thực (key file & passkey)
+
+Ngoài truy cập khách, server chấp nhận hai loại danh tính đặc quyền — cả hai
+được lưu trong một container `key.json` (1 slot ed25519 + 1 slot passkey mềm):
+
+| Loại           | Tạo bằng                                        | Chứng minh đăng nhập                        |
+| -------------- | ----------------------------------------------- | ------------------------------------------- |
+| `ed25519`      | `v2v-admin keygen --type ed25519`                | Chữ ký Ed25519 lên handshake                |
+| Passkey mềm    | `v2v-admin keygen --type passkey` (dev bonus)    | Assertion ES256 theo wire format WebAuthn   |
+
+**Đăng nhập:**
+
+```bash
+./client -s wss://chat.example.com -u "TênCủaBạn" -k key.json
+```
+
+Nếu container có cả 2 slot, client sẽ hỏi chọn. Bất kỳ lỗi xác thực nào cũng
+kết thúc phiên thay vì rơi xuống khách.
+
+**Chống phishing:** mọi danh tính đặc quyền đều gắn với hostname của
+deployment — chữ ký ed25519 bao phủ host một cách tường minh, còn passkey thật
+được pin bằng RP ID/origin — nên không thể tái sử dụng danh tính trên server khác.
+
+**Lệnh trong phiên:** `/whoami` xem danh tính + quyền; `/status` xem kết nối
+và phiên bản client.
+
+**Web** đăng nhập bằng **passkey thật** (popup password manager). Kênh cấp:
+admin phát link one-time trên host server:
+
+```bash
+./v2v-admin enroll --role member --label bob-laptop
+```
+
+Member mở link trong 10 phút bằng bất kỳ browser nào để hoàn tất popup ceremony.
+
+Yêu cầu biến môi trường phía server (xem `.env.example` / `template/.env`):
+
+| Biến              | Ví dụ                       | Công dụng                              |
+| ----------------- | --------------------------- | -------------------------------------- |
+| `WEBAUTHN_RPID`   | `chat.example.com`         | Domain gắn với credential              |
+| `WEBAUTHN_ORIGIN` | `https://chat.example.com` | Origin kiểm tra ở mỗi lần ceremony     |
+| `WEBAUTHN_STORE`  | `./data/webauthn.json`      | Nơi lưu ticket + credential (server)   |
 
 ---
 
@@ -151,7 +195,7 @@ Hệ thống cấp quyền đặc biệt thông qua khóa mã hóa thay vì mậ
 
 1. **Tạo cặp khóa:** Chạy client với flag `-g` để tạo cặp khóa bảo mật.
     ```bash
-    ./client -g
+    ./v2v-admin keygen
     ```
     *Lệnh này sẽ tạo ra `key.json` (Private Key — hãy giữ cẩn thận) và `roles.json` (cấu hình Public Key).*
 

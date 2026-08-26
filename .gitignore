@@ -54,3 +54,6 @@ webterm/version.js
 # Precompressed wasm bundle variants
 webterm/app.wasm.gz
 webterm/app.wasm.br
+
+# Build Artifacts
+v2v-admin
