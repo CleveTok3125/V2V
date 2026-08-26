@@ -1,7 +1,9 @@
 FROM golang:1.25-alpine AS builder
 WORKDIR /build
+# Dependencies are vendored into the repo, so no module downloads (or
+# working DNS) are needed during the image build.
 COPY go.mod go.sum ./
-RUN go mod download
+COPY vendor ./vendor
 COPY . .
 # Version is stamped on the host where .git lives and passed in as a build
 # arg (see docker-compose.yml); build_web.sh falls back to a unique dev
