@@ -9,6 +9,7 @@ A high-performance, real-time anonymous chat system built entirely in Go. It fea
 
 * **Lightning Fast and Lightweight:** Pure Go implementation utilizing `gorilla/websocket` for real-time bidirectional communication.
 * **Asymmetric Authentication (Passwordless):** Uses Ed25519 and HMAC for a Challenge-Response authentication mechanism. This allows Admins/Mods to log in securely without sending private keys over the network, effectively preventing Replay and MITM attacks.
+* **Real WebAuthn Passkeys (Web):** Members can log in from any browser using platform passkeys (Touch ID / Windows Hello / password managers) — private keys never leave the device. Enrollment links are issued by the server admin.
 * **Secure Anonymity:** Users are anonymous by default. Display names are automatically appended with a short hash of the user's IP address (e.g., `Anonymous#1a2b`), making it easy to distinguish users without exposing real IP addresses. Now users can choose tripcode identity system.
 * **Anti-Spam and Abuse Protection:**
     * Maximum connection limits per IP address.
@@ -105,23 +106,30 @@ If the container holds both flavors you'll be asked which one to use.
 Any authentication failure exits the client instead of degrading to a
 guest session.
 
+**Anti-phishing:** privileged identities are bound to the deployment
+hostname — ed25519 signatures explicitly cover it, and real passkeys are
+pinned by RP ID/origin — so an identity cannot be replayed against a
+different server.
+
 **In-session commands:** `/whoami` shows your identity, role and
 permissions; `/status` shows connection info and the client version.
 
 **Web clients** log in through real platform passkeys (password-manager
-popup). Enrollment is admin-issued: run this on the server host to print a
-one-time link valid for 10 minutes, then hand it to the member:
+popup). Enrollment is admin-issued: on the server host, run
 
 ```bash
-./server.bin -enroll --role member --label bob-laptop
+./v2v-admin enroll --role member --label bob-laptop
 ```
+
+then hand the printed one-time link (valid for 10 minutes) to the member,
+who completes the popup ceremony from any browser.
 
 Requires these environment variables on the server (see `.env.example`):
 
 | Variable          | Example                      | Purpose                                    |
 | ----------------- | ---------------------------- | ------------------------------------------ |
-| `WEBAUTHN_RPID`   | `chat.elsutm.io.vn`          | Domain credentials are bound to            |
-| `WEBAUTHN_ORIGIN` | `https://chat.elsutm.io.vn`  | Origin checked during every ceremony       |
+| `WEBAUTHN_RPID`   | `chat.example.com`          | Domain credentials are bound to            |
+| `WEBAUTHN_ORIGIN` | `https://chat.example.com`  | Origin checked during every ceremony       |
 | `WEBAUTHN_STORE`  | `./data/webauthn.json`       | Ticket + credential store (server-managed) |
 
 ---
@@ -194,19 +202,27 @@ Before starting the server, you need to configure your environment variables:
 
 #### Role-Based Authentication (Admins/Mods)
 
-The system allows special privileges through cryptographic keys rather than passwords.
+The system allows special privileges through cryptographic identities rather
+than passwords. Identities are created with the **`v2v-admin`** management
+tool (build once from source: `go build -o v2v-admin ./cmd/v2v-admin`).
 
-1. **Generate Keys:** Run the client with the `-g` flag to generate a secure key pair.
+1. **Create an identity** — pick a flavor:
 
     ```bash
-    ./client -g
+    # classic ed25519 key file (signs the handshake nonce)
+    ./v2v-admin keygen --role admin --type ed25519 --unlimited --prefix "[Admin] "
 
+    # software passkey (WebAuthn wire format, signed natively at login)
+    ./v2v-admin keygen --role admin --type passkey \
+        --rpid chat.example.com --origin https://chat.example.com
     ```
 
-    *This will generate `key.json` (Private Key - keep this safe) and `roles.json` (Public Key configuration).*
+    *Both write the private material into `key.json` (keep it safe). The
+    ed25519 flavor also prints a `roles.json` snippet; the passkey flavor can
+    merge its public entry locally with `--merge-roles`.*
 
 2. **Setup Server:** Place the generated `roles.json` file in the `./` directory on your server so it can verify your identity.
-3. **Login:** Connect to the server using your private key file:
+3. **Login:** Connect to the server using your private identity file:
 
     ```bash
     ./client -s ws://localhost:8080 -u "AdminName" -k /path/to/your/key.json

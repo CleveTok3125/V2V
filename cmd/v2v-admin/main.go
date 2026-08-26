@@ -11,7 +11,6 @@ package main
 // the WEBAUTHN_STORE. No network, no daemon.
 
 import (
-	"bufio"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
@@ -35,11 +34,11 @@ type CLI struct {
 }
 
 type KeygenCmd struct {
-	Role       string `help:"Role gắn với danh tính" default:"admin"`
-	Type       string `help:"Loại danh tính" enum:"ed25519,passkey" default:"ed25519"`
+	Role       string `help:"Role gắn với danh tính (hỏi nếu bỏ trống)"`
+	Type       string `help:"Loại danh tính: ed25519 | passkey (hỏi nếu bỏ trống)"`
 	Out        string `help:"Nơi ghi container" default:"key.json"`
 	Unlimited  bool   `help:"(ed25519) quyền chat không giới hạn"`
-	Prefix     string `help:"(ed25519) prefix hiển thị" default:"[Member] "`
+	Prefix     string `help:"(ed25519) prefix hiển thị"`
 	RPID       string `help:"(passkey) RP ID; fallback env WEBAUTHN_RPID"`
 	Origin     string `help:"(passkey) Origin; fallback env WEBAUTHN_ORIGIN"`
 	MergeRoles bool   `help:"Ghép entry vào ./roles.json (mặc định chỉ in snippet)"`
@@ -64,15 +63,18 @@ func main() {
 	ctx.FatalIfErrorf(ctx.Run())
 }
 
-func isTTY() bool {
+// isInteractive reports whether stdin is a terminal worth prompting on.
+func isInteractive() bool {
 	st, err := os.Stdin.Stat()
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-func prompt(reader *bufio.Reader, msg string) string {
-	fmt.Print(msg)
-	line, _ := reader.ReadString('\n')
-	return strings.TrimSpace(line)
+func ask(reader *bufio.Reader, msg, def string) string {
+	line := prompt(reader, msg+" ["+def+"]: ")
+	if line == "" {
+		return def
+	}
+	return line
 }
 
 func loadIdentityContainer(path string) (*identity.IdentityFile, error) {
@@ -107,25 +109,50 @@ func mergePasskeyCredential(path, role, credID, coseB64 string) error {
 }
 
 func (k *KeygenCmd) Run() error {
+	interactive := isInteractive()
+	reader := bufio.NewReader(os.Stdin)
+
+	if k.Role == "" {
+		if !interactive {
+			k.Role = "admin"
+		} else {
+			k.Role = ask(reader, "Role", "admin")
+		}
+	}
+	if k.Type == "" {
+		if !interactive {
+			k.Type = "ed25519"
+		} else {
+			for k.Type != "ed25519" && k.Type != "passkey" {
+				k.Type = prompt(reader, "Loại danh tính — ed25519 | passkey", "ed25519")
+			}
+		}
+	}
+	switch k.Type {
+	case "ed25519":
+	default:
+		k.Type = "ed25519"
+	}
+
 	rpid, origin := k.RPID, k.Origin
-	if k.Type == "passkey" {
+	if k.Type == "passkey" && (rpid == "" || origin == "") {
+		envR, envO := os.Getenv("WEBAUTHN_RPID"), os.Getenv("WEBAUTHN_ORIGIN")
 		if rpid == "" {
-			rpid = os.Getenv("WEBAUTHN_RPID")
+			rpid = envR
 		}
 		if origin == "" {
-			origin = os.Getenv("WEBAUTHN_ORIGIN")
+			origin = envO
 		}
-		if isTTY() && (rpid == "" || origin == "") {
-			reader := bufio.NewReader(os.Stdin)
+		if (rpid == "" || origin == "") && interactive {
 			if rpid == "" {
-				rpid = prompt(reader, "RP ID (vd: chat.example.com): ")
+				rpid = prompt(reader, "RP ID (vd: chat.example.com)", "")
 			}
 			if origin == "" {
-				origin = prompt(reader, "Origin (vd: https://chat.example.com): ")
+				origin = prompt(reader, "Origin (vd: https://chat.example.com)", "")
 			}
 		}
 		if rpid == "" || origin == "" {
-			return errors.New("passkey cần --rpid và --origin (hoặc env WEBAUTHN_RPID/ORIGIN)")
+			return errors.New("--type passkey cần --rpid và --origin (hoặc env WEBAUTHN_RPID/WEBAUTHN_ORIGIN)")
 		}
 	}
 
@@ -133,6 +160,9 @@ func (k *KeygenCmd) Run() error {
 	var edPubHex string
 	switch k.Type {
 	case "ed25519":
+		if k.Prefix == "" {
+			k.Prefix = "[Member] "
+		}
 		pub, priv, err := ed25519.GenerateKey(rand.Reader)
 		if err != nil {
 			return err

@@ -35,8 +35,8 @@ const (
 )
 
 type webauthnConfig struct {
-	RPID    string // e.g. "elsutm.io.vn"
-	Origin  string // e.g. "https://chat.elsutm.io.vn"
+	RPID    string // e.g. "example.com"
+	Origin  string // e.g. "https://chat.example.com"
 	Enabled bool
 }
 
