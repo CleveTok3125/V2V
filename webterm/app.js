@@ -327,6 +327,19 @@
       showJoin: showJoinToggle.checked,
     };
 
+    if (usePasskey) {
+      var pkRole = passkeyRoleInput.value.trim();
+      if (!pkRole) {
+        // A passkey login without a role cannot be honored; fail fast here
+        // instead of letting the client fall back to a guest session.
+        setStatus("Nhập role cho đăng nhập bằng Passkey.", true);
+        connectBtn.disabled = false;
+        return;
+      }
+      window.v2vConfig.passkey = true;
+      window.v2vConfig.passkeyRole = pkRole;
+    }
+
     panel.style.display = "none";
     wrap.style.display = "block";
     bootWasm();

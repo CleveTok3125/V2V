@@ -36,9 +36,6 @@ var CLI struct {
 
 	KeyFile string `help:"Đường dẫn file chứa khóa xác thực" short:"k"`
 	GenKey  bool   `help:"Tạo identity mới (key file hoặc passkey mềm) và in cấu hình cho Server" short:"g"`
-
-	Passkey bool   `help:"Đăng nhập bằng WebAuthn passkey (web)" `
-	Role    string `help:"Role cần yêu cầu khi dùng passkey"`
 }
 
 type AuthPacket struct {
@@ -357,63 +354,62 @@ func main() {
 	if CLI.KeyFile != "" {
 		idf, lerr := LoadIdentityFile(CLI.KeyFile)
 		if lerr != nil {
-			fmt.Printf("⚠️ %v. Sẽ đăng nhập với quyền khách.\n", lerr)
-		} else {
-			useEd25519, usePasskey := pickIdentity(idf)
-			switch {
-			case usePasskey:
-				pk := idf.Passkey
-				respPacket.Role = pk.Role
-				if credID, ad, cd, sig, aerr := pk.BuildAssertion(challenge.Nonce); aerr == nil {
-					respPacket.PasskeyID = credID
-					respPacket.PasskeyAuthData = ad
-					respPacket.PasskeyClientData = cd
-					respPacket.PasskeySig = sig
-					_ = idf.Save(CLI.KeyFile) // persist the incremented sign counter
-					fmt.Printf("🔑 Đang yêu cầu cấp quyền bằng passkey: [%s]...\n", pk.Role)
-				} else {
-					fmt.Printf("⚠️ Passkey lỗi (%v). Sẽ đăng nhập với quyền khách.\n", aerr)
-				}
-			case useEd25519:
-				id := idf.Ed25519
-				respPacket.Role = id.Role
-				privBytes, err := hex.DecodeString(id.PrivateKey)
-				if err == nil && len(privBytes) == ed25519.PrivateKeySize {
-					priv := ed25519.PrivateKey(privBytes)
-
-					dataToSign := challenge.Nonce + "|" + id.Role + "|" + respPacket.Username
-					sig := ed25519.Sign(priv, []byte(dataToSign))
-					respPacket.Signature = hex.EncodeToString(sig)
-
-					h := hmac.New(sha512.New, []byte(id.HmacShield))
-					h.Write(sig)
-					h.Write([]byte(challenge.Nonce))
-					respPacket.Hmac = hex.EncodeToString(h.Sum(nil))
-
-					fmt.Printf("🔑 Đang yêu cầu cấp quyền: [%s]...\n", id.Role)
-				} else {
-					fmt.Println("⚠️ Private Key trong file không hợp lệ (Phải là chuỗi Hex 128 ký tự).")
-				}
-			default:
-				fmt.Println("⚠️ key.json không chứa danh tính nào. Sẽ đăng nhập với quyền khách.")
-			}
+			fmt.Printf("❌ %v\n", lerr)
+			notifyQuit()
+			return
 		}
-	}
+		useEd25519, usePasskey := pickIdentity(idf)
+		switch {
+		case usePasskey:
+			pk := idf.Passkey
+			respPacket.Role = pk.Role
+			credID, ad, cd, sig, aerr := pk.BuildAssertion(challenge.Nonce)
+			if aerr != nil {
+				fmt.Printf("❌ Passkey lỗi: %v\n", aerr)
+				notifyQuit()
+				return
+			}
+			respPacket.PasskeyID = credID
+			respPacket.PasskeyAuthData = ad
+			respPacket.PasskeyClientData = cd
+			respPacket.PasskeySig = sig
+			_ = idf.Save(CLI.KeyFile) // persist the incremented sign counter
+			fmt.Printf("🔑 Đang yêu cầu cấp quyền bằng passkey: [%s]...\n", pk.Role)
+		case useEd25519:
+			id := idf.Ed25519
+			respPacket.Role = id.Role
+			privBytes, err := hex.DecodeString(id.PrivateKey)
+			if err != nil || len(privBytes) != ed25519.PrivateKeySize {
+				fmt.Println("❌ Private Key trong file không hợp lệ (Phải là chuỗi Hex 128 ký tự).")
+				notifyQuit()
+				return
+			}
 
-	// WebAuthn passkey login (web build): hand the handshake nonce to the
-	// page, let the browser ceremony sign it, and attach the assertion.
-	if CLI.Passkey {
-		fmt.Printf("🔑 Đang chờ passkey cho role [%s]...\n", CLI.Role)
-		respPacket.Role = CLI.Role
-		if a, ok := requestAssertion(challenge.Nonce, CLI.Role); ok {
-			respPacket.PasskeyID = a.PasskeyID
-			respPacket.PasskeyAuthData = a.AuthData
-			respPacket.PasskeyClientData = a.ClientData
-			respPacket.PasskeySig = a.Sig
-			fmt.Println("✅ Passkey đã ký — gửi xác thực...")
-		} else {
-			fmt.Println("⚠️ Passkey thất bại/hủy — sẽ đăng nhập với quyền khách.")
-			respPacket.Role = ""
+			priv := ed25519.PrivateKey(privBytes)
+
+			dataToSign := challenge.Nonce + "|" + id.Role + "|" + respPacket.Username
+			sig := ed25519.Sign(priv, []byte(dataToSign))
+			respPacket.Signature = hex.EncodeToString(sig)
+
+			h := hmac.New(sha512.New, []byte(id.HmacShield))
+			h.Write(sig)
+			h.Write([]byte(challenge.Nonce))
+			respPacket.Hmac = hex.EncodeToString(h.Sum(nil))
+
+			fmt.Printf("🔑 Đang yêu cầu cấp quyền: [%s]...\n", id.Role)
+		default:
+			fmt.Println("❌ key.json không chứa danh tính nào.")
+			notifyQuit()
+			return
+		}
+	} else {
+		// WebAuthn passkey login (web build only): the page's browser
+		// ceremony signs the nonce and fills the packet. A failure here is
+		// fatal — the user asked for authenticated login and gets no silent
+		// guest fallback.
+		if !applyWebPasskey(&respPacket, challenge.Nonce) {
+			notifyQuit()
+			return
 		}
 	}
 
