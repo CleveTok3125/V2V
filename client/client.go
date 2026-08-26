@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"crypto/ed25519"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
@@ -35,7 +33,6 @@ var CLI struct {
 	ShowJoin  bool             `help:"Hiện thông báo người dùng ra/vào phòng" short:"j"`
 
 	KeyFile string `help:"Đường dẫn file chứa khóa xác thực" short:"k"`
-	GenKey  bool   `help:"Tạo identity mới (key file hoặc passkey mềm) và in cấu hình cho Server" short:"g"`
 }
 
 type AuthPacket struct {
@@ -169,155 +166,8 @@ func checkServerInfo(input string) {
 	fmt.Println("\n" + string(body))
 }
 
-// keyFilePath is the local identity container shared by both flavors.
-const keyFilePath = "key.json"
-
-// rolesFilePath is where the generator merges role entries for the server.
-const rolesFilePath = "roles.json"
-
-// generateKeyInteractive creates a new role identity. Two flavors share the
-// same flow, mirroring how roles.json accepts both: a classic ed25519 key
-// file, or a software passkey in WebAuthn wire format. Each flavor owns one
-// slot inside key.json — regenerating replaces its own slot and keeps the
-// sibling intact.
-func generateKeyInteractive() {
-	reader := bufio.NewReader(os.Stdin)
-
-	fmt.Print("Nhập tên role (Mặc định: admin): ")
-	role, _ := reader.ReadString('\n')
-	role = strings.TrimSpace(role)
-	if role == "" {
-		role = "admin"
-	}
-
-	fmt.Print("Loại danh tính — [1] key file ed25519 (mặc định)  [2] passkey mềm: ")
-	kind, _ := reader.ReadString('\n')
-
-	idf, err := LoadIdentityFile(keyFilePath)
-	if err != nil && !os.IsNotExist(err) {
-		// Unparseable container: refuse instead of destroying sibling slots.
-		fmt.Println("❌", err)
-		return
-	}
-	if idf == nil {
-		idf = &IdentityFile{}
-	}
-
-	if strings.TrimSpace(kind) == "2" {
-		generatePasskeySlot(reader, idf, role)
-	} else {
-		generateEd25519Slot(reader, idf, role)
-	}
-
-	if err := idf.Save(keyFilePath); err != nil {
-		fmt.Println("❌ Lỗi lưu file key.json:", err)
-		return
-	}
-	fmt.Println("\nĐã lưu: ./key.json (GIỮ BÍ MẬT FILE NÀY!)")
-}
-
-// generateEd25519Slot creates the classic key-file identity.
-func generateEd25519Slot(reader *bufio.Reader, idf *IdentityFile, role string) {
-	fmt.Printf("%s này có quyền chat không giới hạn? (Y/n) ", role)
-	unlimitedStr, _ := reader.ReadString('\n')
-	unlimitedStr = strings.TrimSpace(strings.ToLower(unlimitedStr))
-	unlimited := true
-	if unlimitedStr == "n" {
-		unlimited = false
-	}
-
-	fmt.Print("Nhập Prefix hiển thị (Mặc định: \"[Admin] \"): ")
-	prefix, _ := reader.ReadString('\n')
-	prefix = strings.TrimSuffix(strings.TrimSuffix(prefix, "\n"), "\r")
-	if prefix == "" {
-		prefix = "[Admin] "
-	}
-
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		fmt.Println("❌ Lỗi sinh khóa:", err)
-		return
-	}
-
-	hmacBytes := make([]byte, 16)
-	rand.Read(hmacBytes)
-	hmacShield := hex.EncodeToString(hmacBytes)
-
-	idf.Ed25519 = &Ed25519Identity{
-		Role:       role,
-		PrivateKey: hex.EncodeToString(priv),
-		HmacShield: hmacShield,
-	}
-
-	err = mergeRolesFile(rolesFilePath, role, func(entry map[string]any) {
-		entry["identities"] = []map[string]string{
-			{
-				"public_key":  hex.EncodeToString(pub),
-				"hmac_shield": hmacShield,
-			},
-		}
-		entry["can_message_unlimited"] = unlimited
-		entry["custom_prefix"] = prefix
-	})
-	if err != nil {
-		fmt.Println("❌", err)
-		return
-	}
-	fmt.Println("Đã cập nhật ./roles.json")
-}
-
-// generatePasskeySlot creates the software passkey identity.
-func generatePasskeySlot(reader *bufio.Reader, idf *IdentityFile, role string) {
-	rpid := os.Getenv("WEBAUTHN_RPID")
-	origin := os.Getenv("WEBAUTHN_ORIGIN")
-	if rpid == "" {
-		fmt.Print("WEBAUTHN_RPID chưa đặt — nhập RP ID (vd: chat.example.com): ")
-		line, _ := reader.ReadString('\n')
-		rpid = strings.TrimSpace(line)
-	}
-	if origin == "" {
-		fmt.Print("WEBAUTHN_ORIGIN chưa đặt — nhập Origin (vd: https://chat.example.com): ")
-		line, _ := reader.ReadString('\n')
-		origin = strings.TrimSpace(line)
-	}
-
-	pk, err := GeneratePasskey(role, rpid, origin)
-	if err != nil {
-		fmt.Println("❌ Lỗi sinh passkey:", err)
-		return
-	}
-
-	idf.Passkey = pk
-
-	err = mergeRolesFile(rolesFilePath, role, func(entry map[string]any) {
-		newEntry := map[string]any{
-			"credential_id": pk.CredentialID,
-			"public_key":    pk.PublicKey,
-			"added_at":      timeNowRFC3339(),
-		}
-		list, _ := entry["passkeys"].([]any)
-		for i, raw := range list {
-			if ex, _ := raw.(map[string]any); ex != nil && ex["credential_id"] == pk.CredentialID {
-				list[i] = newEntry
-				return
-			}
-		}
-		entry["passkeys"] = append(list, newEntry)
-	})
-	if err != nil {
-		fmt.Println("❌", err)
-		return
-	}
-	fmt.Println("Đã cập nhật ./roles.json")
-}
-
 func main() {
 	parseFlags()
-
-	if CLI.GenKey {
-		generateKeyInteractive()
-		return
-	}
 
 	if CLI.Info {
 		checkServerInfo(CLI.Server)
