@@ -11,6 +11,7 @@ package main
 // the WEBAUTHN_STORE. No network, no daemon.
 
 import (
+	"bufio"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
@@ -69,6 +70,12 @@ func isInteractive() bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
+func prompt(reader *bufio.Reader, msg string) string {
+	fmt.Print(msg + ": ")
+	line, _ := reader.ReadString('\n')
+	return strings.TrimSpace(line)
+}
+
 func ask(reader *bufio.Reader, msg, def string) string {
 	line := prompt(reader, msg+" ["+def+"]: ")
 	if line == "" {
@@ -124,7 +131,7 @@ func (k *KeygenCmd) Run() error {
 			k.Type = "ed25519"
 		} else {
 			for k.Type != "ed25519" && k.Type != "passkey" {
-				k.Type = prompt(reader, "Loại danh tính — ed25519 | passkey", "ed25519")
+				k.Type = ask(reader, "Loại danh tính — ed25519 | passkey", "ed25519")
 			}
 		}
 	}
@@ -145,10 +152,10 @@ func (k *KeygenCmd) Run() error {
 		}
 		if (rpid == "" || origin == "") && interactive {
 			if rpid == "" {
-				rpid = prompt(reader, "RP ID (vd: chat.example.com)", "")
+				rpid = prompt(reader, "RP ID (vd: chat.example.com)")
 			}
 			if origin == "" {
-				origin = prompt(reader, "Origin (vd: https://chat.example.com)", "")
+				origin = prompt(reader, "Origin (vd: https://chat.example.com)")
 			}
 		}
 		if rpid == "" || origin == "" {
