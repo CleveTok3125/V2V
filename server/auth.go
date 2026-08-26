@@ -79,11 +79,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP string) (Permissi
 		log.Printf("⚠️ [AUTH FAIL] %s: Nonce đã hết hạn.", clientIP)
 		return perms, resp, fmt.Errorf("auth_error: expired_nonce")
 	}
-
-	// Pair-mode nonces come from /pair/new (desktop login): the assertion is
-	// produced by a browser that may live on another device, so the strict
-	// IP binding of regular handshakes does not apply.
-	if !meta.PairMode && meta.IP != clientIP {
+	if meta.IP != clientIP {
 		log.Printf("🚨 [SECURITY BREACH] %s đang cố sử dụng Nonce được cấp cho IP %s! (Dấu hiệu cướp Token/MITM).", clientIP, meta.IP)
 		return perms, resp, fmt.Errorf("auth_error: ip_mismatch")
 	}
