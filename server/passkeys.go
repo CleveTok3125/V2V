@@ -71,42 +71,43 @@ type clientData struct {
 
 // verifyAssertion validates one login assertion against a stored credential:
 // challenge binding, origin, rpIdHash, user-present flag and the signature.
-func verifyAssertion(pubKeyCOSE []byte, nonceHex string, authDataB64, clientDataB64, sigB64 string) error {
+func verifyAssertion(pubKeyCOSE []byte, nonceHex string, authDataB64, clientDataB64, sigB64 string) (uint32, error) {
 	rawAuth, err := base64.RawURLEncoding.DecodeString(authDataB64)
 	if err != nil || len(rawAuth) < 37 {
-		return perr("authenticator_data_malformed")
+		return 0, perr("authenticator_data_malformed")
 	}
 	rawCD, err := base64.RawURLEncoding.DecodeString(clientDataB64)
 	if err != nil {
-		return perr("client_data_malformed")
+		return 0, perr("client_data_malformed")
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(sigB64)
 	if err != nil {
-		return perr("signature_malformed")
+		return 0, perr("signature_malformed")
 	}
+	counter := uint32(rawAuth[33])<<24 | uint32(rawAuth[34])<<16 | uint32(rawAuth[35])<<8 | uint32(rawAuth[36])
 
 	var cd clientData
 	if err := json.Unmarshal(rawCD, &cd); err != nil {
-		return perr("client_data_invalid_json")
+		return 0, perr("client_data_invalid_json")
 	}
 	if cd.Type != "webauthn.get" {
-		return perr("client_data_wrong_type")
+		return 0, perr("client_data_wrong_type")
 	}
 	wantChallenge := ChallengeFromNonce(nonceHex)
 	gotChallenge, err := base64.RawURLEncoding.DecodeString(cd.Challenge)
 	if err != nil || !bytes.Equal(gotChallenge, wantChallenge) {
-		return perr("challenge_mismatch")
+		return counter, perr("challenge_mismatch")
 	}
 	if subtle.ConstantTimeCompare([]byte(cd.Origin), []byte(WAConfig.Origin)) != 1 {
-		return perr("origin_mismatch")
+		return counter, perr("origin_mismatch")
 	}
 
 	rpIDHash := sha256.Sum256([]byte(WAConfig.RPID))
 	if !bytes.Equal(rawAuth[:32], rpIDHash[:]) {
-		return perr("rp_id_hash_mismatch")
+		return counter, perr("rp_id_hash_mismatch")
 	}
 	if rawAuth[32]&authDataFlagUP == 0 {
-		return perr("user_not_present")
+		return counter, perr("user_not_present")
 	}
 
 	cdHash := sha256.Sum256(rawCD)
@@ -115,21 +116,108 @@ func verifyAssertion(pubKeyCOSE []byte, nonceHex string, authDataB64, clientData
 
 	pub, alg, err := parseCOSEKey(pubKeyCOSE)
 	if err != nil {
-		return err
+		return counter, err
 	}
 	switch k := pub.(type) {
 	case *ecdsa.PublicKey:
 		if alg != coseAlgES256 || !ecdsa.VerifyASN1(k, digest[:], sig) {
-			return perr("signature_invalid")
+			return counter, perr("signature_invalid")
 		}
 	case *rsa.PublicKey:
 		if alg != coseAlgRS256 || rsa.VerifyPKCS1v15(k, crypto.SHA256, digest[:], sig) != nil {
-			return perr("signature_invalid")
+			return counter, perr("signature_invalid")
 		}
 	default:
-		return perr("unsupported_key_type")
+		return counter, perr("unsupported_key_type")
 	}
-	return nil
+	return counter, nil
+}
+
+// ParsedCreation carries the pieces the server must persist from a
+// registration ceremony.
+type ParsedCreation struct {
+	CredentialID string // base64url
+	PublicKey    []byte // COSE_Key CBOR
+	Counter      uint32
+}
+
+// parseCreationForImport validates a browser-side registration ceremony and
+// extracts the credential to import: clientDataJSON type/challenge/origin,
+// rpIdHash, user-present + attested-credential-data flags, then splits out
+// credential ID and COSE public key from the attested data section.
+// Attestation statements are ignored (attestation:"none").
+func parseCreationForImport(clientDataB64, attObjB64, wantChallengeB64 string) (*ParsedCreation, error) {
+	rawCD, err := base64.RawURLEncoding.DecodeString(clientDataB64)
+	if err != nil {
+		return nil, perr("client_data_malformed")
+	}
+	var cd clientData
+	if err := json.Unmarshal(rawCD, &cd); err != nil {
+		return nil, perr("client_data_invalid_json")
+	}
+	if cd.Type != "webauthn.create" {
+		return nil, perr("client_data_wrong_type")
+	}
+	gotChal, err := base64.RawURLEncoding.DecodeString(cd.Challenge)
+	wantChal, err2 := base64.RawURLEncoding.DecodeString(wantChallengeB64)
+	if err != nil || err2 != nil || !bytes.Equal(gotChal, wantChal) {
+		return nil, perr("challenge_mismatch")
+	}
+	if subtle.ConstantTimeCompare([]byte(cd.Origin), []byte(WAConfig.Origin)) != 1 {
+		return nil, perr("origin_mismatch")
+	}
+
+	rawAtt, err := base64.RawURLEncoding.DecodeString(attObjB64)
+	if err != nil {
+		return nil, perr("attestation_malformed")
+	}
+	var obj map[int]any
+	if err := cbor.Unmarshal(rawAtt, &obj); err != nil {
+		return nil, perr("attestation_invalid_cbor")
+	}
+	authData, _ := obj[2].([]byte)
+	if len(authData) < 55 { // 32 rpId + 1 flags + 4 counter + 16 aaguid + 2 len
+		return nil, perr("authenticator_data_malformed")
+	}
+	rpIDHash := sha256.Sum256([]byte(WAConfig.RPID))
+	if !bytes.Equal(authData[:32], rpIDHash[:]) {
+		return nil, perr("rp_id_hash_mismatch")
+	}
+	const flagUP = 0x01
+	const flagAT = 0x40
+	if authData[32]&flagUP == 0 {
+		return nil, perr("user_not_present")
+	}
+	if authData[32]&flagAT == 0 {
+		return nil, perr("attested_data_missing")
+	}
+	counter := uint32(authData[33])<<24 | uint32(authData[34])<<16 | uint32(authData[35])<<8 | uint32(authData[36])
+	idLen := int(authData[53])<<8 | int(authData[54])
+	if 55+idLen > len(authData) {
+		return nil, perr("credential_id_out_of_range")
+	}
+	credID := authData[55 : 55+idLen]
+	cose := authData[55+idLen:]
+
+	pub, alg, err := parseCOSEKey(cose)
+	if err != nil {
+		return nil, err
+	}
+	ok := false
+	switch k := pub.(type) {
+	case *ecdsa.PublicKey:
+		ok = alg == coseAlgES256 && k.Curve == elliptic.P256()
+	case *rsa.PublicKey:
+		ok = alg == coseAlgRS256
+	}
+	if !ok {
+		return nil, perr("cose_alg_unsupported")
+	}
+	return &ParsedCreation{
+		CredentialID: base64.RawURLEncoding.EncodeToString(credID),
+		PublicKey:    cose,
+		Counter:      counter,
+	}, nil
 }
 
 // parseCOSEKey decodes a COSE_Key CBOR blob into a usable public key.
