@@ -22,12 +22,14 @@
       <label for="tripcode">Tripcode (tùy chọn)</label>
       <input id="tripcode" type="password" placeholder="Mật khẩu bí mật tạo chữ ký" value="" />
 
+      <label for="passkey-role" id="passkey-role-label" style="display:none">Role</label>
+      <input id="passkey-role" type="text" placeholder="member" style="display:none" />
+
       <label class="check">
         <input id="showjoin" type="checkbox" />
         Hiện thông báo người dùng ra/vào phòng
       </label>
 
-      <input id="passkey-role" placeholder="Role (khi đăng nhập bằng passkey)" style="display:none" />
       <p id="status-line"></p>
       <div style="display:flex;gap:8px">
         <button type="submit" id="connect-btn">Kết nối</button>
