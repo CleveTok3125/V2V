@@ -319,6 +319,18 @@
       setStatus("Lỗi: #terminal không tồn tại trong DOM.", true);
       return null;
     }
+    // Dispose previous terminal to avoid duplicate xterm-owner-* stacking.
+    if (term) {
+      try { term.dispose(); } catch (e) {}
+      term = null;
+    }
+    host.innerHTML = "";
+    // Remove old listeners to avoid duplicate scheduleResize calls.
+    window.removeEventListener("resize", scheduleResize);
+    if (window.visualViewport) {
+      try { window.visualViewport.removeEventListener("resize", scheduleResize); } catch (e) {}
+    }
+    window.removeEventListener("orientationchange", scheduleResize);
 
     term = new Terminal({
       cursorBlink: true,
@@ -338,6 +350,10 @@
     window.addEventListener("orientationchange", scheduleResize);
 
     // Size the grid to the real viewport before any output exists.
+    // Wait for fonts to be ready so measureCell is accurate.
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(function () { resizeTerminal(); });
+    }
     resizeTerminal();
 
     term.onData(function (data) {
