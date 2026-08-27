@@ -25,6 +25,8 @@ import (
 	"os"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/go-webauthn/webauthn/webauthn"
 )
 
 const (
@@ -42,12 +44,33 @@ type webauthnConfig struct {
 
 var WAConfig webauthnConfig
 
+// WebAuth is the global WebAuthn instance used for 100% library-based
+// verification (attestation none, resident key required).
+var WebAuth *webauthn.WebAuthn
+
 func LoadWebauthnEnv() {
 	WAConfig.RPID = os.Getenv("WEBAUTHN_RPID")
 	WAConfig.Origin = os.Getenv("WEBAUTHN_ORIGIN")
 	WAConfig.Enabled = WAConfig.RPID != "" && WAConfig.Origin != ""
 	if !WAConfig.Enabled {
 		fmt.Println("ℹ️ WEBAUTHN_RPID/WEBAUTHN_ORIGIN chưa đặt — đăng nhập bằng passkey đang TẮT")
+		return
+	}
+	var err error
+	WebAuth, err = webauthn.New(&webauthn.Config{
+		RPDisplayName: "V2V",
+		RPID:          WAConfig.RPID,
+		RPOrigins:     []string{WAConfig.Origin},
+		AttestationPreference: protocol.PreferNoAttestation,
+		AuthenticatorSelection: protocol.AuthenticatorSelection{
+			RequireResidentKey: protocol.ResidentKeyRequired(),
+			ResidentKey:        protocol.ResidentKeyRequirementRequired,
+			UserVerification:   protocol.VerificationPreferred,
+		},
+	})
+	if err != nil {
+		fmt.Printf("❌ WebAuthn init failed: %v\n", err)
+		WAConfig.Enabled = false
 	}
 }
 
@@ -173,11 +196,66 @@ func parseCreationForImport(clientDataB64, attObjB64, wantChallengeB64 string) (
 	if err != nil {
 		return nil, perr("attestation_malformed")
 	}
+	// Use permissive CBOR decoding to handle browser variations
+	// (indefinite length, duplicate keys, int vs uint vs string keys).
+	decMode, _ := cbor.DecOptions{
+		DupMapKey:   cbor.DupMapKeyEnforcedAPF,
+		IndefLength: cbor.IndefLengthAllowed,
+		TagsMd:      cbor.TagsAllowed,
+	}.DecMode()
 	var obj map[int]any
-	if err := cbor.Unmarshal(rawAtt, &obj); err != nil {
+	if err := decMode.Unmarshal(rawAtt, &obj); err != nil {
+		// Fallback 1: try string-keyed map
+		var objStr map[string]any
+		if err2 := decMode.Unmarshal(rawAtt, &objStr); err2 == nil {
+			obj = make(map[int]any)
+			for k, v := range objStr {
+				var ik int
+				fmt.Sscanf(k, "%d", &ik)
+				obj[ik] = v
+			}
+		} else {
+			// Fallback 2: generic any-key map with type switches
+			var objAny map[any]any
+			if err3 := decMode.Unmarshal(rawAtt, &objAny); err3 == nil {
+				obj = make(map[int]any)
+				for k, v := range objAny {
+					var ik int
+					switch key := k.(type) {
+					case int:
+						ik = key
+					case int64:
+						ik = int(key)
+					case uint64:
+						ik = int(key)
+					case string:
+						fmt.Sscanf(key, "%d", &ik)
+					default:
+						continue
+					}
+					obj[ik] = v
+				}
+			} else {
+				fmt.Printf("🔍 [PARSE FAIL] attestation CBOR error: %v (rawLen=%d hex=%x…)\n", err, len(rawAtt), rawAtt[:16])
+				return nil, perr("attestation_invalid_cbor")
+			}
+		}
+		if _, ok := obj[2]; !ok {
+			fmt.Printf("🔍 [PARSE FAIL] attestation missing authData after fallback (keys=%v)\n", getMapKeys(obj))
+			return nil, perr("attestation_invalid_cbor")
+		}
+	}
+	authDataVal := obj[2]
+	var authData []byte
+	switch v := authDataVal.(type) {
+	case []byte:
+		authData = v
+	case string:
+		authData = []byte(v)
+	default:
+		fmt.Printf("🔍 [PARSE FAIL] authData not bytes, type %T\n", authDataVal)
 		return nil, perr("attestation_invalid_cbor")
 	}
-	authData, _ := obj[2].([]byte)
 	if len(authData) < 55 { // 32 rpId + 1 flags + 4 counter + 16 aaguid + 2 len
 		return nil, perr("authenticator_data_malformed")
 	}
@@ -279,4 +357,12 @@ func coseInt(v any) (int64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func getMapKeys(m map[int]any) []int {
+	keys := make([]int, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

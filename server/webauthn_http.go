@@ -46,6 +46,8 @@ type algEnt struct {
 }
 
 type authSel struct {
+	RequireResidentKey *bool  `json:"requireResidentKey,omitempty"`
+	ResidentKey        string `json:"residentKey,omitempty"`
 	UserVerification string `json:"userVerification"`
 }
 
@@ -95,6 +97,7 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 	log.Printf("✅ [ENROLL BEGIN] ticket=%s… role=%s challenge=%s…", shortCode(code), role, challenge[:12])
 	userID, _ := randomB64url(16)
 
+	requireResidentKey := true
 	writeJSON(w, creationOptions{
 		PublicKey: creationOptionsPK{
 			Challenge: challenge,
@@ -104,9 +107,13 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 				{Type: "public-key", Alg: -7},   // ES256
 				{Type: "public-key", Alg: -257}, // RS256
 			},
-			AuthenticatorSelection: authSel{UserVerification: "preferred"},
-			Timeout:                int64(enrollChallengeTTL.Seconds() * 1000),
-			Attestation:            "none",
+			AuthenticatorSelection: authSel{
+				RequireResidentKey: &requireResidentKey,
+				ResidentKey:        "required",
+				UserVerification:   "preferred",
+			},
+			Timeout:     int64(enrollChallengeTTL.Seconds() * 1000),
+			Attestation: "none",
 		},
 	})
 	_ = role // role is already bound server-side via the ticket
