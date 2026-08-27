@@ -32,19 +32,24 @@
   var showJoinToggle = document.getElementById("showjoin");
   var passkeyBtn = document.getElementById("passkey-btn");
   var passkeyRoleInput = document.getElementById("passkey-role");
+  var passkeyRoleLabel = document.getElementById("passkey-role-label");
   var usePasskey = false;
 
   if (passkeyBtn) {
     passkeyBtn.addEventListener("click", function () {
-      var hidden = passkeyRoleInput.style.display === "none";
+      var hidden = getComputedStyle(passkeyRoleInput).display === "none";
       if (hidden) {
         passkeyRoleInput.style.display = "block";
+        if (passkeyRoleLabel) passkeyRoleLabel.style.display = "block";
         passkeyRoleInput.focus();
         passkeyBtn.textContent = "🔑 Passkey (đã chọn)";
         usePasskey = true;
       } else {
-        usePasskey = !usePasskey;
-        passkeyBtn.textContent = usePasskey ? "🔑 Passkey (đã chọn)" : "🔑 Passkey";
+        passkeyRoleInput.style.display = "none";
+        if (passkeyRoleLabel) passkeyRoleLabel.style.display = "none";
+        passkeyRoleInput.value = "";
+        passkeyBtn.textContent = "🔑 Passkey";
+        usePasskey = false;
       }
     });
   }

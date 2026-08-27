@@ -231,13 +231,59 @@ func (c *PasskeyKeygen) Run() error {
 // --- enroll ---------------------------------------------------------------
 
 type EnrollCmd struct {
-	Role  string        `help:"Role gắn với passkey" default:"member"`
-	Label string        `help:"Nhãn thiết bị/người"`
-	Store string        `help:"Đường dẫn store" default:"data/webauthn.json" env:"WEBAUTHN_STORE"`
-	TTL   time.Duration `help:"Thời gian hiệu lực ticket" default:"10m"`
+	Role      string        `help:"Role gắn với passkey" default:"member"`
+	Label     string        `help:"Nhãn thiết bị/người"`
+	Unlimited bool          `help:"Quyền chat không giới hạn"`
+	Prefix    string        `help:"Prefix hiển thị" default:"[Member] "`
+	Store     string        `help:"Đường dẫn store" default:"data/webauthn.json" env:"WEBAUTHN_STORE"`
+	TTL       time.Duration `help:"Thời gian hiệu lực ticket" default:"10m"`
 }
 
 func (e *EnrollCmd) Run() error {
+	if isInteractive() {
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewInput().Title("Role").Value(&e.Role).Validate(nonEmpty),
+			huh.NewConfirm().Title("Quyền chat không giới hạn?").Value(&e.Unlimited),
+			huh.NewInput().Title("Prefix hiển thị").Value(&e.Prefix),
+			huh.NewInput().Title("Nhãn thiết bị/người (tùy chọn)").Value(&e.Label),
+		))
+		if err := form.Run(); err != nil {
+			return err
+		}
+	}
+	if e.Prefix == "" {
+		e.Prefix = "[Member] "
+	}
+	// Merge role permissions into roles.json (report duplicate, overwrite optionally)
+	rolesData, _ := os.ReadFile(rolesPath())
+	var rolesRoot map[string]any
+	if len(rolesData) > 0 {
+		_ = json.Unmarshal(rolesData, &rolesRoot)
+	}
+	if rolesRoot == nil {
+		rolesRoot = map[string]any{}
+	}
+	if _, exists := rolesRoot[e.Role]; exists {
+		fmt.Printf("⚠️  Role \"%s\" đã tồn tại trong roles.json — sẽ ghi đè quyền hạn.\n", e.Role)
+	}
+	if err := identity.MergeRolesFile(rolesPath(), e.Role, func(entry map[string]any) {
+		entry["can_message_unlimited"] = e.Unlimited
+		entry["custom_prefix"] = e.Prefix
+		if _, ok := entry["identities"]; !ok {
+			entry["identities"] = []map[string]string{}
+		}
+		if _, ok := entry["passkeys"]; !ok {
+			entry["passkeys"] = []any{}
+		}
+	}); err != nil {
+		return err
+	}
+	if _, exists := rolesRoot[e.Role]; !exists {
+		fmt.Printf("✅ Đã thêm role \"%s\" vào roles.json\n", e.Role)
+	} else {
+		fmt.Printf("✅ Đã cập nhật quyền hạn cho role \"%s\" trong roles.json\n", e.Role)
+	}
+
 	f, err := loadStore(e.Store)
 	if err != nil {
 		return err
