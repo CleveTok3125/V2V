@@ -197,7 +197,7 @@ func parseCreationForImport(clientDataB64, attObjB64, wantChallengeB64 string) (
 		return nil, perr("attestation_malformed")
 	}
 	// Use permissive CBOR decoding to handle browser variations
-	// (indefinite length, duplicate keys, int vs uint vs string keys).
+	// (indefinite length, duplicate keys, string vs int keys).
 	decMode, _ := cbor.DecOptions{
 		DupMapKey:   cbor.DupMapKeyEnforcedAPF,
 		IndefLength: cbor.IndefLengthAllowed,
@@ -205,17 +205,30 @@ func parseCreationForImport(clientDataB64, attObjB64, wantChallengeB64 string) (
 	}.DecMode()
 	var obj map[int]any
 	if err := decMode.Unmarshal(rawAtt, &obj); err != nil {
-		// Fallback 1: try string-keyed map
+		// Fallback: try string-keyed map and also handle attestation with
+		// named keys like "fmt"/"authData"/"attStmt" (some browsers/libs).
 		var objStr map[string]any
 		if err2 := decMode.Unmarshal(rawAtt, &objStr); err2 == nil {
+			// Try numeric string keys first ("1","2","3")
 			obj = make(map[int]any)
 			for k, v := range objStr {
 				var ik int
-				fmt.Sscanf(k, "%d", &ik)
-				obj[ik] = v
+				if _, err := fmt.Sscanf(k, "%d", &ik); err == nil {
+					obj[ik] = v
+				} else {
+					// Named keys fallback
+					switch k {
+					case "fmt":
+						obj[1] = v
+					case "authData":
+						obj[2] = v
+					case "attStmt":
+						obj[3] = v
+					}
+				}
 			}
 		} else {
-			// Fallback 2: generic any-key map with type switches
+			// Fallback 2: generic any-key map
 			var objAny map[any]any
 			if err3 := decMode.Unmarshal(rawAtt, &objAny); err3 == nil {
 				obj = make(map[int]any)
@@ -229,7 +242,19 @@ func parseCreationForImport(clientDataB64, attObjB64, wantChallengeB64 string) (
 					case uint64:
 						ik = int(key)
 					case string:
-						fmt.Sscanf(key, "%d", &ik)
+						// Try numeric first, then named
+						if _, err := fmt.Sscanf(key, "%d", &ik); err != nil {
+							switch key {
+							case "fmt":
+								ik = 1
+							case "authData":
+								ik = 2
+							case "attStmt":
+								ik = 3
+							default:
+								continue
+							}
+						}
 					default:
 						continue
 					}
@@ -241,10 +266,11 @@ func parseCreationForImport(clientDataB64, attObjB64, wantChallengeB64 string) (
 			}
 		}
 		if _, ok := obj[2]; !ok {
-			fmt.Printf("🔍 [PARSE FAIL] attestation missing authData after fallback (keys=%v)\n", getMapKeys(obj))
+			fmt.Printf("🔍 [PARSE FAIL] attestation missing authData after fallback (keys=%v rawLen=%d)\n", getMapKeys(obj), len(rawAtt))
 			return nil, perr("attestation_invalid_cbor")
 		}
 	}
+	// Handle both []byte and string types for authData (some decoders return string)
 	authDataVal := obj[2]
 	var authData []byte
 	switch v := authDataVal.(type) {
