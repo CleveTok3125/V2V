@@ -132,6 +132,11 @@ func (c *wasmWSConn) close() {
 
 func (c *wasmWSConn) release() {
 	c.relOnce.Do(func() {
+		// Detach handlers first so no further JS events try to resume a dead Go.
+		c.ws.Set("onopen", js.Null())
+		c.ws.Set("onerror", js.Null())
+		c.ws.Set("onmessage", js.Null())
+		c.ws.Set("onclose", js.Null())
 		for _, f := range c.callbacks {
 			f.Release()
 		}
