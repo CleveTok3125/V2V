@@ -161,9 +161,11 @@ func parseCreationForImport(clientDataB64, attObjB64, wantChallengeB64 string) (
 	gotChal, err := base64.RawURLEncoding.DecodeString(cd.Challenge)
 	wantChal, err2 := base64.RawURLEncoding.DecodeString(wantChallengeB64)
 	if err != nil || err2 != nil || !bytes.Equal(gotChal, wantChal) {
+		fmt.Printf("🔍 [PARSE FAIL] challenge mismatch: got=%s want=%s\n", cd.Challenge[:12], wantChallengeB64[:12])
 		return nil, perr("challenge_mismatch")
 	}
 	if subtle.ConstantTimeCompare([]byte(cd.Origin), []byte(WAConfig.Origin)) != 1 {
+		fmt.Printf("🔍 [PARSE FAIL] origin mismatch: got=%q want=%q\n", cd.Origin, WAConfig.Origin)
 		return nil, perr("origin_mismatch")
 	}
 
@@ -181,14 +183,17 @@ func parseCreationForImport(clientDataB64, attObjB64, wantChallengeB64 string) (
 	}
 	rpIDHash := sha256.Sum256([]byte(WAConfig.RPID))
 	if !bytes.Equal(authData[:32], rpIDHash[:]) {
+		fmt.Printf("🔍 [PARSE FAIL] rpIdHash mismatch for RPID=%q\n", WAConfig.RPID)
 		return nil, perr("rp_id_hash_mismatch")
 	}
 	const flagUP = 0x01
 	const flagAT = 0x40
 	if authData[32]&flagUP == 0 {
+		fmt.Printf("🔍 [PARSE FAIL] user_present flag not set (flags=0x%02x)\n", authData[32])
 		return nil, perr("user_not_present")
 	}
 	if authData[32]&flagAT == 0 {
+		fmt.Printf("🔍 [PARSE FAIL] attested_data flag not set (flags=0x%02x)\n", authData[32])
 		return nil, perr("attested_data_missing")
 	}
 	counter := uint32(authData[33])<<24 | uint32(authData[34])<<16 | uint32(authData[35])<<8 | uint32(authData[36])

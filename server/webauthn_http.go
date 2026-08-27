@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 )
@@ -77,17 +78,21 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.WebAuthn.PruneExpired()
+	log.Printf("🔐 [ENROLL BEGIN] ticket=%s… from=%s", shortCode(code), r.RemoteAddr)
 
 	challenge, err := randomB64url(32)
 	if err != nil {
+		log.Printf("❌ [ENROLL BEGIN] ticket=%s… entropy error: %v", shortCode(code), err)
 		http.Error(w, "entropy error", http.StatusInternalServerError)
 		return
 	}
 	role, err := s.WebAuthn.BindChallenge(code, challenge)
 	if err != nil {
+		log.Printf("❌ [ENROLL BEGIN] ticket=%s… bind failed: %v", shortCode(code), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
+	log.Printf("✅ [ENROLL BEGIN] ticket=%s… role=%s challenge=%s…", shortCode(code), role, challenge[:12])
 	userID, _ := randomB64url(16)
 
 	writeJSON(w, creationOptions{
@@ -131,24 +136,31 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 	}
 	var req finishRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&req); err != nil {
+		log.Printf("❌ [ENROLL FINISH] bad payload from %s: %v", r.RemoteAddr, err)
 		http.Error(w, "bad payload", http.StatusBadRequest)
 		return
 	}
 	if req.Ticket == "" || req.ID == "" || req.ClientDataJSON == "" || req.AttestationObject == "" {
+		log.Printf("❌ [ENROLL FINISH] ticket=%s… missing fields (id=%q)", shortCode(req.Ticket), req.ID)
 		http.Error(w, "missing fields", http.StatusBadRequest)
 		return
 	}
 
+	log.Printf("🔐 [ENROLL FINISH] ticket=%s… id=%s… from=%s", shortCode(req.Ticket), shortID(req.ID), r.RemoteAddr)
 	_, boundChallenge, err := s.WebAuthn.PendingInfo(req.Ticket)
 	if err != nil {
+		log.Printf("❌ [ENROLL FINISH] ticket=%s… pending lookup failed: %v", shortCode(req.Ticket), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
+	log.Printf("🔍 [ENROLL FINISH] ticket=%s… boundChallenge=%s…", shortCode(req.Ticket), boundChallenge[:12])
 	parsed, err := parseCreationForImport(req.ClientDataJSON, req.AttestationObject, boundChallenge)
 	if err != nil {
+		log.Printf("❌ [ENROLL FINISH] ticket=%s… parse failed: %v", shortCode(req.Ticket), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
+	log.Printf("✅ [ENROLL FINISH] parsed credential_id=%s… counter=%d", shortID(parsed.CredentialID), parsed.Counter)
 
 	err = s.WebAuthn.CompleteEnrollment(req.Ticket, &WAStoredCred{
 		CredentialID: parsed.CredentialID,
@@ -156,10 +168,26 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 		SignCount:    parsed.Counter,
 	})
 	if err != nil {
+		log.Printf("❌ [ENROLL FINISH] ticket=%s… store failed: %v", shortCode(req.Ticket), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
+	log.Printf("✅ [ENROLL FINISH] ticket=%s… stored credential_id=%s…", shortCode(req.Ticket), shortID(parsed.CredentialID))
 	writeJSON(w, map[string]any{"ok": true, "credential_id": parsed.CredentialID})
+}
+
+func shortCode(s string) string {
+	if len(s) > 12 {
+		return s[:12] + "…"
+	}
+	return s
+}
+
+func shortID(s string) string {
+	if len(s) > 12 {
+		return s[:12] + "…"
+	}
+	return s
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
