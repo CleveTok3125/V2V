@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -134,6 +135,7 @@ func NewChatServer() *ChatServer {
 		AuthFails:       make(map[string]RateLimitRecord),
 		ChatHistory:     make([]string, 0),
 		RoleRegistry:    make(map[string]RoleDefinition),
+		WebAuthn:        NewWebAuthnStore(os.Getenv("WEBAUTHN_STORE")),
 		Upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,

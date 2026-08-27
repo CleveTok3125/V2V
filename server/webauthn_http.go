@@ -59,6 +59,10 @@ func randomB64url(n int) (string, error) {
 // handleEnrollBegin validates the ticket and returns creation options with a
 // fresh challenge bound to it.
 func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
+	if s.WebAuthn == nil {
+		http.Error(w, "passkey disabled", http.StatusServiceUnavailable)
+		return
+	}
 	if !WAConfig.Enabled {
 		http.Error(w, "passkey disabled", http.StatusServiceUnavailable)
 		return
@@ -113,6 +117,10 @@ type finishRequest struct {
 // handleEnrollFinish verifies the ceremony against the bound challenge and
 // persists the credential under the ticket's role.
 func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) {
+	if s.WebAuthn == nil {
+		http.Error(w, "passkey disabled", http.StatusServiceUnavailable)
+		return
+	}
 	if !WAConfig.Enabled {
 		http.Error(w, "passkey disabled", http.StatusServiceUnavailable)
 		return
