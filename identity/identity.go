@@ -232,6 +232,26 @@ func (p *PasskeyIdentity) RolesSnippet() (string, error) {
 	return "// roles.json → \"" + p.Role + "\".passkeys\n" + string(out), nil
 }
 
+// MergePasskeyCredential appends (or dedupe-updates) this credential into
+// the role's passkeys[] inside roles.json, preserving sibling roles.
+func (p *PasskeyIdentity) MergePasskeyCredential(path, role string) error {
+	return MergeRolesFile(path, role, func(entry map[string]any) {
+		newEntry := map[string]any{
+			"credential_id": p.CredentialID,
+			"public_key":    p.PublicKey,
+			"added_at":      time.Now().Format(time.RFC3339),
+		}
+		list, _ := entry["passkeys"].([]any)
+		for i, raw := range list {
+			if ex, _ := raw.(map[string]any); ex != nil && ex["credential_id"] == p.CredentialID {
+				list[i] = newEntry
+				return
+			}
+		}
+		entry["passkeys"] = append(list, newEntry)
+	})
+}
+
 // BuildAssertion signs the handshake nonce and returns the AuthPacket
 // fields. The sign counter is incremented; persist the whole identity file
 // afterwards to keep it durable.
