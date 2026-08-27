@@ -224,41 +224,55 @@
   // Admin issues a one-time ticket (server -enroll); the member opens the
   // URL, the browser popup creates a REAL passkey in their password manager,
   // and only the public half is stored server-side.
+  // Keep the connect panel visible so setStatus remains visible (it lives
+  // inside the panel); the terminal wrap stays hidden during enrollment.
   function runEnrollMode(code) {
-    panel.style.display = "none";
-    wrap.style.display = "block";
+    // Ensure panel is visible and wrap hidden for clear status feedback.
+    panel.style.display = "block";
+    wrap.style.display = "none";
+    console.log("[ENROLL] start ticket=" + code.slice(0, 12) + "…");
     setStatus("Đang tải phiên đăng ký passkey…");
+    console.log("[ENROLL] fetching begin for ticket", code.slice(0, 12));
     fetch("/webauthn/enroll/begin?ticket=" + encodeURIComponent(code))
       .then(function (r) {
         if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
         return r.json();
       })
       .then(function (opts) {
+        console.log("[ENROLL] begin ok, challenge received, rpId=", opts.publicKey.rp.id);
         var pk = opts.publicKey;
         pk.challenge = b64urlToBytes(pk.challenge);
         pk.user.id = b64urlToBytes(pk.user.id);
         setStatus("Xác nhận trên password manager của bạn…");
+        console.log("[ENROLL] calling navigator.credentials.create…");
         return navigator.credentials.create({ publicKey: pk });
       })
       .then(function (cred) {
+        console.log("[ENROLL] credential created id=", cred.id.slice(0, 12) + "…");
         setStatus("Đang lưu passkey…");
+        var payload = {
+          ticket: code,
+          id: cred.id,
+          client_data_json: b64url(cred.response.clientDataJSON),
+          attestation_object: b64url(cred.response.attestationObject)
+        };
+        console.log("[ENROLL] posting finish for ticket", code.slice(0, 12));
         return fetch("/webauthn/enroll/finish", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ticket: code,
-            id: cred.id,
-            client_data_json: b64url(cred.response.clientDataJSON),
-            attestation_object: b64url(cred.response.attestationObject)
-          })
+          body: JSON.stringify(payload)
         }).then(function (r) {
+          console.log("[ENROLL] finish response", r.status);
           if (!r.ok) return r.text().then(function (t) { throw new Error(t || r.status); });
+          return r.json();
         });
       })
-      .then(function () {
+      .then(function (res) {
+        console.log("[ENROLL] finish ok", res);
         setStatus("✅ Passkey đã tạo. Đóng trang này và đăng nhập bằng nút 🔑 Passkey.");
       })
       .catch(function (e) {
+        console.error("[ENROLL] failed", e);
         setStatus("Lỗi enroll: " + e.message, true);
       });
   }
