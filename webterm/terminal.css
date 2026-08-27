@@ -124,16 +124,24 @@ html, body {
   padding: 12px;
   /* Never let the grid spill outside the viewport before/while fitting. */
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 #terminal {
   width: 100%;
   height: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* xterm overrides */
 .xterm {
   height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .xterm .xterm-viewport {
