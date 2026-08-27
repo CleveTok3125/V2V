@@ -104,10 +104,14 @@ html, body {
 }
 
 #status-line {
-  margin-top: 16px;
+  display: none;
+  margin: 12px 0 0;
   font-size: 13px;
   color: #8b93a5;
-  min-height: 1em;
+}
+
+#status-line:not(:empty) {
+  display: block;
 }
 
 #status-line.error {
