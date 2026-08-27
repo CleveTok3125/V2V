@@ -62,6 +62,12 @@
   // Expose status setter for WASM to show auth errors without a full page reload.
   window.v2vSetStatus = function (msg, isError) {
     setStatus(msg, !!isError);
+    if (isError) {
+      // Show the login panel so the error is visible (it was hidden before
+      // bootWasm). Keep the terminal hidden.
+      panel.style.display = "block";
+      wrap.style.display = "none";
+    }
     // Re-enable the connect button so the user can retry.
     if (connectBtn) connectBtn.disabled = false;
   };
@@ -169,8 +175,12 @@
   // handshake and waits on v2vAssertionReady(json).
   window.v2vRequestAssertion = function (nonceHex, role) {
     var respond = function (payload) {
-      if (typeof window.v2vAssertionReady === "function") {
-        window.v2vAssertionReady(JSON.stringify(payload));
+      try {
+        if (typeof window.v2vAssertionReady === "function") {
+          window.v2vAssertionReady(JSON.stringify(payload));
+        }
+      } catch (e) {
+        console.log("Go already exited, ignoring late response", e);
       }
     };
     crypto.subtle.digest("SHA-256", new TextEncoder().encode(nonceHex))

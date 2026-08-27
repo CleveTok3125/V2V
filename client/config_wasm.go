@@ -134,7 +134,7 @@ func requestAssertion(nonceHex, role string) (webauthnAssertion, bool) {
 			return webauthnAssertion{}, false
 		}
 		return a, true
-	case <-time.After(10 * time.Second):
+	case <-time.After(70 * time.Second):
 		return webauthnAssertion{}, false
 	}
 }
