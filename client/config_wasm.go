@@ -67,18 +67,39 @@ func initAssertionBridge() {
 	js.Global().Set("v2vAssertionReady", fn)
 }
 
+// setWasmStatus shows a message in the login panel's status line when
+// available (web), falling back to terminal output otherwise. Returns true
+// if the JS status line was used.
+func setWasmStatus(msg string, isError bool) bool {
+	if fn := js.Global().Get("v2vSetStatus"); fn.Truthy() {
+		fn.Invoke(msg, isError)
+		return true
+	}
+	return false
+}
+
+// showWasmStatus tries to show an auth failure in the web panel; returns
+// true if it was handled via JS.
+func showWasmStatus(msg string, isError bool) bool {
+	return setWasmStatus(msg, isError)
+}
+
 // applyWebPasskey runs the browser ceremony when the page requested a
 // passkey login. Returns false only on failure — the caller treats that as
-// fatal (no silent guest fallback).
+// fatal (no silent guest fallback) but will show the error in the status
+// line instead of reloading the page.
 func applyWebPasskey(resp *AuthPacket, nonceHex string) bool {
 	if !webPasskey.Enabled {
 		return true // passkey not requested; continue as guest
 	}
 	fmt.Printf("🔑 Đang chờ passkey cho role [%s]...\n", webPasskey.Role)
+	setWasmStatus("Đang chờ xác thực passkey…", false)
 	resp.Role = webPasskey.Role
 	a, ok := requestAssertion(nonceHex, webPasskey.Role)
 	if !ok {
-		fmt.Println("❌ Passkey thất bại/hủy.")
+		msg := "❌ Passkey thất bại/hủy."
+		fmt.Println(msg)
+		setWasmStatus(msg, true)
 		return false
 	}
 	resp.PasskeyID = a.PasskeyID
@@ -86,6 +107,7 @@ func applyWebPasskey(resp *AuthPacket, nonceHex string) bool {
 	resp.PasskeyClientData = a.ClientData
 	resp.PasskeySig = a.Sig
 	fmt.Println("✅ Passkey đã ký — gửi xác thực...")
+	setWasmStatus("Đang gửi xác thực…", false)
 	return true
 }
 
