@@ -309,15 +309,20 @@ func (s *WebAuthnStore) Credential(role, credentialID string) (*WAStoredCred, bo
 	return &cp, out != nil
 }
 
-// UpdateSignCount persists an increased sign counter; refuses decreases.
+// UpdateSignCount persists an increased sign counter. Per WebAuthn spec,
+// authenticators that don't support a counter always return 0 — in that
+// case the check is skipped. Only when both stored and new counters are
+// non-zero do we enforce strict increase (clone detection).
 func (s *WebAuthnStore) UpdateSignCount(role, credentialID string, count uint32) error {
 	return s.mutate(func(f *webauthnFile) error {
 		for _, c := range f.Credentials[role] {
 			if c.CredentialID == credentialID {
-				if count <= c.SignCount {
+				if count != 0 && c.SignCount != 0 && count <= c.SignCount {
 					return errors.New("sign counter không tăng")
 				}
-				c.SignCount = count
+				if count != 0 {
+					c.SignCount = count
+				}
 				return nil
 			}
 		}

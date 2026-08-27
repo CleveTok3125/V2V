@@ -54,6 +54,13 @@
     statusLine.className = isError ? "error" : "";
   }
 
+  // Expose status setter for WASM to show auth errors without a full page reload.
+  window.v2vSetStatus = function (msg, isError) {
+    setStatus(msg, !!isError);
+    // Re-enable the connect button so the user can retry.
+    if (connectBtn) connectBtn.disabled = false;
+  };
+
   var FONT_FAMILY = '"JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
 
   // Monospace advance width ~= 0.6em, used for the initial font-size guess.
