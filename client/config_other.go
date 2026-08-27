@@ -16,3 +16,7 @@ func parseFlags() {
 func applyWebPasskey(*AuthPacket, string) bool {
 	return true
 }
+
+func setWasmStatus(string, bool) bool { return false }
+
+func showWasmStatus(string, bool) bool { return false }

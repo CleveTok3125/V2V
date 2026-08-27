@@ -130,8 +130,10 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 			}
 			counter, verr := verifyAssertion(pub, resp.Nonce, resp.PasskeyAuthData, resp.PasskeyClientData, resp.PasskeySig)
 			switch {
-			case verr == nil && counter > cred.SignCount:
-				_ = s.WebAuthn.UpdateSignCount(resp.Role, cred.CredentialID, counter)
+			case verr == nil && (counter == 0 || cred.SignCount == 0 || counter > cred.SignCount):
+				if counter != 0 {
+					_ = s.WebAuthn.UpdateSignCount(resp.Role, cred.CredentialID, counter)
+				}
 				resp.AuthType = "passkey"
 				log.Printf("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey thật, role: [%s]", clientIP, resp.Role)
 				return roleDef.Permission, resp, nil

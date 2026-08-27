@@ -285,10 +285,10 @@ func main() {
 	} else {
 		// WebAuthn passkey login (web build only): the page's browser
 		// ceremony signs the nonce and fills the packet. A failure here is
-		// fatal — the user asked for authenticated login and gets no silent
-		// guest fallback.
+		// Web passkey requested but failed (user cancelled, no credential,
+		// etc.) — status already shown via setWasmStatus, just return to
+		// keep the login panel visible for retry (no reload).
 		if !applyWebPasskey(&respPacket, challenge.Nonce) {
-			notifyQuit()
 			return
 		}
 	}
@@ -319,8 +319,11 @@ func main() {
 
 	switch authSuccess.Type {
 	case "auth_failed":
-		fmt.Println("❌ Xác thực bị từ chối:", authSuccess.Error)
-		notifyQuit()
+		msg := "❌ Xác thực bị từ chối: " + authSuccess.Error
+		fmt.Println(msg)
+		if !showWasmStatus(msg, true) {
+			notifyQuit()
+		}
 		return
 	case "auth_success":
 		username = authSuccess.Username
