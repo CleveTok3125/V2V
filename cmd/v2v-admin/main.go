@@ -1,17 +1,17 @@
 package main
 
 // v2v-admin is the identity management tool split out of the chat client
-// and the server per BLUEPRINTS.md:
+// and the server per BLUEPRINTS.md.
 //
-//	v2v-admin keygen  — create a personal identity container (client machine)
-//	v2v-admin enroll  — issue a one-time passkey enrollment ticket (server host)
-//	v2v-admin list    — inspect pending tickets and stored credentials
+// Layout mirrors real CLIs: `keygen` is a parent command with one leaf per
+// identity flavor, so each flavor owns exactly the flags it needs.
 //
-// It only touches local files: key.json, roles.json (with --merge-roles) and
-// the WEBAUTHN_STORE. No network, no daemon.
+// Interactive TTY sessions drive huh forms; scripts stay strictly
+// flag-driven (defaults apply, hard errors on missing required values).
+// The tool only touches local files: key.json, roles.json (opt-in merge)
+// and the WEBAUTHN_STORE. No network, no daemon.
 
 import (
-	"bufio"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/charmbracelet/huh"
 
 	"localchat/identity"
 )
@@ -35,27 +36,26 @@ type CLI struct {
 }
 
 type KeygenCmd struct {
-	Role       string `help:"Role gắn với danh tính (hỏi nếu bỏ trống)"`
-	Type       string `help:"Loại danh tính: ed25519 | passkey (hỏi nếu bỏ trống)"`
+	Ed25519 Ed25519Keygen `cmd:"" name:"ed25519" help:"Danh tính ed25519 key-file"`
+	Passkey PasskeyKeygen `cmd:"" help:"Danh tính passkey mềm (WebAuthn wire format)"`
+}
+
+type Ed25519Keygen struct {
+	Role       string `help:"Role gắn với danh tính" default:"admin"`
 	Out        string `help:"Nơi ghi container" default:"key.json"`
-	Unlimited  bool   `help:"(ed25519) quyền chat không giới hạn"`
-	Prefix     string `help:"(ed25519) prefix hiển thị"`
-	Host       string `help:"(ed25519) hostname gắn với danh tính (trống = không gắn)"`
-	RPID       string `help:"(passkey) RP ID; fallback env WEBAUTHN_RPID"`
-	Origin     string `help:"(passkey) Origin; fallback env WEBAUTHN_ORIGIN"`
+	Unlimited  bool   `help:"Quyền chat không giới hạn"`
+	Prefix     string `help:"Prefix hiển thị" default:"[Admin] "`
+	Host       string `help:"Hostname gắn với danh tính (chống dùng chéo deployment)"`
 	MergeRoles bool   `help:"Ghép entry vào ./roles.json (mặc định chỉ in snippet)"`
-	Label      string `help:"(passkey) nhãn thiết bị/người"`
 }
 
-type EnrollCmd struct {
-	Role  string        `help:"Role gắn với passkey" required:""`
-	Label string        `help:"Nhãn thiết bị/người"`
-	Store string        `help:"Đường dẫn store" default:"data/webauthn.json" env:"WEBAUTHN_STORE"`
-	TTL   time.Duration `help:"Thời gian hiệu lực ticket" default:"10m"`
-}
-
-type ListCmd struct {
-	Store string `help:"Đường dẫn store" default:"data/webauthn.json" env:"WEBAUTHN_STORE"`
+type PasskeyKeygen struct {
+	Role       string `help:"Role gắn với passkey" default:"member"`
+	Out        string `help:"Nơi ghi container" default:"key.json"`
+	RPID       string `help:"RP ID; fallback env WEBAUTHN_RPID"`
+	Origin     string `help:"Origin; fallback env WEBAUTHN_ORIGIN"`
+	Label      string `help:"Nhãn thiết bị/người"`
+	MergeRoles bool   `help:"Ghép credential vào ./roles.json (mặc định chỉ in snippet)"`
 }
 
 var cli CLI
@@ -65,27 +65,26 @@ func main() {
 	ctx.FatalIfErrorf(ctx.Run())
 }
 
-// isInteractive reports whether stdin is a terminal worth prompting on.
+// isInteractive reports whether a real controlling terminal exists. huh
+// opens /dev/tty directly (it ignores piped stdin), so this must probe the
+// tty device rather than os.Stdin.
 func isInteractive() bool {
-	st, err := os.Stdin.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
-}
-
-func prompt(reader *bufio.Reader, msg string) string {
-	fmt.Print(msg + ": ")
-	line, _ := reader.ReadString('\n')
-	return strings.TrimSpace(line)
-}
-
-func ask(reader *bufio.Reader, msg, def string) string {
-	line := prompt(reader, msg+" ["+def+"]: ")
-	if line == "" {
-		return def
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		return false
 	}
-	return line
+	_ = tty.Close()
+	return true
 }
 
-func loadIdentityContainer(path string) (*identity.IdentityFile, error) {
+func nonEmpty(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return errors.New("bắt buộc")
+	}
+	return nil
+}
+
+func loadContainer(path string) (*identity.IdentityFile, error) {
 	idf, err := identity.Load(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -96,168 +95,174 @@ func loadIdentityContainer(path string) (*identity.IdentityFile, error) {
 	return idf, nil
 }
 
-// mergePasskeyCredential appends (or dedupe-updates) a credential entry in
-// the role's passkeys[] while preserving everything else in roles.json.
-func mergePasskeyCredential(path, role, credID, coseB64 string) error {
-	return identity.MergeRolesFile(path, role, func(entry map[string]any) {
-		newEntry := map[string]any{
-			"credential_id": credID,
-			"public_key":    coseB64,
-			"added_at":      time.Now().Format(time.RFC3339),
-		}
-		list, _ := entry["passkeys"].([]any)
-		for i, raw := range list {
-			if ex, _ := raw.(map[string]any); ex != nil && ex["credential_id"] == credID {
-				list[i] = newEntry
-				return
-			}
-		}
-		entry["passkeys"] = append(list, newEntry)
-	})
-}
+func rolesPath() string { return "roles.json" }
 
-func (k *KeygenCmd) Run() error {
-	interactive := isInteractive()
-	reader := bufio.NewReader(os.Stdin)
+// --- keygen ed25519 -----------------------------------------------------
 
-	if k.Role == "" {
-		if !interactive {
-			k.Role = "admin"
-		} else {
-			k.Role = ask(reader, "Role", "admin")
-		}
-	}
-	if k.Type == "" {
-		if !interactive {
-			k.Type = "ed25519"
-		} else {
-			for k.Type != "ed25519" && k.Type != "passkey" {
-				k.Type = ask(reader, "Loại danh tính — ed25519 | passkey", "ed25519")
-			}
-		}
-	}
-	switch k.Type {
-	case "ed25519":
-	default:
-		k.Type = "ed25519"
-	}
-
-	rpid, origin := k.RPID, k.Origin
-	if k.Type == "passkey" && (rpid == "" || origin == "") {
-		envR, envO := os.Getenv("WEBAUTHN_RPID"), os.Getenv("WEBAUTHN_ORIGIN")
-		if rpid == "" {
-			rpid = envR
-		}
-		if origin == "" {
-			origin = envO
-		}
-		if (rpid == "" || origin == "") && interactive {
-			if rpid == "" {
-				rpid = prompt(reader, "RP ID (vd: chat.example.com)")
-			}
-			if origin == "" {
-				origin = prompt(reader, "Origin (vd: https://chat.example.com)")
-			}
-		}
-		if rpid == "" || origin == "" {
-			return errors.New("--type passkey cần --rpid và --origin (hoặc env WEBAUTHN_RPID/WEBAUTHN_ORIGIN)")
-		}
-	}
-
-	idf := &identity.IdentityFile{}
-	var edPubHex string
-	switch k.Type {
-	case "ed25519":
-		if k.Prefix == "" {
-			k.Prefix = "[Member] "
-		}
-		if k.Host == "" && interactive {
-			k.Host = ask(reader, "Hostname gắn với danh tính (Enter = không gắn)", "")
-		}
-		pub, priv, err := ed25519.GenerateKey(rand.Reader)
-		if err != nil {
+func (c *Ed25519Keygen) Run() error {
+	if isInteractive() {
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewInput().Title("Role").Value(&c.Role).Validate(nonEmpty),
+			huh.NewInput().Title("Nơi lưu key.json").Value(&c.Out),
+			huh.NewConfirm().Title("Quyền chat không giới hạn?").Value(&c.Unlimited),
+			huh.NewInput().Title("Prefix hiển thị").Value(&c.Prefix),
+			huh.NewInput().Title("Hostname gắn với danh tính (Enter = không gắn)").Value(&c.Host),
+			huh.NewConfirm().Title("Ghép entry vào roles.json ngay bây giờ?").
+				Affirmative("Có").Negative("Không").Value(&c.MergeRoles),
+		))
+		if err := form.Run(); err != nil {
 			return err
 		}
-		shieldBytes := make([]byte, 16)
-		if _, err := rand.Read(shieldBytes); err != nil {
-			return err
-		}
-		edPubHex = hex.EncodeToString(pub)
-		idf.Ed25519 = &identity.Ed25519Identity{
-			Role:       k.Role,
-			PrivateKey: hex.EncodeToString(priv),
-			HmacShield: hex.EncodeToString(shieldBytes),
-			Host:       k.Host,
-		}
-	case "passkey":
-		pk, err := identity.GeneratePasskey(k.Role, rpid, origin)
-		if err != nil {
-			return err
-		}
-		idf.Passkey = pk
 	}
-
-	if err := idf.Save(k.Out); err != nil {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("\n💾 Đã lưu khóa bí mật tại %s (chmod 600)\n", k.Out)
+	shield := make([]byte, 16)
+	if _, err := rand.Read(shield); err != nil {
+		return err
+	}
 
-	switch k.Type {
-	case "passkey":
-		snippet, serr := idf.Passkey.RolesSnippet()
-		if serr != nil {
-			return serr
-		}
-		fmt.Print("📤 Gửi đoạn sau cho admin thêm vào roles.json:\n\n")
-		fmt.Println(snippet)
-	default:
-		identityEntry := map[string]string{
-			"public_key":  edPubHex,
-			"hmac_shield": idf.Ed25519.HmacShield,
-		}
-		if idf.Ed25519.Host != "" {
-			identityEntry["host"] = idf.Ed25519.Host
-		}
+	idf, err := loadContainer(c.Out)
+	if err != nil {
+		return err
+	}
+	idf.Ed25519 = &identity.Ed25519Identity{
+		Role:       c.Role,
+		PrivateKey: hex.EncodeToString(priv),
+		HmacShield: hex.EncodeToString(shield),
+		Host:       c.Host,
+	}
+	if err := idf.Save(c.Out); err != nil {
+		return err
+	}
+	fmt.Printf("\n💾 Đã lưu khóa bí mật tại %s (chmod 600)\n", c.Out)
+
+	if !c.MergeRoles {
 		serverCfg := map[string]any{
-			k.Role: map[string]any{
-				"identities":            []map[string]string{identityEntry},
-				"can_message_unlimited": k.Unlimited,
-				"custom_prefix":         k.Prefix,
+			c.Role: map[string]any{
+				"identities": []map[string]string{{
+					"public_key":  hex.EncodeToString(pub),
+					"hmac_shield": hex.EncodeToString(shield),
+					"host":        c.Host,
+				}},
+				"can_message_unlimited": c.Unlimited,
+				"custom_prefix":         c.Prefix,
 			},
 		}
 		out, _ := json.MarshalIndent(serverCfg, "", "  ")
 		fmt.Print("📤 Gửi đoạn sau cho admin thêm vào roles.json:\n\n")
 		fmt.Println(string(out))
+		return nil
+	}
+	return identity.MergeRolesFile(rolesPath(), c.Role, func(e map[string]any) {
+		e["identities"] = []map[string]string{{
+			"public_key":  hex.EncodeToString(pub),
+			"hmac_shield": hex.EncodeToString(shield),
+			"host":        c.Host,
+		}}
+		e["can_message_unlimited"] = c.Unlimited
+		e["custom_prefix"] = c.Prefix
+	})
+}
+
+// --- keygen passkey (mềm) -----------------------------------------------
+
+func (c *PasskeyKeygen) Run() error {
+	if isInteractive() {
+		if c.RPID == "" {
+			c.RPID = os.Getenv("WEBAUTHN_RPID")
+		}
+		if c.Origin == "" {
+			c.Origin = os.Getenv("WEBAUTHN_ORIGIN")
+		}
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewInput().Title("Role").Value(&c.Role).Validate(nonEmpty),
+			huh.NewInput().Title("RP ID").Value(&c.RPID).Validate(nonEmpty),
+			huh.NewInput().Title("Origin").Value(&c.Origin).Validate(nonEmpty),
+			huh.NewInput().Title("Nhãn thiết bị/người (tùy chọn)").Value(&c.Label),
+			huh.NewInput().Title("Nơi lưu key.json").Value(&c.Out),
+			huh.NewConfirm().Title("Ghép credential vào roles.json ngay bây giờ?").
+				Affirmative("Có").Negative("Không").Value(&c.MergeRoles),
+		))
+		if err := form.Run(); err != nil {
+			return err
+		}
+	}
+	rpid := c.RPID
+	if rpid == "" {
+		rpid = os.Getenv("WEBAUTHN_RPID")
+	}
+	origin := c.Origin
+	if origin == "" {
+		origin = os.Getenv("WEBAUTHN_ORIGIN")
+	}
+	if rpid == "" || origin == "" {
+		return errors.New("passkey cần --rpid và --origin (hoặc env WEBAUTHN_RPID/WEBAUTHN_ORIGIN)")
+	}
+	pk, err := identity.GeneratePasskey(c.Role, rpid, origin)
+	if err != nil {
+		return err
 	}
 
-	if k.MergeRoles && k.Type == "passkey" {
-		if err := mergePasskeyCredential(rolesPath(), k.Role, idf.Passkey.CredentialID, idf.Passkey.PublicKey); err != nil {
-			return err
-		}
-		fmt.Println("Đã cập nhật ./roles.json")
-	} else if k.MergeRoles && k.Type == "ed25519" {
-		if err := identity.MergeRolesFile(rolesPath(), k.Role, func(e map[string]any) {
-			identityEntry := map[string]string{
-				"public_key":  edPubHex,
-				"hmac_shield": idf.Ed25519.HmacShield,
-			}
-			if idf.Ed25519.Host != "" {
-				identityEntry["host"] = idf.Ed25519.Host
-			}
-			e["identities"] = []map[string]string{identityEntry}
-			e["can_message_unlimited"] = k.Unlimited
-			e["custom_prefix"] = k.Prefix
-		}); err != nil {
-			return err
-		}
-		fmt.Println("Đã cập nhật ./roles.json")
+	idf, err := loadContainer(c.Out)
+	if err != nil {
+		return err
 	}
+	idf.Passkey = pk
+	if err := idf.Save(c.Out); err != nil {
+		return err
+	}
+	fmt.Printf("\n💾 Đã lưu khóa bí mật tại %s (chmod 600)\n", c.Out)
+
+	snippet, err := pk.RolesSnippet()
+	if err != nil {
+		return err
+	}
+	fmt.Print("📤 Gửi đoạn sau cho admin thêm vào roles.json:\n\n")
+	fmt.Println(snippet)
+
+	if !c.MergeRoles {
+		return nil
+	}
+	return pk.MergePasskeyCredential(rolesPath(), c.Role)
+}
+
+// --- enroll ---------------------------------------------------------------
+
+type EnrollCmd struct {
+	Role  string        `help:"Role gắn với passkey" default:"member"`
+	Label string        `help:"Nhãn thiết bị/người"`
+	Store string        `help:"Đường dẫn store" default:"data/webauthn.json" env:"WEBAUTHN_STORE"`
+	TTL   time.Duration `help:"Thời gian hiệu lực ticket" default:"10m"`
+}
+
+func (e *EnrollCmd) Run() error {
+	f, err := loadStore(e.Store)
+	if err != nil {
+		return err
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return err
+	}
+	code := hex.EncodeToString(b)
+	f.Pending = append(f.Pending, waPending{
+		Code:      code,
+		Role:      e.Role,
+		Label:     e.Label,
+		ExpiresAt: time.Now().Add(e.TTL),
+	})
+	if err := saveStore(e.Store, f); err != nil {
+		return err
+	}
+	origin := os.Getenv("WEBAUTHN_ORIGIN")
+	fmt.Println("✅ Ticket đã tạo (single-use, TTL " + e.TTL.String() + ").")
+	fmt.Printf("Gửi link sau cho người được cấp:\n\n  %s/web/#enroll=%s\n\n", origin, code)
 	return nil
 }
 
-func rolesPath() string { return "roles.json" }
-
-// --- enrollment tickets -------------------------------------------------
+// --- list -----------------------------------------------------------------
 
 // waPending mirrors the server's pending-ticket schema.
 type waPending struct {
@@ -297,12 +302,30 @@ func loadStore(path string) (*waStoreFile, error) {
 	return f, nil
 }
 
+func str(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprint(v)
+}
+
+func short(code string) string {
+	if len(code) > 12 {
+		return code[:12] + "…"
+	}
+	return code
+}
+
+type ListCmd struct {
+	Store string `help:"Đường dẫn store" default:"data/webauthn.json" env:"WEBAUTHN_STORE"`
+}
+
 func saveStore(path string, f *waStoreFile) error {
-	out, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	out, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
@@ -310,34 +333,6 @@ func saveStore(path string, f *waStoreFile) error {
 		return err
 	}
 	return os.Rename(tmp, path)
-}
-
-func (e *EnrollCmd) Run() error {
-	origin := os.Getenv("WEBAUTHN_ORIGIN")
-	if origin == "" {
-		return errors.New("WEBAUTHN_ORIGIN chưa đặt trong .env — không tạo được URL enroll")
-	}
-	f, err := loadStore(e.Store)
-	if err != nil {
-		return err
-	}
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return err
-	}
-	code := hex.EncodeToString(b)
-	f.Pending = append(f.Pending, waPending{
-		Code:      code,
-		Role:      e.Role,
-		Label:     e.Label,
-		ExpiresAt: time.Now().Add(e.TTL),
-	})
-	if err := saveStore(e.Store, f); err != nil {
-		return err
-	}
-	fmt.Println("✅ Ticket đã tạo (single-use, TTL " + e.TTL.String() + ").")
-	fmt.Printf("Gửi link sau cho người được cấp:\n\n  %s/web/#enroll=%s\n\n", origin, code)
-	return nil
 }
 
 func (l *ListCmd) Run() error {
@@ -365,18 +360,4 @@ func (l *ListCmd) Run() error {
 		}
 	}
 	return nil
-}
-
-func str(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprint(v)
-}
-
-func short(code string) string {
-	if len(code) > 12 {
-		return code[:12] + "…"
-	}
-	return code
 }
