@@ -89,7 +89,7 @@ html, body {
 /* Secondary action sharing the connect button's geometry. */
 #passkey-btn {
   width: 100%;
-  margin-top: 8px;
+  margin-top: 20px;
   padding: 10px;
   background: transparent;
   color: #4f7dff;
