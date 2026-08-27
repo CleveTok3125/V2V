@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -169,6 +170,11 @@ func (s *WebAuthnStore) CreatePendingTicket(role, label string, ttl time.Duratio
 		})
 		return nil
 	})
+	if err == nil {
+		log.Printf("🎫 [TICKET CREATED] code=%s… role=%s label=%q expires=%s", code[:12], role, label, time.Now().Add(ttl).Format(time.RFC3339))
+	} else {
+		log.Printf("❌ [TICKET CREATE FAILED] role=%s: %v", role, err)
+	}
 	return code, err
 }
 
@@ -184,14 +190,26 @@ func (s *WebAuthnStore) BindChallenge(code, challengeB64 string) (role string, e
 		role = p.Role
 		return nil
 	})
+	if err != nil {
+		log.Printf("❌ [TICKET BIND] code=%s… failed: %v", shortTicket(code), err)
+	} else {
+		log.Printf("🔗 [TICKET BIND] code=%s… role=%s challenge=%s…", shortTicket(code), role, challengeB64[:12])
+	}
 	return role, err
+}
+
+func shortTicket(s string) string {
+	if len(s) > 12 {
+		return s[:12] + "…"
+	}
+	return s
 }
 
 // CompleteEnrollment stores the credential under the ticket's role and marks
 // the ticket used. Ceremony validation (challenge/origin/signature) is the
 // caller's job — this only handles bookkeeping.
 func (s *WebAuthnStore) CompleteEnrollment(code string, cred *WAStoredCred) error {
-	return s.mutate(func(f *webauthnFile) error {
+	err := s.mutate(func(f *webauthnFile) error {
 		pending, err := findPending(f, code)
 		if err != nil {
 			return err
@@ -207,6 +225,12 @@ func (s *WebAuthnStore) CompleteEnrollment(code string, cred *WAStoredCred) erro
 		pending.Used = true
 		return nil
 	})
+	if err != nil {
+		log.Printf("❌ [ENROLL STORE] CompleteEnrollment code=%s… failed: %v", shortTicket(code), err)
+	} else {
+		log.Printf("✅ [ENROLL STORE] CompleteEnrollment code=%s… credential_id=%s… stored", shortTicket(code), cred.CredentialID[:12])
+	}
+	return err
 }
 
 // PendingInfo returns the role and bound challenge of a valid, unused ticket.
