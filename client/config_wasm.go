@@ -84,6 +84,11 @@ func showWasmStatus(msg string, isError bool) bool {
 	return setWasmStatus(msg, isError)
 }
 
+// parkForever keeps the WASM runtime alive after a failed login attempt
+// so late browser events (passkey dialog dismissal, timers) resume a live
+// runtime instead of a dead one.
+func parkForever() { select {} }
+
 // applyWebPasskey runs the browser ceremony when the page requested a
 // passkey login. Returns false only on failure — the caller treats that as
 // fatal (no silent guest fallback) but will show the error in the status
@@ -119,7 +124,7 @@ func requestAssertion(nonceHex, role string) (webauthnAssertion, bool) {
 		return webauthnAssertion{}, false
 	}
 	select {
-	case assertionCh <- "": // drain any stale result first
+	case <-assertionCh: // drop any stale result from a previous attempt
 	default:
 	}
 	fn.Invoke(nonceHex, role)
