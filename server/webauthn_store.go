@@ -41,8 +41,11 @@ type WAPending struct {
 	Role      string    `json:"role"`
 	Label     string    `json:"label,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
-	Challenge string    `json:"challenge,omitempty"` // b64url, bound at /begin
-	Used      bool      `json:"used"`
+	Challenge string    `json:"challenge,omitempty"` // legacy b64url, kept for compat
+	// SessionData holds the webauthn.SessionData JSON for 100% library-based
+	// registration (challenge, userID, etc.).
+	SessionData []byte `json:"session_data,omitempty"`
+	Used      bool   `json:"used"`
 }
 
 type webauthnFile struct {
@@ -179,7 +182,8 @@ func (s *WebAuthnStore) CreatePendingTicket(role, label string, ttl time.Duratio
 }
 
 // BindChallenge validates the ticket for ceremony start and binds a fresh
-// challenge (returned as base64url) to it.
+// challenge (returned as base64url) to it. Kept for manual challenge flow
+// (e.g., synthetic tests) and for backward compat.
 func (s *WebAuthnStore) BindChallenge(code, challengeB64 string) (role string, err error) {
 	err = s.mutate(func(f *webauthnFile) error {
 		p, perr := findPending(f, code)
@@ -196,6 +200,45 @@ func (s *WebAuthnStore) BindChallenge(code, challengeB64 string) (role string, e
 		log.Printf("🔗 [TICKET BIND] code=%s… role=%s challenge=%s…", shortTicket(code), role, challengeB64[:12])
 	}
 	return role, err
+}
+
+// BindSessionData stores the full webauthn.SessionData for a ticket. Used
+// by the 100% library registration flow where the session contains more than
+// just the challenge (userID, etc.).
+func (s *WebAuthnStore) BindSessionData(code string, sessionData []byte, challengeB64 string) (role string, err error) {
+	err = s.mutate(func(f *webauthnFile) error {
+		p, perr := findPending(f, code)
+		if perr != nil {
+			return perr
+		}
+		p.Challenge = challengeB64
+		p.SessionData = sessionData
+		role = p.Role
+		return nil
+	})
+	if err != nil {
+		log.Printf("❌ [TICKET BIND SESSION] code=%s… failed: %v", shortTicket(code), err)
+	} else {
+		log.Printf("🔗 [TICKET BIND SESSION] code=%s… role=%s", shortTicket(code), role)
+	}
+	return role, err
+}
+
+// SessionData returns the stored webauthn.SessionData for a ticket.
+func (s *WebAuthnStore) SessionData(code string) ([]byte, error) {
+	var data []byte
+	err := s.view(func(f *webauthnFile) error {
+		p, perr := findPending(f, code)
+		if perr != nil {
+			return perr
+		}
+		if len(p.SessionData) == 0 {
+			return errors.New("no session data for ticket")
+		}
+		data = append([]byte(nil), p.SessionData...)
+		return nil
+	})
+	return data, err
 }
 
 func shortTicket(s string) string {
@@ -228,7 +271,7 @@ func (s *WebAuthnStore) CompleteEnrollment(code string, cred *WAStoredCred) erro
 	if err != nil {
 		log.Printf("❌ [ENROLL STORE] CompleteEnrollment code=%s… failed: %v", shortTicket(code), err)
 	} else {
-		log.Printf("✅ [ENROLL STORE] CompleteEnrollment code=%s… credential_id=%s… stored", shortTicket(code), cred.CredentialID[:12])
+		log.Printf("✅ [ENROLL STORE] CompleteEnrollment code=%s… credential_id=%s… stored", shortTicket(code), shortTicket(cred.CredentialID))
 	}
 	return err
 }
