@@ -20,3 +20,5 @@ func applyWebPasskey(*AuthPacket, string) bool {
 func setWasmStatus(string, bool) bool { return false }
 
 func showWasmStatus(string, bool) bool { return false }
+
+func parkForever() {}
