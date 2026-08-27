@@ -105,6 +105,9 @@ func (s *WebAuthnStore) saveFile(f *webauthnFile) error {
 }
 
 func (s *WebAuthnStore) mutate(fn func(f *webauthnFile) error) error {
+	if s == nil {
+		return errors.New("webauthn store not initialized")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, err := s.loadFile()
@@ -118,6 +121,9 @@ func (s *WebAuthnStore) mutate(fn func(f *webauthnFile) error) error {
 }
 
 func (s *WebAuthnStore) view(fn func(f *webauthnFile) error) error {
+	if s == nil {
+		return errors.New("webauthn store not initialized")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, err := s.loadFile()
@@ -254,6 +260,9 @@ func (s *WebAuthnStore) UpdateSignCount(role, credentialID string, count uint32)
 
 // PruneExpired removes stale/used pending tickets; called opportunistically.
 func (s *WebAuthnStore) PruneExpired() {
+	if s == nil {
+		return
+	}
 	_ = s.mutate(func(f *webauthnFile) error {
 		now := time.Now()
 		kept := f.Pending[:0]
