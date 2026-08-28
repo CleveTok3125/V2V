@@ -91,21 +91,54 @@ func (s *WebAuthnStore) loadFile() (*webauthnFile, error) {
 	return f, nil
 }
 
-func (s *WebAuthnStore) saveFile(f *webauthnFile) error {
-	if dir := filepath.Dir(s.path); dir != "." && dir != "" {
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
 		}
 	}
+	tmpFile, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmpFile.Name()
+	if err := tmpFile.Chmod(perm); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if dirFile, err := os.Open(dir); err == nil {
+		_ = dirFile.Sync()
+		dirFile.Close()
+	}
+	return nil
+}
+
+func (s *WebAuthnStore) saveFile(f *webauthnFile) error {
 	out, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
+	return atomicWriteFile(s.path, out, 0o600)
 }
 
 func (s *WebAuthnStore) mutate(fn func(f *webauthnFile) error) error {
