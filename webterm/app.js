@@ -54,6 +54,22 @@
     });
   }
 
+  // Auto-parse role:hash format only in Role input (avoid false-positive on username)
+  if (passkeyRoleInput) {
+    passkeyRoleInput.addEventListener("input", function () {
+      var v = passkeyRoleInput.value;
+      var idx = v.indexOf(":");
+      if (idx > 0) {
+        var rolePart = v.slice(0, idx).trim();
+        if (rolePart && rolePart !== v) {
+          passkeyRoleInput.value = rolePart;
+          // Move cursor to end after parsing
+          try { passkeyRoleInput.setSelectionRange(rolePart.length, rolePart.length); } catch (e) {}
+        }
+      }
+    });
+  }
+
   function setStatus(msg, isError) {
     statusLine.textContent = msg;
     statusLine.className = isError ? "error" : "";
