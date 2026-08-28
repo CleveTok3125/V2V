@@ -3,7 +3,15 @@
         "identities": [
             {
                 "public_key": "d619... (Replace with your Hex Public Key)",
-                "hmac_shield": "a8f2... (Replace it with your HMAC security chain.)"
+                "hmac_shield": "a8f2... (Replace it with your HMAC security chain.)",
+                "host": "chat.example.com"
+            }
+        ],
+        "passkeys": [
+            {
+                "credential_id": "base64url credential ID",
+                "public_key": "base64url COSE public key",
+                "added_at": "2026-08-27T00:00:00Z"
             }
         ],
         "can_message_unlimited": true,
