@@ -53,10 +53,14 @@ type IdentityFile struct {
 
 // Load reads key.json in either the current v2 container shape or the legacy
 // flat ed25519 shape (read-compat for files already in the wild).
+// Encrypted files (version 3 envelope) must be opened via LoadEncrypted.
 func Load(path string) (*IdentityFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
+	}
+	if isEncrypted(data) {
+		return nil, errors.New("key file is encrypted — use passphrase to unlock (LoadEncrypted)")
 	}
 	var probe map[string]any
 	if json.Unmarshal(data, &probe) != nil {
@@ -78,6 +82,36 @@ func Load(path string) (*IdentityFile, error) {
 		return nil, errors.New("key.json is missing required fields")
 	}
 	return &IdentityFile{Version: Version, Ed25519: &legacy}, nil
+}
+
+// LoadEncrypted reads an encrypted key file (version 3).
+func LoadEncrypted(path, passphrase string) (*IdentityFile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if !isEncrypted(data) {
+		return Load(path)
+	}
+	plain, err := decryptJSON(data, passphrase)
+	if err != nil {
+		return nil, err
+	}
+	var f IdentityFile
+	if err := json.Unmarshal(plain, &f); err != nil {
+		return nil, err
+	}
+	f.Version = Version
+	return &f, nil
+}
+
+// IsEncrypted reports whether the file at path is an encrypted envelope.
+func IsEncrypted(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	return isEncrypted(data), nil
 }
 
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
@@ -130,6 +164,24 @@ func (f *IdentityFile) Save(path string) error {
 		return err
 	}
 	return atomicWriteFile(path, data, 0o600)
+}
+
+// SaveEncrypted writes the container encrypted with XChaCha20Poly1305 + Argon2id.
+func (f *IdentityFile) SaveEncrypted(path, passphrase string, p *Params) error {
+	f.Version = Version
+	plain, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return err
+	}
+	if p == nil {
+		pp := defaultParams()
+		p = &pp
+	}
+	enc, err := encryptJSON(plain, passphrase, *p)
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(path, enc, 0o600)
 }
 
 // MergeRolesFile applies update() to a single role entry inside roles.json,
