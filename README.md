@@ -111,6 +111,13 @@ hostname — ed25519 signatures explicitly cover it, and real passkeys are
 pinned by RP ID/origin — so an identity cannot be replayed against a
 different server.
 
+**Key file encryption (v0.6.0+):** `key.json` can be encrypted at rest with
+`XChaCha20Poly1305 + Argon2id` (simple but strong, works on WASM/arm64).
+`v2v-admin keygen` prompts `Passphrase (Enter = no encryption)` with hidden
+input and confirmation; `V2V_PASSPHRASE` env or `--passphrase-file` also
+supported. Encrypted files are `version:3` envelope with random salt/nonce
+per file, `chmod 600`, and atomic `Sync` for durability.
+
 **In-session commands:** `/whoami` shows your identity, role and
 permissions; `/status` shows connection info and the client version.
 
