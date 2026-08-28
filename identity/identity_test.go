@@ -171,3 +171,35 @@ func TestAtomicWriteDurability(t *testing.T) {
 		t.Errorf("tmp file not cleaned: %v", matches)
 	}
 }
+
+func TestEncryptedRoundtrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "enc.json")
+	f := &IdentityFile{
+		Ed25519: &Ed25519Identity{Role: "admin", PrivateKey: "aa", HmacShield: "bb", Host: "example.com"},
+		Passkey: &PasskeyIdentity{Role: "member", CredentialID: "cid123", PrivateKey: "pk", PublicKey: "cose", RPID: "example.com", Origin: "https://example.com"},
+	}
+	// Use fast params for test
+	p := Params{Time: 1, Memory: 8 * 1024, Threads: 1}
+	if err := f.SaveEncrypted(path, "s3cret", &p); err != nil {
+		t.Fatal(err)
+	}
+	// Check file is encrypted
+	if enc, _ := IsEncrypted(path); !enc {
+		t.Fatal("file should be encrypted")
+	}
+	// Wrong passphrase should fail
+	if _, err := LoadEncrypted(path, "wrong"); err == nil {
+		t.Fatal("wrong passphrase should fail")
+	}
+	got, err := LoadEncrypted(path, "s3cret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Ed25519 == nil || got.Ed25519.Role != "admin" || got.Passkey == nil || got.Passkey.CredentialID != "cid123" {
+		t.Fatalf("decrypted mismatch: %+v", got)
+	}
+	// Plaintext load should refuse encrypted file
+	if _, err := Load(path); err == nil || !contains(err.Error(), "encrypted") {
+		t.Fatalf("Load should refuse encrypted file, got %v", err)
+	}
+}
