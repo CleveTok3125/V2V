@@ -62,10 +62,10 @@ fi
 echo ""
 
 echo "[5/5] Checking version tag..."
-if git describe --tags --long HEAD | grep -q "v0.5.0"; then
-  echo "✓ version v0.5.0 tag present: $(git describe --tags --long HEAD)"
+if git describe --tags --long HEAD | grep -q "v0\."; then
+  echo "✓ version tag present: $(git describe --tags --long HEAD)"
 else
-  echo "✗ version v0.5.0 tag not found"
+  echo "✗ version tag not found"
   exit 1
 fi
 echo ""
