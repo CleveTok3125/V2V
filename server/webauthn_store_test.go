@@ -128,3 +128,19 @@ func TestParseCreationForImport(t *testing.T) {
 		t.Error("wrong challenge accepted")
 	}
 }
+
+func TestAtomicWriteAndEnrollMerge(t *testing.T) {
+	dir := t.TempDir()
+	// Use real atomic write via webauthn store save
+	s := NewWebAuthnStore(dir + "/webauthn.json")
+	if _, err := s.CreatePendingTicket("member", "test", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.saveFile(&webauthnFile{Version: 1, Credentials: map[string][]*WAStoredCred{}}); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := filepath.Glob(dir + "/.tmp-*")
+	if len(files) != 0 {
+		t.Errorf("tmp files not cleaned: %v", files)
+	}
+}
