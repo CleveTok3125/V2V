@@ -19,9 +19,39 @@ type (
 	IdentityFile    = identity.IdentityFile
 )
 
-// LoadIdentityFile reads key.json (v2 container or legacy flat ed25519).
+// LoadIdentityFile reads key.json, handling encrypted files (version 3).
 func LoadIdentityFile(path string) (*IdentityFile, error) {
+	if enc, _ := identity.IsEncrypted(path); enc {
+		if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
+			return identity.LoadEncrypted(path, pass)
+		}
+		// Prompt for passphrase (hidden input)
+		fmt.Print("🔒 Nhập passphrase cho key file: ")
+		// Try to use term.ReadPassword if available, fallback to plain
+		pass, err := readPassphrase()
+		fmt.Println()
+		if err != nil {
+			return nil, err
+		}
+		return identity.LoadEncrypted(path, pass)
+	}
 	return identity.Load(path)
+}
+
+var loadedPassphrase string
+var loadedWasEncrypted bool
+
+func readPassphrase() (string, error) {
+	var pass string
+	fmt.Scanln(&pass)
+	return strings.TrimSpace(pass), nil
+}
+
+func SaveIdentityFileEncrypted(path string, idf *IdentityFile) error {
+	if loadedWasEncrypted && loadedPassphrase != "" {
+		return idf.SaveEncrypted(path, loadedPassphrase, nil)
+	}
+	return idf.Save(path)
 }
 
 // pickIdentity resolves which slot to use when key.json holds both flavors.

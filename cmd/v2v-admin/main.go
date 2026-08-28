@@ -84,7 +84,49 @@ func nonEmpty(s string) error {
 	return nil
 }
 
+func promptPassphrase() (string, error) {
+	var pass string
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Passphrase (Enter = không mã hóa)").EchoMode(huh.EchoModePassword).Value(&pass),
+	))
+	if err := form.Run(); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(pass) == "" {
+		return "", nil
+	}
+	var confirm string
+	form2 := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Nhập lại passphrase").EchoMode(huh.EchoModePassword).Value(&confirm).Validate(func(s string) error {
+			if s != pass {
+				return errors.New("không khớp")
+			}
+			return nil
+		}),
+	))
+	if err := form2.Run(); err != nil {
+		return "", err
+	}
+	return pass, nil
+}
+
 func loadContainer(path string) (*identity.IdentityFile, error) {
+	// Check if file is encrypted and need passphrase
+	if enc, _ := identity.IsEncrypted(path); enc {
+		// Try env first
+		if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
+			return identity.LoadEncrypted(path, pass)
+		}
+		if isInteractive() {
+			fmt.Println("🔒 File đã mã hóa, nhập passphrase để mở...")
+			pass, err := promptPassphraseForLoad()
+			if err != nil {
+				return nil, err
+			}
+			return identity.LoadEncrypted(path, pass)
+		}
+		return nil, errors.New("key file is encrypted — set V2V_PASSPHRASE or run in TTY to unlock")
+	}
 	idf, err := identity.Load(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -93,6 +135,34 @@ func loadContainer(path string) (*identity.IdentityFile, error) {
 		return nil, err
 	}
 	return idf, nil
+}
+
+func promptPassphraseForLoad() (string, error) {
+	var pass string
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewInput().Title("Nhập passphrase").EchoMode(huh.EchoModePassword).Value(&pass).Validate(nonEmpty),
+	))
+	if err := form.Run(); err != nil {
+		return "", err
+	}
+	return pass, nil
+}
+
+func saveContainer(idf *identity.IdentityFile, path string) error {
+	if isInteractive() {
+		pass, err := promptPassphrase()
+		if err != nil {
+			return err
+		}
+		if pass != "" {
+			return idf.SaveEncrypted(path, pass, nil)
+		}
+	}
+	// Check env for non-interactive
+	if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
+		return idf.SaveEncrypted(path, pass, nil)
+	}
+	return idf.Save(path)
 }
 
 func rolesPath() string { return "roles.json" }
@@ -133,7 +203,7 @@ func (c *Ed25519Keygen) Run() error {
 		HmacShield: hex.EncodeToString(shield),
 		Host:       c.Host,
 	}
-	if err := idf.Save(c.Out); err != nil {
+	if err := saveContainer(idf, c.Out); err != nil {
 		return err
 	}
 	fmt.Printf("\n💾 Đã lưu khóa bí mật tại %s (chmod 600)\n", c.Out)
@@ -210,7 +280,7 @@ func (c *PasskeyKeygen) Run() error {
 		return err
 	}
 	idf.Passkey = pk
-	if err := idf.Save(c.Out); err != nil {
+	if err := saveContainer(idf, c.Out); err != nil {
 		return err
 	}
 	fmt.Printf("\n💾 Đã lưu khóa bí mật tại %s (chmod 600)\n", c.Out)

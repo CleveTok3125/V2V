@@ -232,7 +232,7 @@ func main() {
 			respPacket.PasskeyAuthData = ad
 			respPacket.PasskeyClientData = cd
 			respPacket.PasskeySig = sig
-			_ = idf.Save(CLI.KeyFile) // persist the incremented sign counter
+			_ = SaveIdentityFileEncrypted(CLI.KeyFile, idf) // persist counter, keep encryption
 			fmt.Printf("🔑 Đang yêu cầu cấp quyền bằng passkey: [%s]...\n", pk.Role)
 		case useEd25519:
 			id := idf.Ed25519
