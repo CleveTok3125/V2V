@@ -366,19 +366,54 @@ type ListCmd struct {
 	Store string `help:"Đường dẫn store" default:"data/webauthn.json" env:"WEBAUTHN_STORE"`
 }
 
-func saveStore(path string, f *waStoreFile) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+func atomicWriteFileAdmin(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+	}
+	tmpFile, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
 		return err
 	}
+	tmpName := tmpFile.Name()
+	if err := tmpFile.Chmod(perm); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if dirFile, err := os.Open(dir); err == nil {
+		_ = dirFile.Sync()
+		dirFile.Close()
+	}
+	return nil
+}
+
+func saveStore(path string, f *waStoreFile) error {
 	out, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicWriteFileAdmin(path, out, 0o600)
 }
 
 func (l *ListCmd) Run() error {

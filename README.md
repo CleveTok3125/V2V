@@ -118,8 +118,9 @@ permissions; `/status` shows connection info and the client version.
 popup). Enrollment is admin-issued: on the server host, run
 
 ```bash
-./v2v-admin enroll --role member --label bob-laptop
+./v2v-admin enroll --role member --label bob-laptop --unlimited --prefix "[Member] "
 ```
+If the `Role` field on the web login form receives `member:abc123…`, only `member` is kept (auto-parse `role:hash`).
 
 then hand the printed one-time link (valid for 10 minutes) to the member,
 who completes the popup ceremony from any browser.
@@ -210,10 +211,10 @@ tool (build once from source: `go build -o v2v-admin ./cmd/v2v-admin`).
 
     ```bash
     # classic ed25519 key file (signs the handshake nonce)
-    ./v2v-admin keygen --role admin --type ed25519 --unlimited --prefix "[Admin] "
+    ./v2v-admin keygen ed25519 --role admin --unlimited --prefix "[Admin] "
 
     # software passkey (WebAuthn wire format, signed natively at login)
-    ./v2v-admin keygen --role admin --type passkey \
+    ./v2v-admin keygen passkey --role admin \
         --rpid chat.example.com --origin https://chat.example.com
     ```
 

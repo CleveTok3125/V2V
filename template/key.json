@@ -1,5 +1,9 @@
 {
-    "role": "admin",
-    "private_key": "Your 128-character hexadecimal private key",
-    "hmac_shield": "The security chain matches the server"
+    "version": 2,
+    "ed25519": {
+        "role": "admin",
+        "private_key": "Your 128-character hexadecimal private key (64 bytes hex)",
+        "hmac_shield": "32-character hex shield (16 bytes)",
+        "host": "chat.example.com"
+    }
 }
