@@ -26,9 +26,19 @@ type HistoryStore struct {
 	mu    sync.Mutex
 }
 
+type TripMeta struct {
+	Pub       string `json:"pub"`
+	Seq       uint32 `json:"seq"`
+	Prev      string `json:"prev"`
+	Sig       string `json:"sig"`
+	ServerPub string `json:"server_pub"`
+	MsgHash   string `json:"msg_hash,omitempty"`
+}
+
 type historyRecord struct {
-	Timestamp string `json:"ts"`
-	Message   string `json:"msg"`
+	Timestamp string    `json:"ts"`
+	Message   string    `json:"msg"`
+	Trip      *TripMeta `json:"trip,omitempty"`
 }
 
 func NewHistoryStore(path string, maxSizeMB int) (*HistoryStore, error) {
@@ -90,6 +100,17 @@ func (h *HistoryStore) Enqueue(message string, now time.Time) {
 	}
 }
 
+func (h *HistoryStore) EnqueueWithTrip(message string, trip *TripMeta, now time.Time) {
+	if h == nil {
+		return
+	}
+	h.queue <- historyRecord{
+		Timestamp: now.Format(time.RFC3339Nano),
+		Message:   message,
+		Trip:      trip,
+	}
+}
+
 func (h *HistoryStore) writeRecord(record historyRecord) error {
 	line, err := json.Marshal(record)
 	if err != nil {
@@ -142,6 +163,47 @@ func (h *HistoryStore) LoadMessages() ([]string, error) {
 	}
 
 	return messages, nil
+}
+
+func (h *HistoryStore) LoadRecords() ([]historyRecord, error) {
+	if h == nil {
+		return nil, nil
+	}
+	var records []historyRecord
+	paths := []string{h.Filename + ".old", h.Filename}
+	for _, path := range paths {
+		file, err := os.Open(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		reader := bufio.NewReader(file)
+		for {
+			line, readErr := reader.ReadBytes('\n')
+			if len(line) > 0 {
+				line = bytes.TrimSuffix(line, []byte{'\n'})
+				if len(line) > 0 {
+					var rec historyRecord
+					if err := json.Unmarshal(line, &rec); err != nil {
+						log.Printf("⚠️ [HISTORY] Bỏ qua record lỗi trong %s: %v", path, err)
+					} else if rec.Message != "" {
+						records = append(records, rec)
+					}
+				}
+			}
+			if readErr != nil {
+				if readErr == io.EOF {
+					break
+				}
+				file.Close()
+				return nil, readErr
+			}
+		}
+		file.Close()
+	}
+	return records, nil
 }
 
 func (h *HistoryStore) loadFile(path string, messages *[]string) error {

@@ -449,6 +449,8 @@
       tripcode: tripInput.value.trim(),
       showJoin: showJoinToggle.checked,
     };
+    // Clear passphrase from DOM immediately after copying to WASM
+    tripInput.value = "";
 
     if (usePasskey) {
       var pkRole = passkeyRoleInput.value.trim();

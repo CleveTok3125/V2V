@@ -45,6 +45,8 @@ type AuthPacket struct {
 	Username  string `json:"username,omitempty"`
 	Tripcode  string `json:"tripcode,omitempty"`
 
+	TripPub string `json:"trip_pub,omitempty"`
+
 	PasskeyID         string `json:"passkey_id,omitempty"`
 	PasskeyAuthData   string `json:"passkey_auth_data,omitempty"`
 	PasskeyClientData string `json:"passkey_client_data,omitempty"`
@@ -57,6 +59,9 @@ type AuthPacket struct {
 	Error    string      `json:"error,omitempty"`
 	AuthType string      `json:"auth_type,omitempty"`
 	Perms    *Permission `json:"perms,omitempty"`
+
+	TripSeq  uint32 `json:"trip_seq,omitempty"`
+	TripPrev string `json:"trip_prev,omitempty"`
 }
 
 type Permission struct {
@@ -230,10 +235,34 @@ func main() {
 		return
 	}
 
+	// Derive trip key after challenge so serverPub is known for salt binding
+	var tripPriv ed25519.PrivateKey
+	var tripPub ed25519.PublicKey
+	var tripBadge string
+	var tripSeq uint32
+	var tripPrev []byte = make([]byte, 32)
+	passphraseBytes := []byte(CLI.Tripcode)
+	if len(passphraseBytes) > 0 {
+		priv, pub, badge := deriveTripKey(CLI.Tripcode, challenge.ServerPubKey)
+		tripPriv = priv
+		tripPub = pub
+		tripBadge = badge
+		// Zero passphrase copy
+		for i := range passphraseBytes {
+			passphraseBytes[i] = 0
+		}
+		CLI.Tripcode = ""
+	}
+
 	respPacket := AuthPacket{
 		Username: username,
-		Tripcode: CLI.Tripcode,
 		Nonce:    challenge.Nonce,
+	}
+	if tripPub != nil {
+		respPacket.TripPub = hex.EncodeToString(tripPub)
+		// Legacy Tripcode field not needed when TripPub is sent; keep empty
+	} else {
+		respPacket.Tripcode = CLI.Tripcode
 	}
 
 	if CLI.KeyFile != "" {
@@ -355,6 +384,18 @@ func main() {
 	if authSuccess.Perms != nil {
 		sessPrefix = authSuccess.Perms.CustomPrefix
 	}
+	// Sync trip chain state from server's last known seq/prev for this pub
+	if tripPub != nil && authSuccess.TripPub != "" {
+		tripSeq = authSuccess.TripSeq
+		if authSuccess.TripPrev != "" {
+			if b, err := hex.DecodeString(authSuccess.TripPrev); err == nil && len(b) == 32 {
+				tripPrev = b
+			}
+		}
+		if tripPrev == nil {
+			tripPrev = make([]byte, 32)
+		}
+	}
 
 	switch authSuccess.Type {
 	case "auth_failed":
@@ -448,7 +489,12 @@ func main() {
 		if text == "/quit" || text == "/q" {
 			quitting <- true
 			conn.WriteMessage(wsCloseMessage, []byte{})
-
+			// Zero trip private key
+			if tripPriv != nil {
+				for i := range tripPriv {
+					tripPriv[i] = 0
+				}
+			}
 			fmt.Fprintf(out, "👋 Đang ngắt kết nối... Tạm biệt!\n")
 			time.Sleep(500 * time.Millisecond)
 			notifyQuit()
@@ -557,13 +603,31 @@ func main() {
 			}
 		}
 
-		if CLI.Tripcode != "" {
+		if tripPriv != nil {
+			// Sign message with trip chain
+			tripSeq++
+			msgHash := sha256.Sum256([]byte(text))
+			prevCopy := make([]byte, len(tripPrev))
+			copy(prevCopy, tripPrev)
+			payload := canonicalPayload(challenge.ServerPubKey, tripSeq, prevCopy, msgHash[:], []byte(tripPub))
+			sig := ed25519.Sign(tripPriv, payload)
+			h := sha256.New()
+			h.Write(prevCopy)
+			h.Write(sig)
+			h.Write(msgHash[:])
+			newPrev := h.Sum(nil)
+			copy(tripPrev, newPrev)
+			fmt.Fprintf(out, "|  └─ ✍  ◆ %s\n", tripBadge)
+			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig)}
+			err = conn.WriteJSON(tripMsg)
+		} else if CLI.Tripcode != "" {
 			hashTrip := sha256.Sum256([]byte(CLI.Tripcode))
 			tripCodeHex := hex.EncodeToString(hashTrip[:])[:8]
 			fmt.Fprintf(out, "|  └─ ✍  ◆ %s\n", tripCodeHex)
+			err = conn.WriteMessage(wsTextMessage, []byte(text))
+		} else {
+			err = conn.WriteMessage(wsTextMessage, []byte(text))
 		}
-
-		err = conn.WriteMessage(wsTextMessage, []byte(text))
 		if err != nil {
 			fmt.Println("❌ Lỗi gửi tin nhắn:", err)
 			break

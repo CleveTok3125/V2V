@@ -383,6 +383,15 @@ func generateTripcode(secret string, length int) string {
 	return "◆ " + fullHex[:length]
 }
 
+func tripBadgeFromPubHex(pubHex string) string {
+	b, err := hex.DecodeString(pubHex)
+	if err != nil || len(b) == 0 {
+		return ""
+	}
+	h := sha256.Sum256(b)
+	return "◆ " + hex.EncodeToString(h[:])[:8]
+}
+
 func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expectedHost string) (*ClientSession, error) {
 	perms, authPacket, err := s.HandleAuth(conn, clientIP, expectedHost)
 	if err != nil {
@@ -414,21 +423,54 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 		authPacket.AuthType = "guest"
 	}
 	finalUsername := s.generateDisplayName(authPacket.Username, clientIP, perms)
+	// Tripcode handling: new flow sends TripPub (derived pubkey), legacy sends Tripcode secret.
+	var tripPub, tripBadge string
+	var tripSeq uint32
+	var tripPrev string
+	if authPacket.TripPub != "" {
+		// Validate pub hex is 64 chars (32 bytes)
+		if b, err := hex.DecodeString(authPacket.TripPub); err == nil && len(b) == ed25519.PublicKeySize {
+			tripPub = strings.ToLower(authPacket.TripPub)
+			tripBadge = tripBadgeFromPubHex(tripPub)
+			if v, ok := s.TripChains.Load(tripPub); ok {
+				if ch, ok := v.(TripChain); ok {
+					tripSeq = ch.Seq
+					if len(ch.PrevHash) > 0 {
+						tripPrev = hex.EncodeToString(ch.PrevHash)
+					} else {
+						tripPrev = hex.EncodeToString(make([]byte, 32))
+					}
+				}
+			} else {
+				tripPrev = hex.EncodeToString(make([]byte, 32))
+			}
+		}
+	}
 	err = conn.WriteJSON(AuthPacket{
 		Type:     "auth_success",
 		Username: finalUsername,
 		Role:     authPacket.Role,
 		AuthType: authPacket.AuthType,
 		Perms:    &perms,
+		TripPub:  tripPub,
+		TripSeq:  tripSeq,
+		TripPrev: tripPrev,
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	// Prefer new pub-based badge, fallback to legacy hash
+	badge := tripBadge
+	if badge == "" {
+		badge = generateTripcode(authPacket.Tripcode, 8)
+	}
 	return &ClientSession{
 		Conn:        conn,
 		DisplayName: finalUsername,
-		Tripcode:    generateTripcode(authPacket.Tripcode, 8),
+		Tripcode:    badge,
+		TripPub:     tripPub,
+		TripBadge:   badge,
 		Perms:       perms,
 		Send:        make(chan []byte, 256),
 	}, nil
