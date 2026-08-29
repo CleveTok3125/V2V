@@ -4,11 +4,11 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"runtime"
 
 	"golang.org/x/crypto/argon2"
 	"localchat/identity"
+	"localchat/internal/tripcolor"
 )
 
 type TripState struct {
@@ -57,7 +57,11 @@ func isWASMRuntime() bool {
 }
 
 func canonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte) []byte {
-	return []byte(fmt.Sprintf("%s\x00%d\x00%x\x00%x\x00%x", serverPub, seq, prev, msgHash, pub))
+	return tripcolor.CanonicalPayload(serverPub, seq, prev, msgHash, pub)
+}
+
+func badgeColor(badge string) string {
+	return tripcolor.BadgeColor(badge)
 }
 
 func zeroTripBytes(b []byte) {
