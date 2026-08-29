@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"strings"
@@ -35,6 +37,13 @@ func (s *ChatServer) AddMessageToHistory(msg string) {
 	}
 }
 
+func (s *ChatServer) AddMessageWithTrip(msg string, trip *TripMeta) {
+	s.appendMessageToHistory(msg)
+	if s.HistoryStore != nil {
+		s.HistoryStore.EnqueueWithTrip(msg, trip, time.Now().In(Cfg.Static.Timezone))
+	}
+}
+
 func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 	store, err := NewHistoryStore(path, maxSizeMB)
 	if err != nil {
@@ -47,13 +56,34 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 		return nil
 	}
 
-	messages, err := store.LoadMessages()
+	records, err := store.LoadRecords()
 	if err != nil {
 		return fmt.Errorf("không thể nạp history từ disk: %w", err)
 	}
 
-	for _, message := range messages {
-		s.appendMessageToHistory(message)
+	for _, rec := range records {
+		s.appendMessageToHistory(rec.Message)
+		if rec.Trip != nil && rec.Trip.Pub != "" {
+			// Repopulate TripChains with latest record per pub
+			prevBytes, _ := hex.DecodeString(rec.Trip.Prev)
+			if len(prevBytes) == 32 {
+				// next prev after this record is hash(prev|sig|msgHash)
+				sigBytes, _ := hex.DecodeString(rec.Trip.Sig)
+				msgHashBytes, _ := hex.DecodeString(rec.Trip.MsgHash)
+				if len(sigBytes) == 64 && len(msgHashBytes) == 32 {
+					h := sha256.New()
+					h.Write(prevBytes)
+					h.Write(sigBytes)
+					h.Write(msgHashBytes)
+					newPrev := h.Sum(nil)
+					s.TripChains.Store(rec.Trip.Pub, TripChain{Seq: rec.Trip.Seq, PrevHash: newPrev})
+				} else {
+					s.TripChains.Store(rec.Trip.Pub, TripChain{Seq: rec.Trip.Seq, PrevHash: prevBytes})
+				}
+			} else if rec.Trip.Seq > 0 {
+				s.TripChains.Store(rec.Trip.Pub, TripChain{Seq: rec.Trip.Seq, PrevHash: []byte{}})
+			}
+		}
 	}
 
 	loggedCount := len(s.ChatHistory)
@@ -66,6 +96,23 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 
 func (s *ChatServer) Broadcast(message string, sender *websocket.Conn) {
 	s.AddMessageToHistory(message)
+	msgBytes := []byte(message)
+
+	s.ClientsMu.RLock()
+	defer s.ClientsMu.RUnlock()
+
+	for conn, client := range s.Clients {
+		if conn != sender {
+			select {
+			case client.Send <- msgBytes:
+			default:
+			}
+		}
+	}
+}
+
+func (s *ChatServer) BroadcastWithTrip(message string, trip *TripMeta, sender *websocket.Conn) {
+	s.AddMessageWithTrip(message, trip)
 	msgBytes := []byte(message)
 
 	s.ClientsMu.RLock()
