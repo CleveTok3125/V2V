@@ -97,9 +97,9 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 			sigBytes, _ := hex.DecodeString(tripForChain.Sig)
 			pubBytes, _ := hex.DecodeString(tripForChain.Pub)
 			hashBytes, _ := hex.DecodeString(tripForChain.MsgHash)
-			serverPub := tripForChain.ServerPub
+			serverPub := strings.ToLower(tripForChain.ServerPub)
 			if serverPub == "" && s.ServerID != nil {
-				serverPub = s.ServerID.PublicKey
+				serverPub = strings.ToLower(s.ServerID.PublicKey)
 			}
 			displayName := wireForVerify.DisplayName
 			if displayName == "" {
@@ -121,23 +121,30 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 				s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: []byte{}})
 			}
 		} else if tripForChain != nil && tripForChain.Pub != "" {
-			// Fallback for records without Wire (legacy) — keep old repopulate without displayName check
+			// Legacy fallback — verify even without Wire (use DisplayName from Trip if present, else empty)
 			prevBytes, _ := hex.DecodeString(tripForChain.Prev)
-			if len(prevBytes) == 32 {
-				sigBytes, _ := hex.DecodeString(tripForChain.Sig)
-				msgHashBytes, _ := hex.DecodeString(tripForChain.MsgHash)
-				if len(sigBytes) == 64 && len(msgHashBytes) == 32 {
+			sigBytes, _ := hex.DecodeString(tripForChain.Sig)
+			msgHashBytes, _ := hex.DecodeString(tripForChain.MsgHash)
+			pubBytes, _ := hex.DecodeString(tripForChain.Pub)
+			serverPub := tripForChain.ServerPub
+			if serverPub == "" && s.ServerID != nil {
+				serverPub = s.ServerID.PublicKey
+			}
+			displayName := tripForChain.DisplayName
+			payload := tripcolor.CanonicalPayload(strings.ToLower(serverPub), tripForChain.Seq, prevBytes, msgHashBytes, pubBytes, displayName)
+			if len(pubBytes) == 32 && len(sigBytes) == 64 && len(prevBytes) == 32 && len(msgHashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes) {
+				if len(prevBytes) == 32 {
 					h := sha256.New()
 					h.Write(prevBytes)
 					h.Write(sigBytes)
 					h.Write(msgHashBytes)
 					newPrev := h.Sum(nil)
 					s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: newPrev})
-				} else {
-					s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: prevBytes})
+				} else if tripForChain.Seq > 0 {
+					s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: []byte{}})
 				}
-			} else if tripForChain.Seq > 0 {
-				s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: []byte{}})
+			} else {
+				log.Printf("⚠️ [HISTORY TAMPER] legacy %s seq %d: signature invalid", tripForChain.Pub[:12], tripForChain.Seq)
 			}
 		}
 	}
@@ -205,8 +212,7 @@ func (s *ChatServer) AddWireMessageToHistory(wire WireMessage) {
 	msgStr := string(data)
 	s.appendMessageToHistory(msgStr)
 	if s.HistoryStore != nil {
-		// Store with Trip meta for chain repopulation
-		s.HistoryStore.EnqueueWithTrip(msgStr, wire.Trip, time.Now().In(Cfg.Static.Timezone))
+		s.HistoryStore.EnqueueWire(wire, time.Now().In(Cfg.Static.Timezone))
 	}
 }
 

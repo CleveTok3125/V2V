@@ -163,7 +163,8 @@ type ChatServer struct {
 	// ed25519 identity (pubkey hex -> session) for concurrency alerts.
 	ActiveIdentities sync.Map
 
-	TripChains sync.Map // pub hex -> TripChain
+	TripChains   sync.Map // pub hex -> TripChain
+	TripChainsMu sync.Mutex
 
 	TripVerifyLast   map[string]time.Time
 	TripVerifyLastMu sync.Mutex

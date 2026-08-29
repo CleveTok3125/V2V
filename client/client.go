@@ -563,9 +563,9 @@ func main() {
 			sigBytes, _ := hex.DecodeString(job.sig)
 			prevBytes, _ := hex.DecodeString(job.prev)
 			msgHashBytes, _ := hex.DecodeString(job.msgHash)
-			serverPub := job.serverPub
+			serverPub := strings.ToLower(job.serverPub)
 			if serverPub == "" {
-				serverPub = serverPubForVerify
+				serverPub = strings.ToLower(serverPubForVerify)
 			}
 			// Check text integrity if present
 			valid := false
@@ -578,7 +578,7 @@ func main() {
 					valid = len(pubBytes) == ed25519.PublicKeySize && len(sigBytes) == ed25519.SignatureSize && len(prevBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
 				}
 			} else {
-				payload := tripcolor.CanonicalPayload(serverPub, job.seq, prevBytes, msgHashBytes, pubBytes, job.displayName)
+				payload := tripcolor.CanonicalPayload(strings.ToLower(serverPub), job.seq, prevBytes, msgHashBytes, pubBytes, job.displayName)
 				valid = len(pubBytes) == ed25519.PublicKeySize && len(sigBytes) == ed25519.SignatureSize && len(prevBytes) == 32 && len(msgHashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
 			}
 			var colored string
@@ -632,9 +632,9 @@ func main() {
 						sigBytes, _ := hex.DecodeString(wire.Trip.Sig)
 						prevBytes, _ := hex.DecodeString(wire.Trip.Prev)
 						hashBytes, _ := hex.DecodeString(wire.Trip.MsgHash)
-						srvPub := wire.Trip.ServerPub
+						srvPub := strings.ToLower(wire.Trip.ServerPub)
 						if srvPub == "" {
-							srvPub = serverPubForVerify
+							srvPub = strings.ToLower(serverPubForVerify)
 						}
 						actualHash := sha256.Sum256([]byte(wire.Text))
 						if hex.EncodeToString(actualHash[:]) != strings.ToLower(wire.Trip.MsgHash) {
@@ -690,9 +690,9 @@ func main() {
 							sigBytes, _ := hex.DecodeString(wl.Trip.Sig)
 							prevBytes, _ := hex.DecodeString(wl.Trip.Prev)
 							hashBytes, _ := hex.DecodeString(wl.Trip.MsgHash)
-							srvPub := wl.Trip.ServerPub
+							srvPub := strings.ToLower(wl.Trip.ServerPub)
 							if srvPub == "" {
-								srvPub = serverPubForVerify
+								srvPub = strings.ToLower(serverPubForVerify)
 							}
 							actualHash2 := sha256.Sum256([]byte(wl.Text))
 							if hex.EncodeToString(actualHash2[:]) != strings.ToLower(wl.Trip.MsgHash) {
@@ -938,7 +938,7 @@ func main() {
 			msgHash := sha256.Sum256([]byte(text))
 			prevCopy := make([]byte, len(tripPrev))
 			copy(prevCopy, tripPrev)
-			payload := canonicalPayload(challenge.ServerPubKey, tripSeq, prevCopy, msgHash[:], []byte(tripPub), username)
+			payload := canonicalPayload(strings.ToLower(challenge.ServerPubKey), tripSeq, prevCopy, msgHash[:], []byte(tripPub), username)
 			sig := ed25519.Sign(tripPriv, payload)
 			h := sha256.New()
 			h.Write(prevCopy)
