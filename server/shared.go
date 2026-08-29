@@ -46,6 +46,14 @@ type ClientSession struct {
 	// IdentityPub pins the ed25519 identity (pubkey hex) behind this
 	// session; empty for guests and web passkey sessions.
 	IdentityPub string
+	TripPub     string
+	TripBadge   string
+}
+
+type TripChain struct {
+	Seq      uint32
+	PrevHash []byte // 32 bytes
+	LastHash []byte // msgHash of last message for debugging
 }
 
 type AuthPacket struct {
@@ -56,6 +64,10 @@ type AuthPacket struct {
 	Hmac      string `json:"hmac,omitempty"`
 	Username  string `json:"username,omitempty"`
 	Tripcode  string `json:"tripcode,omitempty"`
+
+	// TripPub is the hex-encoded ed25519 pubkey derived from passphrase.
+	// Sent in AuthPacket alongside Tripcode for hashchain sync.
+	TripPub string `json:"trip_pub,omitempty"`
 
 	// WebAuthn assertion (all base64url). When present, the nonce is
 	// verified as the SHA-256 of the challenge the authenticator signed.
@@ -81,6 +93,10 @@ type AuthPacket struct {
 	// /whoami without extra round-trips.
 	AuthType string      `json:"auth_type,omitempty"`
 	Perms    *Permission `json:"perms,omitempty"`
+
+	// Trip sync fields for hashchain reconnect
+	TripSeq  uint32 `json:"trip_seq,omitempty"`
+	TripPrev string `json:"trip_prev,omitempty"` // hex 64
 }
 
 type ServerIdentity struct {
@@ -127,6 +143,8 @@ type ChatServer struct {
 	// ActiveIdentities tracks the live session holding each privileged
 	// ed25519 identity (pubkey hex -> session) for concurrency alerts.
 	ActiveIdentities sync.Map
+
+	TripChains sync.Map // pub hex -> TripChain
 
 	WebAuthn *WebAuthnStore
 

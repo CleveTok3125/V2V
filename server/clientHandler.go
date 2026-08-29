@@ -1,6 +1,10 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -163,16 +167,161 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			updateReadDeadline()
 			continue
 		}
-		if err := filter.ValidateMessage(raw); err != nil {
-			select {
-			case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
-			default:
-			}
-			log.Printf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
-			updateReadDeadline()
-			continue
+		// Try to parse as TripMessage JSON envelope for signed messages
+		var tripMsg struct {
+			Text string `json:"text"`
+			Msg  string `json:"msg"`
+			Pub  string `json:"pub"`
+			Seq  uint32 `json:"seq"`
+			Prev string `json:"prev"`
+			Sig  string `json:"sig"`
 		}
+		var isTripMessage bool
+		var tripMeta *TripMeta
 		text := raw
+		tripVerified := false
+		tripBadgeColor := ""
+		if err := json.Unmarshal([]byte(raw), &tripMsg); err == nil && tripMsg.Sig != "" {
+			isTripMessage = true
+			// Extract text
+			t := tripMsg.Text
+			if t == "" {
+				t = tripMsg.Msg
+			}
+			if t == "" {
+				select {
+				case session.Send <- []byte("[Hệ thống]: Tin nhắn trip thiếu nội dung."):
+				default:
+				}
+				updateReadDeadline()
+				continue
+			}
+			text = t
+			// Validate text content
+			if err := filter.ValidateMessage(text); err != nil {
+				select {
+				case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
+				default:
+				}
+				log.Printf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
+				updateReadDeadline()
+				continue
+			}
+			// Trip verification
+			if session.TripPub != "" && !strings.EqualFold(session.TripPub, tripMsg.Pub) {
+				select {
+				case session.Send <- []byte("[Hệ thống]: Pubkey trip không khớp phiên đăng nhập."):
+				default:
+				}
+				updateReadDeadline()
+				continue
+			}
+			pubHex := strings.ToLower(tripMsg.Pub)
+			pubBytes, err1 := hex.DecodeString(pubHex)
+			sigBytes, err2 := hex.DecodeString(tripMsg.Sig)
+			prevBytes, err3 := hex.DecodeString(tripMsg.Prev)
+			if err1 != nil || err2 != nil || err3 != nil || len(pubBytes) != ed25519.PublicKeySize || len(sigBytes) != ed25519.SignatureSize || len(prevBytes) != 32 {
+				select {
+				case session.Send <- []byte("[Hệ thống]: Chữ ký trip không hợp lệ."):
+				default:
+				}
+				updateReadDeadline()
+				continue
+			}
+			// Check seq and prev against chain
+			var expectedSeq uint32 = 1
+			var expectedPrev []byte = make([]byte, 32)
+			if v, ok := s.TripChains.Load(pubHex); ok {
+				if ch, ok := v.(TripChain); ok {
+					expectedSeq = ch.Seq + 1
+					if len(ch.PrevHash) == 32 {
+						expectedPrev = ch.PrevHash
+					}
+				}
+			} else if v, ok := s.TripChains.Load(strings.ToLower(pubHex)); ok {
+				if ch, ok := v.(TripChain); ok {
+					expectedSeq = ch.Seq + 1
+					if len(ch.PrevHash) == 32 {
+						expectedPrev = ch.PrevHash
+					}
+				}
+			}
+			if tripMsg.Seq != expectedSeq {
+				select {
+				case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Sai thứ tự trip seq %d, mong đợi %d.", tripMsg.Seq, expectedSeq)):
+				default:
+				}
+				updateReadDeadline()
+				continue
+			}
+			if !strings.EqualFold(tripMsg.Prev, hex.EncodeToString(expectedPrev)) {
+				select {
+				case session.Send <- []byte("[Hệ thống]: Chuỗi trip bị đứt (prev không khớp)."):
+				default:
+				}
+				updateReadDeadline()
+				continue
+			}
+			// Verify signature over canonical payload
+			serverPub := ""
+			if s.ServerID != nil {
+				serverPub = s.ServerID.PublicKey
+			}
+			msgHash := sha256.Sum256([]byte(text))
+			payload := canonicalPayload(serverPub, tripMsg.Seq, prevBytes, msgHash[:], pubBytes)
+			if !ed25519.Verify(pubBytes, payload, sigBytes) {
+				select {
+				case session.Send <- []byte("[Hệ thống]: Chữ ký trip không hợp lệ."):
+				default:
+				}
+				updateReadDeadline()
+				continue
+			}
+			// Success — update chain
+			h := sha256.New()
+			h.Write(prevBytes)
+			h.Write(sigBytes)
+			h.Write(msgHash[:])
+			newPrev := h.Sum(nil)
+			s.TripChains.Store(pubHex, TripChain{Seq: tripMsg.Seq, PrevHash: newPrev})
+			tripVerified = true
+			// Build trip meta for history
+			tripMeta = &TripMeta{
+				Pub:       pubHex,
+				Seq:       tripMsg.Seq,
+				Prev:      hex.EncodeToString(prevBytes),
+				Sig:       hex.EncodeToString(sigBytes),
+				ServerPub: serverPub,
+				MsgHash:   hex.EncodeToString(msgHash[:]),
+			}
+			// Override session badge if not set
+			if session.TripBadge == "" {
+				h2 := sha256.Sum256(pubBytes)
+				session.TripBadge = "◆ " + hex.EncodeToString(h2[:])[:8]
+				session.TripPub = pubHex
+				session.Tripcode = session.TripBadge
+			}
+			tripBadgeColor = badgeColor(session.TripBadge)
+		} else {
+			// Non-trip message: if user has TripPub, they must sign (enforce)
+			if session.TripPub != "" {
+				select {
+				case session.Send <- []byte("[Hệ thống]: Tin nhắn trip phải được ký."):
+				default:
+				}
+				updateReadDeadline()
+				continue
+			}
+			if err := filter.ValidateMessage(text); err != nil {
+				select {
+				case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
+				default:
+				}
+				log.Printf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
+				updateReadDeadline()
+				continue
+			}
+		}
 
 		lastChatActivity = time.Now()
 		updateReadDeadline()
@@ -201,7 +350,22 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 
 		tripcodeSuffix := ""
 		if session.Tripcode != "" {
-			tripcodeSuffix = "\n  └─ ✍️ " + session.Tripcode
+			if isTripMessage {
+				// Verified badge with hidden OSC8
+				visible := session.Tripcode
+				if tripVerified {
+					visible = tripBadgeColor + session.Tripcode + "\x1b[0m"
+				} else {
+					visible = "\x1b[91m" + session.Tripcode + " ✗\x1b[0m"
+				}
+				hidden := ""
+				if tripMeta != nil {
+					hidden = fmt.Sprintf("\x1b]8;;v2v://trip?pub=%s&seq=%d&sig=%s&prev=%s\x1b\\ \x1b]8;;\x1b\\", tripMeta.Pub, tripMeta.Seq, tripMeta.Sig[:16], tripMeta.Prev[:16])
+				}
+				tripcodeSuffix = "\n  └─ ✍️ " + visible + hidden
+			} else {
+				tripcodeSuffix = "\n  └─ ✍️ " + session.Tripcode
+			}
 		}
 
 		newLinePrefix := " "
@@ -211,6 +375,56 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 
 		chatMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m %s:%s%s%s", now.Format("15:04"), session.DisplayName, newLinePrefix, strings.ReplaceAll(linkify.Linkify(text), "\n", "\n      "), tripcodeSuffix)
 		log.Printf("💬 [MSG từ %s] %s (%s): %s\n", clientIP, session.DisplayName, session.Tripcode, strings.ReplaceAll(text, "\n", "\\n"))
-		s.Broadcast(chatMsg, session.Conn)
+		if tripMeta != nil {
+			s.BroadcastWithTrip(chatMsg, tripMeta, session.Conn)
+		} else {
+			s.Broadcast(chatMsg, session.Conn)
+		}
 	}
+}
+
+func canonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte) []byte {
+	return []byte(fmt.Sprintf("%s\x00%d\x00%x\x00%x\x00%x", serverPub, seq, prev, msgHash, pub))
+}
+
+func badgeColor(badge string) string {
+	// Simple hash -> HSL -> ANSI 38;2;R;G;Bm
+	h := sha256.Sum256([]byte(badge))
+	// Use first 3 bytes as hue seed
+	hue := float64(h[0]) / 255.0 * 360
+	sat := 0.6 + float64(h[1]%51)/255.0*0.3 // 0.6-0.8
+	light := 0.6
+	c := (1 - abs(light*2-1)) * sat
+	x := c * (1 - abs(mathMod(hue/60, 2)-1))
+	m := light - c/2
+	var r1, g1, b1 float64
+	switch {
+	case hue < 60:
+		r1, g1, b1 = c, x, 0
+	case hue < 120:
+		r1, g1, b1 = x, c, 0
+	case hue < 180:
+		r1, g1, b1 = 0, c, x
+	case hue < 240:
+		r1, g1, b1 = 0, x, c
+	case hue < 300:
+		r1, g1, b1 = x, 0, c
+	default:
+		r1, g1, b1 = c, 0, x
+	}
+	r := int((r1 + m) * 255)
+	g := int((g1 + m) * 255)
+	b := int((b1 + m) * 255)
+	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b)
+}
+
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+func mathMod(a, b float64) float64 {
+	return a - b*float64(int(a/b))
 }
