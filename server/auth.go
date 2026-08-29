@@ -42,7 +42,24 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		s.ActiveNonces.Delete(nonceHex)
 	})
 
-	if err := conn.WriteJSON(AuthPacket{Type: "auth_challenge", Nonce: nonceHex}); err != nil {
+	serverPub := ""
+	serverSig := ""
+	serverHost := expectedHost
+	if s.ServerID != nil {
+		serverPub = s.ServerID.PublicKey
+		if privBytes, err := hex.DecodeString(s.ServerID.PrivateKey); err == nil && len(privBytes) == ed25519.PrivateKeySize {
+			priv := ed25519.PrivateKey(privBytes)
+			sig := ed25519.Sign(priv, []byte("V2V-SERVER-v1\x00"+nonceHex+"\x00"+serverHost))
+			serverSig = hex.EncodeToString(sig)
+		}
+	}
+	if err := conn.WriteJSON(AuthPacket{
+		Type:         "auth_challenge",
+		Nonce:        nonceHex,
+		ServerPubKey: serverPub,
+		ServerSig:    serverSig,
+		ServerHost:   serverHost,
+	}); err != nil {
 		return GetDefaultPermission(), AuthPacket{}, err
 	}
 
@@ -170,9 +187,14 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		return perms, resp, fmt.Errorf("auth_error: invalid_signature")
 	}
 
-	// Origin binding v2: the hostname is part of the signed payload so a
-	// key cannot be replayed against a different deployment.
-	signedData := nonceHex + "|" + resp.Role + "|" + resp.Username + "|" + strings.ToLower(expectedHost)
+	// Server pubkey pinning: the server's public key is part of the signed payload
+	// so a key cannot be reused across deployments with different server identities.
+	// When the client has a pin, it must match the current server's pubkey.
+	serverPub = ""
+	if s.ServerID != nil {
+		serverPub = s.ServerID.PublicKey
+	}
+	signedData := nonceHex + "|" + resp.Role + "|" + resp.Username + "|" + serverPub
 	signedBytes := []byte(signedData)
 
 	for _, id := range roleDef.Identities {
@@ -180,8 +202,16 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		if err != nil || len(pub) != ed25519.PublicKeySize {
 			continue
 		}
-		if id.Host != "" && !strings.EqualFold(strings.TrimSpace(id.Host), expectedHost) {
-			log.Printf("🚨 [AUTH FAIL] %s: identity gắn với host %q nhưng kết nối tới %q", clientIP, id.Host, expectedHost)
+		if id.ServerPubKey != "" && !strings.EqualFold(strings.TrimSpace(id.ServerPubKey), serverPub) {
+			srvShort := serverPub
+			if len(srvShort) > 12 {
+				srvShort = srvShort[:12]
+			}
+			pinShort := id.ServerPubKey
+			if len(pinShort) > 12 {
+				pinShort = pinShort[:12]
+			}
+			log.Printf("🚨 [AUTH FAIL] %s: identity pinned to server %q but this server is %q", clientIP, pinShort, srvShort)
 			continue
 		}
 

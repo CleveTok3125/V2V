@@ -21,15 +21,13 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
-const Version = 2
+const Version = 3
 
 type Ed25519Identity struct {
-	Role       string `json:"role"`
-	PrivateKey string `json:"private_key"` // hex-encoded seed
-	HmacShield string `json:"hmac_shield"` // hex-encoded
-	// Host pins the identity to one deployment hostname (anti-phishing /
-	// anti-cross-deployment reuse). Empty means unbound (legacy behavior).
-	Host string `json:"host,omitempty"`
+	Role         string `json:"role"`
+	PrivateKey   string `json:"private_key"` // hex-encoded seed
+	HmacShield   string `json:"hmac_shield"` // hex-encoded
+	ServerPubKey string `json:"server_pubkey,omitempty"` // hex ed25519 pub of server, anti-phishing pin
 }
 
 // PasskeyIdentity is the private half of a software passkey. The COSE public
@@ -66,10 +64,19 @@ func Load(path string) (*IdentityFile, error) {
 	if json.Unmarshal(data, &probe) != nil {
 		return nil, errors.New("key.json is not valid JSON")
 	}
+	// Reject old Host-based files (no backward compat as requested)
+	if ed, ok := probe["ed25519"].(map[string]any); ok {
+		if _, hasHost := ed["host"]; hasHost {
+			return nil, errors.New("key file uses old Host pinning — run v2v-admin migrate to update to server_pubkey")
+		}
+	}
 	if _, isContainer := probe["version"]; isContainer {
 		var f IdentityFile
 		if err := json.Unmarshal(data, &f); err != nil {
 			return nil, err
+		}
+		if f.Version < Version {
+			return nil, errors.New("key file version too old — run v2v-admin migrate")
 		}
 		f.Version = Version
 		return &f, nil

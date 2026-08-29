@@ -4,7 +4,7 @@
             {
                 "public_key": "d619... (Replace with your Hex Public Key)",
                 "hmac_shield": "a8f2... (Replace it with your HMAC security chain.)",
-                "host": "chat.example.com"
+                "server_pubkey": "64 hex of server pubkey (from data/server_identity.json)"
             }
         ],
         "passkeys": [

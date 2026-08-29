@@ -248,6 +248,11 @@ func main() {
 	}
 
 	chatApp := NewChatServer()
+	sid, err := LoadOrCreateServerIdentity("data/server_identity.json")
+	if err != nil {
+		log.Fatalf("❌ CRITICAL ERROR: cannot load server identity: %v", err)
+	}
+	chatApp.ServerID = sid
 	if err := chatApp.InitHistoryStore(Cfg.Static.HistoryFilePath, Cfg.Static.MaxHistoryFileSizeMB); err != nil {
 		log.Fatalf("❌ CRITICAL ERROR: %v", err)
 	}

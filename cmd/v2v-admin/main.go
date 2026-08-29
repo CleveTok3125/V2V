@@ -42,12 +42,12 @@ type KeygenCmd struct {
 }
 
 type Ed25519Keygen struct {
-	Role       string `help:"Role gắn với danh tính" default:"admin"`
-	Out        string `help:"Nơi ghi container" default:"key.json"`
-	Unlimited  bool   `help:"Quyền chat không giới hạn"`
-	Prefix     string `help:"Prefix hiển thị" default:"[Admin] "`
-	Host       string `help:"Hostname gắn với danh tính (chống dùng chéo deployment)"`
-	MergeRoles bool   `help:"Ghép entry vào ./roles.json (mặc định chỉ in snippet)"`
+	Role         string `help:"Role gắn với danh tính" default:"admin"`
+	Out          string `help:"Nơi ghi container" default:"key.json"`
+	Unlimited    bool   `help:"Quyền chat không giới hạn"`
+	Prefix       string `help:"Prefix hiển thị" default:"[Admin] "`
+	ServerPubKey string `help:"Server public key hex (chống phishing, thay thế host pin)"`
+	MergeRoles   bool   `help:"Ghép entry vào ./roles.json (mặc định chỉ in snippet)"`
 }
 
 type PasskeyKeygen struct {
@@ -172,12 +172,23 @@ func rolesPath() string { return "roles.json" }
 
 func (c *Ed25519Keygen) Run() error {
 	if isInteractive() {
+		// Try to auto-fill server pubkey from local server_identity.json if present
+		if c.ServerPubKey == "" {
+			if data, err := os.ReadFile("data/server_identity.json"); err == nil {
+				var sid map[string]any
+				if json.Unmarshal(data, &sid) == nil {
+					if pub, ok := sid["public_key"].(string); ok {
+						c.ServerPubKey = pub
+					}
+				}
+			}
+		}
 		form := huh.NewForm(huh.NewGroup(
 			huh.NewInput().Title("Role").Value(&c.Role).Validate(nonEmpty),
 			huh.NewInput().Title("Nơi lưu key.json").Value(&c.Out),
 			huh.NewConfirm().Title("Quyền chat không giới hạn?").Value(&c.Unlimited),
 			huh.NewInput().Title("Prefix hiển thị").Value(&c.Prefix),
-			huh.NewInput().Title("Hostname gắn với danh tính (Enter = không gắn)").Value(&c.Host),
+			huh.NewInput().Title("Server public key (hex, Enter = không pin)").Value(&c.ServerPubKey),
 			huh.NewConfirm().Title("Ghép entry vào roles.json ngay bây giờ?").
 				Affirmative("Có").Negative("Không").Value(&c.MergeRoles),
 		))
@@ -199,10 +210,10 @@ func (c *Ed25519Keygen) Run() error {
 		return err
 	}
 	idf.Ed25519 = &identity.Ed25519Identity{
-		Role:       c.Role,
-		PrivateKey: hex.EncodeToString(priv),
-		HmacShield: hex.EncodeToString(shield),
-		Host:       c.Host,
+		Role:         c.Role,
+		PrivateKey:   hex.EncodeToString(priv),
+		HmacShield:   hex.EncodeToString(shield),
+		ServerPubKey: c.ServerPubKey,
 	}
 	if err := saveContainer(idf, c.Out); err != nil {
 		return err
@@ -213,9 +224,9 @@ func (c *Ed25519Keygen) Run() error {
 		serverCfg := map[string]any{
 			c.Role: map[string]any{
 				"identities": []map[string]string{{
-					"public_key":  hex.EncodeToString(pub),
-					"hmac_shield": hex.EncodeToString(shield),
-					"host":        c.Host,
+					"public_key":    hex.EncodeToString(pub),
+					"hmac_shield":   hex.EncodeToString(shield),
+					"server_pubkey": c.ServerPubKey,
 				}},
 				"can_message_unlimited": c.Unlimited,
 				"custom_prefix":         c.Prefix,
@@ -228,9 +239,9 @@ func (c *Ed25519Keygen) Run() error {
 	}
 	return identity.MergeRolesFile(rolesPath(), c.Role, func(e map[string]any) {
 		e["identities"] = []map[string]string{{
-			"public_key":  hex.EncodeToString(pub),
-			"hmac_shield": hex.EncodeToString(shield),
-			"host":        c.Host,
+			"public_key":    hex.EncodeToString(pub),
+			"hmac_shield":   hex.EncodeToString(shield),
+			"server_pubkey": c.ServerPubKey,
 		}}
 		e["can_message_unlimited"] = c.Unlimited
 		e["custom_prefix"] = c.Prefix

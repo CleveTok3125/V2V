@@ -49,6 +49,10 @@ type AuthPacket struct {
 	PasskeyClientData string `json:"passkey_client_data,omitempty"`
 	PasskeySig        string `json:"passkey_sig,omitempty"`
 
+	ServerPubKey string `json:"server_pubkey,omitempty"`
+	ServerSig    string `json:"server_sig,omitempty"`
+	ServerHost   string `json:"server_host,omitempty"`
+
 	Error    string      `json:"error,omitempty"`
 	AuthType string      `json:"auth_type,omitempty"`
 	Perms    *Permission `json:"perms,omitempty"`
@@ -184,16 +188,37 @@ func main() {
 
 	conn, resp, err := dialWS(wsURL)
 	if err != nil {
-		fmt.Println("❌ Không thể kết nối:", err)
-		if resp != nil {
-			fmt.Printf("👉 HTTP Status Code: %d\n", resp.StatusCode)
-
-			if resp.StatusCode == 200 {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				fmt.Printf("📦 Nội dung phản hồi: %s\n", string(bodyBytes))
+		// Auto-upgrade ws:// -> wss:// when server requires TLS (426)
+		if resp != nil && resp.StatusCode == http.StatusUpgradeRequired && strings.HasPrefix(wsURL, "ws://") {
+			wssURL := "wss://" + strings.TrimPrefix(wsURL, "ws://")
+			fmt.Printf("🔒 Server yêu cầu wss://, đang thử lại với %s…\n", wssURL)
+			if bodyBytes, _ := io.ReadAll(resp.Body); len(bodyBytes) > 0 {
+				fmt.Printf("📦 Server: %s\n", strings.TrimSpace(string(bodyBytes)))
+			}
+			conn2, resp2, err2 := dialWS(wssURL)
+			if err2 == nil {
+				conn = conn2
+				resp = resp2
+				wsURL = wssURL
+				err = nil
+			} else {
+				fmt.Printf("❌ Thử lại wss cũng thất bại: %v\n", err2)
+				if resp2 != nil {
+					fmt.Printf("👉 HTTP Status Code: %d\n", resp2.StatusCode)
+				}
 			}
 		}
-		return
+		if err != nil {
+			fmt.Println("❌ Không thể kết nối:", err)
+			if resp != nil {
+				fmt.Printf("👉 HTTP Status Code: %d\n", resp.StatusCode)
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				if len(bodyBytes) > 0 {
+					fmt.Printf("📦 Nội dung phản hồi: %s\n", strings.TrimSpace(string(bodyBytes)))
+				}
+			}
+			return
+		}
 	}
 	defer conn.Close()
 
@@ -246,28 +271,41 @@ func main() {
 
 			priv := ed25519.PrivateKey(privBytes)
 
-			// Origin binding v2: hostname joins the signed payload so keys
-			// cannot be reused across deployments.
-			// Origin binding v2: a host recorded in the identity file wins;
-			// otherwise derive it from the URL being connected to. The host
-			// joins the signed payload so keys cannot be reused across
-			// deployments.
-			bindHost := id.Host
-			if bindHost == "" {
-				if u, perr := url.Parse(wsURL); perr == nil {
-					bindHost = strings.ToLower(u.Hostname())
+			// Server pubkey pinning: verify server's identity before sending auth
+			if challenge.ServerPubKey != "" {
+				if id.ServerPubKey != "" && !strings.EqualFold(id.ServerPubKey, challenge.ServerPubKey) {
+					fmt.Printf("🚨 Server identity mismatch! Pin %s != %s — abort.\n", id.ServerPubKey[:12], challenge.ServerPubKey[:12])
+					notifyQuit()
+					return
+				}
+				if challenge.ServerSig != "" {
+					srvPub, _ := hex.DecodeString(challenge.ServerPubKey)
+					srvSig, _ := hex.DecodeString(challenge.ServerSig)
+					msg := []byte("V2V-SERVER-v1\x00" + challenge.Nonce + "\x00" + challenge.ServerHost)
+					if len(srvPub) == ed25519.PublicKeySize && len(srvSig) == ed25519.SignatureSize {
+						if !ed25519.Verify(srvPub, msg, srvSig) {
+							fmt.Println("❌ Server không chứng minh được private key — dừng.")
+							notifyQuit()
+							return
+						}
+					}
+				}
+				if id.ServerPubKey == "" && challenge.ServerPubKey != "" {
+					fmt.Printf("⚠️ Lần đầu kết nối tới server %s pin %s…\n", challenge.ServerHost, challenge.ServerPubKey[:16])
 				}
 			}
-			if id.Host != "" {
-				urlHost := ""
+			// Use server's pubkey for anti-reuse (instead of host string)
+			bindValue := ""
+			if challenge.ServerPubKey != "" {
+				bindValue = challenge.ServerPubKey
+			} else if id.ServerPubKey != "" {
+				bindValue = id.ServerPubKey
+			} else {
 				if u, perr := url.Parse(wsURL); perr == nil {
-					urlHost = strings.ToLower(u.Hostname())
-				}
-				if urlHost != "" && urlHost != id.Host {
-					fmt.Printf("⚠️ Danh tính gắn với host %q nhưng đang kết nối tới %q — chữ ký có thể bị từ chối.\n", id.Host, urlHost)
+					bindValue = strings.ToLower(u.Hostname())
 				}
 			}
-			dataToSign := challenge.Nonce + "|" + id.Role + "|" + respPacket.Username + "|" + bindHost
+			dataToSign := challenge.Nonce + "|" + id.Role + "|" + respPacket.Username + "|" + bindValue
 			sig := ed25519.Sign(priv, []byte(dataToSign))
 			respPacket.Signature = hex.EncodeToString(sig)
 

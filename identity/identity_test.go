@@ -175,7 +175,7 @@ func TestAtomicWriteDurability(t *testing.T) {
 func TestEncryptedRoundtrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enc.json")
 	f := &IdentityFile{
-		Ed25519: &Ed25519Identity{Role: "admin", PrivateKey: "aa", HmacShield: "bb", Host: "example.com"},
+		Ed25519: &Ed25519Identity{Role: "admin", PrivateKey: "aa", HmacShield: "bb", ServerPubKey: "deadbeef"},
 		Passkey: &PasskeyIdentity{Role: "member", CredentialID: "cid123", PrivateKey: "pk", PublicKey: "cose", RPID: "example.com", Origin: "https://example.com"},
 	}
 	// Use fast params for test
