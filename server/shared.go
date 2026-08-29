@@ -147,6 +147,9 @@ type ChatServer struct {
 
 	TripChains sync.Map // pub hex -> TripChain
 
+	TripVerifyLast   map[string]time.Time
+	TripVerifyLastMu sync.Mutex
+
 	WebAuthn *WebAuthnStore
 
 	RoleRegistry   map[string]RoleDefinition
@@ -158,12 +161,13 @@ type ChatServer struct {
 func NewChatServer() *ChatServer {
 	return &ChatServer{
 		StartTime:       time.Now(),
-		Clients:         make(map[*websocket.Conn]*ClientSession),
-		IpCounts:        make(map[string]int),
-		LastConnectTime: make(map[string]time.Time),
-		AuthFails:       make(map[string]RateLimitRecord),
-		ChatHistory:     make([]string, 0),
-		RoleRegistry:    make(map[string]RoleDefinition),
+		Clients:          make(map[*websocket.Conn]*ClientSession),
+		IpCounts:         make(map[string]int),
+		LastConnectTime:  make(map[string]time.Time),
+		AuthFails:        make(map[string]RateLimitRecord),
+		TripVerifyLast:   make(map[string]time.Time),
+		ChatHistory:      make([]string, 0),
+		RoleRegistry:     make(map[string]RoleDefinition),
 		WebAuthn:        NewWebAuthnStore(os.Getenv("WEBAUTHN_STORE")),
 		Upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
