@@ -359,6 +359,33 @@
 
     term.open(host);
 
+    // Allow v2v:// and https trip verify links — stateless verification
+    try {
+      term.options.linkHandler = {
+        allowNonHttpProtocols: true,
+        activate: function (e, uri) {
+          if (uri && (uri.indexOf("v2v://trip") === 0 || uri.indexOf("/api/trip/verify") !== -1)) {
+            if (e && e.preventDefault) e.preventDefault();
+            if (uri.indexOf("/api/trip/verify") !== -1) {
+              fetch(uri).then(function (r) { return r.json(); }).then(function (j) {
+                var info = j.valid ? "✅ Trip valid " + (j.badge || "") + " seq=" + j.seq : "❌ Trip invalid: " + (j.error || "");
+                setStatus(info, !j.valid);
+              }).catch(function () { setStatus("Trip link: " + uri, false); });
+              if (navigator.clipboard) navigator.clipboard.writeText(uri).catch(function () {});
+            } else {
+              var q = uri.split("?")[1] || "";
+              var p = new URLSearchParams(q);
+              var info2 = "Trip pub=" + (p.get("pub") || "").slice(0, 12) + "… seq=" + (p.get("seq") || "?");
+              setStatus(info2, false);
+              if (navigator.clipboard) navigator.clipboard.writeText(uri).catch(function () {});
+            }
+            return;
+          }
+          if (uri) window.open(uri, "_blank");
+        }
+      };
+    } catch (err) {}
+
     window.addEventListener("resize", scheduleResize);
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", scheduleResize);

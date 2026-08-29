@@ -471,6 +471,7 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 		Tripcode:    badge,
 		TripPub:     tripPub,
 		TripBadge:   badge,
+		Host:        expectedHost,
 		Perms:       perms,
 		Send:        make(chan []byte, 256),
 	}, nil
