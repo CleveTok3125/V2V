@@ -56,8 +56,8 @@ func isWASMRuntime() bool {
 	return runtime.GOOS == "js"
 }
 
-func canonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte) []byte {
-	return tripcolor.CanonicalPayload(serverPub, seq, prev, msgHash, pub)
+func canonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte, displayName string) []byte {
+	return tripcolor.CanonicalPayload(serverPub, seq, prev, msgHash, pub, displayName)
 }
 
 func badgeColor(badge string) string {
@@ -72,12 +72,13 @@ func zeroTripBytes(b []byte) {
 
 // TripMessage is the JSON envelope for signed chat messages.
 type TripMessage struct {
-	Text string `json:"text,omitempty"` // for compatibility, also support Msg alias
-	Msg  string `json:"msg,omitempty"`
-	Pub  string `json:"pub,omitempty"`
-	Seq  uint32 `json:"seq,omitempty"`
-	Prev string `json:"prev,omitempty"` // hex 64
-	Sig  string `json:"sig,omitempty"`  // hex 128
+	Text        string `json:"text,omitempty"` // for compatibility, also support Msg alias
+	Msg         string `json:"msg,omitempty"`
+	Pub         string `json:"pub,omitempty"`
+	Seq         uint32 `json:"seq,omitempty"`
+	Prev        string `json:"prev,omitempty"` // hex 64
+	Sig         string `json:"sig,omitempty"`  // hex 128
+	DisplayName string `json:"display_name,omitempty"`
 }
 
 func (m *TripMessage) GetText() string {

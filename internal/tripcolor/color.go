@@ -29,6 +29,7 @@ func BadgeColor(badge string) string {
 }
 
 // CanonicalPayload is the signed payload for trip messages, shared by client/server.
-func CanonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte) []byte {
-	return []byte(fmt.Sprintf("%s\x00%d\x00%x\x00%x\x00%x", serverPub, seq, prev, msgHash, pub))
+// displayName is the final server-rendered name (e.g. "[Admin] Anonymous" or "Anonymous#abcd") — binding it prevents displayName spoofing.
+func CanonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte, displayName string) []byte {
+	return []byte(fmt.Sprintf("%s\x00%d\x00%x\x00%x\x00%x\x00%s", serverPub, seq, prev, msgHash, pub, displayName))
 }
