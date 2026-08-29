@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -64,6 +65,23 @@ type AuthPacket struct {
 
 	TripSeq  uint32 `json:"trip_seq,omitempty"`
 	TripPrev string `json:"trip_prev,omitempty"`
+}
+
+type WireMessage struct {
+	Type        string    `json:"type"`
+	Time        string    `json:"time,omitempty"`
+	DisplayName string    `json:"displayName,omitempty"`
+	Text        string    `json:"text,omitempty"`
+	Trip        *TripMeta `json:"trip,omitempty"`
+}
+
+type TripMeta struct {
+	Pub       string `json:"pub"`
+	Seq       uint32 `json:"seq"`
+	Prev      string `json:"prev"`
+	Sig       string `json:"sig"`
+	ServerPub string `json:"server_pub"`
+	MsgHash   string `json:"msg_hash,omitempty"`
 }
 
 type Permission struct {
@@ -580,8 +598,110 @@ func main() {
 			isShowingJoin := showJoinLeave
 			showJoinMu.RUnlock()
 
+			// Try to handle structured WireMessage JSON first (for new protocol)
+			var wire WireMessage
+			if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
+				displayMu.Lock()
+				fmt.Fprintf(out, "| %s %s: %s\n", wire.Time, wire.DisplayName, filter.SanitizeForDisplay(wire.Text))
+				displayMu.Unlock()
+				if wire.Trip != nil {
+					pubBytes, _ := hex.DecodeString(wire.Trip.Pub)
+					h := sha256.Sum256(pubBytes)
+					badge := "◆ " + hex.EncodeToString(h[:])[:8]
+					autoVerifyMu.RLock()
+					av := autoVerify
+					autoVerifyMu.RUnlock()
+					var colored string
+					if av {
+						sigBytes, _ := hex.DecodeString(wire.Trip.Sig)
+						prevBytes, _ := hex.DecodeString(wire.Trip.Prev)
+						hashBytes, _ := hex.DecodeString(wire.Trip.MsgHash)
+						srvPub := wire.Trip.ServerPub
+						if srvPub == "" {
+							srvPub = serverPubForVerify
+						}
+						payload := tripcolor.CanonicalPayload(srvPub, wire.Trip.Seq, prevBytes, hashBytes, pubBytes)
+						valid := len(pubBytes) == 32 && len(sigBytes) == 64 && len(prevBytes) == 32 && len(hashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
+						if valid {
+							colored = tripcolor.BadgeColor(badge) + badge + "\x1b[0m"
+						} else {
+							colored = "\x1b[91m" + badge + " ✗\x1b[0m"
+						}
+					} else {
+						colored = badge
+					}
+					hostForLink2 := ""
+					if u, err := url.Parse(wsURL); err == nil {
+						hostForLink2 = u.Host
+					}
+					urlStr := ""
+					if hostForLink2 != "" {
+						urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s", hostForLink2, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub)
+					}
+					displayMu.Lock()
+					if urlStr != "" {
+						fmt.Fprintf(out, "|   └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\\n", urlStr, colored)
+					} else {
+						fmt.Fprintf(out, "|   └─ ✍️ %s\n", colored)
+					}
+					displayMu.Unlock()
+				}
+				term.Refresh()
+				continue
+			}
 			lines := strings.Split(string(msg), "\n")
 			for _, line := range lines {
+				// Also try per-line JSON (for history blob where each line is a WireMessage JSON)
+				var wl WireMessage
+				if err := json.Unmarshal([]byte(line), &wl); err == nil && wl.Type == "chat" {
+					displayMu.Lock()
+					fmt.Fprintf(out, "| %s %s: %s\n", wl.Time, wl.DisplayName, filter.SanitizeForDisplay(wl.Text))
+					displayMu.Unlock()
+					if wl.Trip != nil {
+						pubBytes, _ := hex.DecodeString(wl.Trip.Pub)
+						h := sha256.Sum256(pubBytes)
+						badge := "◆ " + hex.EncodeToString(h[:])[:8]
+						autoVerifyMu.RLock()
+						av := autoVerify
+						autoVerifyMu.RUnlock()
+						var colored string
+						if av {
+							sigBytes, _ := hex.DecodeString(wl.Trip.Sig)
+							prevBytes, _ := hex.DecodeString(wl.Trip.Prev)
+							hashBytes, _ := hex.DecodeString(wl.Trip.MsgHash)
+							srvPub := wl.Trip.ServerPub
+							if srvPub == "" {
+								srvPub = serverPubForVerify
+							}
+							payload := tripcolor.CanonicalPayload(srvPub, wl.Trip.Seq, prevBytes, hashBytes, pubBytes)
+							valid := len(pubBytes) == 32 && len(sigBytes) == 64 && len(prevBytes) == 32 && len(hashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
+							if valid {
+								colored = tripcolor.BadgeColor(badge) + badge + "\x1b[0m"
+							} else {
+								colored = "\x1b[91m" + badge + " ✗\x1b[0m"
+							}
+						} else {
+							colored = badge
+						}
+						hostForLink2 := ""
+						if u, err := url.Parse(wsURL); err == nil {
+							hostForLink2 = u.Host
+						}
+						urlStr := ""
+						if hostForLink2 != "" {
+							urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s", hostForLink2, wl.Trip.Pub, wl.Trip.Seq, wl.Trip.Prev, wl.Trip.Sig, wl.Trip.MsgHash, wl.Trip.ServerPub)
+						}
+						displayMu.Lock()
+						if urlStr != "" {
+							fmt.Fprintf(out, "|   └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\\n", urlStr, colored)
+						} else {
+							fmt.Fprintf(out, "|   └─ ✍️ %s\n", colored)
+						}
+						displayMu.Unlock()
+						continue
+					}
+					continue
+				}
 				if !isShowingJoin && isDateBannerLine(line) {
 					pendingDateBanner = line
 					continue
