@@ -225,7 +225,8 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				updateReadDeadline()
 				continue
 			}
-			// Check seq and prev against chain
+			// Check seq and prev against chain — locked per-pub to prevent TOCTOU fork
+			s.TripChainsMu.Lock()
 			var expectedSeq uint32 = 1
 			var expectedPrev []byte = make([]byte, 32)
 			if v, ok := s.TripChains.Load(pubHex); ok {
@@ -235,15 +236,9 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 						expectedPrev = ch.PrevHash
 					}
 				}
-			} else if v, ok := s.TripChains.Load(strings.ToLower(pubHex)); ok {
-				if ch, ok := v.(TripChain); ok {
-					expectedSeq = ch.Seq + 1
-					if len(ch.PrevHash) == 32 {
-						expectedPrev = ch.PrevHash
-					}
-				}
 			}
 			if tripMsg.Seq != expectedSeq {
+				s.TripChainsMu.Unlock()
 				select {
 				case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Sai thứ tự trip seq %d, mong đợi %d.", tripMsg.Seq, expectedSeq)):
 				default:
@@ -252,6 +247,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				continue
 			}
 			if !strings.EqualFold(tripMsg.Prev, hex.EncodeToString(expectedPrev)) {
+				s.TripChainsMu.Unlock()
 				select {
 				case session.Send <- []byte("[Hệ thống]: Chuỗi trip bị đứt (prev không khớp)."):
 				default:
@@ -262,13 +258,14 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			// Verify signature over canonical payload — bind displayName and msg integrity
 			serverPub := ""
 			if s.ServerID != nil {
-				serverPub = s.ServerID.PublicKey
+				serverPub = strings.ToLower(s.ServerID.PublicKey)
 			}
 			msgHash := sha256.Sum256([]byte(text))
 			// Use session's displayName as ground truth (prevents spoofing via TripMessage.DisplayName)
 			displayNameForVerify := session.DisplayName
 			payload := tripcolor.CanonicalPayload(serverPub, tripMsg.Seq, prevBytes, msgHash[:], pubBytes, displayNameForVerify)
 			if !ed25519.Verify(pubBytes, payload, sigBytes) {
+				s.TripChainsMu.Unlock()
 				select {
 				case session.Send <- []byte("[Hệ thống]: Chữ ký trip không hợp lệ."):
 				default:
@@ -283,6 +280,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			h.Write(msgHash[:])
 			newPrev := h.Sum(nil)
 			s.TripChains.Store(pubHex, TripChain{Seq: tripMsg.Seq, PrevHash: newPrev})
+			s.TripChainsMu.Unlock()
 			// Build trip meta for history — store displayName as well for verification
 			tripMeta = &TripMeta{
 				Pub:         pubHex,
