@@ -5,45 +5,27 @@ import (
 	"fmt"
 )
 
-// BadgeColor returns ANSI 38;2;R;G;Bm for a badge string deterministically.
+// Fixed palette for badges — rotated by hash(pub) to avoid harsh reds.
+// Colors are 38;2 truecolor, chosen for contrast on #101014 background.
+var palette = [][3]int{
+	{79, 129, 255},  // blue
+	{129, 199, 132}, // green
+	{255, 183, 77},  // orange
+	{149, 117, 205}, // purple
+	{77, 208, 225},  // cyan
+	{255, 138, 101}, // peach
+	{174, 213, 129}, // light green
+	{144, 164, 174}, // blue-gray
+	{255, 213, 79},  // amber
+	{100, 181, 246}, // light blue
+}
+
+// BadgeColor returns ANSI 38;2;R;G;Bm by rotating the fixed palette.
 func BadgeColor(badge string) string {
 	h := sha256.Sum256([]byte(badge))
-	hue := float64(h[0]) / 255.0 * 360
-	sat := 0.6 + float64(h[1]%51)/255.0*0.3
-	light := 0.6
-	c := (1 - abs(light*2-1)) * sat
-	x := c * (1 - abs(mod(hue/60, 2)-1))
-	m := light - c/2
-	var r1, g1, b1 float64
-	switch {
-	case hue < 60:
-		r1, g1, b1 = c, x, 0
-	case hue < 120:
-		r1, g1, b1 = x, c, 0
-	case hue < 180:
-		r1, g1, b1 = 0, c, x
-	case hue < 240:
-		r1, g1, b1 = 0, x, c
-	case hue < 300:
-		r1, g1, b1 = x, 0, c
-	default:
-		r1, g1, b1 = c, 0, x
-	}
-	r := int((r1 + m) * 255)
-	g := int((g1 + m) * 255)
-	b := int((b1 + m) * 255)
-	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b)
-}
-
-func abs(x float64) float64 {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
-func mod(a, b float64) float64 {
-	return a - b*float64(int(a/b))
+	idx := int(h[0]) % len(palette)
+	c := palette[idx]
+	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", c[0], c[1], c[2])
 }
 
 // CanonicalPayload is the signed payload for trip messages, shared by client/server.
