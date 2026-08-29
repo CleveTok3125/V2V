@@ -106,10 +106,12 @@ If the container holds both flavors you'll be asked which one to use.
 Any authentication failure exits the client instead of degrading to a
 guest session.
 
-**Anti-phishing:** privileged identities are bound to the deployment
-hostname — ed25519 signatures explicitly cover it, and real passkeys are
-pinned by RP ID/origin — so an identity cannot be replayed against a
-different server.
+**Anti-phishing:** privileged identities are bound to the server's
+Ed25519 identity — `key.json` stores `server_pubkey` (hex 64, from
+`data/server_identity.json` auto-generated on first run) and signatures
+cover `server_pubkey` instead of hostname. Real passkeys are pinned by RP
+ID/origin — so an identity cannot be replayed against a different server
+even behind a proxy.
 
 **Key file encryption (v0.6.0+):** `key.json` can be encrypted at rest with
 `XChaCha20Poly1305 + Argon2id` (simple but strong, works on WASM/arm64).
@@ -182,13 +184,15 @@ verify that the container is running:
     docker compose logs -f V2V
     ```
 
-The docker-compose.yml is configured to mount your local `.env` and `roles.json` directly into the running container as read-only files.
-It also mounts `./logs` and `./data` so rotated logs and persisted chat history survive container restarts and recreates.
-By default, the template uses `LOG_FILE_PATH=./logs/app.log` and `HISTORY_FILE_PATH=./data/history.jsonl`.
+The docker-compose.yml mounts `./logs` and `./data` as directories (persisted), and `.env` as a file. `roles.json` is mounted as a **file** — due to Docker bind-mount inode caching, an atomic replacement (`keygen --merge-roles` does `Rename`) may not be visible inside the container until you restart:
 
-You do not need to restart the container when updating roles or environment variables.
+```bash
+docker compose restart v2v_server  # or down && up -d --build
+```
 
-Simply edit `.env` or `roles.json` on your host machine, save the file, and the server will _automatically_ detect the changes and reload the configurations on the fly.
+`./logs` and `./data` (including `data/server_identity.json` auto-generated on first run, `data/history.jsonl`) survive restarts. By default, the template uses `LOG_FILE_PATH=./logs/app.log` and `HISTORY_FILE_PATH=./data/history.jsonl`.
+
+For `.env` changes, the server hot-reloads dynamic vars automatically; `roles.json` and `server_identity.json` require a restart when replaced atomically.
 
 - To stop and remove the container gracefully:
 
@@ -214,16 +218,18 @@ The system allows special privileges through cryptographic identities rather
 than passwords. Identities are created with the **`v2v-admin`** management
 tool (build once from source: `go build -o v2v-admin ./cmd/v2v-admin`).
 
-1. **Create an identity** — pick a flavor:
+1. **Create an identity** — pick a flavor (server identity at `data/server_identity.json` is auto-generated on first run; its `public_key` is shown in logs as `Server public key`):
 
     ```bash
-    # classic ed25519 key file (signs the handshake nonce)
-    ./v2v-admin keygen ed25519 --role admin --unlimited --prefix "[Admin] "
+    # classic ed25519 key file (pin to current server's pubkey for anti-phishing)
+    ./v2v-admin keygen ed25519 --role admin --unlimited --prefix "[Admin] " --server-pubkey $(jq -r .public_key data/server_identity.json)
 
     # software passkey (WebAuthn wire format, signed natively at login)
     ./v2v-admin keygen passkey --role admin \
         --rpid chat.example.com --origin https://chat.example.com
     ```
+
+   Add `--passphrase` handling: `v2v-admin` will prompt `Passphrase (Enter = no encryption)` with hidden confirm when run in a TTY, or read `V2V_PASSPHRASE` env in scripts. Encrypted `key.json` is `version:3`.
 
     *Both write the private material into `key.json` (keep it safe). The
     ed25519 flavor also prints a `roles.json` snippet; the passkey flavor can
