@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"mime"
@@ -271,6 +272,16 @@ func main() {
 	mux.HandleFunc("/webauthn/enroll/begin", chatApp.handleEnrollBegin)
 	mux.HandleFunc("/webauthn/enroll/finish", chatApp.handleEnrollFinish)
 
+	mux.HandleFunc("/api/server_pubkey", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		pub := ""
+		if chatApp.ServerID != nil {
+			pub = chatApp.ServerID.PublicKey
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"public_key": pub})
+	})
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
 			chatApp.ServeWS(w, r)
@@ -291,8 +302,13 @@ func main() {
 		fmt.Fprintf(w, "Múi giờ    : %s\n", Cfg.Static.Timezone)
 		fmt.Fprintf(w, "Trạng thái : %s\n", dynCfg.StatusURL)
 		fmt.Fprintln(w, "------------------------------------")
+		fmt.Fprintf(w, "Web Client : /web\n")
 		fmt.Fprintf(w, "Tải Client : %s\n", dynCfg.DownloadURL)
 		fmt.Fprintf(w, "Homepage   : %s\n", dynCfg.HomepageURL)
+		fmt.Fprintln(w, "------------------------------------")
+		if chatApp.ServerID != nil && chatApp.ServerID.PublicKey != "" {
+			fmt.Fprintf(w, "Server Pubkey: %s\n", chatApp.ServerID.PublicKey)
+		}
 	})
 
 	server := &http.Server{
