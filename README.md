@@ -10,7 +10,9 @@ A high-performance, real-time anonymous chat system built entirely in Go. It fea
 * **Lightning Fast and Lightweight:** Pure Go implementation utilizing `gorilla/websocket` for real-time bidirectional communication.
 * **Asymmetric Authentication (Passwordless):** Uses Ed25519 and HMAC for a Challenge-Response authentication mechanism. This allows Admins/Mods to log in securely without sending private keys over the network, effectively preventing Replay and MITM attacks.
 * **Real WebAuthn Passkeys (Web):** Members can log in from any browser using platform passkeys (Touch ID / Windows Hello / password managers) — private keys never leave the device. Enrollment links are issued by the server admin.
-* **Secure Anonymity:** Users are anonymous by default. Display names are automatically appended with a short hash of the user's IP address (e.g., `Anonymous#1a2b`), making it easy to distinguish users without exposing real IP addresses. Now users can choose tripcode identity system.
+* **Secure Anonymity:** Users are anonymous by default. Display names are automatically appended with a short hash of the user's IP address (e.g., `Anonymous#1a2b`), making it easy to distinguish users without exposing real IP addresses. Optional tripcode provides a cryptographic pseudonym (`◆ ab12cd34`) derived from a passphrase bound to the server's identity.
+* **Tripcode v0.7.0+ (ed25519 + hashchain):** Passphrase → Argon2id (`sha256(serverPub)[:16]` salt, `t=1/m=32MB` WASM / `t=3/m=64MB` native) → `ed25519` keypair; `badge = hex(sha256(pub))[:8]` colored via fixed palette. Each message is signed over `serverPub|seq|prev|msgHash|pub|displayName` with per-user hashchain `prev = sha256(prev|sig|msgHash)`, `seq` strictly increasing, `serverPub` binding prevents cross-server replay, `displayName` binding prevents fake `[Admin]` spoof, and `msgHash` is recomputed server- and client-side to detect history edits (history stores `WireMessage` JSON with `TripMeta` and is re-verified on load and on display, tampered messages show red badge).
+* **Structured Wire & History:** Chat messages are now `WireMessage` JSON (`type, time, displayName, text, trip`) instead of raw ANSI; history is persisted as `history.jsonl` with `wire` + `trip` fields and replayed with integrity checks; legacy ANSI history is still loaded.
 * **Anti-Spam and Abuse Protection:**
     * Maximum connection limits per IP address.
     * Message length and line-break limits.
@@ -19,8 +21,8 @@ A high-performance, real-time anonymous chat system built entirely in Go. It fea
     * IP spoofing and DoS preventation.
     * Immediately block unencrypted connections to prevent MITM attacks and secret sniffing
 
-* **In-Memory Chat History:** Automatically stores and sends the most recent messages to newly connected users.
-* **Cross-Platform CLI Client:** A terminal-based client featuring an integrated chat UI suitable for multi-line messages and local commands.
+* **In-Memory Chat History:** Automatically stores and sends the most recent messages to newly connected users (in-memory + `data/history.jsonl` with `TripChains` repopulation on restart, `MaxHistoryBytes`/`MaxHistorySend` caps).
+* **Cross-Platform CLI Client:** A terminal-based client featuring an integrated chat UI suitable for multi-line messages and local commands. Client auto-verifies trip signatures in a FIFO queue with parallel workers (enabled by default, `/autoverify` to toggle) and recolors badges locally; manual verification also available via `https://<host>/api/trip/verify?...` stateless endpoint (rate-limited 200ms/IP).
 ---
 
 ## Table of Contents
@@ -93,8 +95,8 @@ both issued by an admin and stored locally in a single `key.json` container
 
 | Flavor            | Created with                       | Login proof                          |
 | ----------------- | ---------------------------------- | ------------------------------------ |
-| `ed25519`         | `V2V -g` → option 1                | Ed25519 signature over the handshake |
-| Software passkey  | `V2V -g` → option 2 (dev bonus)    | ES256 assertion, WebAuthn wire format |
+| `ed25519`         | `v2v-admin keygen ed25519`         | Ed25519 signature over the handshake |
+| Software passkey  | `v2v-admin keygen passkey` (dev)   | ES256 assertion, WebAuthn wire format |
 
 **Login:**
 
@@ -121,7 +123,21 @@ supported. Encrypted files are `version:3` envelope with random salt/nonce
 per file, `chmod 600`, and atomic `Sync` for durability.
 
 **In-session commands:** `/whoami` shows your identity, role and
-permissions; `/status` shows connection info and the client version.
+permissions; `/status` shows connection info and the client version; `/autoverify` toggles trip auto-verify (on by default).
+
+#### Tripcode (passphrase → Ed25519, hashchain)
+
+Tripcode is a per-user pseudonym independent from roles. Supply a passphrase via `-t` / `tripcode` field (web `type=password`):
+
+```bash
+./client -s wss://chat.example.com -u "YourName" -t "my secret phrase"
+```
+
+The client derives `ed25519` deterministically: `argon2id(passphrase, salt=sha256(serverPub)[:16]) → seed → ed25519`, `badge = hex(sha256(pub))[:8]` (e.g., `◆ ab12cd34`) colored from a fixed 10-color palette. No private key is sent; the passphrase is zeroed after derive.
+
+Each chat message is signed as `sig = ed25519.Sign(priv, serverPub|seq|prev|msgHash|pub|displayName)` and sent as `{pub,seq,prev,sig,displayName}`. The server verifies `seq == last+1` and `prev` against `TripChains` (per-`pub` mutex), checks `msgHash == sha256(text)` and `ed25519.Verify` with `session.DisplayName` as ground truth (prevents `username="[Admin] Eve"` spoof), then stores `WireMessage` JSON in `history.jsonl` with `TripMeta` (`pub,seq,prev,sig,serverPub,msgHash,displayName`). On restart the server repopulates `TripChains` from history and re-verifies each record.
+
+Clients auto-verify every trip message in a FIFO queue with parallel workers (local `ed25519.Verify`, not via the stateless `GET /api/trip/verify?pub&seq&prev&sig&msg_hash&server_pub&display_name` which is also available for manual click on the badge's `https` OSC8 link). Valid badges keep their palette color; tampered messages (edited `text` or `displayName` without updating `sig`) are shown in red `◆ ab12 ✗`.
 
 **Web clients** log in through real platform passkeys (password-manager
 popup). Enrollment is admin-issued: on the server host, run
