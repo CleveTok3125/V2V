@@ -1,9 +1,9 @@
 {
-    "version": 2,
+    "version": 3,
     "ed25519": {
         "role": "admin",
         "private_key": "Your 128-character hexadecimal private key (64 bytes hex)",
         "hmac_shield": "32-character hex shield (16 bytes)",
-        "host": "chat.example.com"
+        "server_pubkey": "64-character hex of server's ed25519 pubkey (pin, anti-phishing)"
     }
 }
