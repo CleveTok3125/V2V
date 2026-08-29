@@ -103,19 +103,23 @@ func SanitizeForDisplay(s string) string {
 			if i+1 < len(s) && s[i+1] == ']' {
 				// Look for ESC \ terminator
 				j := i + 2
+				found := false
 				for j < len(s)-1 {
 					if s[j] == 0x1b && s[j+1] == '\\' {
 						b.WriteString(s[i : j+2])
 						i = j + 2
-						goto next
+						found = true
+						break
 					}
 					j++
+				}
+				if found {
+					continue
 				}
 			}
 			// Unknown ESC - strip it
 			i++
 			continue
-		next:
 		}
 		r, size := utf8.DecodeRuneInString(s[i:])
 		if r == utf8.RuneError {
