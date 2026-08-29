@@ -282,6 +282,8 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]string{"public_key": pub})
 	})
 
+	mux.HandleFunc("/api/trip/verify", chatApp.handleTripVerify)
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
 			chatApp.ServeWS(w, r)

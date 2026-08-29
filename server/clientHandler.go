@@ -352,15 +352,17 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		tripcodeSuffix := ""
 		if session.Tripcode != "" {
 			if isTripMessage {
-				// Badge itself is the OSC8 hyperlink so click shows metadata, single space after ✍️
+				// Badge itself is the OSC8 hyperlink to stateless verify endpoint
 				visible := session.Tripcode
 				if tripVerified {
 					visible = tripBadgeColor + session.Tripcode + "\x1b[0m"
 				} else {
 					visible = "\x1b[91m" + session.Tripcode + " ✗\x1b[0m"
 				}
-				if tripMeta != nil {
-					visible = fmt.Sprintf("\x1b]8;;v2v://trip?pub=%s&seq=%d&sig=%s&prev=%s\x1b\\%s\x1b]8;;\x1b\\", tripMeta.Pub, tripMeta.Seq, tripMeta.Sig, tripMeta.Prev, visible)
+				if tripMeta != nil && session.Host != "" {
+					// Stateless https link — works in both web and desktop OSC8 handlers
+					url := fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s", session.Host, tripMeta.Pub, tripMeta.Seq, tripMeta.Prev, tripMeta.Sig, tripMeta.MsgHash, tripMeta.ServerPub)
+					visible = fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", url, visible)
 				}
 				tripcodeSuffix = "\n  └─ ✍️ " + visible
 			} else {

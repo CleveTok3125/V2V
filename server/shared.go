@@ -48,6 +48,7 @@ type ClientSession struct {
 	IdentityPub string
 	TripPub     string
 	TripBadge   string
+	Host        string // Host header at handshake, for https trip link generation
 }
 
 type TripChain struct {
