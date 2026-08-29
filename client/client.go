@@ -131,16 +131,18 @@ type inputTerminal interface {
 var historyFile = filepath.Join(os.TempDir(), "V2V_chat_history.tmp")
 
 type verifyJob struct {
-	rawLine   string
-	badge     string
-	urlStr    string
-	pub       string
-	seqStr    string
-	prev      string
-	sig       string
-	msgHash   string
-	serverPub string
-	seq       uint32
+	rawLine     string
+	badge       string
+	urlStr      string
+	pub         string
+	seqStr      string
+	prev        string
+	sig         string
+	msgHash     string
+	serverPub   string
+	displayName string
+	textParam   string
+	seq         uint32
 }
 
 func parseTripBadgeLine(line string) (verifyJob, bool) {
@@ -206,15 +208,17 @@ func parseTripBadgeLine(line string) (verifyJob, bool) {
 	}
 	q := u.Query()
 	job := verifyJob{
-		rawLine:   line,
-		badge:     badge,
-		urlStr:    urlStr,
-		pub:       q.Get("pub"),
-		seqStr:    q.Get("seq"),
-		prev:      q.Get("prev"),
-		sig:       q.Get("sig"),
-		msgHash:   q.Get("msg_hash"),
-		serverPub: q.Get("server_pub"),
+		rawLine:     line,
+		badge:       badge,
+		urlStr:      urlStr,
+		pub:         q.Get("pub"),
+		seqStr:      q.Get("seq"),
+		prev:        q.Get("prev"),
+		sig:         q.Get("sig"),
+		msgHash:     q.Get("msg_hash"),
+		serverPub:   q.Get("server_pub"),
+		displayName: q.Get("display_name"),
+		textParam:   q.Get("text"),
 	}
 	if job.pub == "" || job.sig == "" {
 		return verifyJob{}, false
@@ -563,8 +567,20 @@ func main() {
 			if serverPub == "" {
 				serverPub = serverPubForVerify
 			}
-			payload := tripcolor.CanonicalPayload(serverPub, job.seq, prevBytes, msgHashBytes, pubBytes)
-			valid := len(pubBytes) == ed25519.PublicKeySize && len(sigBytes) == ed25519.SignatureSize && len(prevBytes) == 32 && len(msgHashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
+			// Check text integrity if present
+			valid := false
+			if job.textParam != "" {
+				h := sha256.Sum256([]byte(job.textParam))
+				if hex.EncodeToString(h[:]) != strings.ToLower(job.msgHash) {
+					valid = false
+				} else {
+					payload := tripcolor.CanonicalPayload(serverPub, job.seq, prevBytes, h[:], pubBytes, job.displayName)
+					valid = len(pubBytes) == ed25519.PublicKeySize && len(sigBytes) == ed25519.SignatureSize && len(prevBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
+				}
+			} else {
+				payload := tripcolor.CanonicalPayload(serverPub, job.seq, prevBytes, msgHashBytes, pubBytes, job.displayName)
+				valid = len(pubBytes) == ed25519.PublicKeySize && len(sigBytes) == ed25519.SignatureSize && len(prevBytes) == 32 && len(msgHashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
+			}
 			var colored string
 			if valid {
 				colored = tripcolor.BadgeColor(job.badge) + job.badge + "\x1b[0m"
@@ -620,12 +636,17 @@ func main() {
 						if srvPub == "" {
 							srvPub = serverPubForVerify
 						}
-						payload := tripcolor.CanonicalPayload(srvPub, wire.Trip.Seq, prevBytes, hashBytes, pubBytes)
-						valid := len(pubBytes) == 32 && len(sigBytes) == 64 && len(prevBytes) == 32 && len(hashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
-						if valid {
-							colored = tripcolor.BadgeColor(badge) + badge + "\x1b[0m"
-						} else {
+						actualHash := sha256.Sum256([]byte(wire.Text))
+						if hex.EncodeToString(actualHash[:]) != strings.ToLower(wire.Trip.MsgHash) {
 							colored = "\x1b[91m" + badge + " ✗\x1b[0m"
+						} else {
+							payload := tripcolor.CanonicalPayload(srvPub, wire.Trip.Seq, prevBytes, actualHash[:], pubBytes, wire.DisplayName)
+							valid := len(pubBytes) == 32 && len(sigBytes) == 64 && len(prevBytes) == 32 && len(hashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
+							if valid {
+								colored = tripcolor.BadgeColor(badge) + badge + "\x1b[0m"
+							} else {
+								colored = "\x1b[91m" + badge + " ✗\x1b[0m"
+							}
 						}
 					} else {
 						colored = badge
@@ -636,7 +657,7 @@ func main() {
 					}
 					urlStr := ""
 					if hostForLink2 != "" {
-						urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s", hostForLink2, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub)
+						urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&text=%s", hostForLink2, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub, url.QueryEscape(wire.DisplayName), url.QueryEscape(wire.Text))
 					}
 					displayMu.Lock()
 					if urlStr != "" {
@@ -673,12 +694,17 @@ func main() {
 							if srvPub == "" {
 								srvPub = serverPubForVerify
 							}
-							payload := tripcolor.CanonicalPayload(srvPub, wl.Trip.Seq, prevBytes, hashBytes, pubBytes)
-							valid := len(pubBytes) == 32 && len(sigBytes) == 64 && len(prevBytes) == 32 && len(hashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
-							if valid {
-								colored = tripcolor.BadgeColor(badge) + badge + "\x1b[0m"
-							} else {
+							actualHash2 := sha256.Sum256([]byte(wl.Text))
+							if hex.EncodeToString(actualHash2[:]) != strings.ToLower(wl.Trip.MsgHash) {
 								colored = "\x1b[91m" + badge + " ✗\x1b[0m"
+							} else {
+								payload := tripcolor.CanonicalPayload(srvPub, wl.Trip.Seq, prevBytes, hashBytes, pubBytes, wl.DisplayName)
+								valid := len(pubBytes) == 32 && len(sigBytes) == 64 && len(prevBytes) == 32 && len(hashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
+								if valid {
+									colored = tripcolor.BadgeColor(badge) + badge + "\x1b[0m"
+								} else {
+									colored = "\x1b[91m" + badge + " ✗\x1b[0m"
+								}
 							}
 						} else {
 							colored = badge
@@ -689,7 +715,7 @@ func main() {
 						}
 						urlStr := ""
 						if hostForLink2 != "" {
-							urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s", hostForLink2, wl.Trip.Pub, wl.Trip.Seq, wl.Trip.Prev, wl.Trip.Sig, wl.Trip.MsgHash, wl.Trip.ServerPub)
+							urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&text=%s", hostForLink2, wl.Trip.Pub, wl.Trip.Seq, wl.Trip.Prev, wl.Trip.Sig, wl.Trip.MsgHash, wl.Trip.ServerPub, url.QueryEscape(wl.DisplayName), url.QueryEscape(wl.Text))
 						}
 						displayMu.Lock()
 						if urlStr != "" {
@@ -907,12 +933,12 @@ func main() {
 		}
 
 		if tripPriv != nil {
-			// Sign message with trip chain
+			// Sign message with trip chain — bind displayName for anti-spoof
 			tripSeq++
 			msgHash := sha256.Sum256([]byte(text))
 			prevCopy := make([]byte, len(tripPrev))
 			copy(prevCopy, tripPrev)
-			payload := canonicalPayload(challenge.ServerPubKey, tripSeq, prevCopy, msgHash[:], []byte(tripPub))
+			payload := canonicalPayload(challenge.ServerPubKey, tripSeq, prevCopy, msgHash[:], []byte(tripPub), username)
 			sig := ed25519.Sign(tripPriv, payload)
 			h := sha256.New()
 			h.Write(prevCopy)
@@ -921,7 +947,7 @@ func main() {
 			newPrev := h.Sum(nil)
 			copy(tripPrev, newPrev)
 			fmt.Fprintf(out, "|  └─ ✍ %s◆ %s\x1b[0m\n", badgeColor("◆ "+tripBadge), tripBadge)
-			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig)}
+			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: username}
 			err = conn.WriteJSON(tripMsg)
 		} else if CLI.Tripcode != "" {
 			hashTrip := sha256.Sum256([]byte(CLI.Tripcode))

@@ -58,12 +58,13 @@ type TripChain struct {
 }
 
 type TripMeta struct {
-	Pub       string `json:"pub"`
-	Seq       uint32 `json:"seq"`
-	Prev      string `json:"prev"`
-	Sig       string `json:"sig"`
-	ServerPub string `json:"server_pub"`
-	MsgHash   string `json:"msg_hash,omitempty"`
+	Pub         string `json:"pub"`
+	Seq         uint32 `json:"seq"`
+	Prev        string `json:"prev"`
+	Sig         string `json:"sig"`
+	ServerPub   string `json:"server_pub"`
+	MsgHash     string `json:"msg_hash,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
 }
 
 type WireMessage struct {
