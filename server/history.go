@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"localchat/internal/filter"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -116,7 +118,7 @@ func (s *ChatServer) SendChatHistory(session *ClientSession) {
 	s.HistoryMu.RUnlock()
 
 	for i := range historyCopy {
-		historyCopy[i] = stripBrokenChars(historyCopy[i])
+		historyCopy[i] = filter.CleanHistoryMessage(historyCopy[i])
 	}
 
 	combinedHistory := strings.Join(historyCopy, "\n")

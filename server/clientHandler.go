@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"localchat/internal/filter"
 	"localchat/linkify"
 
 	"github.com/gorilla/websocket"
@@ -157,12 +158,21 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 
 		dynCfg := Cfg.Dynamic.Load()
 
-		text := sanitizeString(string(msg))
-
-		if strings.TrimSpace(text) == "" {
+		raw := string(msg)
+		if strings.TrimSpace(raw) == "" {
 			updateReadDeadline()
 			continue
 		}
+		if err := filter.ValidateMessage(raw); err != nil {
+			select {
+			case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
+			default:
+			}
+			log.Printf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
+			updateReadDeadline()
+			continue
+		}
+		text := raw
 
 		lastChatActivity = time.Now()
 		updateReadDeadline()

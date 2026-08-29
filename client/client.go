@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"localchat/internal/filter"
 	"localchat/linkify"
 
 	"github.com/alecthomas/kong"
@@ -418,14 +419,14 @@ func main() {
 					if strings.Contains(line, "--- Kết thúc lịch sử ---") {
 						pendingDateBanner = ""
 					}
-					fmt.Fprintf(out, "| %s\n", line)
+					fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(line))
 					continue
 				}
 				if !isShowingJoin && pendingDateBanner != "" {
-					fmt.Fprintf(out, "| %s\n", pendingDateBanner)
+					fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(pendingDateBanner))
 					pendingDateBanner = ""
 				}
-				fmt.Fprintf(out, "| %s\n", line)
+				fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(line))
 			}
 			term.Refresh()
 		}
@@ -535,12 +536,19 @@ func main() {
 			text = strings.Join(rawLines, "\n")
 		}
 
+		if err := filter.ValidateMessage(text); err != nil {
+			fmt.Fprintf(out, "| [Local]: Tin nhắn chứa ký tự không hợp lệ và đã bị chặn (client-side): %v\n", err)
+			term.Refresh()
+			continue
+		}
+
 		for range typedLinesCount {
 			fmt.Fprint(out, "\033[1A\033[2K\r")
 		}
 
 		lines := strings.Split(text, "\n")
 		for i, line := range lines {
+			// Linkify after validation (linkify inserts ANSI)
 			line = linkify.Linkify(line)
 			if i == 0 {
 				fmt.Fprintf(out, "| Bạn: %s\n", line)
