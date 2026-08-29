@@ -12,11 +12,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"localchat/internal/filter"
+	"localchat/internal/tripcolor"
 	"localchat/linkify"
 
 	"github.com/alecthomas/kong"
@@ -109,6 +111,105 @@ type inputTerminal interface {
 
 // historyFile is the readline history path used on the desktop build.
 var historyFile = filepath.Join(os.TempDir(), "V2V_chat_history.tmp")
+
+type verifyJob struct {
+	rawLine   string
+	badge     string
+	urlStr    string
+	pub       string
+	seqStr    string
+	prev      string
+	sig       string
+	msgHash   string
+	serverPub string
+	seq       uint32
+}
+
+func parseTripBadgeLine(line string) (verifyJob, bool) {
+	// Look for OSC8 trip link (https or v2v)
+	idx := strings.Index(line, "/api/trip/verify?")
+	if idx == -1 {
+		idx = strings.Index(line, "v2v://trip")
+		if idx == -1 {
+			return verifyJob{}, false
+		}
+	}
+	// Find OSC8 start before idx
+	start := strings.LastIndex(line[:idx], "\x1b]8;;")
+	if start == -1 {
+		return verifyJob{}, false
+	}
+	// Find URL end (ESC \ terminator)
+	endRel := strings.Index(line[idx:], "\x1b\\")
+	if endRel == -1 {
+		return verifyJob{}, false
+	}
+	urlStr := line[idx : idx+endRel]
+	// Badge is between first terminator and second OSC8
+	firstTermEnd := idx + endRel + 2 // after \x1b\\
+	secondOsc := strings.Index(line[firstTermEnd:], "\x1b]8;;")
+	var badge string
+	if secondOsc != -1 {
+		badge = strings.TrimSpace(line[firstTermEnd : firstTermEnd+secondOsc])
+		// Strip ANSI color if present (should be plain, but handle)
+		// Badge is like "◆ ab12" possibly with color codes - strip them for hash
+		// For now, badge as visible text without ANSI
+		if idx2 := strings.Index(badge, "◆"); idx2 != -1 {
+			badge = badge[idx2:]
+			// Remove any ANSI inside badge (e.g., color prefix)
+			if strings.Contains(badge, "\x1b[") {
+				// Strip SGR codes for badge extraction
+				badge = strings.TrimSpace(filter.SanitizeForDisplay(badge))
+			}
+		}
+	} else {
+		// Fallback: find ◆
+		if p := strings.Index(line, "◆"); p != -1 {
+			end := p + len("◆ ") + 8
+			if end > len(line) {
+				end = len(line)
+			}
+			badge = strings.TrimSpace(line[p:end])
+		}
+	}
+	// Parse URL query to get pub/seq etc. Handle both https and v2v
+	fullURL := urlStr
+	if !strings.HasPrefix(fullURL, "http") && !strings.HasPrefix(fullURL, "v2v:") {
+		fullURL = "https://" + fullURL
+	}
+	// For v2v://trip?pub=... we need to parse as URL with custom scheme - net/url can handle
+	u, err := url.Parse(fullURL)
+	if err != nil {
+		// Try with https prefix for v2v
+		u, err = url.Parse("https://" + strings.TrimPrefix(fullURL, "v2v://"))
+		if err != nil {
+			return verifyJob{}, false
+		}
+	}
+	q := u.Query()
+	job := verifyJob{
+		rawLine:   line,
+		badge:     badge,
+		urlStr:    urlStr,
+		pub:       q.Get("pub"),
+		seqStr:    q.Get("seq"),
+		prev:      q.Get("prev"),
+		sig:       q.Get("sig"),
+		msgHash:   q.Get("msg_hash"),
+		serverPub: q.Get("server_pub"),
+	}
+	if job.pub == "" || job.sig == "" {
+		return verifyJob{}, false
+	}
+	if v, err := strconv.ParseUint(job.seqStr, 10, 32); err == nil {
+		job.seq = uint32(v)
+	}
+	return job, true
+}
+
+func isTripBadgeLine(line string) bool {
+	return strings.Contains(line, "◆") && (strings.Contains(line, "/api/trip/verify") || strings.Contains(line, "v2v://trip"))
+}
 
 func isJoinLeaveSystemLine(line string) bool {
 	return strings.Contains(line, "[Hệ thống]:") && (strings.Contains(line, "đã tham gia") || strings.Contains(line, "đã rời"))
@@ -428,6 +529,38 @@ func main() {
 		fmt.Fprint(w, "Gõ tin nhắn để chat, /help để hiện trợ giúp\n\n")
 	}
 
+	verifyCh := make(chan verifyJob, 128)
+	autoVerify := true
+	var autoVerifyMu sync.RWMutex
+	var displayMu sync.Mutex
+	serverPubForVerify := challenge.ServerPubKey
+
+	go func() {
+		for job := range verifyCh {
+			pubBytes, _ := hex.DecodeString(job.pub)
+			sigBytes, _ := hex.DecodeString(job.sig)
+			prevBytes, _ := hex.DecodeString(job.prev)
+			msgHashBytes, _ := hex.DecodeString(job.msgHash)
+			serverPub := job.serverPub
+			if serverPub == "" {
+				serverPub = serverPubForVerify
+			}
+			payload := tripcolor.CanonicalPayload(serverPub, job.seq, prevBytes, msgHashBytes, pubBytes)
+			valid := len(pubBytes) == ed25519.PublicKeySize && len(sigBytes) == ed25519.SignatureSize && len(prevBytes) == 32 && len(msgHashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
+			var colored string
+			if valid {
+				colored = tripcolor.BadgeColor(job.badge) + job.badge + "\x1b[0m"
+			} else {
+				colored = "\x1b[91m" + job.badge + " ✗\x1b[0m"
+			}
+			line := fmt.Sprintf("  └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", job.urlStr, colored)
+			displayMu.Lock()
+			fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(line))
+			term.Refresh()
+			displayMu.Unlock()
+		}
+	}()
+
 	go func() {
 		var pendingDateBanner string
 
@@ -460,14 +593,37 @@ func main() {
 					if strings.Contains(line, "--- Kết thúc lịch sử ---") {
 						pendingDateBanner = ""
 					}
+					displayMu.Lock()
 					fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(line))
+					displayMu.Unlock()
 					continue
 				}
 				if !isShowingJoin && pendingDateBanner != "" {
+					displayMu.Lock()
 					fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(pendingDateBanner))
+					displayMu.Unlock()
 					pendingDateBanner = ""
 				}
+				if isTripBadgeLine(line) {
+					autoVerifyMu.RLock()
+					av := autoVerify
+					autoVerifyMu.RUnlock()
+					if av {
+						if job, ok := parseTripBadgeLine(line); ok {
+							select {
+							case verifyCh <- job:
+							default:
+								displayMu.Lock()
+								fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(line))
+								displayMu.Unlock()
+							}
+							continue
+						}
+					}
+				}
+				displayMu.Lock()
 				fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(line))
+				displayMu.Unlock()
 			}
 			term.Refresh()
 		}
@@ -522,6 +678,7 @@ func main() {
 		}
 
 		if text == "/help" || text == "/h" {
+			displayMu.Lock()
 			fmt.Fprintln(out, "  [Trợ giúp]: Danh sách các lệnh có thể sử dụng:")
 			fmt.Fprintln(out, "    - /help, /h      : Hiển thị bảng trợ giúp này")
 			fmt.Fprintln(out, "    - /clear, /c     : Xóa sạch màn hình chat")
@@ -530,7 +687,10 @@ func main() {
 			fmt.Fprintln(out, "    - /showjoin, /sj : Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp")
 			fmt.Fprintln(out, "    - /whoami, /w    : Thông tin danh tính và quyền hiện tại")
 			fmt.Fprintln(out, "    - /status        : Trạng thái kết nối và phiên bản client")
+			fmt.Fprintln(out, "    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)")
+			fmt.Fprintln(out, "    - /verify        : Hướng dẫn verify thủ công qua link API")
 			fmt.Fprintln(out, "    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng")
+			displayMu.Unlock()
 			continue
 		}
 
@@ -542,7 +702,30 @@ func main() {
 				status = "ĐÃ BẬT"
 			}
 			showJoinMu.Unlock()
+			displayMu.Lock()
 			fmt.Fprintf(out, "| [Local]: %s hiển thị thông báo người dùng ra/vào phòng cho các tin kế tiếp.\n", status)
+			displayMu.Unlock()
+			continue
+		}
+
+		if text == "/autoverify" || text == "/av" {
+			autoVerifyMu.Lock()
+			autoVerify = !autoVerify
+			status := "BẬT"
+			if !autoVerify {
+				status = "TẮT"
+			}
+			autoVerifyMu.Unlock()
+			displayMu.Lock()
+			fmt.Fprintf(out, "| [Local]: Auto-verify đã %s (mặc định BẬT, verify song song qua channel FIFO).\n", status)
+			displayMu.Unlock()
+			continue
+		}
+
+		if strings.HasPrefix(text, "/verify") {
+			displayMu.Lock()
+			fmt.Fprintln(out, "  [Verify]: Click badge link (https://.../api/trip/verify?...) để verify thủ công qua API stateless.")
+			displayMu.Unlock()
 			continue
 		}
 
