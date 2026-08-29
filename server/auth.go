@@ -19,6 +19,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"localchat/internal/filter"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -341,7 +343,11 @@ func (s *ChatServer) handleAuthPenalty(clientIP string) {
 }
 
 func (s *ChatServer) generateDisplayName(username string, clientIP string, perms Permission) string {
-	name := sanitizeString(username)
+	if err := filter.ValidateDisplayName(username); err != nil {
+		log.Printf("⚠️ [FILTER] displayName invalid from %s: %v -> fallback Anonymous", clientIP, err)
+		username = "Anonymous"
+	}
+	name := strings.TrimSpace(username)
 	if name == "" {
 		name = "Anonymous"
 	}

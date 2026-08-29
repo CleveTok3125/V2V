@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 )
 
 type envLoader struct {
@@ -138,39 +137,6 @@ func lastAfterDash(s string) string {
 		return s[i+1:]
 	}
 	return s
-}
-
-func sanitizeString(text string) string {
-	return strings.Map(func(r rune) rune {
-		if r == '\n' || unicode.IsGraphic(r) {
-			if r == 0xFFFD {
-				return -1
-			}
-			if unicode.Is(unicode.Cf, r) {
-				return -1
-			}
-			if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) {
-				return -1
-			}
-			if unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) {
-				return -1
-			}
-			return r
-		}
-		return -1
-	}, text)
-}
-
-// stripBrokenChars removes only replacement characters and invalid UTF-8
-// sequences, keeping everything else (including ANSI escape codes) intact.
-// Used on history replay so legacy corrupted messages cannot reach clients.
-func stripBrokenChars(text string) string {
-	return strings.Map(func(r rune) rune {
-		if r == 0xFFFD {
-			return -1
-		}
-		return r
-	}, text)
 }
 
 func getEnvAsBoolOptional(key string, fallback bool) bool {
