@@ -169,12 +169,13 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		}
 		// Try to parse as TripMessage JSON envelope for signed messages
 		var tripMsg struct {
-			Text string `json:"text"`
-			Msg  string `json:"msg"`
-			Pub  string `json:"pub"`
-			Seq  uint32 `json:"seq"`
-			Prev string `json:"prev"`
-			Sig  string `json:"sig"`
+			Text        string `json:"text"`
+			Msg         string `json:"msg"`
+			Pub         string `json:"pub"`
+			Seq         uint32 `json:"seq"`
+			Prev        string `json:"prev"`
+			Sig         string `json:"sig"`
+			DisplayName string `json:"display_name"`
 		}
 		var tripMeta *TripMeta
 		text := raw
@@ -258,13 +259,15 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				updateReadDeadline()
 				continue
 			}
-			// Verify signature over canonical payload
+			// Verify signature over canonical payload — bind displayName and msg integrity
 			serverPub := ""
 			if s.ServerID != nil {
 				serverPub = s.ServerID.PublicKey
 			}
 			msgHash := sha256.Sum256([]byte(text))
-			payload := tripcolor.CanonicalPayload(serverPub, tripMsg.Seq, prevBytes, msgHash[:], pubBytes)
+			// Use session's displayName as ground truth (prevents spoofing via TripMessage.DisplayName)
+			displayNameForVerify := session.DisplayName
+			payload := tripcolor.CanonicalPayload(serverPub, tripMsg.Seq, prevBytes, msgHash[:], pubBytes, displayNameForVerify)
 			if !ed25519.Verify(pubBytes, payload, sigBytes) {
 				select {
 				case session.Send <- []byte("[Hệ thống]: Chữ ký trip không hợp lệ."):
@@ -280,14 +283,15 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			h.Write(msgHash[:])
 			newPrev := h.Sum(nil)
 			s.TripChains.Store(pubHex, TripChain{Seq: tripMsg.Seq, PrevHash: newPrev})
-			// Build trip meta for history
+			// Build trip meta for history — store displayName as well for verification
 			tripMeta = &TripMeta{
-				Pub:       pubHex,
-				Seq:       tripMsg.Seq,
-				Prev:      hex.EncodeToString(prevBytes),
-				Sig:       hex.EncodeToString(sigBytes),
-				ServerPub: serverPub,
-				MsgHash:   hex.EncodeToString(msgHash[:]),
+				Pub:         pubHex,
+				Seq:         tripMsg.Seq,
+				Prev:        hex.EncodeToString(prevBytes),
+				Sig:         hex.EncodeToString(sigBytes),
+				ServerPub:   serverPub,
+				MsgHash:     hex.EncodeToString(msgHash[:]),
+				DisplayName: session.DisplayName,
 			}
 			// Override session badge if not set
 			if session.TripBadge == "" {

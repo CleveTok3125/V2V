@@ -26,16 +26,18 @@ func TestHistoryTripChainPersistenceAndTamper(t *testing.T) {
 	prev := make([]byte, 32)
 	msgText := "hello trip"
 	msgHash := sha256.Sum256([]byte(msgText))
-	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub)
+	displayName := "Tester#eff8"
+	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName)
 	sig := ed25519.Sign(priv, payload)
 
 	trip := &TripMeta{
-		Pub:       pubHex,
-		Seq:       1,
-		Prev:      hex.EncodeToString(prev),
-		Sig:       hex.EncodeToString(sig),
-		ServerPub: serverPub,
-		MsgHash:   hex.EncodeToString(msgHash[:]),
+		Pub:         pubHex,
+		Seq:         1,
+		Prev:        hex.EncodeToString(prev),
+		Sig:         hex.EncodeToString(sig),
+		ServerPub:   serverPub,
+		MsgHash:     hex.EncodeToString(msgHash[:]),
+		DisplayName: displayName,
 	}
 	// Marshal record like history_store does (sync, no queue)
 	rec := historyRecord{Timestamp: time.Now().Format(time.RFC3339Nano), Message: "test msg", Trip: trip}
@@ -50,7 +52,7 @@ func TestHistoryTripChainPersistenceAndTamper(t *testing.T) {
 	}
 	// Tamper: different msg hash should not verify
 	badHash := sha256.Sum256([]byte("tampered"))
-	badPayload := tripcolor.CanonicalPayload(serverPub, 1, prev, badHash[:], pub)
+	badPayload := tripcolor.CanonicalPayload(serverPub, 1, prev, badHash[:], pub, displayName)
 	if ed25519.Verify(pub, badPayload, sig) {
 		t.Fatalf("tampered payload should not verify")
 	}
@@ -111,7 +113,7 @@ func TestHistoryRestartRepopulation(t *testing.T) {
 	for seq := uint32(1); seq <= 2; seq++ {
 		msg := "msg" + string(rune('0'+seq))
 		h := sha256.Sum256([]byte(msg))
-		payload := tripcolor.CanonicalPayload(serverPub, seq, prev, h[:], pub)
+		payload := tripcolor.CanonicalPayload(serverPub, seq, prev, h[:], pub, "Tester#eff8")
 		sig := ed25519.Sign(priv, payload)
 		hash := sha256.New()
 		hash.Write(prev)
@@ -122,12 +124,13 @@ func TestHistoryRestartRepopulation(t *testing.T) {
 			Timestamp: "2026-01-01T00:00:00Z",
 			Message:   msg,
 			Trip: &TripMeta{
-				Pub:       pubHex,
-				Seq:       seq,
-				Prev:      hex.EncodeToString(prev),
-				Sig:       hex.EncodeToString(sig),
-				ServerPub: serverPub,
-				MsgHash:   hex.EncodeToString(h[:]),
+				Pub:         pubHex,
+				Seq:         seq,
+				Prev:        hex.EncodeToString(prev),
+				Sig:         hex.EncodeToString(sig),
+				ServerPub:   serverPub,
+				MsgHash:     hex.EncodeToString(h[:]),
+				DisplayName: "Tester#eff8",
 			},
 		}
 		records = append(records, rec)
@@ -175,15 +178,17 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 	prev := make([]byte, 32)
 	msgText := "original message"
 	msgHash := sha256.Sum256([]byte(msgText))
-	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub)
+	displayName := "Tester#eff8"
+	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName)
 	sig := ed25519.Sign(priv, payload)
 	trip := &TripMeta{
-		Pub:       pubHex,
-		Seq:       1,
-		Prev:      hex.EncodeToString(prev),
-		Sig:       hex.EncodeToString(sig),
-		ServerPub: serverPub,
-		MsgHash:   hex.EncodeToString(msgHash[:]),
+		Pub:         pubHex,
+		Seq:         1,
+		Prev:        hex.EncodeToString(prev),
+		Sig:         hex.EncodeToString(sig),
+		ServerPub:   serverPub,
+		MsgHash:     hex.EncodeToString(msgHash[:]),
+		DisplayName: displayName,
 	}
 	rec := historyRecord{
 		Timestamp: time.Now().Format(time.RFC3339Nano),
@@ -203,7 +208,7 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 		sigBytes, _ := hex.DecodeString(r.Trip.Sig)
 		prevBytes, _ := hex.DecodeString(r.Trip.Prev)
 		hashBytes, _ := hex.DecodeString(r.Trip.MsgHash)
-		p := tripcolor.CanonicalPayload(r.Trip.ServerPub, r.Trip.Seq, prevBytes, hashBytes, pubBytes)
+		p := tripcolor.CanonicalPayload(r.Trip.ServerPub, r.Trip.Seq, prevBytes, hashBytes, pubBytes, r.Trip.DisplayName)
 		return ed25519.Verify(pubBytes, p, sigBytes)
 	}
 	// Load and verify original — should be valid (green)

@@ -52,6 +52,8 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 	sigHex := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sig")))
 	msgHashHex := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("msg_hash")))
 	serverPub := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("server_pub")))
+	displayName := r.URL.Query().Get("display_name")
+	textParam := r.URL.Query().Get("text")
 
 	if pubHex == "" || sigHex == "" || prevHex == "" || msgHashHex == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -79,6 +81,16 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	seq := uint32(seq64)
 
+	// If text is provided, verify it matches msg_hash
+	if textParam != "" {
+		h := sha256.Sum256([]byte(textParam))
+		if hex.EncodeToString(h[:]) != msgHashHex {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"valid": false, "error": "msg_hash does not match text"})
+			return
+		}
+	}
+
 	pubBytes, err1 := hex.DecodeString(pubHex)
 	sigBytes, err2 := hex.DecodeString(sigHex)
 	prevBytes, err3 := hex.DecodeString(prevHex)
@@ -91,7 +103,7 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 	if serverPub == "" && s.ServerID != nil {
 		serverPub = strings.ToLower(s.ServerID.PublicKey)
 	}
-	payload := tripcolor.CanonicalPayload(serverPub, seq, prevBytes, msgHashBytes, pubBytes)
+	payload := tripcolor.CanonicalPayload(serverPub, seq, prevBytes, msgHashBytes, pubBytes, displayName)
 	valid := ed25519.Verify(pubBytes, payload, sigBytes)
 	badge := ""
 	if pubHex != "" {

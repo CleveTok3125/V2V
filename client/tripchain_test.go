@@ -51,15 +51,21 @@ func TestCanonicalPayloadDeterministic(t *testing.T) {
 	for i := range pub {
 		pub[i] = byte(i)
 	}
-	a := canonicalPayload(serverPub, 1, prev, msgHash[:], pub)
-	b := canonicalPayload(serverPub, 1, prev, msgHash[:], pub)
+	displayName := "Tester#eff8"
+	a := canonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName)
+	b := canonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName)
 	if string(a) != string(b) {
 		t.Fatalf("canonical payload not deterministic")
 	}
 	// Different seq should differ
-	c := canonicalPayload(serverPub, 2, prev, msgHash[:], pub)
+	c := canonicalPayload(serverPub, 2, prev, msgHash[:], pub, displayName)
 	if string(a) == string(c) {
 		t.Fatalf("different seq should differ")
+	}
+	// Different displayName should differ
+	d := canonicalPayload(serverPub, 1, prev, msgHash[:], pub, "Other#1234")
+	if string(a) == string(d) {
+		t.Fatalf("different displayName should differ")
 	}
 }
 
@@ -69,21 +75,27 @@ func TestTripSigningRoundtrip(t *testing.T) {
 	prev := make([]byte, 32)
 	msg := "hello world"
 	msgHash := sha256.Sum256([]byte(msg))
-	payload := canonicalPayload(serverPub, 1, prev, msgHash[:], pub)
+	displayName := "Tester#eff8"
+	payload := canonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName)
 	sig := ed25519.Sign(priv, payload)
 	if !ed25519.Verify(pub, payload, sig) {
 		t.Fatalf("signature should verify")
 	}
 	// Tamper message hash should fail
 	badHash := sha256.Sum256([]byte("tampered"))
-	badPayload := canonicalPayload(serverPub, 1, prev, badHash[:], pub)
+	badPayload := canonicalPayload(serverPub, 1, prev, badHash[:], pub, displayName)
 	if ed25519.Verify(pub, badPayload, sig) {
 		t.Fatalf("tampered payload should not verify")
 	}
 	// Different serverPub should fail
-	badPayload2 := canonicalPayload("differentServerPub", 1, prev, msgHash[:], pub)
+	badPayload2 := canonicalPayload("differentServerPub", 1, prev, msgHash[:], pub, displayName)
 	if ed25519.Verify(pub, badPayload2, sig) {
 		t.Fatalf("different serverPub should not verify")
+	}
+	// Different displayName should fail
+	badPayload3 := canonicalPayload(serverPub, 1, prev, msgHash[:], pub, "Evil#1234")
+	if ed25519.Verify(pub, badPayload3, sig) {
+		t.Fatalf("different displayName should not verify")
 	}
 }
 
@@ -92,11 +104,12 @@ func TestTripHashChain(t *testing.T) {
 	serverPub := "server1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab"
 	prev := make([]byte, 32)
 	seq := uint32(1)
+	displayName := "Tester#eff8"
 	// Simulate 3 messages
 	for i := 0; i < 3; i++ {
 		msg := "msg " + string(rune('a'+i))
 		msgHash := sha256.Sum256([]byte(msg))
-		payload := canonicalPayload(serverPub, seq, prev, msgHash[:], pub)
+		payload := canonicalPayload(serverPub, seq, prev, msgHash[:], pub, displayName)
 		sig := ed25519.Sign(priv, payload)
 		if !ed25519.Verify(pub, payload, sig) {
 			t.Fatalf("msg %d verify failed", i)
