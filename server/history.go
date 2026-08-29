@@ -3,9 +3,9 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"localchat/internal/filter"
@@ -62,26 +62,37 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 	}
 
 	for _, rec := range records {
-		s.appendMessageToHistory(rec.Message)
-		if rec.Trip != nil && rec.Trip.Pub != "" {
+		// Handle both new Wire and legacy Message
+		var msgForHistory string
+		var tripForChain *TripMeta
+		if rec.Wire != nil {
+			data, _ := json.Marshal(rec.Wire)
+			msgForHistory = string(data)
+			tripForChain = rec.Wire.Trip
+		} else {
+			msgForHistory = rec.Message
+			tripForChain = rec.Trip
+		}
+		s.appendMessageToHistory(msgForHistory)
+		if tripForChain != nil && tripForChain.Pub != "" {
 			// Repopulate TripChains with latest record per pub
-			prevBytes, _ := hex.DecodeString(rec.Trip.Prev)
+			prevBytes, _ := hex.DecodeString(tripForChain.Prev)
 			if len(prevBytes) == 32 {
 				// next prev after this record is hash(prev|sig|msgHash)
-				sigBytes, _ := hex.DecodeString(rec.Trip.Sig)
-				msgHashBytes, _ := hex.DecodeString(rec.Trip.MsgHash)
+				sigBytes, _ := hex.DecodeString(tripForChain.Sig)
+				msgHashBytes, _ := hex.DecodeString(tripForChain.MsgHash)
 				if len(sigBytes) == 64 && len(msgHashBytes) == 32 {
 					h := sha256.New()
 					h.Write(prevBytes)
 					h.Write(sigBytes)
 					h.Write(msgHashBytes)
 					newPrev := h.Sum(nil)
-					s.TripChains.Store(rec.Trip.Pub, TripChain{Seq: rec.Trip.Seq, PrevHash: newPrev})
+					s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: newPrev})
 				} else {
-					s.TripChains.Store(rec.Trip.Pub, TripChain{Seq: rec.Trip.Seq, PrevHash: prevBytes})
+					s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: prevBytes})
 				}
-			} else if rec.Trip.Seq > 0 {
-				s.TripChains.Store(rec.Trip.Pub, TripChain{Seq: rec.Trip.Seq, PrevHash: []byte{}})
+			} else if tripForChain.Seq > 0 {
+				s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: []byte{}})
 			}
 		}
 	}
@@ -128,6 +139,32 @@ func (s *ChatServer) BroadcastWithTrip(message string, trip *TripMeta, sender *w
 	}
 }
 
+func (s *ChatServer) BroadcastWire(wire WireMessage, sender *websocket.Conn) {
+	data, _ := json.Marshal(wire)
+	s.AddWireMessageToHistory(wire)
+	s.ClientsMu.RLock()
+	defer s.ClientsMu.RUnlock()
+	for conn, client := range s.Clients {
+		if conn != sender {
+			select {
+			case client.Send <- data:
+			default:
+			}
+		}
+	}
+}
+
+func (s *ChatServer) AddWireMessageToHistory(wire WireMessage) {
+	// Store as JSON string for history (structured)
+	data, _ := json.Marshal(wire)
+	msgStr := string(data)
+	s.appendMessageToHistory(msgStr)
+	if s.HistoryStore != nil {
+		// Store with Trip meta for chain repopulation
+		s.HistoryStore.EnqueueWithTrip(msgStr, wire.Trip, time.Now().In(Cfg.Static.Timezone))
+	}
+}
+
 func (s *ChatServer) CheckAndBroadcastDate(now time.Time) {
 	currentDate := now.Format("02/01/2006")
 
@@ -164,11 +201,17 @@ func (s *ChatServer) SendChatHistory(session *ClientSession) {
 	copy(historyCopy, s.ChatHistory[startIndex:])
 	s.HistoryMu.RUnlock()
 
-	for i := range historyCopy {
-		historyCopy[i] = filter.CleanHistoryMessage(historyCopy[i])
+	session.Send <- []byte("--- Lịch sử chat gần đây ---")
+	for _, msgStr := range historyCopy {
+		// Keep history messages as stored (could be legacy ANSI string or WireMessage JSON)
+		// For WireMessage JSON, send as is; for legacy, clean and send
+		var wire WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &wire); err == nil && wire.Type == "chat" {
+			session.Send <- []byte(msgStr)
+		} else {
+			cleaned := filter.CleanHistoryMessage(msgStr)
+			session.Send <- []byte(cleaned)
+		}
 	}
-
-	combinedHistory := strings.Join(historyCopy, "\n")
-
-	session.Send <- []byte("--- Lịch sử chat gần đây ---\n" + combinedHistory + "\n--- Kết thúc lịch sử ---")
+	session.Send <- []byte("--- Kết thúc lịch sử ---")
 }

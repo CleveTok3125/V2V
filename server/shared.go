@@ -57,6 +57,23 @@ type TripChain struct {
 	LastHash []byte // msgHash of last message for debugging
 }
 
+type TripMeta struct {
+	Pub       string `json:"pub"`
+	Seq       uint32 `json:"seq"`
+	Prev      string `json:"prev"`
+	Sig       string `json:"sig"`
+	ServerPub string `json:"server_pub"`
+	MsgHash   string `json:"msg_hash,omitempty"`
+}
+
+type WireMessage struct {
+	Type        string    `json:"type"` // "chat" or "system"
+	Time        string    `json:"time,omitempty"`
+	DisplayName string    `json:"displayName,omitempty"`
+	Text        string    `json:"text,omitempty"`
+	Trip        *TripMeta `json:"trip,omitempty"`
+}
+
 type AuthPacket struct {
 	Type      string `json:"type"`
 	Nonce     string `json:"nonce,omitempty"`

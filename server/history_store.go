@@ -26,19 +26,11 @@ type HistoryStore struct {
 	mu    sync.Mutex
 }
 
-type TripMeta struct {
-	Pub       string `json:"pub"`
-	Seq       uint32 `json:"seq"`
-	Prev      string `json:"prev"`
-	Sig       string `json:"sig"`
-	ServerPub string `json:"server_pub"`
-	MsgHash   string `json:"msg_hash,omitempty"`
-}
-
 type historyRecord struct {
-	Timestamp string    `json:"ts"`
-	Message   string    `json:"msg"`
-	Trip      *TripMeta `json:"trip,omitempty"`
+	Timestamp string       `json:"ts"`
+	Message   string       `json:"msg,omitempty"`
+	Trip      *TripMeta    `json:"trip,omitempty"`
+	Wire      *WireMessage `json:"wire,omitempty"`
 }
 
 func NewHistoryStore(path string, maxSizeMB int) (*HistoryStore, error) {
@@ -108,6 +100,18 @@ func (h *HistoryStore) EnqueueWithTrip(message string, trip *TripMeta, now time.
 		Timestamp: now.Format(time.RFC3339Nano),
 		Message:   message,
 		Trip:      trip,
+	}
+}
+
+func (h *HistoryStore) EnqueueWire(wire WireMessage, now time.Time) {
+	if h == nil {
+		return
+	}
+	// WireMessage already contains Trip, keep both for backward compat
+	h.queue <- historyRecord{
+		Timestamp: now.Format(time.RFC3339Nano),
+		Wire:      &wire,
+		Trip:      wire.Trip,
 	}
 }
 
@@ -188,7 +192,7 @@ func (h *HistoryStore) LoadRecords() ([]historyRecord, error) {
 					var rec historyRecord
 					if err := json.Unmarshal(line, &rec); err != nil {
 						log.Printf("⚠️ [HISTORY] Bỏ qua record lỗi trong %s: %v", path, err)
-					} else if rec.Message != "" {
+					} else if rec.Message != "" || rec.Wire != nil {
 						records = append(records, rec)
 					}
 				}

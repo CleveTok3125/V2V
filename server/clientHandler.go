@@ -15,7 +15,6 @@ import (
 
 	"localchat/internal/filter"
 	"localchat/internal/tripcolor"
-	"localchat/linkify"
 
 	"github.com/gorilla/websocket"
 )
@@ -177,11 +176,9 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			Prev string `json:"prev"`
 			Sig  string `json:"sig"`
 		}
-		var isTripMessage bool
 		var tripMeta *TripMeta
 		text := raw
 		if err := json.Unmarshal([]byte(raw), &tripMsg); err == nil && tripMsg.Sig != "" {
-			isTripMessage = true
 			// Extract text
 			t := tripMsg.Text
 			if t == "" {
@@ -345,32 +342,14 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		now := time.Now().In(Cfg.Static.Timezone)
 		s.CheckAndBroadcastDate(now)
 
-		tripcodeSuffix := ""
-		if session.Tripcode != "" {
-			if isTripMessage {
-				// Server only issues badge + link, coloring is client's responsibility
-				visible := session.Tripcode
-				if tripMeta != nil && session.Host != "" {
-					url := fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s", session.Host, tripMeta.Pub, tripMeta.Seq, tripMeta.Prev, tripMeta.Sig, tripMeta.MsgHash, tripMeta.ServerPub)
-					visible = fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", url, visible)
-				}
-				tripcodeSuffix = "\n  └─ ✍️ " + visible
-			} else {
-				tripcodeSuffix = "\n  └─ ✍️ " + session.Tripcode
-			}
+		wire := WireMessage{
+			Type:        "chat",
+			Time:        now.Format("15:04"),
+			DisplayName: session.DisplayName,
+			Text:        text,
+			Trip:        tripMeta,
 		}
-
-		newLinePrefix := " "
-		if strings.Contains(text, "\n") {
-			newLinePrefix = "⏎\n      "
-		}
-
-		chatMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m %s:%s%s%s", now.Format("15:04"), session.DisplayName, newLinePrefix, strings.ReplaceAll(linkify.Linkify(text), "\n", "\n      "), tripcodeSuffix)
 		log.Printf("💬 [MSG từ %s] %s (%s): %s\n", clientIP, session.DisplayName, session.Tripcode, strings.ReplaceAll(text, "\n", "\\n"))
-		if tripMeta != nil {
-			s.BroadcastWithTrip(chatMsg, tripMeta, session.Conn)
-		} else {
-			s.Broadcast(chatMsg, session.Conn)
-		}
+		s.BroadcastWire(wire, session.Conn)
 	}
 }
