@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"localchat/internal/filter"
+	"localchat/internal/tripcolor"
 	"localchat/linkify"
 
 	"github.com/gorilla/websocket"
@@ -268,7 +269,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				serverPub = s.ServerID.PublicKey
 			}
 			msgHash := sha256.Sum256([]byte(text))
-			payload := canonicalPayload(serverPub, tripMsg.Seq, prevBytes, msgHash[:], pubBytes)
+			payload := tripcolor.CanonicalPayload(serverPub, tripMsg.Seq, prevBytes, msgHash[:], pubBytes)
 			if !ed25519.Verify(pubBytes, payload, sigBytes) {
 				select {
 				case session.Send <- []byte("[Hệ thống]: Chữ ký trip không hợp lệ."):
@@ -301,7 +302,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				session.TripPub = pubHex
 				session.Tripcode = session.TripBadge
 			}
-			tripBadgeColor = badgeColor(session.TripBadge)
+			tripBadgeColor = tripcolor.BadgeColor(session.TripBadge)
 		} else {
 			// Non-trip message: if user has TripPub, they must sign (enforce)
 			if session.TripPub != "" {
@@ -351,18 +352,17 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		tripcodeSuffix := ""
 		if session.Tripcode != "" {
 			if isTripMessage {
-				// Verified badge with hidden OSC8
+				// Badge itself is the OSC8 hyperlink so click shows metadata, single space after ✍️
 				visible := session.Tripcode
 				if tripVerified {
 					visible = tripBadgeColor + session.Tripcode + "\x1b[0m"
 				} else {
 					visible = "\x1b[91m" + session.Tripcode + " ✗\x1b[0m"
 				}
-				hidden := ""
 				if tripMeta != nil {
-					hidden = fmt.Sprintf("\x1b]8;;v2v://trip?pub=%s&seq=%d&sig=%s&prev=%s\x1b\\ \x1b]8;;\x1b\\", tripMeta.Pub, tripMeta.Seq, tripMeta.Sig[:16], tripMeta.Prev[:16])
+					visible = fmt.Sprintf("\x1b]8;;v2v://trip?pub=%s&seq=%d&sig=%s&prev=%s\x1b\\%s\x1b]8;;\x1b\\", tripMeta.Pub, tripMeta.Seq, tripMeta.Sig, tripMeta.Prev, visible)
 				}
-				tripcodeSuffix = "\n  └─ ✍️ " + visible + hidden
+				tripcodeSuffix = "\n  └─ ✍️ " + visible
 			} else {
 				tripcodeSuffix = "\n  └─ ✍️ " + session.Tripcode
 			}
@@ -381,50 +381,4 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			s.Broadcast(chatMsg, session.Conn)
 		}
 	}
-}
-
-func canonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte) []byte {
-	return []byte(fmt.Sprintf("%s\x00%d\x00%x\x00%x\x00%x", serverPub, seq, prev, msgHash, pub))
-}
-
-func badgeColor(badge string) string {
-	// Simple hash -> HSL -> ANSI 38;2;R;G;Bm
-	h := sha256.Sum256([]byte(badge))
-	// Use first 3 bytes as hue seed
-	hue := float64(h[0]) / 255.0 * 360
-	sat := 0.6 + float64(h[1]%51)/255.0*0.3 // 0.6-0.8
-	light := 0.6
-	c := (1 - abs(light*2-1)) * sat
-	x := c * (1 - abs(mathMod(hue/60, 2)-1))
-	m := light - c/2
-	var r1, g1, b1 float64
-	switch {
-	case hue < 60:
-		r1, g1, b1 = c, x, 0
-	case hue < 120:
-		r1, g1, b1 = x, c, 0
-	case hue < 180:
-		r1, g1, b1 = 0, c, x
-	case hue < 240:
-		r1, g1, b1 = 0, x, c
-	case hue < 300:
-		r1, g1, b1 = x, 0, c
-	default:
-		r1, g1, b1 = c, 0, x
-	}
-	r := int((r1 + m) * 255)
-	g := int((g1 + m) * 255)
-	b := int((b1 + m) * 255)
-	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b)
-}
-
-func abs(x float64) float64 {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
-func mathMod(a, b float64) float64 {
-	return a - b*float64(int(a/b))
 }

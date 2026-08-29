@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"localchat/internal/tripcolor"
 )
 
 func TestHistoryTripChainPersistenceAndTamper(t *testing.T) {
@@ -22,7 +24,7 @@ func TestHistoryTripChainPersistenceAndTamper(t *testing.T) {
 	prev := make([]byte, 32)
 	msgText := "hello trip"
 	msgHash := sha256.Sum256([]byte(msgText))
-	payload := canonicalPayload(serverPub, 1, prev, msgHash[:], pub)
+	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub)
 	sig := ed25519.Sign(priv, payload)
 
 	trip := &TripMeta{
@@ -46,7 +48,7 @@ func TestHistoryTripChainPersistenceAndTamper(t *testing.T) {
 	}
 	// Tamper: different msg hash should not verify
 	badHash := sha256.Sum256([]byte("tampered"))
-	badPayload := canonicalPayload(serverPub, 1, prev, badHash[:], pub)
+	badPayload := tripcolor.CanonicalPayload(serverPub, 1, prev, badHash[:], pub)
 	if ed25519.Verify(pub, badPayload, sig) {
 		t.Fatalf("tampered payload should not verify")
 	}
@@ -78,12 +80,12 @@ func TestTripChainSeqEnforcement(t *testing.T) {
 }
 
 func TestTripBadgeColorDeterministic(t *testing.T) {
-	a := badgeColor("◆ abc12345")
-	b := badgeColor("◆ abc12345")
+	a := tripcolor.BadgeColor("◆ abc12345")
+	b := tripcolor.BadgeColor("◆ abc12345")
 	if a != b {
 		t.Fatalf("badge color not deterministic: %q vs %q", a, b)
 	}
-	c := badgeColor("◆ deadbeef")
+	c := tripcolor.BadgeColor("◆ deadbeef")
 	if a == c {
 		t.Logf("different badge gave same color (possible but unlikely): %q", a)
 	}
@@ -107,7 +109,7 @@ func TestHistoryRestartRepopulation(t *testing.T) {
 	for seq := uint32(1); seq <= 2; seq++ {
 		msg := "msg" + string(rune('0'+seq))
 		h := sha256.Sum256([]byte(msg))
-		payload := canonicalPayload(serverPub, seq, prev, h[:], pub)
+		payload := tripcolor.CanonicalPayload(serverPub, seq, prev, h[:], pub)
 		sig := ed25519.Sign(priv, payload)
 		hash := sha256.New()
 		hash.Write(prev)

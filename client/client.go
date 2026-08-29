@@ -617,13 +617,13 @@ func main() {
 			h.Write(msgHash[:])
 			newPrev := h.Sum(nil)
 			copy(tripPrev, newPrev)
-			fmt.Fprintf(out, "|  └─ ✍  ◆ %s\n", tripBadge)
+			fmt.Fprintf(out, "|  └─ ✍ %s◆ %s\x1b[0m\n", badgeColor("◆ "+tripBadge), tripBadge)
 			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig)}
 			err = conn.WriteJSON(tripMsg)
 		} else if CLI.Tripcode != "" {
 			hashTrip := sha256.Sum256([]byte(CLI.Tripcode))
 			tripCodeHex := hex.EncodeToString(hashTrip[:])[:8]
-			fmt.Fprintf(out, "|  └─ ✍  ◆ %s\n", tripCodeHex)
+			fmt.Fprintf(out, "|  └─ ✍ ◆ %s\n", tripCodeHex)
 			err = conn.WriteMessage(wsTextMessage, []byte(text))
 		} else {
 			err = conn.WriteMessage(wsTextMessage, []byte(text))
