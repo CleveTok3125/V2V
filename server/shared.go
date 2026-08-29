@@ -12,11 +12,9 @@ import (
 )
 
 type Identity struct {
-	PublicKey  string `json:"public_key"`
-	HmacShield string `json:"hmac_shield"`
-	// Host optionally pins this identity to one deployment hostname;
-	// enforced before signature verification when set.
-	Host string `json:"host,omitempty"`
+	PublicKey    string `json:"public_key"`
+	HmacShield   string `json:"hmac_shield"`
+	ServerPubKey string `json:"server_pubkey,omitempty"`
 }
 
 // PasskeyIdentity is a WebAuthn credential accepted for a role. Only public
@@ -66,6 +64,11 @@ type AuthPacket struct {
 	PasskeyClientData string `json:"passkey_client_data,omitempty"`
 	PasskeySig        string `json:"passkey_sig,omitempty"`
 
+	// Server identity proof (auth_challenge from server)
+	ServerPubKey string `json:"server_pubkey,omitempty"`
+	ServerSig    string `json:"server_sig,omitempty"`
+	ServerHost   string `json:"server_host,omitempty"`
+
 	// Error carries the rejection reason in type=="auth_failed" packets so
 	// clients can show why authentication was refused.
 	Error string `json:"error,omitempty"`
@@ -78,6 +81,11 @@ type AuthPacket struct {
 	// /whoami without extra round-trips.
 	AuthType string      `json:"auth_type,omitempty"`
 	Perms    *Permission `json:"perms,omitempty"`
+}
+
+type ServerIdentity struct {
+	PublicKey  string `json:"public_key"`
+	PrivateKey string `json:"private_key"`
 }
 
 type NonceMeta struct {
@@ -124,6 +132,8 @@ type ChatServer struct {
 
 	RoleRegistry   map[string]RoleDefinition
 	RoleRegistryMu sync.RWMutex
+
+	ServerID *ServerIdentity
 }
 
 func NewChatServer() *ChatServer {
