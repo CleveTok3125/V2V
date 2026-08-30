@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,7 +13,7 @@ import (
 	"unicode/utf8"
 
 	"localchat/internal/filter"
-	"localchat/internal/tripcolor"
+	"localchat/internal/trip"
 
 	"github.com/gorilla/websocket"
 )
@@ -214,10 +213,8 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				continue
 			}
 			pubHex := strings.ToLower(tripMsg.Pub)
-			pubBytes, err1 := hex.DecodeString(pubHex)
-			sigBytes, err2 := hex.DecodeString(tripMsg.Sig)
-			prevBytes, err3 := hex.DecodeString(tripMsg.Prev)
-			if err1 != nil || err2 != nil || err3 != nil || len(pubBytes) != ed25519.PublicKeySize || len(sigBytes) != ed25519.SignatureSize || len(prevBytes) != 32 {
+			// Quick hex length check before heavy verify
+			if len(pubHex) != 64 || len(tripMsg.Sig) != 128 || len(tripMsg.Prev) != 64 {
 				select {
 				case session.Send <- []byte("[Hệ thống]: Chữ ký trip không hợp lệ."):
 				default:
@@ -255,16 +252,24 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				updateReadDeadline()
 				continue
 			}
-			// Verify signature over canonical payload — bind displayName and msg integrity
+			// Verify signature via shared trip package (checks msg_hash + displayName binding)
 			serverPub := ""
 			if s.ServerID != nil {
 				serverPub = strings.ToLower(s.ServerID.PublicKey)
 			}
 			msgHash := sha256.Sum256([]byte(text))
-			// Use session's displayName as ground truth (prevents spoofing via TripMessage.DisplayName)
-			displayNameForVerify := session.DisplayName
-			payload := tripcolor.CanonicalPayload(serverPub, tripMsg.Seq, prevBytes, msgHash[:], pubBytes, displayNameForVerify)
-			if !ed25519.Verify(pubBytes, payload, sigBytes) {
+			msgHashHex := hex.EncodeToString(msgHash[:])
+			res, err := trip.Verify(trip.VerifyParams{
+				Text:        text,
+				DisplayName: session.DisplayName,
+				ServerPub:   serverPub,
+				PubHex:      pubHex,
+				Seq:         tripMsg.Seq,
+				PrevHex:     tripMsg.Prev,
+				SigHex:      tripMsg.Sig,
+				MsgHashHex:  msgHashHex,
+			})
+			if err != nil {
 				s.TripChainsMu.Unlock()
 				select {
 				case session.Send <- []byte("[Hệ thống]: Chữ ký trip không hợp lệ."):
@@ -273,30 +278,25 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				updateReadDeadline()
 				continue
 			}
-			// Success — update chain
-			h := sha256.New()
-			h.Write(prevBytes)
-			h.Write(sigBytes)
-			h.Write(msgHash[:])
-			newPrev := h.Sum(nil)
-			s.TripChains.Store(pubHex, TripChain{Seq: tripMsg.Seq, PrevHash: newPrev})
+			// Success — update chain via helper in trip package result
+			s.TripChains.Store(pubHex, TripChain{Seq: tripMsg.Seq, PrevHash: res.NewPrev})
 			s.TripChainsMu.Unlock()
 			// Build trip meta for history — store displayName as well for verification
+			// Use res fields (already hex) but keep consistent with verified data
 			tripMeta = &TripMeta{
-				Pub:         pubHex,
-				Seq:         tripMsg.Seq,
-				Prev:        hex.EncodeToString(prevBytes),
-				Sig:         hex.EncodeToString(sigBytes),
-				ServerPub:   serverPub,
-				MsgHash:     hex.EncodeToString(msgHash[:]),
+				Pub:         res.PubHex,
+				Seq:         res.Seq,
+				Prev:        res.PrevHex,
+				Sig:         res.SigHex,
+				ServerPub:   res.ServerPub,
+				MsgHash:     res.MsgHash,
 				DisplayName: session.DisplayName,
 			}
 			// Override session badge if not set
 			if session.TripBadge == "" {
-				h2 := sha256.Sum256(pubBytes)
-				session.TripBadge = "◆ " + hex.EncodeToString(h2[:])[:8]
-				session.TripPub = pubHex
-				session.Tripcode = session.TripBadge
+				session.TripBadge = res.Badge
+				session.TripPub = res.PubHex
+				session.Tripcode = res.Badge
 			}
 		} else {
 			// Non-trip message: if user has TripPub, they must sign (enforce)
