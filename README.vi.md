@@ -12,7 +12,7 @@ Hệ thống chat ẩn danh WebSocket thời gian thực, hiệu năng cao, đư
 * **WebAuthn Passkey thật (Web):** Thành viên đăng nhập từ bất kỳ trình duyệt nào bằng platform passkey (Touch ID / Windows Hello / password manager) — private key không bao giờ rời thiết bị. Link enroll do admin phát.
 * **Ẩn danh an toàn:** Người dùng mặc định là ẩn danh. Tên hiển thị tự động được gắn thêm một đoạn hash ngắn từ địa chỉ IP (ví dụ: `Anonymous#1a2b`), giúp phân biệt người dùng mà không lộ IP thật. Tripcode là pseudonym mật mã (`◆ ab12cd34`) suy ra từ passphrase và gắn với `server_pubkey` của server.
 * **Tripcode v0.7.0+ (ed25519 + hashchain):** Passphrase → `Argon2id` (`salt=sha256(serverPub)[:16]`, `t=1/m=32MB` WASM / `t=3/m=64MB` native) → `ed25519`; `badge = hex(sha256(pub))[:8]` tô màu qua palette 10 màu cố định. Mỗi tin nhắn được ký `serverPub|seq|prev|msgHash|pub|displayName` với chuỗi `prev = sha256(prev|sig|msgHash)`, `seq` tăng nghiêm ngặt, `serverPub` chống replay cross-server, `displayName` chống mạo danh `[Admin]`, và `msgHash` được tính lại cả phía server và client để phát hiện sửa `history.jsonl` (tin giả hiện badge đỏ).
-* **Wire có cấu trúc & lịch sử:** Tin nhắn là `WireMessage` JSON (`type,time,displayName,text,trip`) thay vì ANSI thô; lịch sử lưu `history.jsonl` kèm `wire` + `trip` và được kiểm tra lại khi load cũng như khi hiển thị, trip giả hiện đỏ `◆ ab12 ✗`.
+* **Wire có cấu trúc & lịch sử:** `WireMessage` JSON (`type,time,displayName,text,trip`); `history.jsonl` lưu `{"ts":"RFC3339Nano","wire":{...}}` (dedup, không trùng `trip` top-level, system là `{"ts","msg"}`), file `.old` được `zstd` nén thành `.old.zst` (`50MB → ~3MB`, 2 gen `~53MB` max), replay verify lại trip.
 * **Chống spam và lạm dụng:**
     * Giới hạn số lượng kết nối tối đa theo địa chỉ IP.
     * Giới hạn độ dài tin nhắn và số dòng.
@@ -20,7 +20,7 @@ Hệ thống chat ẩn danh WebSocket thời gian thực, hiệu năng cao, đư
     * Tạm khóa IP khi xác thực thất bại nhiều lần liên tiếp.
     * Chống IP spoofing và DoS.
     * Tạm thời chặn kết nối không mã hoá để ngăn tấn công MITM và nghe lén
-* **Lịch sử chat trong bộ nhớ:** Tự động lưu và gửi các tin nhắn gần nhất (bộ nhớ + `data/history.jsonl` với repopulate `TripChains` khi restart, giới hạn `MaxHistoryBytes`/`MaxHistorySend`).
+* **Lịch sử chat trong bộ nhớ:** `ChatHistory` giữ `WireMessage` JSON dedup (evict theo `MaxHistoryBytes`, shrink `cap>4*len`), gửi `MaxHistorySend` tin cho người mới; `data/history.jsonl` bền vững (`RFC3339Nano` readable, batch `Sync` 1s chỉ khi dirty, `SIGTERM` drain, repopulate `TripChains` khi restart).
 * **Client CLI đa nền tảng:** Client chạy trên terminal với giao diện chat tích hợp. Client tự động verify trip trong hàng đợi FIFO với worker song song (mặc định bật, `/autoverify` để tắt/mở) và tô màu lại badge; click vào badge mở `https://<host>/api/trip/verify?...` stateless (giới hạn 200ms/IP).
 
 ---
