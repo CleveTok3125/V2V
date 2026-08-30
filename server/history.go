@@ -1,18 +1,15 @@
 package main
 
 import (
-	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
-	"localchat/internal/tripcolor"
-
 	"localchat/internal/filter"
+	"localchat/internal/trip"
 
 	"github.com/gorilla/websocket"
 )
@@ -86,66 +83,57 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 			}
 		}
 		s.appendMessageToHistory(msgForHistory)
-		if tripForChain != nil && tripForChain.Pub != "" && wireForVerify != nil {
-			// Verify integrity before repopulating chain: check msg hash and signature with displayName
-			actualHash := sha256.Sum256([]byte(wireForVerify.Text))
-			if strings.ToLower(tripForChain.MsgHash) != hex.EncodeToString(actualHash[:]) {
-				log.Printf("⚠️ [HISTORY TAMPER] %s seq %d: msg_hash mismatch (stored %s vs actual %s)", tripForChain.Pub[:12], tripForChain.Seq, tripForChain.MsgHash, hex.EncodeToString(actualHash[:]))
-				continue
-			}
-			prevBytes, _ := hex.DecodeString(tripForChain.Prev)
-			sigBytes, _ := hex.DecodeString(tripForChain.Sig)
-			pubBytes, _ := hex.DecodeString(tripForChain.Pub)
-			hashBytes, _ := hex.DecodeString(tripForChain.MsgHash)
-			serverPub := strings.ToLower(tripForChain.ServerPub)
-			if serverPub == "" && s.ServerID != nil {
-				serverPub = strings.ToLower(s.ServerID.PublicKey)
-			}
-			displayName := wireForVerify.DisplayName
-			if displayName == "" {
+		if tripForChain != nil && tripForChain.Pub != "" {
+			var displayName string
+			var textForHash string
+			if wireForVerify != nil {
+				textForHash = wireForVerify.Text
+				displayName = wireForVerify.DisplayName
+				if displayName == "" {
+					displayName = tripForChain.DisplayName
+				}
+			} else {
+				// Legacy: no wire, use displayName from TripMeta
 				displayName = tripForChain.DisplayName
+				textForHash = "" // will be validated via MsgHash
 			}
-			payload := tripcolor.CanonicalPayload(serverPub, tripForChain.Seq, prevBytes, hashBytes, pubBytes, displayName)
-			if len(pubBytes) != 32 || len(sigBytes) != 64 || !ed25519.Verify(pubBytes, payload, sigBytes) {
-				log.Printf("⚠️ [HISTORY TAMPER] %s seq %d: signature invalid for displayName %q", tripForChain.Pub[:12], tripForChain.Seq, displayName)
-				continue
-			}
-			if len(prevBytes) == 32 {
-				h := sha256.New()
-				h.Write(prevBytes)
-				h.Write(sigBytes)
-				h.Write(hashBytes)
-				newPrev := h.Sum(nil)
-				s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: newPrev})
-			} else if tripForChain.Seq > 0 {
-				s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: []byte{}})
-			}
-		} else if tripForChain != nil && tripForChain.Pub != "" {
-			// Legacy fallback — verify even without Wire (use DisplayName from Trip if present, else empty)
-			prevBytes, _ := hex.DecodeString(tripForChain.Prev)
-			sigBytes, _ := hex.DecodeString(tripForChain.Sig)
-			msgHashBytes, _ := hex.DecodeString(tripForChain.MsgHash)
-			pubBytes, _ := hex.DecodeString(tripForChain.Pub)
 			serverPub := tripForChain.ServerPub
 			if serverPub == "" && s.ServerID != nil {
 				serverPub = s.ServerID.PublicKey
 			}
-			displayName := tripForChain.DisplayName
-			payload := tripcolor.CanonicalPayload(strings.ToLower(serverPub), tripForChain.Seq, prevBytes, msgHashBytes, pubBytes, displayName)
-			if len(pubBytes) == 32 && len(sigBytes) == 64 && len(prevBytes) == 32 && len(msgHashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes) {
-				if len(prevBytes) == 32 {
-					h := sha256.New()
-					h.Write(prevBytes)
-					h.Write(sigBytes)
-					h.Write(msgHashBytes)
-					newPrev := h.Sum(nil)
-					s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: newPrev})
-				} else if tripForChain.Seq > 0 {
-					s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: []byte{}})
-				}
-			} else {
-				log.Printf("⚠️ [HISTORY TAMPER] legacy %s seq %d: signature invalid", tripForChain.Pub[:12], tripForChain.Seq)
+			// For wire case, set Text field so trip.Verify recomputes correctly
+			verifyText := textForHash
+			if wireForVerify != nil {
+				verifyText = wireForVerify.Text
 			}
+			_, err := trip.Verify(trip.VerifyParams{
+				Text:        verifyText,
+				DisplayName: displayName,
+				ServerPub:   serverPub,
+				PubHex:      tripForChain.Pub,
+				Seq:         tripForChain.Seq,
+				PrevHex:     tripForChain.Prev,
+				SigHex:      tripForChain.Sig,
+				MsgHashHex:  tripForChain.MsgHash,
+			})
+			if err != nil {
+				if wireForVerify != nil {
+					log.Printf("⚠️ [HISTORY TAMPER] %s seq %d: %v", tripForChain.Pub[:12], tripForChain.Seq, err)
+				} else {
+					log.Printf("⚠️ [HISTORY TAMPER] legacy %s seq %d: %v", tripForChain.Pub[:12], tripForChain.Seq, err)
+				}
+				continue
+			}
+			// Success: derive newPrev via result
+			prevBytes, _ := hex.DecodeString(tripForChain.Prev)
+			sigBytes, _ := hex.DecodeString(tripForChain.Sig)
+			hashBytes, _ := hex.DecodeString(tripForChain.MsgHash)
+			h := sha256.New()
+			h.Write(prevBytes)
+			h.Write(sigBytes)
+			h.Write(hashBytes)
+			newPrev := h.Sum(nil)
+			s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: newPrev})
 		}
 	}
 
