@@ -22,8 +22,9 @@ type HistoryStore struct {
 	Filename string
 	MaxSize  int64
 
-	file *os.File
-	size int64
+	file  *os.File
+	size  int64
+	dirty bool
 
 	queue chan historyRecord
 	mu    sync.Mutex
@@ -89,8 +90,9 @@ func (h *HistoryStore) writeLoop() {
 			}
 		case <-ticker.C:
 			h.mu.Lock()
-			if h.file != nil {
+			if h.file != nil && h.dirty {
 				_ = h.file.Sync()
+				h.dirty = false
 			}
 			h.mu.Unlock()
 		}
@@ -102,7 +104,10 @@ func (h *HistoryStore) Close() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.file != nil {
-		_ = h.file.Sync()
+		if h.dirty {
+			_ = h.file.Sync()
+			h.dirty = false
+		}
 		return h.file.Close()
 	}
 	return nil
@@ -195,6 +200,7 @@ func (h *HistoryStore) writeRecord(record historyRecord) error {
 
 	written, err := h.file.Write(line)
 	h.size += int64(written)
+	h.dirty = true
 	return err
 }
 
