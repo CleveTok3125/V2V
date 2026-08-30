@@ -7,7 +7,9 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 	_ "time/tzdata"
 
@@ -312,6 +314,18 @@ func main() {
 			fmt.Fprintf(w, "Server Pubkey: %s\n", chatApp.ServerID.PublicKey)
 		}
 	})
+
+	// Graceful drain for history on SIGTERM/SIGINT to avoid losing last second of messages
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+		<-ch
+		log.Println("🛑 Nhận tín hiệu dừng, đang flush history...")
+		if chatApp.HistoryStore != nil {
+			_ = chatApp.HistoryStore.Close()
+		}
+		os.Exit(0)
+	}()
 
 	server := &http.Server{
 		Addr:              ":" + Cfg.Static.Port,

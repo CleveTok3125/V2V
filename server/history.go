@@ -29,6 +29,16 @@ func (s *ChatServer) appendMessageToHistory(msg string) {
 		s.ChatHistory[0] = ""
 		s.ChatHistory = s.ChatHistory[1:]
 	}
+	// Shrink underlying array when cap bloats >4*len to avoid holding 20MiB when only 5MiB needed
+	if cap(s.ChatHistory) > 4*len(s.ChatHistory) && cap(s.ChatHistory) > 1024 {
+		newCap := len(s.ChatHistory)
+		if newCap < 1024 {
+			newCap = 1024
+		}
+		n := make([]string, len(s.ChatHistory), newCap)
+		copy(n, s.ChatHistory)
+		s.ChatHistory = n
+	}
 }
 
 func (s *ChatServer) AddMessageToHistory(msg string) {
@@ -63,7 +73,6 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 	}
 
 	for _, rec := range records {
-		// Handle both new Wire and legacy Message
 		var msgForHistory string
 		var tripForChain *TripMeta
 		var wireForVerify *WireMessage
@@ -74,28 +83,15 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 			wireForVerify = rec.Wire
 		} else {
 			msgForHistory = rec.Message
-			tripForChain = rec.Trip
-			// Try to parse Message as WireMessage for displayName/msg integrity check
-			var w WireMessage
-			if err := json.Unmarshal([]byte(rec.Message), &w); err == nil && w.Type == "chat" && w.Trip != nil {
-				wireForVerify = &w
-				tripForChain = w.Trip
-			}
+			tripForChain = nil
+			wireForVerify = nil
 		}
 		s.appendMessageToHistory(msgForHistory)
-		if tripForChain != nil && tripForChain.Pub != "" {
-			var displayName string
-			var textForHash string
-			if wireForVerify != nil {
-				textForHash = wireForVerify.Text
-				displayName = wireForVerify.DisplayName
-				if displayName == "" {
-					displayName = tripForChain.DisplayName
-				}
-			} else {
-				// Legacy: no wire, use displayName from TripMeta
+		if tripForChain != nil && tripForChain.Pub != "" && wireForVerify != nil {
+			textForHash := wireForVerify.Text
+			displayName := wireForVerify.DisplayName
+			if displayName == "" {
 				displayName = tripForChain.DisplayName
-				textForHash = "" // will be validated via MsgHash
 			}
 			serverPub := tripForChain.ServerPub
 			if serverPub == "" && s.ServerID != nil {
@@ -117,11 +113,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 				MsgHashHex:  tripForChain.MsgHash,
 			})
 			if err != nil {
-				if wireForVerify != nil {
-					log.Printf("⚠️ [HISTORY TAMPER] %s seq %d: %v", tripForChain.Pub[:12], tripForChain.Seq, err)
-				} else {
-					log.Printf("⚠️ [HISTORY TAMPER] legacy %s seq %d: %v", tripForChain.Pub[:12], tripForChain.Seq, err)
-				}
+				log.Printf("⚠️ [HISTORY TAMPER] %s seq %d: %v", tripForChain.Pub[:12], tripForChain.Seq, err)
 				continue
 			}
 			// Success: derive newPrev via result
