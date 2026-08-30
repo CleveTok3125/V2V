@@ -12,7 +12,7 @@ A high-performance, real-time anonymous chat system built entirely in Go. It fea
 * **Real WebAuthn Passkeys (Web):** Members can log in from any browser using platform passkeys (Touch ID / Windows Hello / password managers) — private keys never leave the device. Enrollment links are issued by the server admin.
 * **Secure Anonymity:** Users are anonymous by default. Display names are automatically appended with a short hash of the user's IP address (e.g., `Anonymous#1a2b`), making it easy to distinguish users without exposing real IP addresses. Optional tripcode provides a cryptographic pseudonym (`◆ ab12cd34`) derived from a passphrase bound to the server's identity.
 * **Tripcode v0.7.0+ (ed25519 + hashchain):** Passphrase → Argon2id (`sha256(serverPub)[:16]` salt, `t=1/m=32MB` WASM / `t=3/m=64MB` native) → `ed25519` keypair; `badge = hex(sha256(pub))[:8]` colored via fixed palette. Each message is signed over `serverPub|seq|prev|msgHash|pub|displayName` with per-user hashchain `prev = sha256(prev|sig|msgHash)`, `seq` strictly increasing, `serverPub` binding prevents cross-server replay, `displayName` binding prevents fake `[Admin]` spoof, and `msgHash` is recomputed server- and client-side to detect history edits (history stores `WireMessage` JSON with `TripMeta` and is re-verified on load and on display, tampered messages show red badge).
-* **Structured Wire & History:** Chat messages are now `WireMessage` JSON (`type, time, displayName, text, trip`) instead of raw ANSI; history is persisted as `history.jsonl` with `wire` + `trip` fields and replayed with integrity checks; legacy ANSI history is still loaded.
+* **Structured Wire & History:** Chat messages are `WireMessage` JSON (`type, time, displayName, text, trip`) rather than raw ANSI; `history.jsonl` stores `{"ts":"RFC3339Nano","wire":{...}}` (dedup, no top-level `trip`; system messages as `{"ts","msg"}`), the rotated `.old` is `zstd`-compressed to `.old.zst` (`50MB → ~3MB`, 2 generations max `~53MB`), and replay verifies trip integrity.
 * **Anti-Spam and Abuse Protection:**
     * Maximum connection limits per IP address.
     * Message length and line-break limits.
@@ -21,7 +21,7 @@ A high-performance, real-time anonymous chat system built entirely in Go. It fea
     * IP spoofing and DoS preventation.
     * Immediately block unencrypted connections to prevent MITM attacks and secret sniffing
 
-* **In-Memory Chat History:** Automatically stores and sends the most recent messages to newly connected users (in-memory + `data/history.jsonl` with `TripChains` repopulation on restart, `MaxHistoryBytes`/`MaxHistorySend` caps).
+* **In-Memory Chat History:** `ChatHistory` is kept in RAM as deduped `WireMessage` JSON strings (evicted by `MaxHistoryBytes`, `cap>4*len` shrink) and streamed as `MaxHistorySend` messages to newcomers; `data/history.jsonl` is the durable store (`RFC3339Nano` `ts` readable, `zstd` `.old`, smart batch `Sync` every 1s only when dirty, `SIGTERM` drain, and `TripChains` repopulation on restart).
 * **Cross-Platform CLI Client:** A terminal-based client featuring an integrated chat UI suitable for multi-line messages and local commands. Client auto-verifies trip signatures in a FIFO queue with parallel workers (enabled by default, `/autoverify` to toggle) and recolors badges locally; manual verification also available via `https://<host>/api/trip/verify?...` stateless endpoint (rate-limited 200ms/IP).
 ---
 
@@ -206,7 +206,7 @@ The docker-compose.yml mounts `./logs` and `./data` as directories (persisted), 
 docker compose restart v2v_server  # or down && up -d --build
 ```
 
-`./logs` and `./data` (including `data/server_identity.json` auto-generated on first run, `data/history.jsonl`) survive restarts. By default, the template uses `LOG_FILE_PATH=./logs/app.log` and `HISTORY_FILE_PATH=./data/history.jsonl`.
+`./logs` and `./data` (including `data/server_identity.json` auto-generated on first run, `data/history.jsonl` + `data/history.jsonl.old.zst` rotated at `MAX_HISTORY_FILE_SIZE_MB`, smart batch `Sync` every 1s only when dirty) survive restarts. By default, the template uses `LOG_FILE_PATH=./logs/app.log` and `HISTORY_FILE_PATH=./data/history.jsonl`.
 
 For `.env` changes, the server hot-reloads dynamic vars automatically; `roles.json` and `server_identity.json` require a restart when replaced atomically.
 
