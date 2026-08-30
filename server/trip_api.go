@@ -51,9 +51,19 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 	prevHex := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("prev")))
 	sigHex := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sig")))
 	msgHashHex := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("msg_hash")))
-	serverPub := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("server_pub")))
+	queryServerPub := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("server_pub")))
 	displayName := r.URL.Query().Get("display_name")
 	textParam := r.URL.Query().Get("text")
+	// Enforce server_pub is server's own key; ignore query if it doesn't match.
+	serverPub := ""
+	if s.ServerID != nil {
+		serverPub = strings.ToLower(s.ServerID.PublicKey)
+	}
+	if queryServerPub != "" && queryServerPub != serverPub {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"valid": false, "error": "server_pub mismatch"})
+		return
+	}
 
 	if pubHex == "" || sigHex == "" || prevHex == "" || msgHashHex == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -99,9 +109,6 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"valid": false, "error": "invalid hex length"})
 		return
-	}
-	if serverPub == "" && s.ServerID != nil {
-		serverPub = strings.ToLower(s.ServerID.PublicKey)
 	}
 	payload := tripcolor.CanonicalPayload(serverPub, seq, prevBytes, msgHashBytes, pubBytes, displayName)
 	valid := ed25519.Verify(pubBytes, payload, sigBytes)

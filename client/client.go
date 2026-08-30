@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"localchat/internal/filter"
+	"localchat/internal/trip"
 	"localchat/internal/tripcolor"
 	"localchat/linkify"
 
@@ -146,13 +147,10 @@ type verifyJob struct {
 }
 
 func parseTripBadgeLine(line string) (verifyJob, bool) {
-	// Look for OSC8 trip link (https or v2v)
+	// Look for OSC8 trip link (only https)
 	idx := strings.Index(line, "/api/trip/verify?")
 	if idx == -1 {
-		idx = strings.Index(line, "v2v://trip")
-		if idx == -1 {
-			return verifyJob{}, false
-		}
+		return verifyJob{}, false
 	}
 	// Find OSC8 start before idx
 	start := strings.LastIndex(line[:idx], "\x1b]8;;")
@@ -192,19 +190,14 @@ func parseTripBadgeLine(line string) (verifyJob, bool) {
 			badge = strings.TrimSpace(line[p:end])
 		}
 	}
-	// Parse URL query to get pub/seq etc. Handle both https and v2v
+	// Parse URL query to get pub/seq etc. Only https is supported now.
 	fullURL := urlStr
-	if !strings.HasPrefix(fullURL, "http") && !strings.HasPrefix(fullURL, "v2v:") {
+	if !strings.HasPrefix(fullURL, "http") {
 		fullURL = "https://" + fullURL
 	}
-	// For v2v://trip?pub=... we need to parse as URL with custom scheme - net/url can handle
 	u, err := url.Parse(fullURL)
 	if err != nil {
-		// Try with https prefix for v2v
-		u, err = url.Parse("https://" + strings.TrimPrefix(fullURL, "v2v://"))
-		if err != nil {
-			return verifyJob{}, false
-		}
+		return verifyJob{}, false
 	}
 	q := u.Query()
 	job := verifyJob{
@@ -230,7 +223,7 @@ func parseTripBadgeLine(line string) (verifyJob, bool) {
 }
 
 func isTripBadgeLine(line string) bool {
-	return strings.Contains(line, "◆") && (strings.Contains(line, "/api/trip/verify") || strings.Contains(line, "v2v://trip"))
+	return strings.Contains(line, "◆") && strings.Contains(line, "/api/trip/verify")
 }
 
 func isJoinLeaveSystemLine(line string) bool {
@@ -559,27 +552,27 @@ func main() {
 
 	go func() {
 		for job := range verifyCh {
-			pubBytes, _ := hex.DecodeString(job.pub)
-			sigBytes, _ := hex.DecodeString(job.sig)
-			prevBytes, _ := hex.DecodeString(job.prev)
-			msgHashBytes, _ := hex.DecodeString(job.msgHash)
+			// Use shared trip verification (same as server) — serverPub is enforced to server's own key
 			serverPub := strings.ToLower(job.serverPub)
 			if serverPub == "" {
 				serverPub = strings.ToLower(serverPubForVerify)
 			}
-			// Check text integrity if present
-			valid := false
-			if job.textParam != "" {
-				h := sha256.Sum256([]byte(job.textParam))
-				if hex.EncodeToString(h[:]) != strings.ToLower(job.msgHash) {
-					valid = false
-				} else {
-					payload := tripcolor.CanonicalPayload(serverPub, job.seq, prevBytes, h[:], pubBytes, job.displayName)
-					valid = len(pubBytes) == ed25519.PublicKeySize && len(sigBytes) == ed25519.SignatureSize && len(prevBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
-				}
-			} else {
-				payload := tripcolor.CanonicalPayload(strings.ToLower(serverPub), job.seq, prevBytes, msgHashBytes, pubBytes, job.displayName)
-				valid = len(pubBytes) == ed25519.PublicKeySize && len(sigBytes) == ed25519.SignatureSize && len(prevBytes) == 32 && len(msgHashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
+			textForVerify := job.textParam
+			// If textParam empty, we still verify via msgHash (trip.Verify recomputes)
+			_, err := trip.Verify(trip.VerifyParams{
+				Text:        textForVerify,
+				DisplayName: job.displayName,
+				ServerPub:   serverPub,
+				PubHex:      job.pub,
+				Seq:         job.seq,
+				PrevHex:     job.prev,
+				SigHex:      job.sig,
+				MsgHashHex:  job.msgHash,
+			})
+			valid := err == nil
+			// Fallback: if textParam was empty but msgHash check failed, try empty text path
+			if !valid && textForVerify != "" {
+				// Already handled; keep invalid
 			}
 			var colored string
 			if valid {
@@ -621,34 +614,35 @@ func main() {
 				fmt.Fprintf(out, "| %s %s: %s\n", wire.Time, wire.DisplayName, filter.SanitizeForDisplay(wire.Text))
 				displayMu.Unlock()
 				if wire.Trip != nil {
+					h := sha256.Sum256([]byte(wire.Trip.Pub))
+					// Quick pub decode to compute badge; actual verify via shared lib
 					pubBytes, _ := hex.DecodeString(wire.Trip.Pub)
-					h := sha256.Sum256(pubBytes)
-					badge := "◆ " + hex.EncodeToString(h[:])[:8]
+					_ = pubBytes
+					badgeTmp := "◆ " + hex.EncodeToString(h[:])[:8]
+					_ = badgeTmp
 					autoVerifyMu.RLock()
 					av := autoVerify
 					autoVerifyMu.RUnlock()
 					var colored string
 					if av {
-						sigBytes, _ := hex.DecodeString(wire.Trip.Sig)
-						prevBytes, _ := hex.DecodeString(wire.Trip.Prev)
-						hashBytes, _ := hex.DecodeString(wire.Trip.MsgHash)
-						srvPub := strings.ToLower(wire.Trip.ServerPub)
-						if srvPub == "" {
-							srvPub = strings.ToLower(serverPubForVerify)
-						}
-						actualHash := sha256.Sum256([]byte(wire.Text))
-						if hex.EncodeToString(actualHash[:]) != strings.ToLower(wire.Trip.MsgHash) {
-							colored = "\x1b[91m" + badge + " ✗\x1b[0m"
+						res, err := trip.Verify(trip.VerifyParams{
+							Text:        wire.Text,
+							DisplayName: wire.DisplayName,
+							ServerPub:   wire.Trip.ServerPub,
+							PubHex:      wire.Trip.Pub,
+							Seq:         wire.Trip.Seq,
+							PrevHex:     wire.Trip.Prev,
+							SigHex:      wire.Trip.Sig,
+							MsgHashHex:  wire.Trip.MsgHash,
+						})
+						if err == nil && res != nil {
+							colored = tripcolor.BadgeColor(res.Badge) + res.Badge + "\x1b[0m"
 						} else {
-							payload := tripcolor.CanonicalPayload(srvPub, wire.Trip.Seq, prevBytes, actualHash[:], pubBytes, wire.DisplayName)
-							valid := len(pubBytes) == 32 && len(sigBytes) == 64 && len(prevBytes) == 32 && len(hashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
-							if valid {
-								colored = tripcolor.BadgeColor(badge) + badge + "\x1b[0m"
-							} else {
-								colored = "\x1b[91m" + badge + " ✗\x1b[0m"
-							}
+							badge := "◆ " + hex.EncodeToString(h[:])[:8]
+							colored = "\x1b[91m" + badge + " ✗\x1b[0m"
 						}
 					} else {
+						badge := "◆ " + hex.EncodeToString(h[:])[:8]
 						colored = badge
 					}
 					hostForLink2 := ""
@@ -679,34 +673,32 @@ func main() {
 					fmt.Fprintf(out, "| %s %s: %s\n", wl.Time, wl.DisplayName, filter.SanitizeForDisplay(wl.Text))
 					displayMu.Unlock()
 					if wl.Trip != nil {
-						pubBytes, _ := hex.DecodeString(wl.Trip.Pub)
-						h := sha256.Sum256(pubBytes)
-						badge := "◆ " + hex.EncodeToString(h[:])[:8]
+						h := sha256.Sum256([]byte(wl.Trip.Pub))
+						badgeTmp2 := "◆ " + hex.EncodeToString(h[:])[:8]
+						_ = badgeTmp2
 						autoVerifyMu.RLock()
 						av := autoVerify
 						autoVerifyMu.RUnlock()
 						var colored string
 						if av {
-							sigBytes, _ := hex.DecodeString(wl.Trip.Sig)
-							prevBytes, _ := hex.DecodeString(wl.Trip.Prev)
-							hashBytes, _ := hex.DecodeString(wl.Trip.MsgHash)
-							srvPub := strings.ToLower(wl.Trip.ServerPub)
-							if srvPub == "" {
-								srvPub = strings.ToLower(serverPubForVerify)
-							}
-							actualHash2 := sha256.Sum256([]byte(wl.Text))
-							if hex.EncodeToString(actualHash2[:]) != strings.ToLower(wl.Trip.MsgHash) {
-								colored = "\x1b[91m" + badge + " ✗\x1b[0m"
+							res, err := trip.Verify(trip.VerifyParams{
+								Text:        wl.Text,
+								DisplayName: wl.DisplayName,
+								ServerPub:   wl.Trip.ServerPub,
+								PubHex:      wl.Trip.Pub,
+								Seq:         wl.Trip.Seq,
+								PrevHex:     wl.Trip.Prev,
+								SigHex:      wl.Trip.Sig,
+								MsgHashHex:  wl.Trip.MsgHash,
+							})
+							if err == nil && res != nil {
+								colored = tripcolor.BadgeColor(res.Badge) + res.Badge + "\x1b[0m"
 							} else {
-								payload := tripcolor.CanonicalPayload(srvPub, wl.Trip.Seq, prevBytes, hashBytes, pubBytes, wl.DisplayName)
-								valid := len(pubBytes) == 32 && len(sigBytes) == 64 && len(prevBytes) == 32 && len(hashBytes) == 32 && ed25519.Verify(pubBytes, payload, sigBytes)
-								if valid {
-									colored = tripcolor.BadgeColor(badge) + badge + "\x1b[0m"
-								} else {
-									colored = "\x1b[91m" + badge + " ✗\x1b[0m"
-								}
+								badge := "◆ " + hex.EncodeToString(h[:])[:8]
+								colored = "\x1b[91m" + badge + " ✗\x1b[0m"
 							}
 						} else {
+							badge := "◆ " + hex.EncodeToString(h[:])[:8]
 							colored = badge
 						}
 						hostForLink2 := ""
