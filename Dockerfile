@@ -10,7 +10,7 @@ COPY . .
 # stamp when it is empty, so the bundle never silently reports a stale hash.
 ARG GIT_HASH=""
 ENV GIT_HASH=${GIT_HASH}
-RUN chmod +x build_server.sh && CGO_ENABLED=0 GOOS=linux sh ./build_server.sh
+RUN apk add --no-cache make && make server web
 
 FROM alpine:latest
 WORKDIR /app
