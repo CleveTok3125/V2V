@@ -82,8 +82,16 @@ Chat messages are `WireMessage` JSON, not raw ANSI:
 - `PasskeyIdentity` stores `credential_id`, `private_key` (PKCS8), `public_key` (COSE CBOR), `rpid`, `origin`, `signCount`.
 - Web enrollment: `v2vctl enroll --role member` creates a one-time ticket (`/webauthn/enroll/begin` → `navigator.credentials.create` → `/webauthn/enroll/finish`), stored in `data/webauthn.json` (`WebAuthnStore`). Login verifies `authenticatorData`, `clientDataJSON`, `rpIdHash`, `origin`, and `counter` (clone detection).
 
-### Display name
-`server/auth.go:generateDisplayName` validates `username` via `filter.ValidateDisplayName`, truncates to `MaxUsernameLength`, then either prepends `CustomPrefix` (from `roles.json`) or appends `#<sha256(IP)[:4]>` for guests. `CustomPrefix` is trusted config.
+### Display name — uniform hash, serial, dynamic length, per-session salt
+`server/auth.go:generateDisplayName` validates `username` via `filter.ValidateDisplayName`, trims and caps to `MaxUsernameLength`, then **always** appends a hash suffix — even for roles with `CustomPrefix` (`roles.json`). No role is exempt:
+
+- **Salt:** `server/shared.go:ChatServer.DisplaySalt` — 32B `crypto/rand` generated once per server run in `NewChatServer` (ephemeral, never persisted or logged, distinct from `server_identity.json`'s long-term Ed25519 key). The hash is `HMAC-SHA256(salt, IP)` (`auth.go:366`), not plain `SHA256(IP)`, so knowing the hash does not reveal the IP and a restart rotates all hashes.
+- **Hash length (dynamic):** `hashLen` is computed from live connections `len(Clients)` (`auth.go:360`): `4` chars (16-bit) by default, `5` when `n>100`, `6` when `n>800`, clamped `4..6` via `ceil(log2(n*8)/4)`. This keeps collision probability low as concurrency grows, while keeping names short when few users are online.
+- **Serial for duplicates:** `server/shared.go:DisplayNameCount map[string]int` + `DisplayNameCountMu` tracks active `fullDisplayName`s. If `base = prefix+name+"#"+hash` already exists, the next duplicate becomes `base-2`, then `-3`, etc. (`auth.go:370`). On `unregisterClient` the exact `session.DisplayName` is `delete`d (`clientHandler.go:82`), freeing the slot. The check and claim are `O(1)` and happen once per login.
+
+Final form: `[CustomPrefix]name#hash` or `[CustomPrefix]name#hash-2` (e.g., `[Admin] Alice#a1b2`, `Bob#a1b2-2`). The full `displayName` (including hash and serial) is what is signed in trip messages (`payload = serverPub|seq|prev|msgHash|pub|displayName`) and stored in `WireMessage`/`TripMeta`, so a spoofed `displayName` fails trip verification.
+
+Performance: one `HMAC` per login (`µs`), `hashLen` calc is `O(1)` with `RLock`, serial map is `O(1)`. No per-message cost.
 
 ## Tripcode
 
