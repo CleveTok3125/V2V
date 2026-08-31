@@ -6,7 +6,7 @@
 
 A lightweight, real-time anonymous chat — pure Go, WebSocket, no database.
 
-- **Anonymous by default** — you get `Anonymous#ab12` from your IP hash. No signup.
+- **Anonymous by default** — everyone gets `Name#a1b2` from a per-session salted IP hash (auto-extends, adds `-2` on collision). No signup, comfortable naming.
 - **Passwordless login for staff** — Ed25519 key files or WebAuthn passkeys (Touch ID / Windows Hello).
 - **Optional tripcode** — a colorful `◆ ab12` badge derived from a passphrase, cryptographically verifiable.
 - **Fast & private** — in-memory history, anti-spam limits, and encrypted key files stay on your device.

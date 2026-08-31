@@ -6,7 +6,7 @@
 
 Chat ẩn danh, nhẹ, chạy hoàn toàn bằng Go — không cần database.
 
-- **Ẩn danh mặc định** — bạn sẽ là `Anonymous#ab12` từ IP hash. Không cần đăng ký.
+- **Ẩn danh mặc định** — mọi người, kể cả admin, đều có `Tên#a1b2` từ IP hash với salt ngẫu nhiên mỗi phiên (tự mở rộng, thêm `-2` khi trùng). Không cần đăng ký, đặt tên thoải mái.
 - **Đăng nhập không mật khẩu** — key Ed25519 hoặc passkey WebAuthn (Touch ID / Windows Hello).
 - **Tripcode tùy chọn** — badge `◆ ab12` từ passphrase, có thể xác thực bằng mật mã.
 - **Nhanh & riêng tư** — lịch sử trong RAM + file, chống spam, key được mã hóa trên máy bạn.
