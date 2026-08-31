@@ -18,7 +18,8 @@ Chat ẩn danh, nhẹ, chạy hoàn toàn bằng Go — không cần database.
 Tải từ [releases](https://github.com/CleveTok3125/V2V/releases) hoặc tự build:
 
 ```bash
-make client          # -> public/V2V-linux-amd64
+make client          # -> public/V2V-linux-amd64 (chỉ host)
+make client ALL=1    # -> full matrix 7 nền tảng (dành cho CI)
 make help            # xem tất cả target
 ```
 
@@ -40,7 +41,7 @@ Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/whoami`, `/statu
 
 ## Dành cho Admin
 
-Tạo danh tính bằng `v2vctl` (`make v2vctl`):
+Tạo danh tính bằng `v2vctl` (`make v2vctl` / `make v2vctl ALL=1` cho full matrix):
 
 ```bash
 # Ed25519 classic
@@ -73,6 +74,7 @@ cp template/.env .env          # sửa PORT, ALLOWED_ORIGINS, ...
 make server web                # -> public/server.bin + webterm/app.wasm
 ./public/server.bin
 # hoặc: docker compose up -d --build   (lưu ./data và ./logs)
+# full matrix: make all ALL=1 -j4
 ```
 
 Mở `http://localhost:10000/web/` cho bản web.
