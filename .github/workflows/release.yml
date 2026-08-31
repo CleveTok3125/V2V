@@ -25,6 +25,7 @@ jobs:
       - name: Build Clients
         run: |
           bash ./build_client.sh
+          bash ./build_ctl.sh
         env:
           APP_VERSION: ${{ github.ref_name }}
 

@@ -1,5 +1,5 @@
 // Package identity holds the locally stored login identities shared by the
-// chat client and the v2v-admin management tool: a classic ed25519 key-file
+// chat client and the v2vctl management tool: a classic ed25519 key-file
 // slot and a software-passkey slot inside one versioned container, plus the
 // WebAuthn wire-format helpers the desktop login needs.
 package identity
@@ -67,7 +67,7 @@ func Load(path string) (*IdentityFile, error) {
 	// Reject old Host-based files (no backward compat as requested)
 	if ed, ok := probe["ed25519"].(map[string]any); ok {
 		if _, hasHost := ed["host"]; hasHost {
-			return nil, errors.New("key file uses old Host pinning — run v2v-admin migrate to update to server_pubkey")
+			return nil, errors.New("key file uses old Host pinning — run v2vctl migrate to update to server_pubkey")
 		}
 	}
 	if _, isContainer := probe["version"]; isContainer {
@@ -76,7 +76,7 @@ func Load(path string) (*IdentityFile, error) {
 			return nil, err
 		}
 		if f.Version < Version {
-			return nil, errors.New("key file version too old — run v2v-admin migrate")
+			return nil, errors.New("key file version too old — run v2vctl migrate")
 		}
 		f.Version = Version
 		return &f, nil

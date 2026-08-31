@@ -44,7 +44,7 @@ var loadedPassphrase string
 var loadedWasEncrypted bool
 
 func readPassphrase() (string, error) {
-	// Use charmbracelet/x/term to hide input (same stack as v2v-admin's huh)
+	// Use charmbracelet/x/term to hide input (same stack as v2vctl's huh)
 	if xterm.IsTerminal(os.Stdin.Fd()) {
 		b, err := xterm.ReadPassword(os.Stdin.Fd())
 		if err != nil {
