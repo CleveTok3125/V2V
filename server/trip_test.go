@@ -222,7 +222,7 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 		t.Fatalf("original should verify")
 	}
 
-	// Tamper 1: sửa text nhưng không đổi sig/msg_hash — client sẽ thấy msg_hash không khớp payload nên đỏ
+	// Tamper 1: edit text without updating sig/msg_hash — client sees msg_hash mismatch, badge turns red
 	loaded.Wire.Text = "tampered message"
 	if verify(loaded) {
 		h2 := sha256.Sum256([]byte("tampered message"))
@@ -230,7 +230,7 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 			t.Fatalf("tampered msg should have different hash")
 		}
 	}
-	// Tamper 2: sửa trip.sig (flip a byte) — sig verify phải fail (đỏ)
+	// Tamper 2: flip a byte in sig — signature must fail (red)
 	loaded2 := rec
 	sigBytes2, _ := hex.DecodeString(loaded2.Wire.Trip.Sig)
 	sigBytes2[0] ^= 0xFF
@@ -238,26 +238,26 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 	if verify(loaded2) {
 		t.Fatalf("tampered sig should not verify")
 	}
-	// Tamper 3: sửa trip.pub — sig không khớp pub (đỏ)
+	// Tamper 3: replace pub — sig no longer matches pub (red)
 	loaded3 := rec
 	loaded3.Wire.Trip.Pub = hex.EncodeToString(make([]byte, 32))
 	if verify(loaded3) {
 		t.Fatalf("tampered pub should not verify")
 	}
-	// Tamper 4: sửa trip.seq — payload seq khác nên sig fail (đỏ)
+	// Tamper 4: change seq — payload differs, sig must fail (red)
 	loaded4 := rec
 	loaded4.Wire.Trip.Seq = 2
 	if verify(loaded4) {
 		t.Fatalf("tampered seq should not verify")
 	}
-	// Tamper 5: sửa trip.prev — payload prev khác nên sig fail (đỏ)
+	// Tamper 5: change prev — payload differs, sig must fail (red)
 	loaded5 := rec
 	loaded5.Wire.Trip.Prev = hex.EncodeToString(make([]byte, 32))
 	loaded5.Wire.Trip.Prev = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 	if verify(loaded5) {
 		t.Fatalf("tampered prev should not verify")
 	}
-	// Tamper 6: sửa file history trực tiếp trên disk (wire text) và load lại — giống client reload
+	// Tamper 6: edit history file directly on disk (wire text) and reload — simulates client reload
 	tamperedRec := rec
 	tamperedRec.Wire.Text = "edited on disk"
 	tamperedLine, _ := json.Marshal(tamperedRec)
