@@ -56,5 +56,8 @@ webterm/app.wasm.gz
 webterm/app.wasm.br
 
 # Build Artifacts
-v2v-admin
-!v2v-admin/
+v2vctl
+v2ctl
+V2Vctl-*
+public/V2Vctl-*
+!v2vctl/

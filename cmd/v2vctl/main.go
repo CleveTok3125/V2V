@@ -1,6 +1,6 @@
 package main
 
-// v2v-admin is the identity management tool split out of the chat client
+// v2vctl is the identity & server management tool split out of the chat client
 // and the server per BLUEPRINTS.md.
 //
 // Layout mirrors real CLIs: `keygen` is a parent command with one leaf per
@@ -28,6 +28,8 @@ import (
 
 	"localchat/identity"
 )
+
+var Version = "dev"
 
 type CLI struct {
 	Keygen  KeygenCmd  `cmd:"" help:"Tạo danh tính cá nhân vào key.json"`
