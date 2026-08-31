@@ -38,17 +38,21 @@ All builds are driven by `Makefile`:
 ```bash
 make help            # list targets
 make vet test        # GOCACHE=/tmp/gocache go vet/test
-make -j4 all         # parallel: server + web + client + v2vctl
+make -j4 all         # parallel: server + web + client + v2vctl (host only for client/v2vctl)
+make all ALL=1 -j4   # full 7-platform matrix for client/v2vctl (CI)
 make server          # public/server.bin (-tags netgo, -trimpath)
 make web             # webterm/app.wasm (+ wasm_exec.js, version.js, gzip/br)
-make client          # public/V2V-* matrix (7 platforms)
-make v2vctl          # public/V2Vctl-* matrix
+make client          # host only: public/V2V-$(go env GOOS)-$(go env GOARCH)
+make client ALL=1    # full matrix: public/V2V-* (7 platforms)
+make v2vctl          # host only
+make v2vctl ALL=1    # full matrix
 make clean
 ```
 
 - Version stamping: `APP_VERSION=$(git describe --tags --always)` via `-ldflags -X 'main.Version=...'`, also `GIT_HASH` for web.
-- Cross-compile: `CGO_ENABLED=0 GOOS=... GOARCH=... go build -trimpath`.
-- CI: `.github/workflows/ci.yml` runs `make vet test` on push to `main/master` and PRs (Go 1.25, cache); `release.yml` runs `make -j4 client v2vctl` on tag `v*` and publishes `public/*`.
+- Cross-compile: `CGO_ENABLED=0 GOOS=... GOARCH=... go build -trimpath`; host OS detected via `go env GOOS/GOARCH` (`HOST_GOOS/HOST_GOARCH`).
+- Default `make client`/`v2vctl` builds only host binary for fast dev; `ALL=1` builds full matrix (7 platforms) for CI.
+- CI: `.github/workflows/ci.yml` runs `make vet test` on push to `main/master` and PRs (Go 1.25, cache); `release.yml` runs `make -j4 client v2vctl ALL=1` on tag `v*` and publishes `public/*`.
 - Docker: `Dockerfile` runs `make server web` (requires `make` in builder).
 
 ## Wire Protocol & History

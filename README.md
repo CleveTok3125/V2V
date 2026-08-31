@@ -18,7 +18,8 @@ A lightweight, real-time anonymous chat — pure Go, WebSocket, no database.
 Download from [releases](https://github.com/CleveTok3125/V2V/releases) or build:
 
 ```bash
-make client          # -> public/V2V-linux-amd64 (or V2V-windows-amd64.exe)
+make client          # -> public/V2V-linux-amd64 (host only)
+make client ALL=1    # -> full matrix (7 platforms, for CI)
 make help            # see all targets
 ```
 
@@ -40,7 +41,7 @@ Type `/help` inside the chat for commands (`/quit`, `/clear`, `/whoami`, `/statu
 
 ## For Admins
 
-Create identities with `v2vctl` (build with `make v2vctl`):
+Create identities with `v2vctl` (build with `make v2vctl` / `make v2vctl ALL=1` for all platforms):
 
 ```bash
 # 1) Ed25519 key (classic, works everywhere)
@@ -73,6 +74,7 @@ cp template/.env .env          # edit PORT, ALLOWED_ORIGINS, etc.
 make server web                # -> public/server.bin + webterm/app.wasm
 ./public/server.bin
 # or: docker compose up -d --build   (persists ./data and ./logs)
+# full matrix for release: make all ALL=1 -j4
 ```
 
 Open `http://localhost:10000/web/` for the browser client.
