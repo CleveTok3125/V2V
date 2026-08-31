@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"net"
 	"net/http"
 	"os"
@@ -355,27 +354,26 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 
 	// Defensive cap: never let the sanitized name exceed the configured limit,
 	// so oversized input cannot inflate every broadcast/history/log message.
-	maxLen := Cfg.Dynamic.Load().MaxUsernameLength
+	var maxLen int
+	if cfg := Cfg.Dynamic.Load(); cfg != nil {
+		maxLen = cfg.MaxUsernameLength
+	} else {
+		maxLen = 12 // default for tests
+	}
 	if maxLen > 0 && utf8.RuneCountInString(name) > maxLen {
 		name = string([]rune(name)[:maxLen])
 	}
 
-	// Dynamic hash length based on active connections (log2 scale)
+	// Dynamic hash length based on active connections
 	s.ClientsMu.RLock()
 	n := len(s.Clients)
 	s.ClientsMu.RUnlock()
 	total := n + 1
 	hashLen := 4
-	if total > 2 {
-		bitsNeeded := math.Ceil(math.Log2(float64(total * 8)))
-		chars := int(math.Ceil(bitsNeeded / 4))
-		if chars < 4 {
-			chars = 4
-		}
-		if chars > 6 {
-			chars = 6
-		}
-		hashLen = chars
+	if total > 800 {
+		hashLen = 6
+	} else if total > 100 {
+		hashLen = 5
 	}
 
 	// Salted hash with per-session server salt (ephemeral, not persisted)
