@@ -161,21 +161,21 @@ func TestDisplayName_ReleaseSerial(t *testing.T) {
 }
 
 func TestDisplayName_Truncate(t *testing.T) {
+	// Setup config for deterministic truncate
+	Cfg.Dynamic.Store(&DynamicConfig{MaxUsernameLength: 12})
+	defer Cfg.Dynamic.Store(nil)
+
 	s := NewChatServer()
 	s.DisplaySalt = []byte("fixed-salt-truncate-test-32bytes!")
 	longName := strings.Repeat("a", 100)
 	perms := GetDefaultPermission()
-	// MaxUsernameLength is loaded from config, default maybe 12? Set via Cfg if needed
-	// For test, just ensure it truncates and still has hash
 	name := s.generateDisplayName(longName, "1.1.1.1", perms)
-	// Should contain # and hash, and base part truncated
+	// Should contain # and hash, and base part truncated to 12
 	if !strings.Contains(name, "#") {
 		t.Fatalf("should have hash: %q", name)
 	}
-	// Extract base before #
 	base := name[:strings.LastIndex(name, "#")]
-	// base may include prefix, but for guest it should be truncated
-	if len([]rune(base)) > 20 { // some slack
-		t.Fatalf("base too long after truncate: %q", base)
+	if len([]rune(base)) != 12 {
+		t.Fatalf("base should be truncated to 12, got %q len %d", base, len([]rune(base)))
 	}
 }
