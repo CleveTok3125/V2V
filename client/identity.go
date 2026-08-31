@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"localchat/identity"
+
+	xterm "github.com/charmbracelet/x/term"
 )
 
 type (
@@ -42,9 +44,21 @@ var loadedPassphrase string
 var loadedWasEncrypted bool
 
 func readPassphrase() (string, error) {
-	var pass string
-	fmt.Scanln(&pass)
-	return strings.TrimSpace(pass), nil
+	// Use charmbracelet/x/term to hide input (same stack as v2v-admin's huh)
+	if xterm.IsTerminal(os.Stdin.Fd()) {
+		b, err := xterm.ReadPassword(os.Stdin.Fd())
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	}
+	// Fallback for piped/non-TTY (CI): read full line including spaces
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
 }
 
 func SaveIdentityFileEncrypted(path string, idf *IdentityFile) error {
