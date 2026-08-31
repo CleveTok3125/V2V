@@ -248,7 +248,7 @@ func (c *Ed25519Keygen) Run() error {
 	})
 }
 
-// --- keygen passkey (mềm) -----------------------------------------------
+// --- keygen passkey (soft) -----------------------------------------------
 
 func (c *PasskeyKeygen) Run() error {
 	if isInteractive() {
