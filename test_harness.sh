@@ -53,7 +53,7 @@ else
   echo "✗ web role:hash parsing not found"
   exit 1
 fi
-if grep -q "Unlimited" cmd/v2v-admin/main.go && grep -q "Prefix" cmd/v2v-admin/main.go; then
+if grep -q "Unlimited" cmd/v2vctl/main.go && grep -q "Prefix" cmd/v2vctl/main.go; then
   echo "✓ enroll has unlimited/prefix"
 else
   echo "✗ enroll missing unlimited/prefix"

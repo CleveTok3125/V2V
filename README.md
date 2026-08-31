@@ -95,8 +95,8 @@ both issued by an admin and stored locally in a single `key.json` container
 
 | Flavor            | Created with                       | Login proof                          |
 | ----------------- | ---------------------------------- | ------------------------------------ |
-| `ed25519`         | `v2v-admin keygen ed25519`         | Ed25519 signature over the handshake |
-| Software passkey  | `v2v-admin keygen passkey` (dev)   | ES256 assertion, WebAuthn wire format |
+| `ed25519`         | `v2vctl keygen ed25519`         | Ed25519 signature over the handshake |
+| Software passkey  | `v2vctl keygen passkey` (dev)   | ES256 assertion, WebAuthn wire format |
 
 **Login:**
 
@@ -117,7 +117,7 @@ even behind a proxy.
 
 **Key file encryption (v0.6.0+):** `key.json` can be encrypted at rest with
 `XChaCha20Poly1305 + Argon2id` (simple but strong, works on WASM/arm64).
-`v2v-admin keygen` prompts `Passphrase (Enter = no encryption)` with hidden
+`v2vctl keygen` prompts `Passphrase (Enter = no encryption)` with hidden
 input and confirmation; `V2V_PASSPHRASE` env or `--passphrase-file` also
 supported. Encrypted files are `version:3` envelope with random salt/nonce
 per file, `chmod 600`, and atomic `Sync` for durability.
@@ -143,7 +143,7 @@ Clients auto-verify every trip message in a FIFO queue with parallel workers (lo
 popup). Enrollment is admin-issued: on the server host, run
 
 ```bash
-./v2v-admin enroll --role member --label bob-laptop --unlimited --prefix "[Member] "
+./v2vctl enroll --role member --label bob-laptop --unlimited --prefix "[Member] "
 ```
 If the `Role` field on the web login form receives `member:abc123…`, only `member` is kept (auto-parse `role:hash`).
 
@@ -231,21 +231,21 @@ Before starting the server, you need to configure your environment variables:
 #### Role-Based Authentication (Admins/Mods)
 
 The system allows special privileges through cryptographic identities rather
-than passwords. Identities are created with the **`v2v-admin`** management
-tool (build once from source: `go build -o v2v-admin ./cmd/v2v-admin`).
+than passwords. Identities are created with the **`v2vctl`** management
+tool (build once from source: `go build -o v2vctl ./cmd/v2vctl`).
 
 1. **Create an identity** — pick a flavor (server identity at `data/server_identity.json` is auto-generated on first run; its `public_key` is shown in logs as `Server public key`):
 
     ```bash
     # classic ed25519 key file (pin to current server's pubkey for anti-phishing)
-    ./v2v-admin keygen ed25519 --role admin --unlimited --prefix "[Admin] " --server-pubkey $(jq -r .public_key data/server_identity.json)
+    ./v2vctl keygen ed25519 --role admin --unlimited --prefix "[Admin] " --server-pubkey $(jq -r .public_key data/server_identity.json)
 
     # software passkey (WebAuthn wire format, signed natively at login)
-    ./v2v-admin keygen passkey --role admin \
+    ./v2vctl keygen passkey --role admin \
         --rpid chat.example.com --origin https://chat.example.com
     ```
 
-   Add `--passphrase` handling: `v2v-admin` will prompt `Passphrase (Enter = no encryption)` with hidden confirm when run in a TTY, or read `V2V_PASSPHRASE` env in scripts. Encrypted `key.json` is `version:3`.
+   Add `--passphrase` handling: `v2vctl` will prompt `Passphrase (Enter = no encryption)` with hidden confirm when run in a TTY, or read `V2V_PASSPHRASE` env in scripts. Encrypted `key.json` is `version:3`.
 
     *Both write the private material into `key.json` (keep it safe). The
     ed25519 flavor also prints a `roles.json` snippet; the passkey flavor can

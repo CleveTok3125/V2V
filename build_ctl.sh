@@ -1,4 +1,5 @@
 #!/bin/sh
+# Build the v2vctl identity & server management tool (matrix like client).
 
 mkdir -p public
 
@@ -24,18 +25,18 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     GOOS=${PLATFORM%/*}
     GOARCH=${PLATFORM#*/}
 
-    OUTPUT_NAME="public/V2V-${GOOS}-${GOARCH}"
+    OUTPUT_NAME="public/V2Vctl-${GOOS}-${GOARCH}"
 
     if [ "$GOOS" = "android" ] && [ "$GOARCH" = "arm64" ]; then
-        OUTPUT_NAME="public/V2V-android-aarch64"
+        OUTPUT_NAME="public/V2Vctl-android-aarch64"
     fi
     if [ "$GOOS" = "windows" ]; then
         OUTPUT_NAME+=".exe"
     fi
 
-    echo "Building: $GOOS/$GOARCH..."
+    echo "Building v2vctl: $GOOS/$GOARCH..."
 
-    env $BUILD_ENV GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags="$LDFLAGS" -o $OUTPUT_NAME ./client
+    env $BUILD_ENV GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags="$LDFLAGS" -o $OUTPUT_NAME ./cmd/v2vctl
 
     if [ $? -ne 0 ]; then
         echo "Error while building $GOOS/$GOARCH"

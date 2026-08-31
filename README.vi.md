@@ -88,8 +88,8 @@ Ngoài truy cập khách, server chấp nhận hai loại danh tính đặc quy�
 
 | Loại           | Tạo bằng                         | Chứng minh đăng nhập                        |
 | -------------- | -------------------------------- | ------------------------------------------- |
-| `ed25519`      | `v2v-admin keygen ed25519`       | Chữ ký Ed25519 lên handshake                |
-| Passkey mềm    | `v2v-admin keygen passkey` (dev) | Assertion ES256 theo wire format WebAuthn   |
+| `ed25519`      | `v2vctl keygen ed25519`       | Chữ ký Ed25519 lên handshake                |
+| Passkey mềm    | `v2vctl keygen passkey` (dev) | Assertion ES256 theo wire format WebAuthn   |
 
 **Đăng nhập:**
 
@@ -102,7 +102,7 @@ kết thúc phiên thay vì rơi xuống khách.
 
 **Chống phishing:** mọi danh tính đặc quyền gắn với `server_pubkey` Ed25519 của server — `key.json` lưu `server_pubkey` (hex 64, từ `data/server_identity.json` tự sinh lần đầu) và chữ ký bao phủ `server_pubkey` thay vì hostname. Passkey thật được pin bằng RP ID/origin.
 
-**Mã hoá key file (v0.6.0+):** `key.json` có thể mã hoá at-rest bằng `XChaCha20Poly1305 + Argon2id` (nhẹ nhưng mạnh, chạy được WASM/arm64). `v2v-admin keygen` sẽ hỏi `Passphrase (Enter = không mã hoá)` ẩn khi chạy TTY hoặc đọc `V2V_PASSPHRASE`.
+**Mã hoá key file (v0.6.0+):** `key.json` có thể mã hoá at-rest bằng `XChaCha20Poly1305 + Argon2id` (nhẹ nhưng mạnh, chạy được WASM/arm64). `v2vctl keygen` sẽ hỏi `Passphrase (Enter = không mã hoá)` ẩn khi chạy TTY hoặc đọc `V2V_PASSPHRASE`.
 
 **Lệnh trong phiên:** `/whoami` xem danh tính + quyền; `/status` xem kết nối + phiên bản; `/autoverify` bật/tắt tự verify trip (mặc định bật).
 
@@ -124,7 +124,7 @@ Client tự verify mọi tin trip trong hàng đợi FIFO với worker song song
 admin phát link one-time trên host server:
 
 ```bash
-./v2v-admin enroll --role member --label bob-laptop
+./v2vctl enroll --role member --label bob-laptop
 ```
 
 Member mở link trong 10 phút bằng bất kỳ browser nào để hoàn tất popup ceremony.
@@ -210,7 +210,7 @@ Hệ thống cấp quyền đặc biệt thông qua khóa mã hóa thay vì mậ
 
 1. **Tạo cặp khóa:** Chạy client với flag `-g` để tạo cặp khóa bảo mật.
     ```bash
-    ./v2v-admin keygen
+    ./v2vctl keygen
     ```
     *Lệnh này sẽ tạo ra `key.json` (Private Key — hãy giữ cẩn thận) và `roles.json` (cấu hình Public Key).*
 
