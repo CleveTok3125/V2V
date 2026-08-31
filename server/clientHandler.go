@@ -79,6 +79,11 @@ func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
 		}
 	}
 
+	// Release display name serial slot
+	s.DisplayNameCountMu.Lock()
+	delete(s.DisplayNameCount, session.DisplayName)
+	s.DisplayNameCountMu.Unlock()
+
 	close(session.Send)
 
 	leaveTime := time.Now().In(Cfg.Static.Timezone)

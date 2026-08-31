@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -359,13 +360,61 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 		name = string([]rune(name)[:maxLen])
 	}
 
-	if perms.CustomPrefix != "" {
-		return perms.CustomPrefix + name
+	// Dynamic hash length based on active connections (log2 scale)
+	s.ClientsMu.RLock()
+	n := len(s.Clients)
+	s.ClientsMu.RUnlock()
+	total := n + 1
+	hashLen := 4
+	if total > 2 {
+		bitsNeeded := math.Ceil(math.Log2(float64(total * 8)))
+		chars := int(math.Ceil(bitsNeeded / 4))
+		if chars < 4 {
+			chars = 4
+		}
+		if chars > 6 {
+			chars = 6
+		}
+		hashLen = chars
 	}
 
-	hash := sha256.Sum256([]byte(clientIP))
-	ipSuffix := hex.EncodeToString(hash[:])[:4]
-	return fmt.Sprintf("%s#%s", name, ipSuffix)
+	// Salted hash with per-session server salt (ephemeral, not persisted)
+	var hashStr string
+	if len(s.DisplaySalt) > 0 {
+		mac := hmac.New(sha256.New, s.DisplaySalt)
+		mac.Write([]byte(clientIP))
+		sum := mac.Sum(nil)
+		hashStr = hex.EncodeToString(sum)[:hashLen]
+	} else {
+		h := sha256.Sum256([]byte(clientIP))
+		hashStr = hex.EncodeToString(h[:])[:hashLen]
+	}
+
+	// Always include hash, even for privileged roles (no exception)
+	var baseDisplay string
+	if perms.CustomPrefix != "" {
+		baseDisplay = perms.CustomPrefix + name + "#" + hashStr
+	} else {
+		baseDisplay = name + "#" + hashStr
+	}
+
+	// Serial handling for duplicate hash (same baseDisplay already taken)
+	s.DisplayNameCountMu.Lock()
+	defer s.DisplayNameCountMu.Unlock()
+	if _, exists := s.DisplayNameCount[baseDisplay]; !exists {
+		s.DisplayNameCount[baseDisplay] = 1
+		return baseDisplay
+	}
+	// Find next available serial: base-2, base-3, ...
+	for serial := 2; serial < 1000; serial++ {
+		candidate := fmt.Sprintf("%s-%d", baseDisplay, serial)
+		if _, exists := s.DisplayNameCount[candidate]; !exists {
+			s.DisplayNameCount[candidate] = 1
+			return candidate
+		}
+	}
+	// Fallback (should not happen): return base with timestamp
+	return fmt.Sprintf("%s-%d", baseDisplay, time.Now().UnixNano()%1000)
 }
 
 func generateTripcode(secret string, length int) string {
