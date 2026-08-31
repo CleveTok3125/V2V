@@ -22,10 +22,12 @@ jobs:
         with:
           go-version: "1.21"
 
+      - name: Vet & Test
+        run: make vet test
+
       - name: Build Clients
         run: |
-          bash ./build_client.sh
-          bash ./build_ctl.sh
+          make -j4 client v2vctl
         env:
           APP_VERSION: ${{ github.ref_name }}
 
