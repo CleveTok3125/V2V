@@ -47,11 +47,11 @@ Chạy file thực thi phù hợp với hệ điều hành và kiến trúc củ
 
 #### Cách 2: tự build từ mã nguồn
 
-Bạn có thể build dễ dàng bằng các script có sẵn:
+Build bằng `Makefile`:
 
-**Build Client:**
 ```bash
-bash build_client.sh
+make client          # hoặc make -j4 client v2vctl
+make help            # xem tất cả target
 ```
 
 ---
@@ -146,7 +146,9 @@ Yêu cầu biến môi trường phía server (xem `.env.example` / `template/.e
 
 **Build Server:**
 ```bash
-bash build_server.sh
+make server          # public/server.bin
+make web             # webterm/app.wasm
+make -j4 all         # tất cả
 ```
 
 #### Cách 2: dùng Docker 

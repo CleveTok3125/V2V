@@ -48,11 +48,9 @@ Run the executable matching your operating system and architecture (e.g., `./V2V
 
 #### Option 2: building from source
 
-**Build the Client:**
-
 ```bash
-bash build_client.sh
-
+make client          # or make -j4 client v2vctl for all binaries
+make help            # list all targets
 ```
 
 ---
@@ -164,11 +162,10 @@ Requires these environment variables on the server (see `.env.example`):
 ### Installation 
 
 #### Option 1: building from source
-**Build the Server:**
-
 ```bash
-bash build_server.sh
-
+make server          # public/server.bin
+make web             # webterm/app.wasm
+make -j4 all         # everything
 ```
 
 #### Option 2: Docker Deployment
