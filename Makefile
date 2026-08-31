@@ -51,7 +51,9 @@ vet:
 
 test:
 	GOCACHE=/tmp/gocache go test ./... -count=1
-	@echo "vet/test done"
+
+check: vet test
+	@echo "check done (vet+test)"
 
 clean:
 	rm -rf public webterm/app.wasm webterm/app.wasm.gz webterm/app.wasm.br webterm/version.js webterm/wasm_exec.js
@@ -65,4 +67,5 @@ help:
 	@echo "  make v2vctl   - build public/V2Vctl-* matrix"
 	@echo "  make vet      - go vet"
 	@echo "  make test     - go test"
+	@echo "  make check    - vet+test"
 	@echo "  make clean    - remove build artifacts"
