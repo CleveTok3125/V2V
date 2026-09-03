@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/filter"
+	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/trip"
 	"github.com/CleveTok3125/V2V/internal/tripcolor"
 	"github.com/CleveTok3125/V2V/linkify"
@@ -552,6 +553,7 @@ func main() {
 	var autoVerifyMu sync.RWMutex
 	var displayMu sync.Mutex
 	serverPubForVerify := challenge.ServerPubKey
+	lastMessageTime := time.Now().Add(-10 * time.Second)
 
 	enqueueVerify := func(job verifyJob) {
 		verifyMu.Lock()
@@ -929,20 +931,51 @@ func main() {
 			continue
 		}
 
+		// Guard: client-side MessageCooldown (mirror server, zero-trust)
+		if ClientCfg != nil {
+			if err := guard.ValidateMessageForSend(text, lastMessageTime, &ClientCfg.Limits, false); err != nil {
+				if err == guard.ErrTooFast {
+					fmt.Fprintf(out, "| [Local]: Bạn đang chat quá nhanh! Vui lòng đợi %v.\n", ClientCfg.Limits.MessageCooldown)
+					term.Refresh()
+					continue
+				}
+				if err == guard.ErrTooLong {
+					fmt.Fprintf(out, "| [Local]: Tin nhắn quá dài (tối đa %d ký tự).\n", ClientCfg.Limits.MaxMessageLength)
+					term.Refresh()
+					continue
+				}
+			}
+		}
+
+		// Placeholder: keep original text grey with pending indicator until server echo
+		// Single displayMu lock for entire wipe + placeholder + trip sign + send to avoid burst drift
+		displayMu.Lock()
 		for range typedLinesCount {
 			fmt.Fprint(out, "\033[1A\033[2K\r")
 		}
 
 		lines := strings.Split(text, "\n")
 		for i, line := range lines {
-			// Linkify after validation (linkify inserts ANSI)
 			line = linkify.Linkify(line)
 			if i == 0 {
-				fmt.Fprintf(out, "| Bạn: %s\n", line)
+				fmt.Fprintf(out, "\x1b[90m| Bạn: %s ⏳\x1b[0m\n", line)
 			} else {
-				fmt.Fprintf(out, "|      %s\n", line)
+				fmt.Fprintf(out, "\x1b[90m|      %s\x1b[0m\n", line)
 			}
 		}
+		// Trip placeholder (grey ◆ …) — real badge will come from server echo
+		if tripPriv != nil || CLI.Tripcode != "" {
+			badgePlaceholder := tripBadge
+			if badgePlaceholder == "" && CLI.Tripcode != "" {
+				h := sha256.Sum256([]byte(CLI.Tripcode))
+				badgePlaceholder = hex.EncodeToString(h[:])[:8]
+			}
+			if badgePlaceholder != "" {
+				fmt.Fprintf(out, "\x1b[90m|  └─ ✍ ◆ %s ⏳\x1b[0m\n", badgePlaceholder)
+			}
+		}
+		term.Refresh()
+		displayMu.Unlock()
 
 		if tripPriv != nil {
 			// Sign message with trip chain — bind displayName for anti-spoof
@@ -958,16 +991,23 @@ func main() {
 			h.Write(msgHash[:])
 			newPrev := h.Sum(nil)
 			copy(tripPrev, newPrev)
-			fmt.Fprintf(out, "|  └─ ✍ %s◆ %s\x1b[0m\n", badgeColor("◆ "+tripBadge), tripBadge)
 			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: username}
 			err = conn.WriteJSON(tripMsg)
+			if err != nil {
+				// Rollback seq/prev on send failure to avoid permanent fork
+				tripSeq--
+				copy(tripPrev, prevCopy)
+			}
 		} else if CLI.Tripcode != "" {
-			hashTrip := sha256.Sum256([]byte(CLI.Tripcode))
-			tripCodeHex := hex.EncodeToString(hashTrip[:])[:8]
-			fmt.Fprintf(out, "|  └─ ✍ ◆ %s\n", tripCodeHex)
 			err = conn.WriteMessage(wsTextMessage, []byte(text))
 		} else {
 			err = conn.WriteMessage(wsTextMessage, []byte(text))
+		}
+		if err != nil {
+			// Mark placeholder as failed (red) is handled by server unicast; keep placeholder grey until then
+			lastMessageTime = time.Now()
+		} else {
+			lastMessageTime = time.Now()
 		}
 		if err != nil {
 			fmt.Println("❌ Lỗi gửi tin nhắn:", err)
