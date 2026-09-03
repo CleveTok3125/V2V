@@ -1,4 +1,4 @@
-module localchat
+module github.com/CleveTok3125/V2V
 
 go 1.25.0
 

@@ -19,7 +19,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"localchat/internal/filter"
+	"github.com/CleveTok3125/V2V/internal/filter"
+	"github.com/CleveTok3125/V2V/internal/guard"
 
 	"github.com/gorilla/websocket"
 )
@@ -303,11 +304,11 @@ func (s *ChatServer) LoadRoles() {
 
 func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string) bool {
 	s.AuthFailsMu.Lock()
-	record := s.AuthFails[clientIP]
-
-	if time.Now().Before(record.UnlockTime) {
+	rec := guard.RateLimitRecord(s.AuthFails[clientIP])
+	now := time.Now()
+	if guard.IsBanned(rec, now) {
 		s.AuthFailsMu.Unlock()
-		log.Printf("⛔ [BAN] Từ chối %s. Vui lòng đợi đến %s.", clientIP, record.UnlockTime.Format("15:04:05"))
+		log.Printf("⛔ [BAN] Từ chối %s. Vui lòng đợi đến %s.", clientIP, rec.UnlockTime.Format("15:04:05"))
 		http.Error(w, "IP của bạn đang bị khóa tạm thời do xác thực sai nhiều lần.", http.StatusTooManyRequests)
 		return false
 	}
@@ -315,7 +316,7 @@ func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string)
 
 	s.LastConnectMu.Lock()
 	if lastTime, exists := s.LastConnectTime[clientIP]; exists {
-		if time.Since(lastTime) < Cfg.Dynamic.Load().ConnectionCooldown {
+		if ok, _ := guard.CheckConnectionRate(now, guard.RateLimitRecord{}, lastTime, Cfg.Dynamic.Load().ConnectionCooldown); !ok {
 			s.LastConnectMu.Unlock()
 			log.Printf("⛔ Từ chối: %s kết nối ra/vào quá nhanh.\n", clientIP)
 			http.Error(w, "Bạn thao tác ra/vào quá nhanh! Vui lòng đợi vài giây rồi thử lại.", http.StatusTooManyRequests)
@@ -332,14 +333,9 @@ func (s *ChatServer) handleAuthPenalty(clientIP string) {
 	s.AuthFailsMu.Lock()
 	defer s.AuthFailsMu.Unlock()
 
-	record := s.AuthFails[clientIP]
-	record.FailCount++
-
-	if record.FailCount >= 5 {
-		record.UnlockTime = time.Now().Add(5 * time.Minute)
-		record.FailCount = 0
-	}
-	s.AuthFails[clientIP] = record
+	rec := guard.RateLimitRecord(s.AuthFails[clientIP])
+	rec = guard.NextPenalty(rec, time.Now())
+	s.AuthFails[clientIP] = RateLimitRecord(rec)
 }
 
 func (s *ChatServer) generateDisplayName(username string, clientIP string, perms Permission) string {
@@ -412,27 +408,11 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 }
 
 func generateTripcode(secret string, length int) string {
-	if secret == "" || length <= 0 {
-		return ""
-	}
-
-	hashTrip := sha256.Sum256([]byte(secret))
-	fullHex := hex.EncodeToString(hashTrip[:])
-
-	if length > len(fullHex) {
-		length = len(fullHex)
-	}
-
-	return "◆ " + fullHex[:length]
+	return guard.GenerateTripcode(secret, length)
 }
 
 func tripBadgeFromPubHex(pubHex string) string {
-	b, err := hex.DecodeString(pubHex)
-	if err != nil || len(b) == 0 {
-		return ""
-	}
-	h := sha256.Sum256(b)
-	return "◆ " + hex.EncodeToString(h[:])[:8]
+	return guard.TripBadgeFromPubHex(pubHex)
 }
 
 func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expectedHost string) (*ClientSession, error) {

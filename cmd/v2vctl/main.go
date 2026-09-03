@@ -26,7 +26,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/charmbracelet/huh"
 
-	"localchat/identity"
+	"github.com/CleveTok3125/V2V/identity"
 )
 
 var Version = "dev"

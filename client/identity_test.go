@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"localchat/identity"
+	"github.com/CleveTok3125/V2V/identity"
 )
 
 func TestPickIdentityFrom(t *testing.T) {

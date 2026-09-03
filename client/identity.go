@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"localchat/identity"
+	"github.com/CleveTok3125/V2V/identity"
 
 	xterm "github.com/charmbracelet/x/term"
 )

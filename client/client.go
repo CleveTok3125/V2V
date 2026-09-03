@@ -17,10 +17,10 @@ import (
 	"sync"
 	"time"
 
-	"localchat/internal/filter"
-	"localchat/internal/trip"
-	"localchat/internal/tripcolor"
-	"localchat/linkify"
+	"github.com/CleveTok3125/V2V/internal/filter"
+	"github.com/CleveTok3125/V2V/internal/trip"
+	"github.com/CleveTok3125/V2V/internal/tripcolor"
+	"github.com/CleveTok3125/V2V/linkify"
 
 	"github.com/alecthomas/kong"
 )

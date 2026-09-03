@@ -3,6 +3,8 @@ package main
 import (
 	"sync/atomic"
 	"time"
+
+	"github.com/CleveTok3125/V2V/internal/config"
 )
 
 type StaticConfig struct {
@@ -17,22 +19,7 @@ type StaticConfig struct {
 	MaxHistoryFileSizeMB int
 }
 
-type DynamicConfig struct {
-	StatusURL   string
-	DownloadURL string
-	HomepageURL string
-
-	MaxConnectionsPerIP int
-	MaxMessageLength    int
-	MaxMessageLine      int
-	MessageCooldown     time.Duration
-	IdleChatTimeout     time.Duration
-	MaxHistoryBytes     int
-	MaxHistorySend      int
-	MaxUsernameLength   int
-	MaxTripcodeLength   int
-	ConnectionCooldown  time.Duration
-}
+type DynamicConfig = config.DynamicConfig
 
 type AppConfig struct {
 	Static  StaticConfig

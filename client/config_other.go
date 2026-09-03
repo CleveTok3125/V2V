@@ -7,8 +7,11 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"localchat/internal/configdir"
+	"github.com/CleveTok3125/V2V/internal/config"
+	"github.com/CleveTok3125/V2V/internal/configdir"
 )
+
+var ClientCfg *config.ClientConfig
 
 func parseFlags() {
 	kong.Parse(&CLI, kong.Vars{
@@ -28,6 +31,13 @@ func parseFlags() {
 		CLI.KeyFile = ""
 	}
 	historyFile = filepath.Join(CLI.CacheDir, "history.tmp")
+	// Load or auto-create client config.json
+	cfgPath := configdir.DefaultConfigFile(CLI.ConfigDir)
+	if cfg, err := config.LoadOrCreate(cfgPath, true); err == nil {
+		ClientCfg = cfg
+	} else {
+		ClientCfg = config.DefaultClientConfig()
+	}
 }
 
 // applyWebPasskey is web-only: the desktop signs assertions natively from

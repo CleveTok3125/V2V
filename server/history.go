@@ -8,8 +8,8 @@ import (
 	"log"
 	"time"
 
-	"localchat/internal/filter"
-	"localchat/internal/trip"
+	"github.com/CleveTok3125/V2V/internal/filter"
+	"github.com/CleveTok3125/V2V/internal/trip"
 
 	"github.com/gorilla/websocket"
 )
