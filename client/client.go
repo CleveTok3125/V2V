@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,7 +36,10 @@ var CLI struct {
 	Info      bool             `help:"Kiểm tra thông tin trạng thái của Server" short:"i"`
 	ShowJoin  bool             `help:"Hiện thông báo người dùng ra/vào phòng" short:"j"`
 
-	KeyFile string `help:"Đường dẫn file chứa khóa xác thực" short:"k"`
+	UseKey    bool   `help:"Dùng key mặc định trong config-dir" short:"k"`
+	KeyFile   string `help:"Đường dẫn file chứa khóa xác thực" short:"K" name:"key-file"`
+	ConfigDir string `help:"Thư mục config" short:"c" env:"V2V_CONFIG_DIR"`
+	CacheDir  string `help:"Thư mục cache/history" short:"C" env:"V2V_CACHE_DIR"`
 }
 
 type AuthPacket struct {
@@ -128,8 +130,8 @@ type inputTerminal interface {
 // parseFlags resolves CLI arguments / web config (platform-specific, see
 // config_other.go / config_wasm.go).
 
-// historyFile is the readline history path used on the desktop build.
-var historyFile = filepath.Join(os.TempDir(), "V2V_chat_history.tmp")
+// historyFile is set in parseFlags from CacheDir (UserCacheDir/V2V/history.tmp by default).
+var historyFile string
 
 type verifyJob struct {
 	rawLine     string
