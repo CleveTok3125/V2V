@@ -11,8 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"localchat/internal/tripcolor"
+	"github.com/CleveTok3125/V2V/internal/guard"
+	"github.com/CleveTok3125/V2V/internal/tripcolor"
 )
+
+var guardTripCooldown = guard.NewCooldownMap()
 
 func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -25,26 +28,14 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	clientIP := getClientIP(r)
-	// Simple per-IP cooldown: 200ms (same as MessageCooldown) to prevent tight loops
-	s.TripVerifyLastMu.Lock()
-	if last, ok := s.TripVerifyLast[clientIP]; ok && time.Since(last) < 200*time.Millisecond {
-		s.TripVerifyLastMu.Unlock()
+	// Use shared CooldownMap via guard logic (200ms)
+	if !guardTripCooldown.Allow(clientIP, 200*time.Millisecond) {
 		log.Printf("⛔ [TRIP VERIFY RATE] %s bị hạn chế", clientIP)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]any{"valid": false, "error": "rate limited, slow down"})
 		return
 	}
-	s.TripVerifyLast[clientIP] = time.Now()
-	// Opportunistic cleanup of old entries to avoid memory growth
-	if len(s.TripVerifyLast) > 1000 {
-		for ip, t := range s.TripVerifyLast {
-			if time.Since(t) > 10*time.Minute {
-				delete(s.TripVerifyLast, ip)
-			}
-		}
-	}
-	s.TripVerifyLastMu.Unlock()
 
 	pubHex := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("pub")))
 	seqStr := r.URL.Query().Get("seq")
