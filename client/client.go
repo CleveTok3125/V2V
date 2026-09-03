@@ -545,10 +545,31 @@ func main() {
 	}
 
 	verifyCh := make(chan verifyJob, 128)
+	var verifyMu sync.Mutex
 	autoVerify := true
 	var autoVerifyMu sync.RWMutex
 	var displayMu sync.Mutex
 	serverPubForVerify := challenge.ServerPubKey
+
+	enqueueVerify := func(job verifyJob) {
+		verifyMu.Lock()
+		defer verifyMu.Unlock()
+		select {
+		case verifyCh <- job:
+		default:
+			// Drop oldest (FIFO) — dropped is considered verify fail (red ✗)
+			select {
+			case <-verifyCh:
+			default:
+			}
+			// Now space is guaranteed (or channel was emptied)
+			select {
+			case verifyCh <- job:
+			default:
+				// Extremely unlikely: channel filled again between drop and send
+			}
+		}
+	}
 
 	go func() {
 		for job := range verifyCh {
@@ -748,13 +769,10 @@ func main() {
 					autoVerifyMu.RUnlock()
 					if av {
 						if job, ok := parseTripBadgeLine(line); ok {
-							select {
-							case verifyCh <- job:
-							default:
-								displayMu.Lock()
-								fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(line))
-								displayMu.Unlock()
-							}
+							// Drop-oldest on full: dropped is treated as verify fail (deterministic)
+							// Show the line immediately as pending-plain then queue newest for real verify
+							// If queue was full, oldest was dropped and will stay uncolored (fail)
+							enqueueVerify(job)
 							continue
 						}
 					}
