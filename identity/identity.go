@@ -64,7 +64,7 @@ func Load(path string) (*IdentityFile, error) {
 	if json.Unmarshal(data, &probe) != nil {
 		return nil, errors.New("key.json is not valid JSON")
 	}
-	// Reject old Host-based files (no backward compat as requested)
+	// Reject old Host-based files (no backward compat).
 	if ed, ok := probe["ed25519"].(map[string]any); ok {
 		if _, hasHost := ed["host"]; hasHost {
 			return nil, errors.New("key file uses old Host pinning — run v2vctl migrate to update to server_pubkey")
