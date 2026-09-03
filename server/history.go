@@ -137,6 +137,21 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 	return nil
 }
 
+func (s *ChatServer) sendWithRetry(conn *websocket.Conn, client *ClientSession, msg []byte, isSystem bool) {
+	// System/date messages get one retry to avoid drift when burst follows
+	select {
+	case client.Send <- msg:
+	default:
+		if isSystem {
+			time.Sleep(20 * time.Millisecond)
+			select {
+			case client.Send <- msg:
+			default:
+			}
+		}
+	}
+}
+
 func (s *ChatServer) Broadcast(message string, sender *websocket.Conn) {
 	s.AddMessageToHistory(message)
 	msgBytes := []byte(message)
@@ -146,10 +161,7 @@ func (s *ChatServer) Broadcast(message string, sender *websocket.Conn) {
 
 	for conn, client := range s.Clients {
 		if conn != sender {
-			select {
-			case client.Send <- msgBytes:
-			default:
-			}
+			s.sendWithRetry(conn, client, msgBytes, true)
 		}
 	}
 }
@@ -163,10 +175,7 @@ func (s *ChatServer) BroadcastWithTrip(message string, trip *TripMeta, sender *w
 
 	for conn, client := range s.Clients {
 		if conn != sender {
-			select {
-			case client.Send <- msgBytes:
-			default:
-			}
+			s.sendWithRetry(conn, client, msgBytes, true)
 		}
 	}
 }
@@ -178,10 +187,7 @@ func (s *ChatServer) BroadcastWire(wire WireMessage, sender *websocket.Conn) {
 	defer s.ClientsMu.RUnlock()
 	for conn, client := range s.Clients {
 		if conn != sender {
-			select {
-			case client.Send <- data:
-			default:
-			}
+			s.sendWithRetry(conn, client, data, false)
 		}
 	}
 }
