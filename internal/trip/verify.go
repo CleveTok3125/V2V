@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"localchat/internal/tripcolor"
+	"github.com/CleveTok3125/V2V/internal/tripcolor"
 )
 
 // VerifyParams collects all fields needed to verify a trip signature.

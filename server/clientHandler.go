@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode/utf8"
 
-	"localchat/internal/filter"
-	"localchat/internal/trip"
+	"github.com/CleveTok3125/V2V/internal/filter"
+	"github.com/CleveTok3125/V2V/internal/guard"
+	"github.com/CleveTok3125/V2V/internal/trip"
 
 	"github.com/gorilla/websocket"
 )
@@ -327,21 +327,18 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		lastChatActivity = time.Now()
 		updateReadDeadline()
 
-		if !session.Perms.CanMessageUnlimited {
-			if utf8.RuneCountInString(text) > dynCfg.MaxMessageLength {
+		if err := guard.ValidateMessageForSend(text, lastMessageTime, dynCfg, session.Perms.CanMessageUnlimited); err != nil {
+			switch err {
+			case guard.ErrTooLong:
 				session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn của bạn quá dài (tối đa %d ký tự).", dynCfg.MaxMessageLength))
-				continue
-			}
-
-			if strings.Count(text, "\n") > dynCfg.MaxMessageLine {
+			case guard.ErrTooManyLines:
 				session.Send <- []byte("[Hệ thống]: Tin nhắn chứa quá nhiều dòng. Vui lòng gộp lại!")
-				continue
-			}
-
-			if time.Since(lastMessageTime) < dynCfg.MessageCooldown {
+			case guard.ErrTooFast:
 				session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Bạn đang chat quá nhanh! Vui lòng đợi %v.", dynCfg.MessageCooldown))
-				continue
+			default:
+				session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err))
 			}
+			continue
 		}
 
 		lastMessageTime = time.Now()

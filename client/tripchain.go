@@ -7,8 +7,8 @@ import (
 	"runtime"
 
 	"golang.org/x/crypto/argon2"
-	"localchat/identity"
-	"localchat/internal/tripcolor"
+	"github.com/CleveTok3125/V2V/identity"
+	"github.com/CleveTok3125/V2V/internal/tripcolor"
 )
 
 type TripState struct {
