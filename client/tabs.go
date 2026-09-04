@@ -30,7 +30,13 @@ func classifyTab(line string) int {
 	if isTripBadgeLine(line) {
 		return TabChat
 	}
-	if isJoinLeaveSystemLine(line) || isDateBannerLine(line) || isHistoryBoundaryLine(line) || isGenericSystemLine(line) || isLocalLine(line) {
+	// History boundaries delimit the chat history stream, so they belong
+	// to TabChat. Date banners, join/leave, generic system and local lines
+	// go to TabSystem.
+	if isHistoryBoundaryLine(line) {
+		return TabChat
+	}
+	if isJoinLeaveSystemLine(line) || isDateBannerLine(line) || isGenericSystemLine(line) || isLocalLine(line) {
 		return TabSystem
 	}
 	return TabChat
