@@ -141,8 +141,8 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 
 ## Message Rendering
 
-- `codebg.Render` wraps inline `` `code` `` spans and ``` fenced blocks in a background SGR (`48;5;236`, closed with `49m` so ambient foreground survives). Backticks stay visible; only zero-width escapes are added, so display-cell math, trip `msg_hash` (over raw text) and placeholder erase counts are unaffected. Unmatched backticks, empty spans and text containing ESC pass through unchanged.
-- Applied client-side after `SanitizeForDisplay` on incoming chat text and after `Linkify` on the sender placeholder echo.
+- `codebg.Render` wraps inline `` `code` `` spans and ``` fenced blocks in a background SGR (`48;5;236`, closed with `49m` so ambient foreground survives), stripping the backtick delimiters markdown-style: a ```lang opener becomes a header line showing just the language name (no language means no header), the closing fence is dropped, and single-line ```code``` renders as one background line. Only zero-width escapes are added or removed, so trip `msg_hash` (over raw text) is unaffected; placeholder erase counts are recomputed from the rendered split. Unmatched backticks, empty spans and text containing ESC pass through unchanged.
+- Applied client-side after `SanitizeForDisplay` on incoming chat text and after `Linkify` on the sender placeholder echo (whole text rendered before splitting, so fence state survives across lines).
 
 ## Storage & Persistence
 

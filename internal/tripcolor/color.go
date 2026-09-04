@@ -22,10 +22,29 @@ var palette = [][3]int{
 
 // BadgeColor returns ANSI 38;2;R;G;Bm by rotating the fixed palette.
 func BadgeColor(badge string) string {
+	return BadgeColorWithPalette(badge, palette)
+}
+
+// BadgeColorWithPalette is BadgeColor with a caller-supplied palette
+// (e.g. from client config). Out-of-range channels are clamped; an empty
+// palette falls back to the fixed one so output is never uncolored.
+func BadgeColorWithPalette(badge string, pal [][3]int) string {
+	if len(pal) == 0 {
+		pal = palette
+	}
 	h := sha256.Sum256([]byte(badge))
-	idx := int(h[0]) % len(palette)
-	c := palette[idx]
-	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", c[0], c[1], c[2])
+	c := pal[int(h[0])%len(pal)]
+	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", clamp(c[0]), clamp(c[1]), clamp(c[2]))
+}
+
+func clamp(v int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return v
 }
 
 // CanonicalPayload is the signed payload for trip messages, shared by client/server.

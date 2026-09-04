@@ -61,6 +61,9 @@ func canonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte,
 }
 
 func badgeColor(badge string) string {
+	if ClientCfg != nil && len(ClientCfg.UI.TripPalette) > 0 {
+		return tripcolor.BadgeColorWithPalette(badge, ClientCfg.UI.TripPalette)
+	}
 	return tripcolor.BadgeColor(badge)
 }
 

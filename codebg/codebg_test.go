@@ -35,11 +35,14 @@ func TestRenderPlainUnchanged(t *testing.T) {
 	}
 }
 
-func TestRenderInline(t *testing.T) {
+func TestRenderInlineStripsDelimiters(t *testing.T) {
 	got := Render("run `go vet` now")
-	want := "run \x1b[48;5;236m`go vet`\x1b[49m now"
+	want := "run \x1b[48;5;236mgo vet\x1b[49m now"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+	if strings.Contains(got, "`") {
+		t.Errorf("delimiters must be stripped, got %q", got)
 	}
 }
 
@@ -56,43 +59,70 @@ func TestRenderInlineMultiple(t *testing.T) {
 	if strings.Count(got, "\x1b[48;5;236m") != 2 || strings.Count(got, "\x1b[49m") != 2 {
 		t.Errorf("expected two spans, got %q", got)
 	}
-	if !strings.Contains(got, "`a`") || !strings.Contains(got, "`b`") {
-		t.Errorf("backticks must stay visible, got %q", got)
+	if strings.Contains(got, "`") {
+		t.Errorf("delimiters must be stripped, got %q", got)
 	}
 }
 
-func TestRenderFencedBlock(t *testing.T) {
+func TestRenderFencedBlockNoMarkers(t *testing.T) {
 	in := "```\nhello\nworld\n```"
 	got := Render(in)
 	lines := strings.Split(got, "\n")
-	if lines[0] != "```" || lines[3] != "```" {
-		t.Errorf("fence markers must pass through, got %q", got)
+	if len(lines) != 2 {
+		t.Fatalf("markers must be hidden, want 2 lines, got %q", got)
 	}
-	if lines[1] != "\x1b[48;5;236mhello\x1b[49m" || lines[2] != "\x1b[48;5;236mworld\x1b[49m" {
+	if lines[0] != "\x1b[48;5;236mhello\x1b[49m" || lines[1] != "\x1b[48;5;236mworld\x1b[49m" {
 		t.Errorf("block content must get background, got %q", got)
 	}
 }
 
-func TestRenderFencedWithLang(t *testing.T) {
+func TestRenderFencedWithLangHeader(t *testing.T) {
 	in := "```go\nfmt.Println()\n```"
 	got := Render(in)
-	if !strings.Contains(got, "\x1b[48;5;236mfmt.Println()\x1b[49m") {
-		t.Errorf("fenced content with lang tag must get background, got %q", got)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want header + 1 content line, got %q", got)
+	}
+	if lines[0] != "\x1b[48;5;236mgo\x1b[49m" {
+		t.Errorf("first line must be the language header, got %q", lines[0])
+	}
+	if lines[1] != "\x1b[48;5;236mfmt.Println()\x1b[49m" {
+		t.Errorf("content must get background, got %q", lines[1])
+	}
+}
+
+func TestRenderUnclosedFence(t *testing.T) {
+	in := "```go\nfmt.Println()"
+	got := Render(in)
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 || lines[0] != "\x1b[48;5;236mgo\x1b[49m" {
+		t.Errorf("unclosed fence keeps header + bg to end, got %q", got)
 	}
 }
 
 func TestRenderSingleLineFence(t *testing.T) {
 	got := Render("```code```")
-	if got != "\x1b[48;5;236m```code```\x1b[49m" {
-		t.Errorf("single-line fence must get background, got %q", got)
+	if got != "\x1b[48;5;236mcode\x1b[49m" {
+		t.Errorf("single-line fence must strip markers, got %q", got)
 	}
 }
 
-func TestRenderBackticksInsideFenceLiteral(t *testing.T) {
+func TestRenderSingleLineFenceWithLang(t *testing.T) {
+	got := Render("```go fmt.Println()```")
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want header + content, got %q", got)
+	}
+	if lines[0] != "\x1b[48;5;236mgo\x1b[49m" || lines[1] != "\x1b[48;5;236mfmt.Println()\x1b[49m" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestRenderBackticksInsideFenceAreContent(t *testing.T) {
 	in := "```\n`not inline`\n```"
 	lines := strings.Split(Render(in), "\n")
-	if lines[1] != "\x1b[48;5;236m`not inline`\x1b[49m" {
-		t.Errorf("backticks inside fence are literal block content, got %q", lines[1])
+	if len(lines) != 1 || lines[0] != "\x1b[48;5;236m`not inline`\x1b[49m" {
+		t.Errorf("backticks inside fence stay literal block content, got %q", lines)
 	}
 }
 
@@ -103,14 +133,10 @@ func TestRenderEscUnchanged(t *testing.T) {
 	}
 }
 
-func TestRenderKeepsVisibleChars(t *testing.T) {
-	strip := func(s string) string {
-		s = strings.ReplaceAll(s, "\x1b[48;5;236m", "")
-		return strings.ReplaceAll(s, "\x1b[49m", "")
-	}
-	for _, s := range []string{"run `go vet` now", "```\nhi\n```", "`a` and `b`"} {
-		if strip(Render(s)) != s {
-			t.Errorf("visible chars changed for %q", s)
-		}
+func TestRenderIndentedFence(t *testing.T) {
+	in := "   ```\nhi\n   ```"
+	got := Render(in)
+	if got != "\x1b[48;5;236mhi\x1b[49m" {
+		t.Errorf("indented fences must toggle, got %q", got)
 	}
 }
