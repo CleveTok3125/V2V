@@ -5,6 +5,28 @@ import (
 	"testing"
 )
 
+func TestNeedsContinuation(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"```", true},
+		{"```go", true},
+		{"   ```", true},
+		{"```code```", false},
+		{"```go fmt.Println() ```", false},
+		{"``````", false},
+		{"hello", false},
+		{"`code`", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := NeedsContinuation(c.in); got != c.want {
+			t.Errorf("NeedsContinuation(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
 func TestRenderPlainUnchanged(t *testing.T) {
 	for _, s := range []string{"", "hello world", "no backticks here", "100% sure"} {
 		if got := Render(s); got != s {

@@ -12,6 +12,19 @@ const (
 	sgrBgOff  = "\x1b[49m"
 )
 
+// NeedsContinuation reports whether a first input line that opens a fenced
+// block still needs more input lines to close the fence. It mirrors the
+// toggle semantics of Render: a first line that already contains a closing
+// fence after the opener is complete and must not open multiline
+// collection.
+func NeedsContinuation(firstLine string) bool {
+	t := strings.TrimSpace(firstLine)
+	if !strings.HasPrefix(t, "```") {
+		return false
+	}
+	return !strings.Contains(t[3:], "```")
+}
+
 // Render returns text with code spans wrapped in a background color.
 // Single backtick pairs on one line (`code`) and fenced blocks (```)
 // are supported; the backticks themselves are kept visible. Fence marker
