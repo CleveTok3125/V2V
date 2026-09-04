@@ -567,6 +567,7 @@ func main() {
 		rows    int
 		shown   bool
 		gen     uint64
+		bufEnd  int
 		seq     uint32
 		pub     string
 		hasTrip bool
@@ -600,9 +601,11 @@ func main() {
 	}
 
 	// consumeEchoLocked matches a server echo of our own message against the
-	// oldest pending placeholder. On match it drops the pending entry and,
-	// only when the placeholder is still the last thing printed, erases its
-	// rows so the normal rendering below replaces it. Caller must hold displayMu.
+	// oldest pending placeholder. On match it drops the pending entry, splices
+	// the placeholder rows out of the tab buffer, and rewrites the screen
+	// region: move up past the placeholder plus any lines printed after it,
+	// clear to bottom, then reprint the intervening lines so the normal
+	// rendering below replaces the placeholder in place. Caller must hold displayMu.
 	consumeEchoLocked := func(wire WireMessage) {
 		if wire.DisplayName != username || len(pendingPlaceholders) == 0 {
 			return
@@ -618,15 +621,28 @@ func main() {
 			return
 		}
 		pendingPlaceholders = pendingPlaceholders[1:]
-		if !pm.shown || activeTab != TabChat || printGen != pm.gen || pm.rows <= 0 {
+		if !pm.shown || activeTab != TabChat || pm.rows <= 0 {
 			return
 		}
-		fmt.Fprintf(out, "\x1b[%dA", pm.rows)
-		for i := 0; i < pm.rows; i++ {
-			if i > 0 {
-				fmt.Fprint(out, "\x1b[1B")
+		start := pm.bufEnd - pm.rows
+		if start < 0 || pm.bufEnd > len(tabChat.lines) {
+			return
+		}
+		// Verify the region still holds our placeholder (eviction or
+		// concurrent appends may have shifted it); otherwise leave the
+		// screen alone and render the echo normally.
+		for _, l := range tabChat.lines[start:pm.bufEnd] {
+			if !strings.Contains(l, "⏳") {
+				return
 			}
-			fmt.Fprint(out, "\r\x1b[2K")
+		}
+		intervening := append([]string{}, tabChat.lines[pm.bufEnd:]...)
+		tabChat.spliceOut(start, pm.bufEnd)
+		// Rows on screen: placeholder block plus intervening lines printed after it.
+		fmt.Fprintf(out, "\x1b[%dA", pm.rows+len(intervening))
+		fmt.Fprint(out, "\x1b[J")
+		for _, l := range intervening {
+			fmt.Fprint(out, l)
 		}
 		printGen++
 	}
@@ -1103,6 +1119,7 @@ func main() {
 		// Single displayMu lock for entire wipe + placeholder + trip sign + send to avoid burst drift
 		phRows := 0
 		phShown := activeTab == TabChat
+		phBufEnd := 0
 		displayMu.Lock()
 		for range typedLinesCount {
 			fmt.Fprint(out, "\033[1A\033[2K\r")
@@ -1130,6 +1147,7 @@ func main() {
 				phRows++
 			}
 		}
+		phBufEnd = len(tabChat.lines)
 		term.Refresh()
 		displayMu.Unlock()
 
@@ -1166,7 +1184,7 @@ func main() {
 			lastMessageTime = time.Now()
 			// Track placeholder so the server echo can replace it.
 			displayMu.Lock()
-			pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: printGen, sentAt: time.Now()}
+			pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: printGen, bufEnd: phBufEnd, sentAt: time.Now()}
 			if tripPriv != nil {
 				pm.hasTrip = true
 				pm.seq = tripSeq
