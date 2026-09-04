@@ -140,3 +140,69 @@ func TestRenderIndentedFence(t *testing.T) {
 		t.Errorf("indented fences must toggle, got %q", got)
 	}
 }
+
+func TestRenderWithStyleGoBlock(t *testing.T) {
+	in := "```go\npackage main\n```"
+	got := RenderWithStyle(in, DefaultStyle())
+	lines := strings.Split(got, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want header + 1 line, got %q", got)
+	}
+	if lines[0] != "\x1b[48;5;236mgo\x1b[49m" {
+		t.Errorf("header must stay plain, got %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "\x1b[38;2;") || !strings.Contains(lines[1], "\x1b[48;2;48;48;48m") {
+		t.Errorf("go block must carry fg highlight on truecolor bg, got %q", lines[1])
+	}
+	if strings.Contains(got, "```") {
+		t.Errorf("markers must be stripped, got %q", got)
+	}
+}
+
+func TestRenderWithStyleUnknownLangFallsBack(t *testing.T) {
+	in := "```zznope\ncode here\n```"
+	if got, want := RenderWithStyle(in, DefaultStyle()), Render(in); got != want {
+		t.Errorf("unknown lang must match plain Render,\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestRenderWithStyleNoLangFallsBack(t *testing.T) {
+	in := "```\nplain\n```"
+	if got, want := RenderWithStyle(in, DefaultStyle()), Render(in); got != want {
+		t.Errorf("untagged block must match plain Render,\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestRenderWithStyleInlineUnchanged(t *testing.T) {
+	in := "say `hi` now"
+	if got, want := RenderWithStyle(in, DefaultStyle()), Render(in); got != want {
+		t.Errorf("inline spans must match plain Render, got %q want %q", got, want)
+	}
+}
+
+func TestRenderWithStyleUnclosedHighlightsToEnd(t *testing.T) {
+	in := "```go\npackage main"
+	got := RenderWithStyle(in, DefaultStyle())
+	if !strings.Contains(got, "\x1b[38;2;") {
+		t.Errorf("unclosed fence must still highlight, got %q", got)
+	}
+	if strings.Contains(got, "```") {
+		t.Errorf("markers must be stripped, got %q", got)
+	}
+}
+
+func TestRenderWithStyleCustomPalette(t *testing.T) {
+	st := DefaultStyle()
+	st.Keyword = [3]int{1, 2, 3}
+	got := RenderWithStyle("```go\npackage main\n```", st)
+	if !strings.Contains(got, "\x1b[38;2;1;2;3m") {
+		t.Errorf("custom keyword colour must appear, got %q", got)
+	}
+}
+
+func TestRenderWithStyleOversizeFallsBack(t *testing.T) {
+	in := "```go\n" + strings.Repeat("x", 64*1024+1) + "\n```"
+	if got, want := RenderWithStyle(in, DefaultStyle()), Render(in); got != want {
+		t.Errorf("oversize block must match plain Render")
+	}
+}
