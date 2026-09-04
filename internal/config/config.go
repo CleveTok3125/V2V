@@ -214,6 +214,7 @@ func DefaultClientConfig() *ClientConfig {
 		"showJoin":     {"/showjoin", "/sj"},
 		"autoVerify":   {"/autoverify", "/av"},
 		"verify":       {"/verify"},
+		"tab":          {"/tab", "/t"},
 		"whoami":       {"/whoami", "/w"},
 		"status":       {"/status"},
 		"help":         {"/help", "/h"},
