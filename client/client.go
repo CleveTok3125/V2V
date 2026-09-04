@@ -22,7 +22,6 @@ import (
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/trip"
-	"github.com/CleveTok3125/V2V/internal/tripcolor"
 	"github.com/CleveTok3125/V2V/linkify"
 
 	"github.com/alecthomas/kong"
@@ -746,7 +745,7 @@ func main() {
 			}
 			var colored string
 			if valid {
-				colored = tripcolor.BadgeColor(job.badge) + job.badge + "\x1b[0m"
+				colored = badgeColor(job.badge) + job.badge + "\x1b[0m"
 			} else {
 				colored = "\x1b[91m" + job.badge + " ✗\x1b[0m"
 			}
@@ -807,7 +806,7 @@ func main() {
 							MsgHashHex:  wire.Trip.MsgHash,
 						})
 						if err == nil && res != nil {
-							colored = tripcolor.BadgeColor(res.Badge) + res.Badge + "\x1b[0m"
+							colored = badgeColor(res.Badge) + res.Badge + "\x1b[0m"
 						} else {
 							badge := "◆ " + hex.EncodeToString(h[:])[:8]
 							colored = "\x1b[91m" + badge + " ✗\x1b[0m"
@@ -864,7 +863,7 @@ func main() {
 								MsgHashHex:  wl.Trip.MsgHash,
 							})
 							if err == nil && res != nil {
-								colored = tripcolor.BadgeColor(res.Badge) + res.Badge + "\x1b[0m"
+								colored = badgeColor(res.Badge) + res.Badge + "\x1b[0m"
 							} else {
 								badge := "◆ " + hex.EncodeToString(h[:])[:8]
 								colored = "\x1b[91m" + badge + " ✗\x1b[0m"
@@ -1168,10 +1167,13 @@ func main() {
 			fmt.Fprint(out, "\033[1A\033[2K\r")
 		}
 
-		lines := strings.Split(text, "\n")
+		// Render code spans on the whole text first so fenced blocks
+		// keep their state across lines; phRows then counts rendered
+		// rows (headers added, closers dropped), matching the erase math.
+		lines := strings.Split(codebg.Render(text), "\n")
 		phRows = len(lines)
 		for i, line := range lines {
-			line = linkify.Linkify(codebg.Render(line))
+			line = linkify.Linkify(line)
 			if i == 0 {
 				emitTab(TabChat, fmt.Sprintf("\x1b[90m| Bạn: %s ⏳\x1b[0m\n", line))
 			} else {
