@@ -142,6 +142,11 @@ type ClientConfig struct {
 		} `json:"web"`
 	} `json:"ui"`
 	Commands map[string][]string `json:"commands"`
+	Tabs struct {
+		ChatMaxBytes   int `json:"chatMaxBytes"`
+		SystemMaxLines int `json:"systemMaxLines"`
+		SystemMaxBytes int `json:"systemMaxBytes"`
+	} `json:"tabs"`
 	Timeouts struct {
 		QuitGrace         string `json:"quitGrace"`
 		AuthResponse      string `json:"authResponse"`
@@ -213,6 +218,9 @@ func DefaultClientConfig() *ClientConfig {
 		"status":       {"/status"},
 		"help":         {"/help", "/h"},
 	}
+	c.Tabs.ChatMaxBytes = 2097152
+	c.Tabs.SystemMaxLines = 2000
+	c.Tabs.SystemMaxBytes = 409600
 	c.Timeouts.QuitGrace = "500ms"
 	c.Timeouts.AuthResponse = "12s"
 	c.Timeouts.WsPing = "50s"
@@ -244,6 +252,17 @@ func LoadOrCreate(path string, autoCreate bool) (*ClientConfig, error) {
 	var c ClientConfig
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, err
+	}
+	// Backfill tab caps for config files written before the tabs section existed.
+	def := DefaultClientConfig()
+	if c.Tabs.ChatMaxBytes <= 0 {
+		c.Tabs.ChatMaxBytes = def.Tabs.ChatMaxBytes
+	}
+	if c.Tabs.SystemMaxLines <= 0 {
+		c.Tabs.SystemMaxLines = def.Tabs.SystemMaxLines
+	}
+	if c.Tabs.SystemMaxBytes <= 0 {
+		c.Tabs.SystemMaxBytes = def.Tabs.SystemMaxBytes
 	}
 	return &c, nil
 }
