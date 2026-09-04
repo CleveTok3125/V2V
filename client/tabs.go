@@ -4,7 +4,8 @@ import (
 	"strings"
 )
 
-// Tab IDs for the single-process switching view (plan A).
+// Tab IDs for the single-terminal switching view: TabChat shows chat and
+// trip badges, TabSystem shows local, system, date and history lines.
 const (
 	TabChat   = 1
 	TabSystem = 2

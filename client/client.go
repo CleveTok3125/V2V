@@ -555,6 +555,50 @@ func main() {
 	serverPubForVerify := challenge.ServerPubKey
 	lastMessageTime := time.Now().Add(-10 * time.Second)
 
+	activeTab := TabChat
+	cl, cb, sl, sb := tabCaps()
+	tabChat := newTabBuffer(cl, cb)
+	tabSys := newTabBuffer(sl, sb)
+
+	// emitTab buffers a rendered line and prints it only when its tab is
+	// active. Caller must hold displayMu.
+	emitTab := func(tab int, line string) {
+		if tab == TabChat {
+			tabChat.append(line)
+		} else {
+			tabSys.append(line)
+		}
+		if tab == activeTab {
+			fmt.Fprint(out, line)
+		}
+	}
+
+	// switchTab replays the target buffer under a single lock.
+	switchTab := func(n int) {
+		if n != TabChat && n != TabSystem {
+			return
+		}
+		displayMu.Lock()
+		defer displayMu.Unlock()
+		if n == activeTab {
+			return
+		}
+		activeTab = n
+		fmt.Fprint(out, "\033[H\033[2J")
+		var buf *tabBuffer
+		if n == TabChat {
+			buf = tabChat
+		} else {
+			buf = tabSys
+		}
+		var sb strings.Builder
+		for _, l := range buf.lines {
+			sb.WriteString(l)
+		}
+		fmt.Fprint(out, sb.String())
+		term.Refresh()
+	}
+
 	enqueueVerify := func(job verifyJob) {
 		verifyMu.Lock()
 		defer verifyMu.Unlock()
@@ -607,7 +651,7 @@ func main() {
 			}
 			line := fmt.Sprintf("  └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", job.urlStr, colored)
 			displayMu.Lock()
-			fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(line))
+			emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 			term.Refresh()
 			displayMu.Unlock()
 		}
@@ -636,7 +680,7 @@ func main() {
 			var wire WireMessage
 			if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
 				displayMu.Lock()
-				fmt.Fprintf(out, "| %s %s: %s\n", wire.Time, wire.DisplayName, filter.SanitizeForDisplay(wire.Text))
+				emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, filter.SanitizeForDisplay(wire.Text)))
 				displayMu.Unlock()
 				if wire.Trip != nil {
 					h := sha256.Sum256([]byte(wire.Trip.Pub))
@@ -680,9 +724,9 @@ func main() {
 					}
 					displayMu.Lock()
 					if urlStr != "" {
-						fmt.Fprintf(out, "|   └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\\n", urlStr, colored)
+						emitTab(TabChat, fmt.Sprintf("|   └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\\n", urlStr, colored))
 					} else {
-						fmt.Fprintf(out, "|   └─ ✍️ %s\n", colored)
+						emitTab(TabChat, fmt.Sprintf("|   └─ ✍️ %s\n", colored))
 					}
 					displayMu.Unlock()
 				}
@@ -695,7 +739,7 @@ func main() {
 				var wl WireMessage
 				if err := json.Unmarshal([]byte(line), &wl); err == nil && wl.Type == "chat" {
 					displayMu.Lock()
-					fmt.Fprintf(out, "| %s %s: %s\n", wl.Time, wl.DisplayName, filter.SanitizeForDisplay(wl.Text))
+					emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wl.Time, wl.DisplayName, filter.SanitizeForDisplay(wl.Text)))
 					displayMu.Unlock()
 					if wl.Trip != nil {
 						h := sha256.Sum256([]byte(wl.Trip.Pub))
@@ -736,9 +780,9 @@ func main() {
 						}
 						displayMu.Lock()
 						if urlStr != "" {
-							fmt.Fprintf(out, "|   └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\\n", urlStr, colored)
+							emitTab(TabChat, fmt.Sprintf("|   └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\\n", urlStr, colored))
 						} else {
-							fmt.Fprintf(out, "|   └─ ✍️ %s\n", colored)
+							emitTab(TabChat, fmt.Sprintf("|   └─ ✍️ %s\n", colored))
 						}
 						displayMu.Unlock()
 						continue
@@ -757,13 +801,13 @@ func main() {
 						pendingDateBanner = ""
 					}
 					displayMu.Lock()
-					fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(line))
+					emitTab(TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 					displayMu.Unlock()
 					continue
 				}
 				if !isShowingJoin && pendingDateBanner != "" {
 					displayMu.Lock()
-					fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(pendingDateBanner))
+					emitTab(TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(pendingDateBanner)))
 					displayMu.Unlock()
 					pendingDateBanner = ""
 				}
@@ -782,7 +826,7 @@ func main() {
 					}
 				}
 				displayMu.Lock()
-				fmt.Fprintf(out, "| %s\n", filter.SanitizeForDisplay(line))
+				emitTab(classifyTab(line), fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 				displayMu.Unlock()
 			}
 			term.Refresh()
@@ -818,9 +862,11 @@ func main() {
 		}
 
 		if text == "/whoami" || text == "/w" {
-			fmt.Fprintf(out, "| [Local]: Người dùng: %s | Xác thực: %s\n", username, sessAuthType)
+		displayMu.Lock()
+			emitTab(TabSystem, fmt.Sprintf("| [Local]: Người dùng: %s | Xác thực: %s\n", username, sessAuthType))
 			if sessRole != "" {
-				fmt.Fprintf(out, "| [Local]: Role: %s | Unlimited: %v | Prefix: %q\n", sessRole, sessUnlimited, sessPrefix)
+				emitTab(TabSystem, fmt.Sprintf("| [Local]: Role: %s | Unlimited: %v | Prefix: %q\n", sessRole, sessUnlimited, sessPrefix))
+		displayMu.Unlock()
 			}
 			continue
 		}
@@ -832,24 +878,27 @@ func main() {
 				sj = "BẬT"
 			}
 			showJoinMu.RUnlock()
-			fmt.Fprintf(out, "| [Local]: Server: %s | Đã kết nối: %s | Phiên bản: %s | Show-join: %s\n",
-				wsURL, time.Since(sessConnected).Round(time.Second), Version, sj)
+		displayMu.Lock()
+			emitTab(TabSystem, fmt.Sprintf("| [Local]: Server: %s | Đã kết nối: %s | Phiên bản: %s | Show-join: %s\n",
+				wsURL, time.Since(sessConnected).Round(time.Second), Version, sj))
+		displayMu.Unlock()
 			continue
 		}
 
 		if text == "/help" || text == "/h" {
 			displayMu.Lock()
-			fmt.Fprintln(out, "  [Trợ giúp]: Danh sách các lệnh có thể sử dụng:")
-			fmt.Fprintln(out, "    - /help, /h      : Hiển thị bảng trợ giúp này")
-			fmt.Fprintln(out, "    - /clear, /c     : Xóa sạch màn hình chat")
-			fmt.Fprintln(out, "    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy")
-			fmt.Fprintln(out, "    - /quit, /q      : Rời phòng chat và tắt ứng dụng")
-			fmt.Fprintln(out, "    - /showjoin, /sj : Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp")
-			fmt.Fprintln(out, "    - /whoami, /w    : Thông tin danh tính và quyền hiện tại")
-			fmt.Fprintln(out, "    - /status        : Trạng thái kết nối và phiên bản client")
-			fmt.Fprintln(out, "    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)")
-			fmt.Fprintln(out, "    - /verify        : Hướng dẫn verify thủ công qua link API")
-			fmt.Fprintln(out, "    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng")
+			emitTab(TabSystem, "  [Trợ giúp]: Danh sách các lệnh có thể sử dụng:\n")
+			emitTab(TabSystem, "    - /help, /h      : Hiển thị bảng trợ giúp này\n")
+			emitTab(TabSystem, "    - /clear, /c     : Xóa sạch màn hình chat\n")
+			emitTab(TabSystem, "    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy\n")
+			emitTab(TabSystem, "    - /quit, /q      : Rời phòng chat và tắt ứng dụng\n")
+			emitTab(TabSystem, "    - /showjoin, /sj : Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp\n")
+			emitTab(TabSystem, "    - /whoami, /w    : Thông tin danh tính và quyền hiện tại\n")
+			emitTab(TabSystem, "    - /status        : Trạng thái kết nối và phiên bản client\n")
+			emitTab(TabSystem, "    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
+			emitTab(TabSystem, "    - /verify        : Hướng dẫn verify thủ công qua link API\n")
+			emitTab(TabSystem, "    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
+			emitTab(TabSystem, "    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng\n")
 			displayMu.Unlock()
 			continue
 		}
@@ -863,7 +912,7 @@ func main() {
 			}
 			showJoinMu.Unlock()
 			displayMu.Lock()
-			fmt.Fprintf(out, "| [Local]: %s hiển thị thông báo người dùng ra/vào phòng cho các tin kế tiếp.\n", status)
+			emitTab(TabSystem, fmt.Sprintf("| [Local]: %s hiển thị thông báo người dùng ra/vào phòng cho các tin kế tiếp.\n", status))
 			displayMu.Unlock()
 			continue
 		}
@@ -877,17 +926,50 @@ func main() {
 			}
 			autoVerifyMu.Unlock()
 			displayMu.Lock()
-			fmt.Fprintf(out, "| [Local]: Auto-verify đã %s (mặc định BẬT, verify song song qua channel FIFO).\n", status)
+			emitTab(TabSystem, fmt.Sprintf("| [Local]: Auto-verify đã %s (mặc định BẬT, verify song song qua channel FIFO).\n", status))
 			displayMu.Unlock()
 			continue
 		}
 
 		if strings.HasPrefix(text, "/verify") {
 			displayMu.Lock()
-			fmt.Fprintln(out, "  [Verify]: Click badge link (https://.../api/trip/verify?...) để verify thủ công qua API stateless.")
+			emitTab(TabSystem, "  [Verify]: Click badge link (https://.../api/trip/verify?...) để verify thủ công qua API stateless.\n")
 			displayMu.Unlock()
 			continue
 		}
+
+		if text == "/tab" || text == "/t" || strings.HasPrefix(text, "/tab ") || strings.HasPrefix(text, "/t ") {
+			n := activeTab
+			if text == "/tab" || text == "/t" {
+				if activeTab == TabChat {
+					n = TabSystem
+				} else {
+					n = TabChat
+				}
+			} else {
+				rest := ""
+				if strings.HasPrefix(text, "/tab ") {
+					rest = strings.TrimSpace(strings.TrimPrefix(text, "/tab"))
+				} else {
+					rest = strings.TrimSpace(strings.TrimPrefix(text, "/t"))
+				}
+				if rest == "1" {
+					n = TabChat
+				} else if rest == "2" {
+					n = TabSystem
+				}
+			}
+			switchTab(n)
+			displayMu.Lock()
+			if activeTab == TabChat {
+				fmt.Fprint(out, "| Tab 1: chat (Tab 2: local & system, /tab để chuyển)\n")
+			} else {
+				fmt.Fprint(out, "| Tab 2: local & system (Tab 1: chat, /tab để chuyển)\n")
+			}
+			displayMu.Unlock()
+			continue
+		}
+
 
 		if text == "/clear" || text == "/c" {
 			fmt.Fprint(out, "\033[H\033[2J")
@@ -926,7 +1008,9 @@ func main() {
 		}
 
 		if err := filter.ValidateMessage(text); err != nil {
-			fmt.Fprintf(out, "| [Local]: Tin nhắn chứa ký tự không hợp lệ và đã bị chặn (client-side): %v\n", err)
+		displayMu.Lock()
+			emitTab(TabSystem, fmt.Sprintf("| [Local]: Tin nhắn chứa ký tự không hợp lệ và đã bị chặn (client-side): %v\n", err))
+		displayMu.Unlock()
 			term.Refresh()
 			continue
 		}
@@ -935,12 +1019,16 @@ func main() {
 		if ClientCfg != nil {
 			if err := guard.ValidateMessageForSend(text, lastMessageTime, &ClientCfg.Limits, false); err != nil {
 				if err == guard.ErrTooFast {
-					fmt.Fprintf(out, "| [Local]: Bạn đang chat quá nhanh! Vui lòng đợi %v.\n", ClientCfg.Limits.MessageCooldown)
+		displayMu.Lock()
+					emitTab(TabSystem, fmt.Sprintf("| [Local]: Bạn đang chat quá nhanh! Vui lòng đợi %v.\n", ClientCfg.Limits.MessageCooldown))
+		displayMu.Unlock()
 					term.Refresh()
 					continue
 				}
 				if err == guard.ErrTooLong {
-					fmt.Fprintf(out, "| [Local]: Tin nhắn quá dài (tối đa %d ký tự).\n", ClientCfg.Limits.MaxMessageLength)
+		displayMu.Lock()
+					emitTab(TabSystem, fmt.Sprintf("| [Local]: Tin nhắn quá dài (tối đa %d ký tự).\n", ClientCfg.Limits.MaxMessageLength))
+		displayMu.Unlock()
 					term.Refresh()
 					continue
 				}
@@ -958,9 +1046,9 @@ func main() {
 		for i, line := range lines {
 			line = linkify.Linkify(line)
 			if i == 0 {
-				fmt.Fprintf(out, "\x1b[90m| Bạn: %s ⏳\x1b[0m\n", line)
+				emitTab(TabChat, fmt.Sprintf("\x1b[90m| Bạn: %s ⏳\x1b[0m\n", line))
 			} else {
-				fmt.Fprintf(out, "\x1b[90m|      %s\x1b[0m\n", line)
+				emitTab(TabChat, fmt.Sprintf("\x1b[90m|      %s\x1b[0m\n", line))
 			}
 		}
 		// Trip placeholder (grey ◆ …) — real badge will come from server echo
@@ -971,7 +1059,7 @@ func main() {
 				badgePlaceholder = hex.EncodeToString(h[:])[:8]
 			}
 			if badgePlaceholder != "" {
-				fmt.Fprintf(out, "\x1b[90m|  └─ ✍ ◆ %s ⏳\x1b[0m\n", badgePlaceholder)
+				emitTab(TabChat, fmt.Sprintf("\x1b[90m|  └─ ✍ ◆ %s ⏳\x1b[0m\n", badgePlaceholder))
 			}
 		}
 		term.Refresh()
