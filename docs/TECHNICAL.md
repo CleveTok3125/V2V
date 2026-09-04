@@ -29,6 +29,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 │   ├── tripcolor/    # Badge color palette + CanonicalPayload
 │   └── wire/         # Shared TripMeta / WireMessage / AuthPacket types (future)
 ├── linkify/          # URL → OSC8 hyperlink
+├── codebg/           # inline `code` + ``` blocks → background SGR (display only)
 ├── webterm/          # Browser terminal (xterm.js + WASM glue)
 ├── cmd/v2vctl/       # Management tool (keygen, enroll, list, migrate)
 ├── template/         # Example .env / key.json / roles.json
@@ -82,7 +83,7 @@ make clean
 
 ## Slash Commands
 
-- Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, and the `/verify` prefix. Anything else starting with `/` follows the space rule (`client/commands.go:slashFallbackSend`): contains a space → ordinary chat sent as-is; no space (`/halp`, `/tab1`, `/`) → rejected locally with `| [Local]: Lệnh không tồn tại…`, never broadcast or trip-signed. Code blocks (```) are unaffected.
+- Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, and the `/verify` prefix. Anything else starting with `/` is an unknown command (`client/commands.go:isUnknownSlashCommand`) rejected locally with `| [Local]: Lệnh không tồn tại…`, never broadcast or trip-signed. Code blocks (```) are unaffected, so they double as the escape hatch for sending literal text starting with `/`.
 
 ## Wire Protocol & History
 
@@ -136,6 +137,11 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - Transport: `client/tripchain.go:TripMessage` JSON `{text,pub,seq,prev,sig,displayName}` via `WriteJSON`; server `ReadPump` parses it, validates `filter.ValidateMessage(text)`, checks `pub == session.TripPub`, checks `seq == last+1` and `prev == lastPrev`, verifies `msgHash` and `ed25519`, updates chain, stores `WireMessage{Text, TripMeta}`.
 - Verification: Both server (`ReadPump`, `history.go:InitHistoryStore`, `trip_api.go`) and client (`verifyCh` FIFO queue, parallel workers, `autoVerify` default on, `/autoverify` toggle) recompute `msgHash` and `Verify`, then recolor badge (`palette` if valid, `91m` red `✗` if tampered). History file edits without updating `sig` are detected as `HISTORY TAMPER`.
 - Link: Badge is wrapped in OSC8 `https://<host>/api/trip/verify?pub&seq&prev&sig&msg_hash&server_pub&display_name&text` (stateless `GET /api/trip/verify`, rate-limited `200ms/IP`, capped `2048` query). `serverPub` is enforced to be the server's own key to prevent cross-server reuse. `linkify` (server) and `webterm/app.js` (browser) handle `https` links; `v2v://` legacy is removed.
+
+## Message Rendering
+
+- `codebg.Render` wraps inline `` `code` `` spans and ``` fenced blocks in a background SGR (`48;5;236`, closed with `49m` so ambient foreground survives). Backticks stay visible; only zero-width escapes are added, so display-cell math, trip `msg_hash` (over raw text) and placeholder erase counts are unaffected. Unmatched backticks, empty spans and text containing ESC pass through unchanged.
+- Applied client-side after `SanitizeForDisplay` on incoming chat text and after `Linkify` on the sender placeholder echo.
 
 ## Storage & Persistence
 

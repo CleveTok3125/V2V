@@ -40,7 +40,7 @@ make help            # see all targets
 
 Type `/help` inside the chat for commands (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/verify`, `/tab`).
 
-Your message first appears grey with `⏳` and is replaced by the confirmed line once the server echoes it back. Unknown `/commands` are rejected locally (never broadcast); to send text starting with `/`, put a space after the slash (`/ hello`).
+Your message first appears grey with `⏳` and is replaced by the confirmed line once the server echoes it back. Unknown `/commands` are rejected locally and never broadcast (to send text starting with `/`, wrap it in a ``` code block).
 
 Chat and system messages live on separate tabs: `/tab` switches between Tab 1 (chat) and Tab 2 (local & system). The bar shows `[1:chat] 2:system` with the active tab in brackets.
 

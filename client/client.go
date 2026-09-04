@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/CleveTok3125/V2V/codebg"
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/trip"
@@ -756,7 +757,7 @@ func main() {
 			if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
 				displayMu.Lock()
 				consumeEchoLocked(wire)
-				emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, filter.SanitizeForDisplay(wire.Text)))
+				emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, codebg.Render(filter.SanitizeForDisplay(wire.Text))))
 				displayMu.Unlock()
 				if wire.Trip != nil {
 					h := sha256.Sum256([]byte(wire.Trip.Pub))
@@ -816,7 +817,7 @@ func main() {
 				if err := json.Unmarshal([]byte(line), &wl); err == nil && wl.Type == "chat" {
 					displayMu.Lock()
 					consumeEchoLocked(wl)
-					emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wl.Time, wl.DisplayName, filter.SanitizeForDisplay(wl.Text)))
+					emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wl.Time, wl.DisplayName, codebg.Render(filter.SanitizeForDisplay(wl.Text))))
 					displayMu.Unlock()
 					if wl.Trip != nil {
 						h := sha256.Sum256([]byte(wl.Trip.Pub))
@@ -975,8 +976,9 @@ func main() {
 			emitLocalFeedback("    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
 			emitLocalFeedback("    - /verify        : Hướng dẫn verify thủ công qua link API\n")
 			emitLocalFeedback("    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
-			emitLocalFeedback("    - Lệnh lạ không dấu cách bị chặn\n")
+			emitLocalFeedback("    - Lệnh lạ bắt đầu bằng / bị chặn, không gửi đi (muốn gửi chữ / đầu dòng thì dùng codeblock)\n")
 			emitLocalFeedback("    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng\n")
+			emitLocalFeedback("    - Bọc chữ trong `dấu backtick` để hiện nền riêng (inline code một dòng)\n")
 			displayMu.Unlock()
 			continue
 		}
@@ -1060,11 +1062,11 @@ func main() {
 			continue
 		}
 
-		// Unknown slash input: every built-in command is written
-		// contiguously, so a space means ordinary chat (sent as-is),
-		// otherwise it is a mistyped command rejected locally and never
-		// broadcast. Known commands above already continued.
-		if strings.HasPrefix(text, "/") && !slashFallbackSend(text) {
+		// Unknown slash input: every built-in command was already matched
+		// above, so anything still starting with "/" is a mistyped command
+		// rejected locally and never broadcast. Known commands above
+		// already continued.
+		if isUnknownSlashCommand(text) {
 			displayMu.Lock()
 			emitLocalFeedback(fmt.Sprintf("| [Local]: Lệnh không tồn tại: %s. Gõ /help để xem danh sách.\n", text))
 			displayMu.Unlock()
@@ -1137,7 +1139,7 @@ func main() {
 		lines := strings.Split(text, "\n")
 		phRows = len(lines)
 		for i, line := range lines {
-			line = linkify.Linkify(line)
+			line = linkify.Linkify(codebg.Render(line))
 			if i == 0 {
 				emitTab(TabChat, fmt.Sprintf("\x1b[90m| Bạn: %s ⏳\x1b[0m\n", line))
 			} else {
