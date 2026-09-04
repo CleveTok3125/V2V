@@ -56,6 +56,7 @@ webterm/app.wasm.gz
 webterm/app.wasm.br
 
 # Build Artifacts
+bin/
 v2vctl
 v2ctl
 V2Vctl-*
