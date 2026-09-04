@@ -7,7 +7,13 @@ import (
 	"fmt"
 	"syscall/js"
 	"time"
+
+	"github.com/CleveTok3125/V2V/internal/config"
 )
+
+// ClientCfg mirrors the desktop default config; the web build has no
+// config file access, so it always uses compiled defaults.
+var ClientCfg = config.DefaultClientConfig()
 
 // webPasskey carries the page's intent to log in via WebAuthn.
 var webPasskey struct {
