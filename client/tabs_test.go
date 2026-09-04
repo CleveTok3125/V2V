@@ -16,12 +16,21 @@ func TestClassifyTab(t *testing.T) {
 		"| 09:01 [Hệ thống]: Bob đã tham gia phòng chat!",
 		"| 09:01 [Hệ thống]: Bob đã rời phòng chat.",
 		"\x1b[36m--- Ngày 03/09/2026 ---\x1b[0m",
-		"--- Lịch sử chat gần đây ---",
 		"| [Hệ thống]: Bạn đang chat quá nhanh! Vui lòng đợi 200ms.",
 		"| [Local]: Auto-verify đã BẬT",
 	} {
 		if got := classifyTab(s); got != TabSystem {
 			t.Errorf("system line %q -> %d, want TabSystem", s, got)
+		}
+	}
+	// History boundaries delimit the chat history stream, so they stay
+	// on TabChat and never pollute TabSystem.
+	for _, s := range []string{
+		"--- Lịch sử chat gần đây ---",
+		"--- Kết thúc lịch sử ---",
+	} {
+		if got := classifyTab(s); got != TabChat {
+			t.Errorf("boundary line %q -> %d, want TabChat", s, got)
 		}
 	}
 }
