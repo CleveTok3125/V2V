@@ -7,6 +7,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -240,6 +241,30 @@ func isDateBannerLine(line string) bool {
 
 func isHistoryBoundaryLine(line string) bool {
 	return strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Kết thúc lịch sử ---")
+}
+
+// collectCodeblock gathers a fenced code block after its opening line.
+// It returns the joined text, or canceled=true when the user aborted with
+// Ctrl+C or the stream ended — in which case the caller must discard
+// everything and send nothing.
+func collectCodeblock(term inputTerminal, firstLine string) (string, bool) {
+	rawLines := []string{firstLine}
+
+	term.SetPrompt("| ... ")
+	defer term.SetPrompt("| > ")
+	for {
+		nextLine, err := term.ReadLine()
+		if err != nil {
+			return "", true
+		}
+		rawLines = append(rawLines, nextLine)
+
+		if strings.HasSuffix(strings.TrimSpace(nextLine), "```") {
+			break
+		}
+	}
+
+	return strings.Join(rawLines, "\n"), false
 }
 
 func normalizeURL(input string) string {
@@ -913,9 +938,34 @@ func main() {
 
 	greeting(out, username)
 
+	// gracefulQuit closes the connection cleanly like /quit does, so both
+	// an explicit quit command and an EOF (Ctrl+D) leave no dangling state.
+	gracefulQuit := func() {
+		quitting <- true
+		conn.WriteMessage(wsCloseMessage, []byte{})
+		// Zero trip private key
+		if tripPriv != nil {
+			for i := range tripPriv {
+				tripPriv[i] = 0
+			}
+		}
+		fmt.Fprintf(out, "👋 Đang ngắt kết nối... Tạm biệt!\n")
+		time.Sleep(500 * time.Millisecond)
+		notifyQuit()
+	}
+
 	for {
 		text, err := term.ReadLine()
 		if err != nil {
+			if errors.Is(err, ErrInputCancel) {
+				term.SetPrompt("| > ")
+				displayMu.Lock()
+				emitLocalFeedback("| [Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.\n")
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			gracefulQuit()
 			break
 		}
 
@@ -925,17 +975,7 @@ func main() {
 		}
 
 		if text == "/quit" || text == "/q" {
-			quitting <- true
-			conn.WriteMessage(wsCloseMessage, []byte{})
-			// Zero trip private key
-			if tripPriv != nil {
-				for i := range tripPriv {
-					tripPriv[i] = 0
-				}
-			}
-			fmt.Fprintf(out, "👋 Đang ngắt kết nối... Tạm biệt!\n")
-			time.Sleep(500 * time.Millisecond)
-			notifyQuit()
+			gracefulQuit()
 			break
 		}
 
@@ -977,7 +1017,7 @@ func main() {
 			emitLocalFeedback("    - /verify        : Hướng dẫn verify thủ công qua link API\n")
 			emitLocalFeedback("    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
 			emitLocalFeedback("    - Lệnh lạ bắt đầu bằng / bị chặn, không gửi đi (muốn gửi chữ / đầu dòng thì dùng codeblock)\n")
-			emitLocalFeedback("    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng\n")
+			emitLocalFeedback("    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng (^C hủy nhập)\n")
 			emitLocalFeedback("    - Bọc chữ trong `dấu backtick` để hiện nền riêng (inline code một dòng)\n")
 			displayMu.Unlock()
 			continue
@@ -1077,25 +1117,17 @@ func main() {
 		typedLinesCount := 1
 
 		if strings.HasPrefix(text, "```") {
-			var rawLines []string
-			rawLines = append(rawLines, text)
-
-			term.SetPrompt("| ... ")
-			for {
-				nextLine, err := term.ReadLine()
-				if err != nil {
-					break
+			if !codebg.NeedsContinuation(text) {
+				// Single-line fence (```code```): complete already.
+				typedLinesCount = 1
+			} else {
+				var canceled bool
+				text, canceled = collectCodeblock(term, text)
+				if canceled {
+					continue
 				}
-				typedLinesCount++
-				rawLines = append(rawLines, nextLine)
-
-				if strings.HasSuffix(strings.TrimSpace(nextLine), "```") {
-					break
-				}
+				typedLinesCount = strings.Count(text, "\n") + 1
 			}
-
-			term.SetPrompt("| > ")
-			text = strings.Join(rawLines, "\n")
 		}
 
 		if err := filter.ValidateMessage(text); err != nil {

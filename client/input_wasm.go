@@ -46,15 +46,20 @@ type wasmTerm struct {
 	line   []rune
 	cur    int
 
+	// cancelCh aborts the in-flight ReadLine. It is buffered so a stray
+	// Ctrl+C never blocks the keystroke loop.
+	cancelCh chan struct{}
+
 	esc string
 }
 
 func newInputTerminal() (inputTerminal, error) {
 	t := &wasmTerm{
-		out:    jsOutputWriter{fn: js.Global().Get("v2vOutput")},
-		keyCh:  make(chan string, 64),
-		lineCh: make(chan string, 4),
-		prompt: "| > ",
+		out:      jsOutputWriter{fn: js.Global().Get("v2vOutput")},
+		keyCh:    make(chan string, 64),
+		lineCh:   make(chan string, 4),
+		cancelCh: make(chan struct{}, 1),
+		prompt:   "| > ",
 	}
 
 	t.keysFn = js.FuncOf(func(this js.Value, args []js.Value) any {
@@ -134,11 +139,24 @@ func (t *wasmTerm) ReadLine() (string, error) {
 	t.paintFreshLocked()
 	t.mu.Unlock()
 
-	line, ok := <-t.lineCh
-	if !ok {
-		return "", io.EOF
+	// Drain a stale cancel so only a fresh Ctrl+C aborts this read.
+	select {
+	case <-t.cancelCh:
+	default:
 	}
-	return line, nil
+
+	select {
+	case <-t.cancelCh:
+		t.mu.Lock()
+		t.active = false
+		t.mu.Unlock()
+		return "", ErrInputCancel
+	case line, ok := <-t.lineCh:
+		if !ok {
+			return "", io.EOF
+		}
+		return line, nil
+	}
 }
 
 func (t *wasmTerm) SetPrompt(p string) {
@@ -179,7 +197,8 @@ func notifyQuit() {
 // lineLoop consumes raw keystrokes and emulates a simple text-editor line
 // discipline: printable runes insert at the cursor, arrow keys move the
 // cursor, Home/End jump to the line edges, Backspace/Delete remove a rune,
-// Ctrl+C clears the line and Enter submits it.
+// Enter submits it. Ctrl+C clears a non-empty line; on an empty line it
+// aborts the in-flight ReadLine so callers can cancel (e.g. codeblock).
 func (t *wasmTerm) lineLoop() {
 	for keys := range t.keyCh {
 		for _, r := range keys {
@@ -229,15 +248,24 @@ func (t *wasmTerm) lineLoop() {
 				t.home()
 			case '\x05': // Ctrl+E: end
 				t.end()
-			case '\x03':
-				// Ctrl+C: clear the current line.
-				t.mu.Lock()
-				up := t.wipeOffsetLocked()
-				t.wipeLocked(up)
-				t.line = t.line[:0]
-				t.cur = 0
-				t.out.Write([]byte(t.prompt))
+		case '\x03':
+			t.mu.Lock()
+			if len(t.line) == 0 {
+				// Ctrl+C on an empty line: abort the in-flight ReadLine.
+				select {
+				case t.cancelCh <- struct{}{}:
+				default:
+				}
 				t.mu.Unlock()
+				continue
+			}
+			// Ctrl+C on a non-empty line: clear it.
+			up := t.wipeOffsetLocked()
+			t.wipeLocked(up)
+			t.line = t.line[:0]
+			t.cur = 0
+			t.out.Write([]byte(t.prompt))
+			t.mu.Unlock()
 			default:
 				if r >= 0x20 {
 					t.insertRune(r)
