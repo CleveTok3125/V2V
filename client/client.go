@@ -1038,11 +1038,7 @@ func main() {
 			}
 			switchTab(n)
 			displayMu.Lock()
-			if activeTab == TabChat {
-				fmt.Fprint(out, "| Tab 1: chat (Tab 2: local & system, /tab để chuyển)\n")
-			} else {
-				fmt.Fprint(out, "| Tab 2: local & system (Tab 1: chat, /tab để chuyển)\n")
-			}
+			emitLocalFeedback(tabBarLine(activeTab))
 			printGen++
 			displayMu.Unlock()
 			continue
