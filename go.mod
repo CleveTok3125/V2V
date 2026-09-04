@@ -5,12 +5,15 @@ go 1.25.0
 require github.com/gorilla/websocket v1.5.3
 
 require (
+	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/alecthomas/kong v1.14.0
 	github.com/charmbracelet/huh v0.7.0
+	github.com/charmbracelet/x/term v0.2.1
 	github.com/chzyer/readline v1.5.1
 	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/go-webauthn/webauthn v0.17.4
 	github.com/joho/godotenv v1.5.1
+	github.com/klauspost/compress v1.18.0
 	golang.org/x/crypto v0.52.0
 )
 
@@ -25,7 +28,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.8.0 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.13 // indirect
 	github.com/charmbracelet/x/exp/strings v0.0.0-20240722160745-212f7b056ed0 // indirect
-	github.com/charmbracelet/x/term v0.2.1 // indirect
+	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
@@ -33,7 +36,6 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect

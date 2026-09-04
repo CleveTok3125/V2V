@@ -128,7 +128,18 @@ type ClientConfig struct {
 			EOF       string `json:"eof"`
 		} `json:"prompts"`
 		TripPalette [][3]int `json:"tripPalette"`
-		Linkify     struct {
+		CodeStyle struct {
+			Background [3]int `json:"background"`
+			Keyword    [3]int `json:"keyword"`
+			String     [3]int `json:"string"`
+			Comment    [3]int `json:"comment"`
+			Number     [3]int `json:"number"`
+			Name       [3]int `json:"name"`
+			Function   [3]int `json:"function"`
+			Type       [3]int `json:"type"`
+			Operator   [3]int `json:"operator"`
+		} `json:"codeStyle"`
+		Linkify struct {
 			TrailingPunct string `json:"trailingPunct"`
 		} `json:"linkify"`
 		Theme struct {
@@ -201,6 +212,17 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.Prompts.Interrupt = "^C"
 	c.UI.Prompts.EOF = "/quit"
 	c.UI.TripPalette = [][3]int{{79, 129, 255}, {129, 199, 132}, {255, 183, 77}, {149, 117, 205}, {77, 208, 225}, {255, 138, 101}, {174, 213, 129}, {144, 164, 174}, {255, 213, 79}, {100, 181, 246}}
+	// Code highlight palette (dark, matching the trip palette hues).
+	// A [0,0,0] entry means "use this default".
+	c.UI.CodeStyle.Background = [3]int{48, 48, 48}
+	c.UI.CodeStyle.Keyword = [3]int{255, 183, 77}
+	c.UI.CodeStyle.String = [3]int{174, 213, 129}
+	c.UI.CodeStyle.Comment = [3]int{144, 164, 174}
+	c.UI.CodeStyle.Number = [3]int{255, 213, 79}
+	c.UI.CodeStyle.Name = [3]int{100, 181, 246}
+	c.UI.CodeStyle.Function = [3]int{77, 208, 225}
+	c.UI.CodeStyle.Type = [3]int{149, 117, 205}
+	c.UI.CodeStyle.Operator = [3]int{216, 222, 233}
 	c.UI.Linkify.TrailingPunct = ".,;:!?)»\"'’\"…"
 	c.UI.Theme.Background = "#101014"
 	c.UI.Theme.Accent = "#4f7dff"
@@ -264,6 +286,34 @@ func LoadOrCreate(path string, autoCreate bool) (*ClientConfig, error) {
 	}
 	if c.Tabs.SystemMaxBytes <= 0 {
 		c.Tabs.SystemMaxBytes = def.Tabs.SystemMaxBytes
+	}
+	// Backfill code highlight palette ([0,0,0] means "use default").
+	if c.UI.CodeStyle.Background == ([3]int{}) {
+		c.UI.CodeStyle.Background = def.UI.CodeStyle.Background
+	}
+	if c.UI.CodeStyle.Keyword == ([3]int{}) {
+		c.UI.CodeStyle.Keyword = def.UI.CodeStyle.Keyword
+	}
+	if c.UI.CodeStyle.String == ([3]int{}) {
+		c.UI.CodeStyle.String = def.UI.CodeStyle.String
+	}
+	if c.UI.CodeStyle.Comment == ([3]int{}) {
+		c.UI.CodeStyle.Comment = def.UI.CodeStyle.Comment
+	}
+	if c.UI.CodeStyle.Number == ([3]int{}) {
+		c.UI.CodeStyle.Number = def.UI.CodeStyle.Number
+	}
+	if c.UI.CodeStyle.Name == ([3]int{}) {
+		c.UI.CodeStyle.Name = def.UI.CodeStyle.Name
+	}
+	if c.UI.CodeStyle.Function == ([3]int{}) {
+		c.UI.CodeStyle.Function = def.UI.CodeStyle.Function
+	}
+	if c.UI.CodeStyle.Type == ([3]int{}) {
+		c.UI.CodeStyle.Type = def.UI.CodeStyle.Type
+	}
+	if c.UI.CodeStyle.Operator == ([3]int{}) {
+		c.UI.CodeStyle.Operator = def.UI.CodeStyle.Operator
 	}
 	return &c, nil
 }

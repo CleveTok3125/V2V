@@ -55,6 +55,7 @@
   "ui": {
     "prompts": {"normal": "| > ", "multiline": "| ... ", "interrupt": "^C", "eof": "/quit"},
     "tripPalette": [[79,129,255],[129,199,132],[255,183,77],[149,117,205],[77,208,225],[255,138,101],[174,213,129],[144,164,174],[255,213,79],[100,181,246]],
+    "codeStyle": {"background":[48,48,48],"keyword":[255,183,77],"string":[174,213,129],"comment":[144,164,174],"number":[255,213,79],"name":[100,181,246],"function":[77,208,225],"type":[149,117,205],"operator":[216,222,233]},
     "linkify": {"trailingPunct": ".,;:!?)»\"'’\"…"},
     "theme": {"background": "#101014", "accent": "#4f7dff", "error": "#ff6b6b"},
     "web": {"charAspect": 0.6, "targetCols": {"coarse":42,"desktop":105,"narrow":90}, "scrollback": 10000, "resizeDebounce": "150ms"}
