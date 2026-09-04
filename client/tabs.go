@@ -65,6 +65,10 @@ func newTabBuffer(maxLines, maxBytes int) *tabBuffer {
 func (b *tabBuffer) append(line string) {
 	b.lines = append(b.lines, line)
 	b.size += len(line)
+	b.evict()
+}
+
+func (b *tabBuffer) evict() {
 	for (len(b.lines) > b.maxLines || b.size > b.maxBytes) && len(b.lines) > 0 {
 		b.size -= len(b.lines[0])
 		b.lines[0] = ""
@@ -75,6 +79,28 @@ func (b *tabBuffer) append(line string) {
 		copy(n, b.lines)
 		b.lines = n
 	}
+}
+
+// spliceOut removes lines [start:end) and fixes the byte accounting. It is
+// used to drop a resolved placeholder block from the buffer.
+func (b *tabBuffer) spliceOut(start, end int) {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(b.lines) {
+		end = len(b.lines)
+	}
+	if start >= end {
+		return
+	}
+	for _, l := range b.lines[start:end] {
+		b.size -= len(l)
+	}
+	copy(b.lines[start:], b.lines[end:])
+	for i := len(b.lines) - (end - start); i < len(b.lines); i++ {
+		b.lines[i] = ""
+	}
+	b.lines = b.lines[:len(b.lines)-(end-start)]
 }
 
 // tabCaps resolves buffer caps from config: chat lines derive from the

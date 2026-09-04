@@ -59,3 +59,21 @@ func TestTabCapsFromConfig(t *testing.T) {
 		t.Fatalf("caps must be positive: %d %d %d %d", cl, cb, sl, sb)
 	}
 }
+
+func TestTabBufferSpliceOut(t *testing.T) {
+	b := newTabBuffer(100, 1000000)
+	for _, l := range []string{"a\n", "b ⏳\n", "c ⏳\n", "d\n"} {
+		b.append(l)
+	}
+	b.spliceOut(1, 3)
+	if len(b.lines) != 2 || b.lines[0] != "a\n" || b.lines[1] != "d\n" {
+		t.Fatalf("splice failed: %q", b.lines)
+	}
+	if b.size != len("a\n")+len("d\n") {
+		t.Fatalf("size not fixed: %d", b.size)
+	}
+	b.spliceOut(-5, 99)
+	if len(b.lines) != 0 || b.size != 0 {
+		t.Fatalf("clamp splice failed: %q %d", b.lines, b.size)
+	}
+}
