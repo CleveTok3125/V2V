@@ -975,6 +975,7 @@ func main() {
 			emitLocalFeedback("    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
 			emitLocalFeedback("    - /verify        : Hướng dẫn verify thủ công qua link API\n")
 			emitLocalFeedback("    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
+			emitLocalFeedback("    - Lệnh lạ không dấu cách bị chặn\n")
 			emitLocalFeedback("    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng\n")
 			displayMu.Unlock()
 			continue
@@ -1056,6 +1057,18 @@ func main() {
 			fmt.Fprintf(out, "🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile)
 			printGen++
 			displayMu.Unlock()
+			continue
+		}
+
+		// Unknown slash input: every built-in command is written
+		// contiguously, so a space means ordinary chat (sent as-is),
+		// otherwise it is a mistyped command rejected locally and never
+		// broadcast. Known commands above already continued.
+		if strings.HasPrefix(text, "/") && !slashFallbackSend(text) {
+			displayMu.Lock()
+			emitLocalFeedback(fmt.Sprintf("| [Local]: Lệnh không tồn tại: %s. Gõ /help để xem danh sách.\n", text))
+			displayMu.Unlock()
+			term.Refresh()
 			continue
 		}
 
