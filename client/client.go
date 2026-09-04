@@ -573,6 +573,14 @@ func main() {
 		}
 	}
 
+	// emitLocalFeedback buffers a local command response in TabSystem and
+	// prints it on the active tab immediately, so commands always respond
+	// visibly while staying reviewable in Tab 2. Caller must hold displayMu.
+	emitLocalFeedback := func(line string) {
+		tabSys.append(line)
+		fmt.Fprint(out, line)
+	}
+
 	// switchTab replays the target buffer under a single lock.
 	switchTab := func(n int) {
 		if n != TabChat && n != TabSystem {
@@ -862,11 +870,11 @@ func main() {
 		}
 
 		if text == "/whoami" || text == "/w" {
-		displayMu.Lock()
-			emitTab(TabSystem, fmt.Sprintf("| [Local]: Người dùng: %s | Xác thực: %s\n", username, sessAuthType))
+			displayMu.Lock()
+			emitLocalFeedback(fmt.Sprintf("| [Local]: Người dùng: %s | Xác thực: %s\n", username, sessAuthType))
 			if sessRole != "" {
-				emitTab(TabSystem, fmt.Sprintf("| [Local]: Role: %s | Unlimited: %v | Prefix: %q\n", sessRole, sessUnlimited, sessPrefix))
-		displayMu.Unlock()
+				emitLocalFeedback(fmt.Sprintf("| [Local]: Role: %s | Unlimited: %v | Prefix: %q\n", sessRole, sessUnlimited, sessPrefix))
+				displayMu.Unlock()
 			}
 			continue
 		}
@@ -878,27 +886,27 @@ func main() {
 				sj = "BẬT"
 			}
 			showJoinMu.RUnlock()
-		displayMu.Lock()
-			emitTab(TabSystem, fmt.Sprintf("| [Local]: Server: %s | Đã kết nối: %s | Phiên bản: %s | Show-join: %s\n",
+			displayMu.Lock()
+			emitLocalFeedback(fmt.Sprintf("| [Local]: Server: %s | Đã kết nối: %s | Phiên bản: %s | Show-join: %s\n",
 				wsURL, time.Since(sessConnected).Round(time.Second), Version, sj))
-		displayMu.Unlock()
+			displayMu.Unlock()
 			continue
 		}
 
 		if text == "/help" || text == "/h" {
 			displayMu.Lock()
-			emitTab(TabSystem, "  [Trợ giúp]: Danh sách các lệnh có thể sử dụng:\n")
-			emitTab(TabSystem, "    - /help, /h      : Hiển thị bảng trợ giúp này\n")
-			emitTab(TabSystem, "    - /clear, /c     : Xóa sạch màn hình chat\n")
-			emitTab(TabSystem, "    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy\n")
-			emitTab(TabSystem, "    - /quit, /q      : Rời phòng chat và tắt ứng dụng\n")
-			emitTab(TabSystem, "    - /showjoin, /sj : Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp\n")
-			emitTab(TabSystem, "    - /whoami, /w    : Thông tin danh tính và quyền hiện tại\n")
-			emitTab(TabSystem, "    - /status        : Trạng thái kết nối và phiên bản client\n")
-			emitTab(TabSystem, "    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
-			emitTab(TabSystem, "    - /verify        : Hướng dẫn verify thủ công qua link API\n")
-			emitTab(TabSystem, "    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
-			emitTab(TabSystem, "    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng\n")
+			emitLocalFeedback("  [Trợ giúp]: Danh sách các lệnh có thể sử dụng:\n")
+			emitLocalFeedback("    - /help, /h      : Hiển thị bảng trợ giúp này\n")
+			emitLocalFeedback("    - /clear, /c     : Xóa sạch màn hình chat\n")
+			emitLocalFeedback("    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy\n")
+			emitLocalFeedback("    - /quit, /q      : Rời phòng chat và tắt ứng dụng\n")
+			emitLocalFeedback("    - /showjoin, /sj : Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp\n")
+			emitLocalFeedback("    - /whoami, /w    : Thông tin danh tính và quyền hiện tại\n")
+			emitLocalFeedback("    - /status        : Trạng thái kết nối và phiên bản client\n")
+			emitLocalFeedback("    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
+			emitLocalFeedback("    - /verify        : Hướng dẫn verify thủ công qua link API\n")
+			emitLocalFeedback("    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
+			emitLocalFeedback("    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng\n")
 			displayMu.Unlock()
 			continue
 		}
@@ -912,7 +920,7 @@ func main() {
 			}
 			showJoinMu.Unlock()
 			displayMu.Lock()
-			emitTab(TabSystem, fmt.Sprintf("| [Local]: %s hiển thị thông báo người dùng ra/vào phòng cho các tin kế tiếp.\n", status))
+			emitLocalFeedback(fmt.Sprintf("| [Local]: %s hiển thị thông báo người dùng ra/vào phòng cho các tin kế tiếp.\n", status))
 			displayMu.Unlock()
 			continue
 		}
@@ -926,14 +934,14 @@ func main() {
 			}
 			autoVerifyMu.Unlock()
 			displayMu.Lock()
-			emitTab(TabSystem, fmt.Sprintf("| [Local]: Auto-verify đã %s (mặc định BẬT, verify song song qua channel FIFO).\n", status))
+			emitLocalFeedback(fmt.Sprintf("| [Local]: Auto-verify đã %s (mặc định BẬT, verify song song qua channel FIFO).\n", status))
 			displayMu.Unlock()
 			continue
 		}
 
 		if strings.HasPrefix(text, "/verify") {
 			displayMu.Lock()
-			emitTab(TabSystem, "  [Verify]: Click badge link (https://.../api/trip/verify?...) để verify thủ công qua API stateless.\n")
+			emitLocalFeedback("  [Verify]: Click badge link (https://.../api/trip/verify?...) để verify thủ công qua API stateless.\n")
 			displayMu.Unlock()
 			continue
 		}
@@ -969,7 +977,6 @@ func main() {
 			displayMu.Unlock()
 			continue
 		}
-
 
 		if text == "/clear" || text == "/c" {
 			fmt.Fprint(out, "\033[H\033[2J")
@@ -1008,9 +1015,9 @@ func main() {
 		}
 
 		if err := filter.ValidateMessage(text); err != nil {
-		displayMu.Lock()
-			emitTab(TabSystem, fmt.Sprintf("| [Local]: Tin nhắn chứa ký tự không hợp lệ và đã bị chặn (client-side): %v\n", err))
-		displayMu.Unlock()
+			displayMu.Lock()
+			emitLocalFeedback(fmt.Sprintf("| [Local]: Tin nhắn chứa ký tự không hợp lệ và đã bị chặn (client-side): %v\n", err))
+			displayMu.Unlock()
 			term.Refresh()
 			continue
 		}
@@ -1019,16 +1026,16 @@ func main() {
 		if ClientCfg != nil {
 			if err := guard.ValidateMessageForSend(text, lastMessageTime, &ClientCfg.Limits, false); err != nil {
 				if err == guard.ErrTooFast {
-		displayMu.Lock()
-					emitTab(TabSystem, fmt.Sprintf("| [Local]: Bạn đang chat quá nhanh! Vui lòng đợi %v.\n", ClientCfg.Limits.MessageCooldown))
-		displayMu.Unlock()
+					displayMu.Lock()
+					emitLocalFeedback(fmt.Sprintf("| [Local]: Bạn đang chat quá nhanh! Vui lòng đợi %v.\n", ClientCfg.Limits.MessageCooldown))
+					displayMu.Unlock()
 					term.Refresh()
 					continue
 				}
 				if err == guard.ErrTooLong {
-		displayMu.Lock()
-					emitTab(TabSystem, fmt.Sprintf("| [Local]: Tin nhắn quá dài (tối đa %d ký tự).\n", ClientCfg.Limits.MaxMessageLength))
-		displayMu.Unlock()
+					displayMu.Lock()
+					emitLocalFeedback(fmt.Sprintf("| [Local]: Tin nhắn quá dài (tối đa %d ký tự).\n", ClientCfg.Limits.MaxMessageLength))
+					displayMu.Unlock()
 					term.Refresh()
 					continue
 				}
