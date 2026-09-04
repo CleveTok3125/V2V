@@ -559,6 +559,20 @@ func main() {
 	cl, cb, sl, sb := tabCaps()
 	tabChat := newTabBuffer(cl, cb)
 	tabSys := newTabBuffer(sl, sb)
+	var printGen uint64
+
+	// pendingMsg tracks a grey placeholder awaiting server echo.
+	type pendingMsg struct {
+		text    string
+		rows    int
+		shown   bool
+		gen     uint64
+		seq     uint32
+		pub     string
+		hasTrip bool
+		sentAt  time.Time
+	}
+	pendingPlaceholders := []pendingMsg{}
 
 	// emitTab buffers a rendered line and prints it only when its tab is
 	// active. Caller must hold displayMu.
@@ -568,8 +582,11 @@ func main() {
 		} else {
 			tabSys.append(line)
 		}
-		if tab == activeTab {
+		// Tab 1 shows the full legacy stream, so it is unaffected by tabs.
+		// Tab 2 is purely additive and shows only its own lines.
+		if tab == activeTab || activeTab == TabChat {
 			fmt.Fprint(out, line)
+			printGen++
 		}
 	}
 
@@ -579,6 +596,39 @@ func main() {
 	emitLocalFeedback := func(line string) {
 		tabSys.append(line)
 		fmt.Fprint(out, line)
+		printGen++
+	}
+
+	// consumeEchoLocked matches a server echo of our own message against the
+	// oldest pending placeholder. On match it drops the pending entry and,
+	// only when the placeholder is still the last thing printed, erases its
+	// rows so the normal rendering below replaces it. Caller must hold displayMu.
+	consumeEchoLocked := func(wire WireMessage) {
+		if wire.DisplayName != username || len(pendingPlaceholders) == 0 {
+			return
+		}
+		pm := pendingPlaceholders[0]
+		matched := false
+		if wire.Trip != nil && pm.hasTrip {
+			matched = wire.Trip.Pub == pm.pub && wire.Trip.Seq == pm.seq && wire.Text == pm.text
+		} else if wire.Trip == nil && !pm.hasTrip {
+			matched = wire.Text == pm.text && time.Since(pm.sentAt) < time.Minute
+		}
+		if !matched {
+			return
+		}
+		pendingPlaceholders = pendingPlaceholders[1:]
+		if !pm.shown || activeTab != TabChat || printGen != pm.gen || pm.rows <= 0 {
+			return
+		}
+		fmt.Fprintf(out, "\x1b[%dA", pm.rows)
+		for i := 0; i < pm.rows; i++ {
+			if i > 0 {
+				fmt.Fprint(out, "\x1b[1B")
+			}
+			fmt.Fprint(out, "\r\x1b[2K")
+		}
+		printGen++
 	}
 
 	// switchTab replays the target buffer under a single lock.
@@ -592,6 +642,7 @@ func main() {
 			return
 		}
 		activeTab = n
+		printGen++
 		fmt.Fprint(out, "\033[H\033[2J")
 		var buf *tabBuffer
 		if n == TabChat {
@@ -688,6 +739,7 @@ func main() {
 			var wire WireMessage
 			if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
 				displayMu.Lock()
+				consumeEchoLocked(wire)
 				emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, filter.SanitizeForDisplay(wire.Text)))
 				displayMu.Unlock()
 				if wire.Trip != nil {
@@ -747,6 +799,7 @@ func main() {
 				var wl WireMessage
 				if err := json.Unmarshal([]byte(line), &wl); err == nil && wl.Type == "chat" {
 					displayMu.Lock()
+					consumeEchoLocked(wl)
 					emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wl.Time, wl.DisplayName, filter.SanitizeForDisplay(wl.Text)))
 					displayMu.Unlock()
 					if wl.Trip != nil {
@@ -809,7 +862,7 @@ func main() {
 						pendingDateBanner = ""
 					}
 					displayMu.Lock()
-					emitTab(TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
+					emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 					displayMu.Unlock()
 					continue
 				}
@@ -974,6 +1027,7 @@ func main() {
 			} else {
 				fmt.Fprint(out, "| Tab 2: local & system (Tab 1: chat, /tab để chuyển)\n")
 			}
+			printGen++
 			displayMu.Unlock()
 			continue
 		}
@@ -986,7 +1040,10 @@ func main() {
 
 		if text == "/clearhistory" || text == "/ch" {
 			os.Remove(historyFile)
+			displayMu.Lock()
 			fmt.Fprintf(out, "🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile)
+			printGen++
+			displayMu.Unlock()
 			continue
 		}
 
@@ -1044,12 +1101,15 @@ func main() {
 
 		// Placeholder: keep original text grey with pending indicator until server echo
 		// Single displayMu lock for entire wipe + placeholder + trip sign + send to avoid burst drift
+		phRows := 0
+		phShown := activeTab == TabChat
 		displayMu.Lock()
 		for range typedLinesCount {
 			fmt.Fprint(out, "\033[1A\033[2K\r")
 		}
 
 		lines := strings.Split(text, "\n")
+		phRows = len(lines)
 		for i, line := range lines {
 			line = linkify.Linkify(line)
 			if i == 0 {
@@ -1067,6 +1127,7 @@ func main() {
 			}
 			if badgePlaceholder != "" {
 				emitTab(TabChat, fmt.Sprintf("\x1b[90m|  └─ ✍ ◆ %s ⏳\x1b[0m\n", badgePlaceholder))
+				phRows++
 			}
 		}
 		term.Refresh()
@@ -1103,6 +1164,16 @@ func main() {
 			lastMessageTime = time.Now()
 		} else {
 			lastMessageTime = time.Now()
+			// Track placeholder so the server echo can replace it.
+			displayMu.Lock()
+			pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: printGen, sentAt: time.Now()}
+			if tripPriv != nil {
+				pm.hasTrip = true
+				pm.seq = tripSeq
+				pm.pub = hex.EncodeToString([]byte(tripPub))
+			}
+			pendingPlaceholders = append(pendingPlaceholders, pm)
+			displayMu.Unlock()
 		}
 		if err != nil {
 			fmt.Println("❌ Lỗi gửi tin nhắn:", err)
