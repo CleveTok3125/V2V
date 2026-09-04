@@ -4,27 +4,19 @@ import "strings"
 
 // Slash command handling.
 //
-// Every built-in command is written contiguously (no space inside the
-// command itself): /help, /quit, /tab 1 and /verify... are matched by the
-// dispatch in client.go before anything below runs. What reaches
-// slashFallbackSend is therefore input starting with "/" that matched no
-// known command:
-//
-//   - contains a space (e.g. "/hello world") → ordinary chat message,
-//     sent as-is with the slash kept;
-//   - no space (e.g. "/halp", "/tab1", "/") → unknown command, rejected
-//     locally so a typo is never broadcast.
+// Every built-in command is matched by the dispatch in client.go before
+// anything below runs (/help, /quit, /tab 1, /verify...). What reaches
+// isUnknownSlashCommand is therefore input starting with "/" that matched
+// no known command — a mistyped command. It is always rejected locally so
+// a typo is never broadcast or trip-signed.
 //
 // Code blocks (```) never reach here: they are joined before dispatch and
 // always start with backticks.
 
-// slashFallbackSend reports whether unknown slash input should be sent as
-// chat (true, it contains a space) or rejected as an unknown command.
-// Callers must only pass text that starts with "/" and matched no known
-// command; text is expected trimmed (no leading/trailing spaces).
-func slashFallbackSend(text string) bool {
-	if !strings.HasPrefix(text, "/") {
-		return true
-	}
-	return strings.Contains(text, " ")
+// isUnknownSlashCommand reports whether text is a mistyped command: it
+// starts with "/" and matched no known command. Callers must only pass
+// text that the known-command dispatch already skipped; text is expected
+// trimmed (no leading/trailing spaces).
+func isUnknownSlashCommand(text string) bool {
+	return strings.HasPrefix(text, "/")
 }

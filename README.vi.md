@@ -40,7 +40,7 @@ make help            # xem tất cả target
 
 Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/verify`, `/tab`).
 
-Tin nhắn của bạn hiện xám kèm `⏳` trước, rồi được thay bằng dòng xác nhận khi server gửi lại (echo). Lệnh `/` lạ (không dấu cách) bị chặn ngay trên máy, không gửi đi; muốn gửi chữ bắt đầu bằng `/` thì thêm dấu cách sau slash (`/ hello`).
+Tin nhắn của bạn hiện xám kèm `⏳` trước, rồi được thay bằng dòng xác nhận khi server gửi lại (echo). Lệnh `/` lạ bị chặn ngay trên máy, không gửi đi (muốn gửi chữ bắt đầu bằng `/` thì bọc trong codeblock ```).
 
 Chat và system nằm ở 2 tab riêng: `/tab` chuyển giữa Tab 1 (chat) và Tab 2 (local & system). Thanh tab hiện `[1:chat] 2:system`, tab đang xem nằm trong ngoặc.
 
