@@ -29,7 +29,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 │   ├── tripcolor/    # Badge color palette + CanonicalPayload
 │   └── wire/         # Shared TripMeta / WireMessage / AuthPacket types (future)
 ├── linkify/          # URL → OSC8 hyperlink
-├── codebg/           # inline `code` + ``` blocks → background SGR (display only)
+├── codebg/           # inline `code` + ``` blocks → background SGR + chroma highlight (display only)
 ├── webterm/          # Browser terminal (xterm.js + WASM glue)
 ├── cmd/v2vctl/       # Management tool (keygen, enroll, list, migrate)
 ├── template/         # Example .env / key.json / roles.json
@@ -142,6 +142,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 ## Message Rendering
 
 - `codebg.Render` wraps inline `` `code` `` spans and ``` fenced blocks in a background SGR (`48;5;236`, closed with `49m` so ambient foreground survives), stripping the backtick delimiters markdown-style: a ```lang opener becomes a header line showing just the language name (no language means no header), the closing fence is dropped, and single-line ```code``` renders as one background line. Only zero-width escapes are added or removed, so trip `msg_hash` (over raw text) is unaffected; placeholder erase counts are recomputed from the rendered split. Unmatched backticks, empty spans and text containing ESC pass through unchanged.
+- `codebg.RenderWithStyle` adds chroma syntax highlighting for fenced blocks with a known language tag (custom per-line SGR emitter, truecolor `38;2` foreground on the configured background, every line self-closed so tab buffers stay consistent). Inline spans, untagged blocks, unknown languages and oversize blocks (>64KiB) fall back to the plain background. Palette comes from `ui.codeStyle` in `config.json` (`background`, `keyword`, `string`, `comment`, `number`, `name`, `function`, `type`, `operator` as `[r,g,b]`; a `[0,0,0]` entry falls back to the compiled default), backfilled by `internal/config` like `tripPalette`. Applied client-side after `SanitizeForDisplay` on incoming chat text; the sender placeholder echo keeps plain `Render` so highlight resets don't cancel its grey wrapper (line counts match either way).
 - Applied client-side after `SanitizeForDisplay` on incoming chat text and after `Linkify` on the sender placeholder echo (whole text rendered before splitting, so fence state survives across lines).
 
 ## Storage & Persistence

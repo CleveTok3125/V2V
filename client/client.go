@@ -29,6 +29,28 @@ import (
 
 var Version = "dev"
 
+// renderChatText sanitizes incoming chat text and renders code spans with
+// the configured highlight palette, falling back to compiled defaults
+// when the client config is absent.
+func renderChatText(text string) string {
+	st := codebg.DefaultStyle()
+	if ClientCfg != nil {
+		cs := ClientCfg.UI.CodeStyle
+		st = codebg.Style{
+			Background: cs.Background,
+			Keyword:    cs.Keyword,
+			String:     cs.String,
+			Comment:    cs.Comment,
+			Number:     cs.Number,
+			Name:       cs.Name,
+			Function:   cs.Function,
+			Type:       cs.Type,
+			Operator:   cs.Operator,
+		}
+	}
+	return codebg.RenderWithStyle(filter.SanitizeForDisplay(text), st)
+}
+
 var CLI struct {
 	Version   kong.VersionFlag `help:"Hiển thị phiên bản (Git Commit Hash)" short:"v"`
 	Server    string           `help:"Link server WebSocket" short:"s"`
@@ -781,7 +803,7 @@ func main() {
 			if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
 				displayMu.Lock()
 				consumeEchoLocked(wire)
-				emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, codebg.Render(filter.SanitizeForDisplay(wire.Text))))
+				emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderChatText(wire.Text)))
 				displayMu.Unlock()
 				if wire.Trip != nil {
 					h := sha256.Sum256([]byte(wire.Trip.Pub))
@@ -841,7 +863,7 @@ func main() {
 				if err := json.Unmarshal([]byte(line), &wl); err == nil && wl.Type == "chat" {
 					displayMu.Lock()
 					consumeEchoLocked(wl)
-					emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wl.Time, wl.DisplayName, codebg.Render(filter.SanitizeForDisplay(wl.Text))))
+					emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wl.Time, wl.DisplayName, renderChatText(wl.Text)))
 					displayMu.Unlock()
 					if wl.Trip != nil {
 						h := sha256.Sum256([]byte(wl.Trip.Pub))
@@ -1170,6 +1192,9 @@ func main() {
 		// Render code spans on the whole text first so fenced blocks
 		// keep their state across lines; phRows then counts rendered
 		// rows (headers added, closers dropped), matching the erase math.
+		// Plain Render (no highlight): highlight's full resets would
+		// cancel the grey placeholder wrapper mid-line, and line counts
+		// match the highlighted echo anyway.
 		lines := strings.Split(codebg.Render(text), "\n")
 		phRows = len(lines)
 		for i, line := range lines {
