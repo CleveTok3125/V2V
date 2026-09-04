@@ -190,6 +190,16 @@ func (s *ChatServer) BroadcastWire(wire WireMessage, sender *websocket.Conn) {
 			s.sendWithRetry(conn, client, data, false)
 		}
 	}
+	// Echo back to the sender as delivery confirmation so it can replace
+	// its grey placeholder with the confirmed rendering.
+	if sender != nil {
+		if sess, ok := s.Clients[sender]; ok {
+			select {
+			case sess.Send <- data:
+			default:
+			}
+		}
+	}
 }
 
 func (s *ChatServer) AddWireMessageToHistory(wire WireMessage) {
