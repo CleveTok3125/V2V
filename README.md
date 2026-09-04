@@ -20,6 +20,7 @@ Download from [releases](https://github.com/CleveTok3125/V2V/releases) or build:
 ```bash
 make client          # -> public/V2V-linux-amd64 (host only)
 make client ALL=1    # -> full matrix (7 platforms, for CI)
+make dev             # -> bin/v2v, bin/v2v-server, bin/v2vctl + fresh webterm (dev build)
 make help            # see all targets
 ```
 
@@ -37,21 +38,31 @@ make help            # see all targets
 #                      └─ ✍️ ◆ ab12cd34  (colored, clickable to verify)
 ```
 
-Type `/help` inside the chat for commands (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`).
+Type `/help` inside the chat for commands (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/verify`, `/tab`).
+
+Your message first appears grey with `⏳` and is replaced by the confirmed line once the server echoes it back. Unknown `/commands` are rejected locally (never broadcast); to send text starting with `/`, put a space after the slash (`/ hello`).
+
+Chat and system messages live on separate tabs: `/tab` switches between Tab 1 (chat) and Tab 2 (local & system). The bar shows `[1:chat] 2:system` with the active tab in brackets.
+
+Keys and settings live in your OS config dir (`~/.config/V2V/` on Linux, `%AppData%\V2V` on Windows, `~/Library/Application Support/V2V` on macOS): `key.json` for identities, auto-created `config.json` for settings. Override with `-c/--config-dir` and `-C/--cache-dir`.
 
 ## For Admins
 
 Create identities with `v2vctl` (build with `make v2vctl` / `make v2vctl ALL=1` for all platforms):
 
 ```bash
-# 1) Ed25519 key (classic, works everywhere)
-./public/V2Vctl-linux-amd64 keygen ed25519 --role admin --unlimited --prefix "[Admin] "
+# 1) Create the role (permissions live here, not in keygen)
+./public/V2Vctl-linux-amd64 role create admin --unlimited --prefix "[Admin] "
 
-# 2) Software passkey (WebAuthn wire format, for testing)
+# 2) Ed25519 key (classic, works everywhere)
+./public/V2Vctl-linux-amd64 keygen ed25519 --role admin
+# paste the printed snippet via: role add-identity admin --paste
+
+# 3) Software passkey (WebAuthn wire format, for testing)
 ./public/V2Vctl-linux-amd64 keygen passkey --role admin --rpid chat.example.com --origin https://chat.example.com
 
-# Login with a key file
-./public/V2V-linux-amd64 -s wss://chat.example.com -u "Admin" -k key.json
+# Login with a key file (-K path, or -k for the default key in the config dir)
+./public/V2V-linux-amd64 -s wss://chat.example.com -u "Admin" -K key.json
 ```
 
 Key files can be encrypted (`v2vctl` will ask for a passphrase, or use `V2V_PASSPHRASE`).

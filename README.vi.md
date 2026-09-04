@@ -20,6 +20,7 @@ Tải từ [releases](https://github.com/CleveTok3125/V2V/releases) hoặc tự 
 ```bash
 make client          # -> public/V2V-linux-amd64 (chỉ host)
 make client ALL=1    # -> full matrix 7 nền tảng (dành cho CI)
+make dev             # -> bin/v2v, bin/v2v-server, bin/v2vctl + webterm mới (bản dev)
 make help            # xem tất cả target
 ```
 
@@ -37,21 +38,31 @@ make help            # xem tất cả target
 #               └─ ✍️ ◆ ab12cd34  (màu, bấm để verify)
 ```
 
-Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`).
+Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/verify`, `/tab`).
+
+Tin nhắn của bạn hiện xám kèm `⏳` trước, rồi được thay bằng dòng xác nhận khi server gửi lại (echo). Lệnh `/` lạ (không dấu cách) bị chặn ngay trên máy, không gửi đi; muốn gửi chữ bắt đầu bằng `/` thì thêm dấu cách sau slash (`/ hello`).
+
+Chat và system nằm ở 2 tab riêng: `/tab` chuyển giữa Tab 1 (chat) và Tab 2 (local & system). Thanh tab hiện `[1:chat] 2:system`, tab đang xem nằm trong ngoặc.
+
+Key và cấu hình nằm trong thư mục config của hệ điều hành (`~/.config/V2V/` trên Linux, `%AppData%\V2V` trên Windows, `~/Library/Application Support/V2V` trên macOS): `key.json` cho danh tính, `config.json` tự tạo cho cài đặt. Ghi đè bằng `-c/--config-dir` và `-C/--cache-dir`.
 
 ## Dành cho Admin
 
 Tạo danh tính bằng `v2vctl` (`make v2vctl` / `make v2vctl ALL=1` cho full matrix):
 
 ```bash
+# Tạo role trước (quyền nằm ở role, không nằm ở keygen)
+./public/V2Vctl-linux-amd64 role create admin --unlimited --prefix "[Admin] "
+
 # Ed25519 classic
-./public/V2Vctl-linux-amd64 keygen ed25519 --role admin --unlimited --prefix "[Admin] "
+./public/V2Vctl-linux-amd64 keygen ed25519 --role admin
+# dán snippet in ra bằng: role add-identity admin --paste
 
 # Passkey mềm (dev)
 ./public/V2Vctl-linux-amd64 keygen passkey --role admin --rpid chat.example.com --origin https://chat.example.com
 
-# Đăng nhập bằng key
-./public/V2V-linux-amd64 -s wss://chat.example.com -u "Admin" -k key.json
+# Đăng nhập bằng key (-K đường dẫn, hoặc -k để dùng key mặc định trong config dir)
+./public/V2V-linux-amd64 -s wss://chat.example.com -u "Admin" -K key.json
 ```
 
 Key có thể mã hóa (`v2vctl` sẽ hỏi passphrase, hoặc dùng `V2V_PASSPHRASE`).

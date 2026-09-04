@@ -6,6 +6,10 @@ For a friendly getting-started guide, see [README.md](../README.md).
 ## Table of Contents
 - [Project Structure](#project-structure)
 - [Build System](#build-system)
+- [Client Configuration](#client-configuration)
+- [Client Tabs](#client-tabs)
+- [Placeholders and Server Echo](#placeholders-and-server-echo)
+- [Slash Commands](#slash-commands)
 - [Wire Protocol & History](#wire-protocol--history)
 - [Authentication](#authentication)
 - [Tripcode](#tripcode)
@@ -38,6 +42,7 @@ All builds are driven by `Makefile`:
 ```bash
 make help            # list targets
 make vet test        # GOCACHE=/tmp/gocache go vet/test
+make dev             # dev build: bin/v2v, bin/v2v-server, bin/v2vctl + fresh webterm (unstripped, dev-<hash> stamp)
 make -j4 all         # parallel: server + web + client + v2vctl (host only for client/v2vctl)
 make all ALL=1 -j4   # full 7-platform matrix for client/v2vctl (CI)
 make server          # public/server.bin (-tags netgo, -trimpath)
@@ -54,6 +59,30 @@ make clean
 - Default `make client`/`v2vctl` builds only host binary for fast dev; `ALL=1` builds full matrix (7 platforms) for CI.
 - CI: `.github/workflows/ci.yml` runs `make vet test` on push to `main/master` and PRs (Go 1.25, cache); `release.yml` runs `make -j4 client v2vctl ALL=1` on tag `v*` and publishes `public/*`.
 - Docker: `Dockerfile` runs `make server web` (requires `make` in builder).
+- Dev version stamp is always `dev-<HEAD>[-dirty]` from the working tree, never from a possibly stale `GIT_HASH` env; `make web` warns when `GIT_HASH` differs from `HEAD` (stale browser cache risk).
+
+## Client Configuration
+
+- Locations follow the OS (`internal/configdir`): config dir holds `key.json` + auto-created `config.json` (`~/.config/V2V/` Linux, `%AppData%\V2V` Windows, `~/Library/Application Support/V2V` macOS); cache dir holds `history.tmp`. Override with `-c/--config-dir` (`V2V_CONFIG_DIR`) and `-C/--cache-dir` (`V2V_CACHE_DIR`).
+- Identity flags: `-k` uses the default key in the config dir, `-K/--key-file <path>` uses an explicit path (old `v2v -k <path>` now errors). No key given means guest mode.
+- `template/config.json` documents every group (`defaults`, `network`, `limits`, `guard`, `channels`, `crypto`, `ui`, `commands`, `timeouts`, `tabs`); `internal/config` loads it with `LoadOrCreate` (missing `tabs` section is backfilled). Sensitive fields (tripcode, passphrases, private keys) never go in `config.json` — they stay in encrypted `key.json`.
+- Tab buffer caps come from config, never hardcoded: chat line cap derives from `ui.web.scrollback` (10000), `tabs.chatMaxBytes` (2MiB), `tabs.systemMaxLines` (2000), `tabs.systemMaxBytes` (400KB).
+
+## Client Tabs
+
+- Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system, date, history). `client/tabs.go:classifyTab` routes each rendered line; `isHistoryBoundaryLine` belongs to TabChat since boundaries delimit chat history.
+- Tab 1 shows the full legacy stream even when Tab 2 is active (`emitTab` prints when `tab == activeTab || activeTab == TabChat`), so tabs never change Tab 1 behavior; Tab 2 is purely additive and lazyloads (buffered always, rendered on switch).
+- Buffers (`tabBuffer`) are FIFO rings with dual-limit eviction (lines + bytes), mirroring server `ChatHistory`; `spliceOut` removes resolved placeholders. `/tab`, `/tab 1|2`, `/t` switch with a single-lock clear + replay; the bar shows `[1:chat] 2:system` with the active tab bracketed (`tabBarLine`, columns padded so labels never shift).
+- Local command responses (`/help`, `/status`, …) print on the active tab immediately via `emitLocalFeedback` while also buffering into Tab 2 for review.
+
+## Placeholders and Server Echo
+
+- Outgoing text is not echoed optimistically: it prints grey with `⏳` (`| Bạn: … ⏳`), then `BroadcastWire` unicasts the same `WireMessage` back to the sender as delivery confirmation.
+- The client tracks pending placeholders (`text/rows/bufEnd/seq/pub`) and on matching echo (same `DisplayName` + `Text`, plus `Pub/Seq` for trip) splices the placeholder out of the tab buffer, erases its screen rows, reprints any intervening lines, and renders the echo through the normal path (badge color + verify link). A generation counter (`printGen`) skips the erase when burst output intervened, so wrong rows are never wiped.
+
+## Slash Commands
+
+- Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, and the `/verify` prefix. Anything else starting with `/` follows the space rule (`client/commands.go:slashFallbackSend`): contains a space → ordinary chat sent as-is; no space (`/halp`, `/tab1`, `/`) → rejected locally with `| [Local]: Lệnh không tồn tại…`, never broadcast or trip-signed. Code blocks (```) are unaffected.
 
 ## Wire Protocol & History
 
@@ -74,6 +103,7 @@ Chat messages are `WireMessage` JSON, not raw ANSI:
 
 ### In-memory history
 - `server/shared.go:ChatHistory []string` — deduped `WireMessage` JSON strings, evicted by `MaxHistoryBytes` (`10MB`), with `cap > 4*len` shrink to avoid 20MiB bloat. `SendChatHistory` streams `MaxHistorySend` (`500`) messages without extra copy.
+- System broadcasts (`join/leave/date`) retry once after `20ms` before dropping (`sendWithRetry`), so a chat burst filling the per-client `Send` queue (256) does not silently swallow system lines; chat itself stays best-effort.
 
 ## Authentication
 
