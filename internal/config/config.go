@@ -134,6 +134,19 @@ type ClientConfig struct {
 		Meta struct {
 			Show *bool `json:"show"`
 		} `json:"meta"`
+		// Mention controls @#height highlights. Color follows the
+		// [0,0,0]-means-default convention ([0,0,0] is unreadable on a
+		// dark background anyway).
+		Mention struct {
+			Enabled *bool  `json:"enabled"`
+			Color   [3]int `json:"color"`
+		} `json:"mention"`
+		// Reply controls /reply quotes. QuoteMaxRunes bounds the preview
+		// so quotes never wrap and break row math.
+		Reply struct {
+			Enabled       *bool `json:"enabled"`
+			QuoteMaxRunes int   `json:"quoteMaxRunes"`
+		} `json:"reply"`
 		CodeStyle struct {
 			Background [3]int `json:"background"`
 			Keyword    [3]int `json:"keyword"`
@@ -219,6 +232,10 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.Prompts.EOF = "/quit"
 	c.UI.TripPalette = [][3]int{{79, 129, 255}, {129, 199, 132}, {255, 183, 77}, {149, 117, 205}, {77, 208, 225}, {255, 138, 101}, {174, 213, 129}, {144, 164, 174}, {255, 213, 79}, {100, 181, 246}}
 	c.UI.Meta.Show = boolPtr(true)
+	c.UI.Mention.Enabled = boolPtr(true)
+	c.UI.Mention.Color = [3]int{0, 255, 255}
+	c.UI.Reply.Enabled = boolPtr(true)
+	c.UI.Reply.QuoteMaxRunes = 80
 	// Code highlight palette (dark, matching the trip palette hues).
 	// A [0,0,0] entry means "use this default".
 	c.UI.CodeStyle.Background = [3]int{48, 48, 48}
@@ -279,6 +296,58 @@ func (c *ClientConfig) ShowMeta() bool {
 	return *c.UI.Meta.Show
 }
 
+// MentionEnabled reports whether @#height mentions highlight.
+func (c *ClientConfig) MentionEnabled() bool {
+	if c == nil || c.UI.Mention.Enabled == nil {
+		return true
+	}
+	return *c.UI.Mention.Enabled
+}
+
+// MentionColor returns the clamped highlight triple, defaulting bright
+// cyan for absent ([0,0,0]) or out-of-range channels.
+func (c *ClientConfig) MentionColor() [3]int {
+	def := [3]int{0, 255, 255}
+	if c == nil {
+		return def
+	}
+	v := c.UI.Mention.Color
+	if v == ([3]int{}) {
+		return def
+	}
+	for i, ch := range v {
+		if ch < 0 {
+			v[i] = 0
+		} else if ch > 255 {
+			v[i] = 255
+		}
+	}
+	return v
+}
+
+// ReplyEnabled reports whether /reply quotes send.
+func (c *ClientConfig) ReplyEnabled() bool {
+	if c == nil || c.UI.Reply.Enabled == nil {
+		return true
+	}
+	return *c.UI.Reply.Enabled
+}
+
+// QuoteMaxRunes bounds reply preview length (clamped 20-200, default 80)
+// so quotes stay single-line on narrow screens.
+func (c *ClientConfig) QuoteMaxRunes() int {
+	if c == nil || c.UI.Reply.QuoteMaxRunes <= 0 {
+		return 80
+	}
+	if c.UI.Reply.QuoteMaxRunes < 20 {
+		return 20
+	}
+	if c.UI.Reply.QuoteMaxRunes > 200 {
+		return 200
+	}
+	return c.UI.Reply.QuoteMaxRunes
+}
+
 // LoadOrCreate loads config from path, creates default if missing when autoCreate is true.
 func LoadOrCreate(path string, autoCreate bool) (*ClientConfig, error) {
 	data, err := os.ReadFile(path)
@@ -336,6 +405,19 @@ func LoadOrCreate(path string, autoCreate bool) (*ClientConfig, error) {
 	// Backfill meta visibility (absent section means default: shown).
 	if c.UI.Meta.Show == nil {
 		c.UI.Meta.Show = def.UI.Meta.Show
+	}
+	// Backfill mention/reply knobs the same way.
+	if c.UI.Mention.Enabled == nil {
+		c.UI.Mention.Enabled = def.UI.Mention.Enabled
+	}
+	if c.UI.Mention.Color == ([3]int{}) {
+		c.UI.Mention.Color = def.UI.Mention.Color
+	}
+	if c.UI.Reply.Enabled == nil {
+		c.UI.Reply.Enabled = def.UI.Reply.Enabled
+	}
+	if c.UI.Reply.QuoteMaxRunes <= 0 {
+		c.UI.Reply.QuoteMaxRunes = def.UI.Reply.QuoteMaxRunes
 	}
 	if c.Tabs.ChatMaxBytes <= 0 {
 		c.Tabs.ChatMaxBytes = def.Tabs.ChatMaxBytes

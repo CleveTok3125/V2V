@@ -893,7 +893,7 @@ func main() {
 				if idx == 0 {
 					continue
 				}
-				return []string{formatQuote(replyTo, buf.lines[idx-1], pending)}
+				return []string{formatQuote(replyTo, buf.lines[idx-1], pending, ClientCfg.QuoteMaxRunes())}
 			}
 		}
 		return nil
@@ -907,7 +907,8 @@ func main() {
 			head = fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(wire.Text))
 			tab = classifyTab(wire.Text)
 		} else {
-			head = fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderMentions(renderChatText(wire.Text), resolveMentionLocked))
+			mentionOpen, mentionClose := mentionSGR(ClientCfg.MentionColor())
+			head = fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderMentions(renderChatText(wire.Text), resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose))
 		}
 		if wire.ReplyTo > 0 {
 			quote = quoteLinesFor(wire.ReplyTo, false)
@@ -1367,6 +1368,13 @@ func main() {
 		}
 
 		if text == "/reply" || strings.HasPrefix(text, "/reply ") {
+			if !ClientCfg.ReplyEnabled() {
+				displayMu.Lock()
+				emitLocalFeedback("| [Local]: Reply đã tắt trong config (ui.reply.enabled).\n")
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
 			rest := strings.TrimSpace(strings.TrimPrefix(text, "/reply"))
 			fields := strings.Fields(rest)
 			var target, body string

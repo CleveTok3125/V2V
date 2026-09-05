@@ -256,20 +256,28 @@ func TestFindMentions(t *testing.T) {
 
 func TestRenderMentions(t *testing.T) {
 	resolve := func(h uint64, s string) bool { return h == 7 && (s == "" || s == "ab") }
-	got := renderMentions("see @#7 and @#8 and @#7:zz", resolve)
-	if !strings.Contains(got, "\x1b[1;96m@#7\x1b[22;39m") {
+	open, close := mentionSGR([3]int{0, 255, 255})
+	if open != "\x1b[1;38;2;0;255;255m" || close != "\x1b[22;39m" {
+		t.Fatalf("got %q %q", open, close)
+	}
+	got := renderMentions("see @#7 and @#8 and @#7:zz", resolve, true, open, close)
+	if !strings.Contains(got, "\x1b[1;38;2;0;255;255m@#7\x1b[22;39m") {
 		t.Fatalf("resolved mention must highlight: %q", got)
 	}
-	if strings.Contains(got, "\x1b[1;96m@#8") || strings.Contains(got, "@#7:zz\x1b") {
+	if strings.Contains(got, "@#8\x1b") || strings.Contains(got, "@#7:zz\x1b") {
 		t.Fatalf("unresolved/suffix-mismatch must stay plain: %q", got)
+	}
+	// Disabled renders everything plain.
+	if got := renderMentions("see @#7", resolve, false, open, close); got != "see @#7" {
+		t.Fatalf("disabled must stay plain: %q", got)
 	}
 	// SGR spans are never entered.
 	in := "\x1b[48;5;236m@#7\x1b[49m tail @#7"
-	got = renderMentions(in, resolve)
-	if strings.Contains(got, "\x1b[48;5;236m\x1b[1;96m") {
+	got = renderMentions(in, resolve, true, open, close)
+	if strings.Contains(got, "\x1b[48;5;236m\x1b[1;") {
 		t.Fatalf("must not highlight inside SGR span: %q", got)
 	}
-	if !strings.Contains(got, "\x1b[1;96m@#7\x1b[22;39m") {
+	if !strings.Contains(got, "\x1b[1;38;2;0;255;255m@#7\x1b[22;39m") {
 		t.Fatalf("plain mention must still highlight: %q", got)
 	}
 }
@@ -288,17 +296,25 @@ func TestMatchPendingReplyTo(t *testing.T) {
 }
 
 func TestFormatQuote(t *testing.T) {
-	got := formatQuote(12, "| 15:04 Alice: hello world\n", false)
+	got := formatQuote(12, "| 15:04 Alice: hello world\n", false, 80)
 	if got != "| ↩ #12: 15:04 Alice: hello world" {
 		t.Fatalf("got %q", got)
 	}
-	got = formatQuote(12, "\x1b[90m| Bạn: x ⏳\x1b[0m\n", true)
+	got = formatQuote(12, "\x1b[90m| Bạn: x ⏳\x1b[0m\n", true, 80)
 	if !strings.HasPrefix(got, "\x1b[90m| ↩ #12:") || !strings.HasSuffix(got, "⏳\x1b[0m") {
 		t.Fatalf("pending quote must be grey with hourglass: %q", got)
 	}
 	long := "| X: " + strings.Repeat("a", 200)
-	got = formatQuote(3, long, false)
+	got = formatQuote(3, long, false, 80)
 	if strings.Count(got, "a") > 80 || !strings.HasSuffix(got, "…") {
 		t.Fatalf("must truncate: %q", got)
+	}
+	got = formatQuote(3, long, false, 30)
+	if strings.Count(got, "a") > 30 {
+		t.Fatalf("must honor custom max: %q", got)
+	}
+	got = formatQuote(3, long, false, 0)
+	if strings.Count(got, "a") > 20 {
+		t.Fatalf("must clamp tiny max: %q", got)
 	}
 }
