@@ -260,6 +260,7 @@ func DefaultClientConfig() *ClientConfig {
 		"showJoin":     {"/showjoin", "/sj"},
 		"autoVerify":   {"/autoverify", "/av"},
 		"info":         {"/info"},
+		"copy":         {"/copy"},
 		"tab":          {"/tab", "/t"},
 		"meta":         {"/meta", "/m"},
 		"find":         {"/find", "/f"},

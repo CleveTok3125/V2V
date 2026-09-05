@@ -45,15 +45,29 @@
       margin: 0 0 12px;
     }
     section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
-    blockquote {
-      margin: 0;
-      padding: 8px 12px;
-      border-left: 3px solid var(--accent);
+    #content-sec textarea {
+      width: 100%;
       background: var(--panel2);
-      border-radius: 0 8px 8px 0;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
+      border: 1px solid #262633;
+      color: var(--text);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: 13px/1.5 var(--mono);
+      resize: vertical;
     }
+    #content-sec textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .checkerow {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 10px;
+    }
+    #content-verdict { font-size: 13px; font-weight: 600; }
+    #content-verdict.ok { color: var(--ok); }
+    #content-verdict.bad { color: var(--error); }
     .row { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; }
     .row + .row { border-top: 1px solid #22222e; }
     .row .k { flex: 0 0 108px; color: var(--muted); font-size: 13px; padding-top: 4px; }
@@ -112,9 +126,14 @@
     <p class="sub">Xác thực stateless chữ ký tripcode, không cần đăng nhập.</p>
     <div id="pill" class="pill wait">Đang kiểm tra…</div>
 
-    <section id="quote-sec" class="hidden">
-      <h2>Nội dung tin nhắn</h2>
-      <blockquote id="quote"></blockquote>
+    <section id="content-sec" class="hidden">
+      <h2>Kiểm chứng nội dung</h2>
+      <p class="hint">Dán nội dung tin nhắn gốc vào đây — trang băm SHA-256 ngay trên trình duyệt và đối chiếu với msg_hash đã ký. Chữ không rời máy bạn.</p>
+      <textarea id="content-input" rows="3" placeholder="Dán nội dung tin nhắn..."></textarea>
+      <div class="checkerow">
+        <button id="content-check" type="button">Kiểm tra</button>
+        <span id="content-verdict"></span>
+      </div>
     </section>
 
     <section>
@@ -142,8 +161,10 @@
       "use strict";
       var pill = document.getElementById("pill");
       var fieldsEl = document.getElementById("fields");
-      var quoteSec = document.getElementById("quote-sec");
-      var quoteEl = document.getElementById("quote");
+      var contentSec = document.getElementById("content-sec");
+      var contentInput = document.getElementById("content-input");
+      var contentCheck = document.getElementById("content-check");
+      var contentVerdict = document.getElementById("content-verdict");
       var apiInput = document.getElementById("apiurl");
       var rawEl = document.getElementById("rawjson");
 
@@ -240,11 +261,41 @@
           }
           setPill("✅ Trip hợp lệ", "ok");
           var q = new URLSearchParams(location.search);
-          var text = q.get("text") || "";
-          if (text) {
-            quoteSec.classList.remove("hidden");
-            quoteEl.textContent = text;
-            addCopy(quoteSec, text);
+          var wantHash = (q.get("msg_hash") || "").toLowerCase();
+          if (wantHash) {
+            contentSec.classList.remove("hidden");
+            contentCheck.addEventListener("click", checkContent);
+            contentInput.addEventListener("input", checkContent);
+          }
+          function hex(buf) {
+            return Array.prototype.map.call(new Uint8Array(buf), function (b) {
+              return ("0" + b.toString(16)).slice(-2);
+            }).join("");
+          }
+          function checkContent() {
+            var t = contentInput.value;
+            if (!t) {
+              contentVerdict.textContent = "Chưa dán nội dung — mới chỉ xác thực chữ ký.";
+              contentVerdict.className = "";
+              return;
+            }
+            if (!window.crypto || !crypto.subtle) {
+              contentVerdict.textContent = "Trình duyệt thiếu WebCrypto (cần HTTPS/localhost).";
+              contentVerdict.className = "bad";
+              return;
+            }
+            crypto.subtle.digest("SHA-256", new TextEncoder().encode(t)).then(function (buf) {
+              if (hex(buf) === wantHash) {
+                contentVerdict.textContent = "khớp ✓ Nội dung đúng tin đã ký.";
+                contentVerdict.className = "ok";
+              } else {
+                contentVerdict.textContent = "lệch ✗ Nội dung không khớp hash đã ký.";
+                contentVerdict.className = "bad";
+              }
+            }, function () {
+              contentVerdict.textContent = "Không băm được nội dung.";
+              contentVerdict.className = "bad";
+            });
           }
           if (j.badge) {
             var badgeEl = addField("badge", j.badge, true);
