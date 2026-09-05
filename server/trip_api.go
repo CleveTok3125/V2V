@@ -49,6 +49,10 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.ParseUint(r.URL.Query().Get("tmp_id"), 10, 64); err == nil {
 		tmpID = v
 	}
+	var replyTo uint64
+	if v, err := strconv.ParseUint(r.URL.Query().Get("reply_to"), 10, 64); err == nil {
+		replyTo = v
+	}
 	// Enforce server_pub is server's own key; ignore query if it doesn't match.
 	serverPub := ""
 	if s.ServerID != nil {
@@ -105,7 +109,7 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"valid": false, "error": "invalid hex length"})
 		return
 	}
-	payload := tripcolor.CanonicalPayload(serverPub, seq, prevBytes, msgHashBytes, pubBytes, displayName, tmpID)
+	payload := tripcolor.CanonicalPayload(serverPub, seq, prevBytes, msgHashBytes, pubBytes, displayName, tmpID, replyTo)
 	valid := ed25519.Verify(pubBytes, payload, sigBytes)
 	badge := ""
 	if pubHex != "" {

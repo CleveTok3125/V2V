@@ -186,9 +186,11 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			Sig         string `json:"sig"`
 			DisplayName string `json:"display_name"`
 			TmpID       uint64 `json:"tmp_id"`
+			ReplyTo     uint64 `json:"reply_to"`
 		}
 		var tripMeta *TripMeta
 		var msgTmpID uint64
+		var msgReplyTo uint64
 		text := raw
 		if err := json.Unmarshal([]byte(raw), &tripMsg); err == nil && (tripMsg.Sig != "" || tripMsg.TmpID != 0 || strings.TrimSpace(tripMsg.Text+tripMsg.Msg) != "") {
 			if tripMsg.TmpID == 0 {
@@ -200,6 +202,19 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				continue
 			}
 			msgTmpID = tripMsg.TmpID
+			msgReplyTo = tripMsg.ReplyTo
+			// Cheap sanity: quotes must name a message that exists.
+			s.HistoryMu.RLock()
+			tipReady, tipHeight := s.chainReady, s.chainHeight
+			s.HistoryMu.RUnlock()
+			if msgReplyTo != 0 && tipReady && msgReplyTo > tipHeight+1 {
+				select {
+				case session.Send <- []byte("[Hệ thống]: Tin reply dẫn tới ID chưa tồn tại."):
+				default:
+				}
+				updateReadDeadline()
+				continue
+			}
 			if tripMsg.Sig == "" {
 				// Unsigned envelope: plain chat text with a session counter.
 				t := tripMsg.Text
@@ -327,6 +342,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				SigHex:      tripMsg.Sig,
 				MsgHashHex:  msgHashHex,
 				TmpID:       tripMsg.TmpID,
+				ReplyTo:     tripMsg.ReplyTo,
 			})
 			if err != nil {
 				s.TripChainsMu.Unlock()
@@ -351,6 +367,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				MsgHash:     res.MsgHash,
 				DisplayName: session.DisplayName,
 				TmpID:       tripMsg.TmpID,
+				ReplyTo:     tripMsg.ReplyTo,
 			}
 			// Override session badge if not set
 			if session.TripBadge == "" {
@@ -408,6 +425,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			Text:        text,
 			Trip:        tripMeta,
 			TmpID:       msgTmpID,
+			ReplyTo:     msgReplyTo,
 		}
 		log.Printf("💬 [MSG từ %s] %s (%s): %s\n", clientIP, session.DisplayName, session.Tripcode, strings.ReplaceAll(text, "\n", "\\n"))
 		s.BroadcastWire(wire, session.Conn)

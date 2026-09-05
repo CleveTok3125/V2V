@@ -51,7 +51,13 @@ func checkStoredChainFrom(s *ChatServer, prev [32]byte) error {
 			return fmt.Errorf("msg %d: height %d, want %d", i, wire.ChainHeight, wantHeight)
 		}
 		want, ok := chain.ParseHex64(wire.ChainHash)
-		if !ok || !chain.VerifyLink(gotPrev, wire.ChainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire), want) {
+		var linked bool
+		if wire.ChainVer >= 2 {
+			linked = chain.VerifyLink(gotPrev, wire.ChainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire), want)
+		} else {
+			linked = chain.VerifyLinkV1(gotPrev, wire.ChainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire), want)
+		}
+		if !ok || !linked {
 			return fmt.Errorf("msg %d: broken hash link", i)
 		}
 		prev = want
@@ -171,7 +177,13 @@ func TestChainConcurrentAppend(t *testing.T) {
 		json.Unmarshal([]byte(msgStr), &wire)
 		gotPrev, _ := chain.ParseHex64(wire.ChainPrev)
 		want, _ := chain.ParseHex64(wire.ChainHash)
-		if gotPrev != prev || !chain.VerifyLink(gotPrev, wire.ChainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire), want) {
+		var linked2 bool
+		if wire.ChainVer >= 2 {
+			linked2 = chain.VerifyLink(gotPrev, wire.ChainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire), want)
+		} else {
+			linked2 = chain.VerifyLinkV1(gotPrev, wire.ChainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire), want)
+		}
+		if gotPrev != prev || !linked2 {
 			t.Fatalf("height %d: broken link", wire.ChainHeight)
 		}
 		prev = want

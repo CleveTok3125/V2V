@@ -25,7 +25,8 @@ const (
 // Hash links one message into the log. Fields are length-prefixed so
 // concatenation is unambiguous regardless of embedded separators. tmpID
 // is covered too, so renumbering breaks the link for every observer.
-func Hash(prev [32]byte, height uint64, tmpID uint64, typ, tim, display, text, tripSig string) [32]byte {
+// replyTo (v2) covers the quote target the same way.
+func Hash(prev [32]byte, height uint64, tmpID uint64, replyTo uint64, typ, tim, display, text, tripSig string) [32]byte {
 	h := sha256.New()
 	h.Write([]byte(domainLink))
 	h.Write([]byte{0})
@@ -39,6 +40,8 @@ func Hash(prev [32]byte, height uint64, tmpID uint64, typ, tim, display, text, t
 	n := binary.PutUvarint(buf[:], height)
 	h.Write(buf[:n])
 	n = binary.PutUvarint(buf[:], tmpID)
+	h.Write(buf[:n])
+	n = binary.PutUvarint(buf[:], replyTo)
 	h.Write(buf[:n])
 	put([]byte(typ))
 	put([]byte(tim))
@@ -65,8 +68,41 @@ func LegacyAnchor(lastLegacyMsg string) [32]byte {
 }
 
 // VerifyLink recomputes the link and compares it with want.
-func VerifyLink(prev [32]byte, height uint64, tmpID uint64, typ, tim, display, text, tripSig string, want [32]byte) bool {
-	return Hash(prev, height, tmpID, typ, tim, display, text, tripSig) == want
+func VerifyLink(prev [32]byte, height uint64, tmpID uint64, replyTo uint64, typ, tim, display, text, tripSig string, want [32]byte) bool {
+	return Hash(prev, height, tmpID, replyTo, typ, tim, display, text, tripSig) == want
+}
+
+// hashV1 builds the pre-reply_to encoding (chain_ver absent). Old records
+// keep verifying against it; nothing new is ever hashed with it.
+func hashV1(prev [32]byte, height uint64, tmpID uint64, typ, tim, display, text, tripSig string) [32]byte {
+	h := sha256.New()
+	h.Write([]byte(domainLink))
+	h.Write([]byte{0})
+	var buf [binary.MaxVarintLen64]byte
+	put := func(b []byte) {
+		n := binary.PutUvarint(buf[:], uint64(len(b)))
+		h.Write(buf[:n])
+		h.Write(b)
+	}
+	put(prev[:])
+	n := binary.PutUvarint(buf[:], height)
+	h.Write(buf[:n])
+	n = binary.PutUvarint(buf[:], tmpID)
+	h.Write(buf[:n])
+	put([]byte(typ))
+	put([]byte(tim))
+	put([]byte(display))
+	put([]byte(text))
+	put([]byte(tripSig))
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	return out
+}
+
+// VerifyLinkV1 checks pre-reply_to links (chain_ver absent), where the
+// encoding carries no replyTo segment. Old records keep verifying.
+func VerifyLinkV1(prev [32]byte, height uint64, tmpID uint64, typ, tim, display, text, tripSig string, want [32]byte) bool {
+	return hashV1(prev, height, tmpID, typ, tim, display, text, tripSig) == want
 }
 
 // ParseHex64 decodes a 64-char lowercase hex hash; it reports false for

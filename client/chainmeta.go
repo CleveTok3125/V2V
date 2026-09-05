@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/CleveTok3125/V2V/internal/chain"
 )
@@ -161,6 +162,113 @@ func (c *renderCache) put(key string, b renderedBlock) {
 // part may be empty when scanning, and is compared separately.
 var findMetaRe = regexp.MustCompile(`└─\s+#(\d+):([0-9a-fA-F]*)`)
 
+// mentionRe matches @-mentions of message heights ("@#1234", "@#1234:abcd").
+// The @ prefix keeps them distinct from server-stamped "name#hash"
+// display names, which never open with "@#".
+var mentionRe = regexp.MustCompile(`@#(\d+)(?::([0-9a-fA-F]{1,16}))?`)
+
+// sgrMention wraps a resolved mention; the closer resets bold + foreground
+// so surrounding colors resume. Mentions only render in incoming/history
+// content (default foreground), never in placeholders or meta lines.
+const (
+	sgrMentionOpen  = "\x1b[1;96m"
+	sgrMentionClose = "\x1b[22;39m"
+)
+
+// mention is one @#height reference with byte offsets into its source.
+type mention struct {
+	start, end int
+	height     uint64
+	suffix     string
+}
+
+func isMentionBoundary(r rune) bool {
+	switch {
+	case r >= '0' && r <= '9', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_', r == '#', r == '@':
+		return false
+	}
+	return true
+}
+
+// findMentions locates @#height references outside identifier/URL-like runs.
+// A trailing colon not followed by hex voids the match (half-written suffix).
+func findMentions(s string) []mention {
+	var out []mention
+	for _, loc := range mentionRe.FindAllStringSubmatchIndex(s, -1) {
+		fullStart, fullEnd := loc[0], loc[1]
+		if fullStart > 0 {
+			if r, _ := utf8.DecodeLastRuneInString(s[:fullStart]); r != utf8.RuneError && !isMentionBoundary(r) {
+				continue
+			}
+		}
+		if fullEnd < len(s) {
+			if r, _ := utf8.DecodeRuneInString(s[fullEnd:]); r != utf8.RuneError && !isMentionBoundary(r) {
+				continue
+			}
+			// "@#1234:xyz" (non-hex tail): the regex stops before the
+			// colon, so a bare colon right after means don't half-match.
+			if s[fullEnd] == ':' {
+				continue
+			}
+		}
+		height, err := strconv.ParseUint(s[loc[2]:loc[3]], 10, 64)
+		if err != nil || height == 0 {
+			continue
+		}
+		suffix := ""
+		if loc[4] >= 0 {
+			suffix = strings.ToLower(s[loc[4]:loc[5]])
+		}
+		out = append(out, mention{start: fullStart, end: fullEnd, height: height, suffix: suffix})
+	}
+	return out
+}
+
+// ansiSpanRe matches terminal spans wholesale: an SGR-colored region
+// (opener through its closer), an OSC8 hyperlink (markers plus linked
+// text), or a lone escape. Mention scanning only sees the gaps, so code
+// spans, links and badges are never entered.
+var ansiSpanRe = regexp.MustCompile("\x1b\\[[0-9;]*m[\\s\\S]*?\x1b\\[[0-9;]*m|\x1b\\]8;;[^\x1b]*\x1b\\\\[\\s\\S]*?\x1b\\]8;;\x1b\\\\|\x1b\\[[0-9;]*m|\x1b\\]8;;[^\x1b]*\x1b\\\\")
+
+// renderMentions highlights @#height references whose target resolves via
+// resolve (height in buffer, suffix matching). Unresolved mentions stay
+// plain text so evicted targets never mislead.
+func renderMentions(s string, resolve func(height uint64, suffix string) bool) string {
+	if !strings.Contains(s, "@#") {
+		return s
+	}
+	var sb strings.Builder
+	pos := 0
+	for _, loc := range ansiSpanRe.FindAllStringIndex(s, -1) {
+		sb.WriteString(renderMentionsPlain(s[pos:loc[0]], resolve))
+		sb.WriteString(s[loc[0]:loc[1]])
+		pos = loc[1]
+	}
+	sb.WriteString(renderMentionsPlain(s[pos:], resolve))
+	return sb.String()
+}
+
+func renderMentionsPlain(s string, resolve func(height uint64, suffix string) bool) string {
+	ms := findMentions(s)
+	if len(ms) == 0 {
+		return s
+	}
+	var sb strings.Builder
+	pos := 0
+	for _, m := range ms {
+		if !resolve(m.height, m.suffix) {
+			continue
+		}
+		sb.WriteString(s[pos:m.start])
+		sb.WriteString(sgrMentionOpen)
+		sb.WriteString(s[m.start:m.end])
+		sb.WriteString(sgrMentionClose)
+		pos = m.end
+	}
+	sb.WriteString(s[pos:])
+	return sb.String()
+}
+
 var ansiStripRe = regexp.MustCompile("\x1b\\[[0-9;]*m|\x1b\\]8;;[^\x1b]*\x1b\\\\")
 
 // stripANSIForFind removes SGR/OSC8 sequences for text matching.
@@ -267,7 +375,9 @@ func saveChainTip(path string, tip [32]byte, height uint64) {
 }
 
 // verifyWireLink recomputes a received wire link against the running tip.
-// It returns the new tip or an error describing the break.
+// It returns the new tip or an error describing the break. Encoding
+// dispatches on chain_ver: v2 covers the reply target, v1 (absent) is the
+// pre-reply encoding that old records keep verifying against.
 func verifyWireLink(wire WireMessage, prev [32]byte) ([32]byte, error) {
 	var zero [32]byte
 	gotPrev, ok := chain.ParseHex64(wire.ChainPrev)
@@ -285,7 +395,13 @@ func verifyWireLink(wire WireMessage, prev [32]byte) ([32]byte, error) {
 	if wire.Trip != nil {
 		sig = wire.Trip.Sig
 	}
-	if !chain.VerifyLink(gotPrev, wire.ChainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, sig, want) {
+	var linked bool
+	if wire.ChainVer >= 2 {
+		linked = chain.VerifyLink(gotPrev, wire.ChainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, sig, want)
+	} else {
+		linked = chain.VerifyLinkV1(gotPrev, wire.ChainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, sig, want)
+	}
+	if !linked {
 		return zero, errChainLink("hash does not match content")
 	}
 	return want, nil

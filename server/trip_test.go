@@ -27,7 +27,7 @@ func TestHistoryTripChainPersistenceAndTamper(t *testing.T) {
 	msgText := "hello trip"
 	msgHash := sha256.Sum256([]byte(msgText))
 	displayName := "Tester#eff8"
-	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName, 9)
+	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName, 9, 0)
 	sig := ed25519.Sign(priv, payload)
 
 	trip := &TripMeta{
@@ -53,7 +53,7 @@ func TestHistoryTripChainPersistenceAndTamper(t *testing.T) {
 	}
 	// Tamper: different msg hash should not verify
 	badHash := sha256.Sum256([]byte("tampered"))
-	badPayload := tripcolor.CanonicalPayload(serverPub, 1, prev, badHash[:], pub, displayName, 9)
+	badPayload := tripcolor.CanonicalPayload(serverPub, 1, prev, badHash[:], pub, displayName, 9, 0)
 	if ed25519.Verify(pub, badPayload, sig) {
 		t.Fatalf("tampered payload should not verify")
 	}
@@ -114,7 +114,7 @@ func TestHistoryRestartRepopulation(t *testing.T) {
 	for seq := uint32(1); seq <= 2; seq++ {
 		msg := "msg" + string(rune('0'+seq))
 		h := sha256.Sum256([]byte(msg))
-		payload := tripcolor.CanonicalPayload(serverPub, seq, prev, h[:], pub, "Tester#eff8", 9)
+		payload := tripcolor.CanonicalPayload(serverPub, seq, prev, h[:], pub, "Tester#eff8", 9, 0)
 		sig := ed25519.Sign(priv, payload)
 		hash := sha256.New()
 		hash.Write(prev)
@@ -181,7 +181,7 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 	msgText := "original message"
 	msgHash := sha256.Sum256([]byte(msgText))
 	displayName := "Tester#eff8"
-	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName, 9)
+	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName, 9, 0)
 	sig := ed25519.Sign(priv, payload)
 	trip := &TripMeta{
 		Pub:         pubHex,
@@ -221,7 +221,7 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 		sigBytes, _ := hex.DecodeString(w.Trip.Sig)
 		prevBytes, _ := hex.DecodeString(w.Trip.Prev)
 		hashBytes, _ := hex.DecodeString(w.Trip.MsgHash)
-		p := tripcolor.CanonicalPayload(w.Trip.ServerPub, w.Trip.Seq, prevBytes, hashBytes, pubBytes, w.Trip.DisplayName, w.Trip.TmpID)
+		p := tripcolor.CanonicalPayload(w.Trip.ServerPub, w.Trip.Seq, prevBytes, hashBytes, pubBytes, w.Trip.DisplayName, w.Trip.TmpID, w.Trip.ReplyTo)
 		return ed25519.Verify(pubBytes, p, sigBytes)
 	}
 	// Load and verify original — should be valid (green)

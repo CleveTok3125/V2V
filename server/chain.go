@@ -18,6 +18,10 @@ import (
 // and send happen under BroadcastMu so every client receives messages in
 // chain order and prev-continuity checks never false-positive on reorder.
 
+// chainVersion is the link encoding in use. Version 1 (no replyTo
+// segment) verifies pre-reply records; new links always carry 2.
+const chainVersion = 2
+
 // tripSigOf extracts the trip signature bound into a wire for chaining.
 func tripSigOf(wire WireMessage) string {
 	if wire.Trip != nil {
@@ -37,10 +41,11 @@ func (s *ChatServer) linkAndStore(wire WireMessage) WireMessage {
 	}
 	s.chainHeight++
 	prev := s.chainTip
-	h := chain.Hash(prev, s.chainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire))
+	h := chain.Hash(prev, s.chainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire))
 	wire.ChainPrev = hex.EncodeToString(prev[:])
 	wire.ChainHash = hex.EncodeToString(h[:])
 	wire.ChainHeight = s.chainHeight
+	wire.ChainVer = chainVersion
 	s.chainTip = h
 	data, _ := json.Marshal(wire)
 	s.appendMessageLocked(string(data))
@@ -85,8 +90,19 @@ func (s *ChatServer) initChainLocked() {
 			expectPrev = chain.LegacyAnchor(anchor)
 			anchored = false
 		}
-		if prev != expectPrev || wire.ChainHeight != height+1 ||
-			!chain.VerifyLink(prev, wire.ChainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire), want) {
+		if prev != expectPrev || wire.ChainHeight != height+1 {
+			broken = true
+			log.Printf("⛔ [CHAIN TAMPER] height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
+			tip, height = want, wire.ChainHeight
+			continue
+		}
+		var linked bool
+		if wire.ChainVer >= 2 {
+			linked = chain.VerifyLink(prev, wire.ChainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire), want)
+		} else {
+			linked = chain.VerifyLinkV1(prev, wire.ChainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire), want)
+		}
+		if !linked {
 			broken = true
 			log.Printf("⛔ [CHAIN TAMPER] height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
 		}
