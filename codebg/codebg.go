@@ -65,6 +65,13 @@ func NeedsContinuation(firstLine string) bool {
 	return !strings.Contains(t[3:], "```")
 }
 
+// Span wraps an already-extracted code span's content in the code
+// background. The caller strips the backtick delimiters, mirroring
+// inline; markup uses this so code styling has a single source.
+func Span(s string) string {
+	return sgrCodeBg + s + sgrBgOff
+}
+
 // Render returns text with code spans wrapped in a background color,
 // mirroring markdown: inline `code` spans lose their backticks, a fenced
 // block shows its language name as a header line followed by the block,

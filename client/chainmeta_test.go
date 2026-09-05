@@ -405,6 +405,40 @@ func TestFormatInfoBlock(t *testing.T) {
 	}
 }
 
+func TestFormatInfoBlockRaw(t *testing.T) {
+	wire := chainedTestWire(chain.Genesis("srv"), 12, 5)
+	wire.Text = "**bold** line1\nline2 \x1b[31mred\x1b[0m\x07bell"
+	joined := strings.Join(formatInfoBlock(wire), "")
+	// Raw row shows stored bytes: no renderer ran, newline marked,
+	// ESC/control neutralized.
+	for _, want := range []string{"raw:", "**bold** line1⏎line2 [31mred[0mbell"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("block must contain %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "\x1b[31m") || strings.Contains(joined, "\x07") {
+		t.Fatalf("raw row must not carry ESC/control:\n%s", joined)
+	}
+	// Long raw text truncates at 500 runes with an ellipsis.
+	wire.Text = strings.Repeat("a", 600)
+	joined = strings.Join(formatInfoBlock(wire), "")
+	if !strings.Contains(joined, strings.Repeat("a", 500)+"…") {
+		t.Fatalf("raw row must truncate:\n%s", joined)
+	}
+}
+
+func TestRawOneLine(t *testing.T) {
+	if got := rawOneLine("a\nb"); got != "a⏎b" {
+		t.Fatalf("got %q", got)
+	}
+	if got := rawOneLine("x\x1b[1m\x07\x00y\tz"); got != "x[1my\tz" {
+		t.Fatalf("got %q", got)
+	}
+	if got := rawOneLine("plain"); got != "plain" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestFormatInfoBlockTripDetail(t *testing.T) {
 	// Real signature so the verdict path is genuine.
 	seed := make([]byte, 32)

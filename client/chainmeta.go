@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/CleveTok3125/V2V/internal/chain"
@@ -514,7 +515,33 @@ func formatInfoBlock(wire WireMessage) []string {
 		first = string(r[:80]) + "…"
 	}
 	out = append(out, row("text:", first))
+	out = append(out, row("raw:", rawOneLine(wire.Text)))
 	return out
+}
+
+// rawOneLine shows message bytes exactly as stored, without any parser
+// or renderer: newlines become ⏎ so the block stays one field per line,
+// and ESC plus control bytes (except tab) are dropped so legacy history
+// containing escape sequences cannot inject terminal output. Documented
+// as ESC-neutralized rather than byte-absolute for that reason.
+func rawOneLine(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			b.WriteRune('⏎')
+		case r == '\t':
+			b.WriteRune(r)
+		case r == '\x1b' || unicode.IsControl(r):
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	if r := []rune(b.String()); len(r) > 500 {
+		return string(r[:500]) + "…"
+	}
+	return b.String()
 }
 
 // tripPayloadBytes rebuilds the exact signed bytes trip.Verify checks

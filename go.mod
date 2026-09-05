@@ -14,6 +14,7 @@ require (
 	github.com/go-webauthn/webauthn v0.17.4
 	github.com/joho/godotenv v1.5.1
 	github.com/klauspost/compress v1.18.0
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/crypto v0.52.0
 )
 

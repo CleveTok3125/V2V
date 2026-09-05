@@ -35,6 +35,12 @@ func Linkify(text string) string {
 	return urlRe.ReplaceAllStringFunc(text, func(m string) string {
 		url := strings.TrimRight(m, trailingPunct)
 		tail := m[len(url):]
-		return osc8Open + url + osc8Close + sgrLink + url + sgrReset + osc8Open + osc8Close + tail
+		return Wrap(url, url) + tail
 	})
+}
+
+// Wrap renders visible text as a hyperlink to url in exactly the shape
+// Linkify uses, so markup [text](url) matches bare-URL styling.
+func Wrap(url, visible string) string {
+	return osc8Open + url + osc8Close + sgrLink + visible + sgrReset + osc8Open + osc8Close
 }
