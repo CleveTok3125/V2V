@@ -699,9 +699,12 @@ func main() {
 		}
 	}
 
-	// emitLocalFeedback buffers a local command response in TabSystem and
-	// prints it on the active tab immediately, so commands always respond
-	// visibly while staying reviewable in Tab 2. Caller must hold displayMu.
+	// emitLocalFeedback is the single funnel for all local output: it
+	// buffers the line in TabSystem and prints it on the active tab
+	// immediately, so commands always respond visibly while staying
+	// reviewable in Tab 2. Every current and future local message must
+	// go through here — printing to out directly bypasses Tab 2 and
+	// leaves it incomplete. Caller must hold displayMu.
 	emitLocalFeedback := func(line string) {
 		tabSys.append(line)
 		fmt.Fprint(out, line)
@@ -1520,27 +1523,29 @@ func main() {
 			}
 			displayMu.Lock()
 			shown := 0
-			fmt.Fprintf(out, "| [Local]: Tìm #%d", height)
+			header := fmt.Sprintf("| [Local]: Tìm #%d", height)
 			if suffix != "" {
-				fmt.Fprintf(out, ":%s", suffix)
+				header += ":" + suffix
 			}
-			fmt.Fprintf(out, " trong bộ nhớ:\n")
-			printGen++
+			emitLocalFeedback(header + " trong bộ nhớ:\n")
+			// Snapshot matches before emitting: emitting appends to
+			// tabSys, whose eviction could shift indices mid-scan.
+			var hits []string
 			for _, buf := range []*tabBuffer{tabChat, tabSys} {
 				matches := findMetaMatches(buf.lines, height, suffix)
 				for _, idx := range matches {
 					if idx > 0 {
-						fmt.Fprint(out, buf.lines[idx-1])
-						printGen++
+						hits = append(hits, buf.lines[idx-1])
 					}
-					fmt.Fprint(out, buf.lines[idx])
-					printGen++
+					hits = append(hits, buf.lines[idx])
 				}
 				shown += len(matches)
 			}
+			for _, h := range hits {
+				emitLocalFeedback(h)
+			}
 			if shown == 0 {
-				fmt.Fprintf(out, "| [Local]: Không thấy (tin cũ đã bị evict khỏi bộ nhớ hoặc chưa sync).\n")
-				printGen++
+				emitLocalFeedback("| [Local]: Không thấy (tin cũ đã bị evict khỏi bộ nhớ hoặc chưa sync).\n")
 			}
 			displayMu.Unlock()
 			term.Refresh()
@@ -1560,22 +1565,19 @@ func main() {
 			displayMu.Lock()
 			wire, ok := wireIdx.get(height)
 			if !ok {
-				fmt.Fprintf(out, "| [Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height)
-				printGen++
+				emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height))
 				displayMu.Unlock()
 				term.Refresh()
 				continue
 			}
 			if suffix != "" && !strings.HasPrefix(strings.ToLower(wire.ChainHash), suffix) {
-				fmt.Fprintf(out, "| [Local]: Height đúng nhưng hash khác — kiểm tra lại số.\n")
-				printGen++
+				emitLocalFeedback("| [Local]: Height đúng nhưng hash khác — kiểm tra lại số.\n")
 				displayMu.Unlock()
 				term.Refresh()
 				continue
 			}
 			for _, line := range formatInfoBlock(wire) {
-				fmt.Fprint(out, line)
-				printGen++
+				emitLocalFeedback(line)
 			}
 			displayMu.Unlock()
 			term.Refresh()
@@ -1585,8 +1587,7 @@ func main() {
 		if text == "/clearhistory" || text == "/ch" {
 			os.Remove(historyFile)
 			displayMu.Lock()
-			fmt.Fprintf(out, "🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile)
-			printGen++
+			emitLocalFeedback(fmt.Sprintf("🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile))
 			displayMu.Unlock()
 			continue
 		}
