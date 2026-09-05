@@ -111,6 +111,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 				PrevHex:     tripForChain.Prev,
 				SigHex:      tripForChain.Sig,
 				MsgHashHex:  tripForChain.MsgHash,
+				TmpID:       tripForChain.TmpID,
 			})
 			if err != nil {
 				log.Printf("⚠️ [HISTORY TAMPER] %s seq %d: %v", tripForChain.Pub[:12], tripForChain.Seq, err)

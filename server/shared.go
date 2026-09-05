@@ -66,6 +66,7 @@ type TripMeta struct {
 	ServerPub   string `json:"server_pub"`
 	MsgHash     string `json:"msg_hash,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
+	TmpID       uint64 `json:"tmp_id,omitempty"`
 }
 
 type WireMessage struct {
@@ -74,6 +75,9 @@ type WireMessage struct {
 	DisplayName string    `json:"displayName,omitempty"`
 	Text        string    `json:"text,omitempty"`
 	Trip        *TripMeta `json:"trip,omitempty"`
+	// TmpID is the sender's per-session counter, relayed verbatim and
+	// never assigned by the server. Chain link fields are set in P3.
+	TmpID uint64 `json:"tmp_id,omitempty"`
 }
 
 type AuthPacket struct {
