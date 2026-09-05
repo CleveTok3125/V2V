@@ -80,3 +80,26 @@ func TestVerifyBindsReplyTo(t *testing.T) {
 		t.Fatal("swapped reply_to must not verify")
 	}
 }
+
+func TestVerifySkipTextCheck(t *testing.T) {
+	p, _ := signFixture(t, 7, 0, false)
+	// Text-less link: no displayed text exists, signature over the hash
+	// alone verifies with explicit opt-in.
+	p.Text = ""
+	p.SkipTextCheck = true
+	if _, err := Verify(p); err != nil {
+		t.Fatalf("skip mode with valid sig must verify: %v", err)
+	}
+	// Tampered signature still fails in skip mode.
+	p.SigHex = "00" + p.SigHex[2:]
+	if _, err := Verify(p); err == nil {
+		t.Fatal("tampered sig must not verify even with skip")
+	}
+	// Empty text without opt-in keeps failing: accidental unbound
+	// displays must never verify.
+	p2, _ := signFixture(t, 7, 0, false)
+	p2.Text = ""
+	if _, err := Verify(p2); err == nil {
+		t.Fatal("empty text without skip must not verify")
+	}
+}
