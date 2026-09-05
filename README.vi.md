@@ -4,7 +4,7 @@
 <a href="README.md">English</a> · <a href="docs/TECHNICAL.md">Tài liệu kỹ thuật</a>
 </p>
 
-Chat ẩn danh, nhẹ, thời gian thực, kèm log chống sửa — chạy hoàn toàn bằng Go, không cần database.
+Chat ẩn danh mà không ai — kể cả server — có thể sửa lịch sử.
 
 - **Ẩn danh mặc định** — mọi người, kể cả admin, đều có `Tên#a1b2` từ IP hash với salt ngẫu nhiên mỗi phiên (tự mở rộng, thêm `-2` khi trùng). Không cần đăng ký, đặt tên thoải mái.
 - **Log chống sửa** — mọi tin nhắn nối vào một hash chain chung toàn server, mỗi tin mang ID `#height:hash`. Sửa, đảo thứ tự hay đánh lại số bất kỳ tin nào cũng làm đứt chain, mọi client đều thấy — không cần ai ký tay.
