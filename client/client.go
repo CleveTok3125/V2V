@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -430,7 +431,9 @@ func main() {
 	var tripPrev []byte = make([]byte, 32)
 	// tmpSeq numbers every outgoing message in this session (trip and
 	// plain alike). The server relays it verbatim but never assigns it.
-	var tmpSeq uint64
+	// The base is random per connection (upper 32 bits) so a reconnect
+	// never reuses another session's IDs in stash/pending matching.
+	var tmpSeq uint64 = (uint64(rand.Uint32()) + 1) << 32
 	// pendingReplyTo quotes a chain height on the next outgoing message
 	// only (/reply sets it, the send path consumes and clears it).
 	var pendingReplyTo uint64
@@ -736,22 +739,24 @@ func main() {
 	// matches nothing is stashed: it may have beaten its placeholder
 	// (local echo race) and is retried when placeholders are tracked;
 	// entries never matched expire with a warning, which is how
-	// server-side ID tampering surfaces. Caller must hold displayMu.
-	consumeEchoLocked := func(wire WireMessage) {
+	// server-side ID tampering surfaces. allowStash is false for history
+	// replay: our own old messages must never pollute the stash (their
+	// tmpIDs belong to previous sessions). Caller must hold displayMu.
+	consumeEchoLocked := func(wire WireMessage, allowStash bool) {
 		var stale []WireMessage
 		pendingEchoes, stale = reapStaleEchoes(pendingEchoes, 10*time.Second)
 		for _, w := range stale {
 			emitLocalFeedback(fmt.Sprintf("| [Local]: Echo không khớp tin đang chờ (tmp_id=%d) — ID có thể đã bị sửa.\n", w.TmpID))
 		}
 		if wire.DisplayName != username || len(pendingPlaceholders) == 0 {
-			if wire.DisplayName == username && wire.TmpID != 0 {
+			if allowStash && wire.DisplayName == username && wire.TmpID != 0 {
 				pendingEchoes = stashEcho(pendingEchoes, wire, 16)
 			}
 			return
 		}
 		idx := matchPendingIndex(pendingPlaceholders, wire.TmpID, wire.ReplyTo, wire.Text, username, wire.DisplayName)
 		if idx == -1 {
-			if wire.TmpID != 0 {
+			if allowStash && wire.TmpID != 0 {
 				pendingEchoes = stashEcho(pendingEchoes, wire, 16)
 			}
 			return
@@ -763,12 +768,19 @@ func main() {
 
 	// Chain verification state: running tip adopted from the first
 	// chained message seen, persisted tip for fork detection after sync.
+	// The persisted tip is namespaced by server identity: a tip from
+	// another server is silently ignored (switching servers is a first
+	// run, never a fork).
 	var chainTip [32]byte
 	var chainHeight uint64
 	var chainHaveTip bool
 	var chainWarned bool
+	serverPubHex := strings.ToLower(strings.TrimSpace(challenge.ServerPubKey))
 	tipPath := chainTipFile(historyFile)
-	persistedTip, persistedHeight, havePersistedTip := loadChainTip(tipPath)
+	persistedTip, persistedHeight, persistedServer, havePersistedTip := loadChainTip(tipPath)
+	if havePersistedTip && !strings.EqualFold(persistedServer, serverPubHex) {
+		persistedTip, persistedHeight, havePersistedTip = [32]byte{}, 0, false
+	}
 	inSync := false
 	syncHashes := map[string]bool{}
 	var syncFirstHeight uint64
@@ -783,13 +795,13 @@ func main() {
 		chainTip, chainHeight, chainHaveTip = tip, height, true
 		tipSinceSave++
 		if tipSinceSave >= tipBatchSaves {
-			saveChainTip(tipPath, tip, height)
+			saveChainTip(tipPath, tip, height, serverPubHex)
 			tipSinceSave = 0
 		}
 	}
 	flushChainTip := func() {
 		if chainHaveTip {
-			saveChainTip(tipPath, chainTip, chainHeight)
+			saveChainTip(tipPath, chainTip, chainHeight, serverPubHex)
 			tipSinceSave = 0
 		}
 	}
@@ -1091,7 +1103,7 @@ func main() {
 			var wire WireMessage
 			if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
 				displayMu.Lock()
-				consumeEchoLocked(wire)
+				consumeEchoLocked(wire, true)
 				checkChainLink(wire)
 				flushDateBannerLocked()
 				renderChatBlock(wire)
@@ -1127,7 +1139,7 @@ func main() {
 				if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
 					displayMu.Lock()
 					if wl.Type == "chat" {
-						consumeEchoLocked(wl)
+						consumeEchoLocked(wl, !inSync)
 					}
 					checkChainLink(wl)
 					if wl.Type == "system" && !isShowingJoin && isDateBannerLine(wl.Text) {
@@ -1165,7 +1177,7 @@ func main() {
 						if havePersistedTip && len(syncHashes) > 0 {
 							tipHex := strings.ToLower(hex.EncodeToString(persistedTip[:]))
 							if !syncHashes[tipHex] && persistedHeight >= syncFirstHeight && syncFirstHeight > 0 {
-								emitLocalFeedback("| [Local]: Lịch sử server không chứa tip đã lưu — log có thể đã phân nhánh (fork).\n")
+								emitLocalFeedback(fmt.Sprintf("| [Local]: Lịch sử server không chứa tip đã lưu #%d (replay từ #%d) — log có thể đã phân nhánh (fork).\n", persistedHeight, syncFirstHeight))
 								flushChainTip()
 							}
 						}
