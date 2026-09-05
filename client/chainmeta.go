@@ -352,7 +352,7 @@ func findMetaMatches(lines []string, height uint64, suffix string) []int {
 // Pending (placeholder) quotes carry the grey wrapper plus ⏳ so the erase
 // region check keeps passing; confirmed quotes render plain.
 func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) string {
-	line := fmt.Sprintf("| ↩ #%d: %s", height, quoteFirstLine(headEntry, maxRunes))
+	line := fmt.Sprintf("|   ┌─  ↩ #%d: %s", height, quoteFirstLine(headEntry, maxRunes))
 	if pending {
 		return "\x1b[90m" + line + " ⏳\x1b[0m"
 	}
@@ -367,7 +367,7 @@ func formatQuoteRich(wire WireMessage, pending bool, maxRunes int) string {
 	if err := verifyWireContent(wire); err != nil {
 		mark = "✗"
 	}
-	line := fmt.Sprintf("| ↩ #%d | %s %s %s: %s",
+	line := fmt.Sprintf("|   ┌─  ↩ #%d | %s %s %s: %s",
 		wire.ChainHeight, wire.Time, wire.DisplayName, mark,
 		quoteFirstLine(wire.Text, maxRunes))
 	if pending {
