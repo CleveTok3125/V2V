@@ -905,15 +905,14 @@ func main() {
 		tab = TabChat
 		if wire.Type == "system" {
 			head = fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(wire.Text))
-			tab = classifyTab(wire.Text)
-		} else {
-			mentionOpen, mentionClose := mentionSGR(ClientCfg.MentionColor())
-			head = fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderMentions(renderChatText(wire.Text), resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose))
+			return quote, head, "", classifyTab(wire.Text), wantsMeta(wire, withMeta)
 		}
+		mentionOpen, mentionClose := mentionSGR(ClientCfg.MentionColor())
+		head = fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderMentions(renderChatText(wire.Text), resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose))
 		if wire.ReplyTo > 0 {
 			quote = quoteLinesFor(wire.ReplyTo, false)
 		}
-		if wire.ChainHash == "" || !withMeta {
+		if !wantsMeta(wire, withMeta) {
 			return quote, head, "", tab, false
 		}
 		meta = metaLineFor(wire.ChainHeight, wire.ChainHash, "")
