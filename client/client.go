@@ -384,6 +384,21 @@ func main() {
 	wsURL := normalizeURL(CLI.Server)
 	username := strings.TrimSpace(CLI.Username)
 
+	// Tripcode is a secret: -t takes no value. Resolve it here, before
+	// dialing: the prompts (secret, save offer, unlock) are interactive
+	// and would blow the server's 12s auth-response deadline if they ran
+	// after the challenge. Key derivation still happens after the
+	// challenge so serverPub stays salt-bound.
+	if CLI.UseTripcode && CLI.Tripcode == "" {
+		tc, terr := resolveTripcode(true, CLI.ConfigDir)
+		if terr != nil {
+			fmt.Printf("❌ Tripcode: %v\n", terr)
+			notifyQuit()
+			return
+		}
+		CLI.Tripcode = tc
+	}
+
 	conn, resp, err := dialWS(wsURL)
 	if err != nil {
 		// Auto-upgrade ws:// -> wss:// when server requires TLS (426)
@@ -444,17 +459,6 @@ func main() {
 	// replyDraft holds a quote target awaiting its body on the next line
 	// (bare "/reply H" form). Any slash command or empty-line ^C aborts it.
 	var replyDraft uint64
-	// Tripcode is a secret: -t takes no value. Resolve from env, saved
-	// file or hidden prompt (desktop); WASM keeps its JS-provided string.
-	if CLI.UseTripcode && CLI.Tripcode == "" {
-		tc, terr := resolveTripcode(true, CLI.ConfigDir)
-		if terr != nil {
-			fmt.Printf("❌ Tripcode: %v\n", terr)
-			notifyQuit()
-			return
-		}
-		CLI.Tripcode = tc
-	}
 	passphraseBytes := []byte(CLI.Tripcode)
 	if len(passphraseBytes) > 0 {
 		priv, pub, badge := deriveTripKey(CLI.Tripcode, challenge.ServerPubKey)
