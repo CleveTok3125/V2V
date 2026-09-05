@@ -4,7 +4,6 @@ package main
 // used when key.json holds both flavors.
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -43,6 +42,30 @@ func LoadIdentityFile(path string) (*IdentityFile, error) {
 var loadedPassphrase string
 var loadedWasEncrypted bool
 
+// readLineRaw reads one line without read-ahead: byte-by-byte, so bytes
+// meant for later readers (prompts, then readline's chat loop) stay on
+// the fd. Buffered readers would swallow piped input past the newline.
+func readLineRaw(r io.Reader) (string, error) {
+	var buf []byte
+	one := make([]byte, 1)
+	for {
+		n, err := r.Read(one)
+		if n > 0 {
+			if one[0] == '\n' {
+				break
+			}
+			buf = append(buf, one[0])
+		}
+		if err != nil {
+			if len(buf) == 0 {
+				return "", err
+			}
+			break
+		}
+	}
+	return strings.TrimRight(string(buf), "\r"), nil
+}
+
 func readPassphrase() (string, error) {
 	// Use charmbracelet/x/term to hide input (same stack as v2vctl's huh)
 	if xterm.IsTerminal(os.Stdin.Fd()) {
@@ -53,12 +76,7 @@ func readPassphrase() (string, error) {
 		return string(b), nil
 	}
 	// Fallback for piped/non-TTY (CI): read full line including spaces
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
-	if err != nil && len(line) == 0 {
-		return "", err
-	}
-	return strings.TrimRight(line, "\r\n"), nil
+	return readLineRaw(os.Stdin)
 }
 
 func SaveIdentityFileEncrypted(path string, idf *IdentityFile) error {
@@ -89,7 +107,7 @@ func pickIdentityFrom(r io.Reader, f *IdentityFile) (useEd, usePk bool) {
 	fmt.Println("  [2] passkey           role: " + f.Passkey.Role)
 	fmt.Print("Chọn (1/2, Enter = passkey): ")
 
-	line, err := bufio.NewReader(r).ReadString('\n')
+	line, err := readLineRaw(r)
 	if err != nil && line == "" {
 		return false, true // stdin closed: deterministic default
 	}

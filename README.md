@@ -34,10 +34,13 @@ make help            # see all targets
 **3. Join with a tripcode**
 
 ```bash
-./public/V2V-linux-amd64 -s wss://chat.example.com -u "YourName" -t "my secret phrase"
+./public/V2V-linux-amd64 -s wss://chat.example.com -u "YourName" -t
+# prompts for the secret tripcode (hidden input, never passed as an
+# argument); offers to save it encrypted in tripcode.json afterwards.
 # you will appear as: YourName#ab12
 #                      └─ ✍️ ◆ ab12cd34  (colored, clickable to verify)
 ```
+`V2V_TRIPCODE` env also works (CI only — prefer the encrypted file).
 
 Type `/help` inside the chat for commands (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`).
 

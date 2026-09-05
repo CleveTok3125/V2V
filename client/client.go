@@ -57,13 +57,14 @@ func renderChatText(text string) string {
 }
 
 var CLI struct {
-	Version   kong.VersionFlag `help:"Hiển thị phiên bản (Git Commit Hash)" short:"v"`
-	Server    string           `help:"Link server WebSocket" short:"s"`
-	Username  string           `help:"Tên người dùng của bạn" default:"Anonymous" short:"u"`
-	Tripcode  string           `help:"Mật khẩu bí mật để tạo Chữ ký Tripcode (tùy chọn)" short:"t"`
-	UserAgent string           `help:"Tùy chỉnh User-Agent" default:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" short:"a"`
-	Info      bool             `help:"Kiểm tra thông tin trạng thái của Server" short:"i"`
-	ShowJoin  bool             `help:"Hiện thông báo người dùng ra/vào phòng" short:"j"`
+	Version     kong.VersionFlag `help:"Hiển thị phiên bản" short:"v"`
+	Server      string           `help:"Link server WebSocket" short:"s"`
+	Username    string           `help:"Tên người dùng của bạn" default:"Anonymous" short:"u"`
+	UseTripcode bool             `help:"Dùng tripcode" short:"t"`
+	Tripcode    string           `kong:"-"`
+	UserAgent   string           `help:"Tùy chỉnh User-Agent" default:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" short:"a"`
+	Info        bool             `help:"Kiểm tra thông tin trạng thái của Server" short:"i"`
+	ShowJoin    bool             `help:"Hiện thông báo người dùng ra/vào phòng" short:"j"`
 
 	UseKey    bool   `help:"Dùng key mặc định trong config-dir" short:"k"`
 	KeyFile   string `help:"Đường dẫn file chứa khóa xác thực" short:"K" name:"key-file"`
@@ -443,6 +444,17 @@ func main() {
 	// replyDraft holds a quote target awaiting its body on the next line
 	// (bare "/reply H" form). Any slash command or empty-line ^C aborts it.
 	var replyDraft uint64
+	// Tripcode is a secret: -t takes no value. Resolve from env, saved
+	// file or hidden prompt (desktop); WASM keeps its JS-provided string.
+	if CLI.UseTripcode && CLI.Tripcode == "" {
+		tc, terr := resolveTripcode(true, CLI.ConfigDir)
+		if terr != nil {
+			fmt.Printf("❌ Tripcode: %v\n", terr)
+			notifyQuit()
+			return
+		}
+		CLI.Tripcode = tc
+	}
 	passphraseBytes := []byte(CLI.Tripcode)
 	if len(passphraseBytes) > 0 {
 		priv, pub, badge := deriveTripKey(CLI.Tripcode, challenge.ServerPubKey)
@@ -1102,7 +1114,7 @@ func main() {
 				renderChatBlock(*pendingDateBannerWire)
 				pendingDateBannerWire = nil
 			}
-		};
+		}
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -1256,11 +1268,11 @@ func main() {
 		text, err := term.ReadLine()
 		if err != nil {
 			if errors.Is(err, ErrInputCancel) {
-		// Reply targets attach to the next send only; reset first so a
-		// rejected message never leaks its quote into a later one. The
-		// draft/inline /reply handlers below re-arm it when due.
-		pendingReplyTo = 0
-		if replyDraft > 0 {
+				// Reply targets attach to the next send only; reset first so a
+				// rejected message never leaks its quote into a later one. The
+				// draft/inline /reply handlers below re-arm it when due.
+				pendingReplyTo = 0
+				if replyDraft > 0 {
 					replyDraft = 0
 					term.SetPrompt("| > ")
 					displayMu.Lock()
