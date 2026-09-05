@@ -246,6 +246,7 @@ func DefaultClientConfig() *ClientConfig {
 		"tab":          {"/tab", "/t"},
 		"meta":         {"/meta", "/m"},
 		"find":         {"/find", "/f"},
+		"reply":        {"/reply"},
 		"whoami":       {"/whoami", "/w"},
 		"status":       {"/status"},
 		"help":         {"/help", "/h"},

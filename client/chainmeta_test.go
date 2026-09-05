@@ -26,22 +26,22 @@ func TestMatchPendingIndex(t *testing.T) {
 		{text: "same", tmpID: 2, sentAt: time.Now()},
 	}
 	// Exact tmp_id wins even with duplicate texts.
-	if i := matchPendingIndex(pending, 2, "same", "me", "me"); i != 1 {
+	if i := matchPendingIndex(pending, 2, 0, "same", "me", "me"); i != 1 {
 		t.Fatalf("want 1, got %d", i)
 	}
 	// Legacy oldest-text fallback when the echo carries no ID.
-	if i := matchPendingIndex(pending, 0, "same", "me", "me"); i != 0 {
+	if i := matchPendingIndex(pending, 0, 0, "same", "me", "me"); i != 0 {
 		t.Fatalf("want 0, got %d", i)
 	}
 	// Another user's echo never matches our placeholders.
-	if i := matchPendingIndex(pending, 2, "same", "me", "you"); i != -1 {
+	if i := matchPendingIndex(pending, 2, 0, "same", "me", "you"); i != -1 {
 		t.Fatalf("want -1, got %d", i)
 	}
 	// Unknown ID with different text falls back to no match (texts differ).
-	if i := matchPendingIndex(pending, 9, "other", "me", "me"); i != -1 {
+	if i := matchPendingIndex(pending, 9, 0, "other", "me", "me"); i != -1 {
 		t.Fatalf("want -1, got %d", i)
 	}
-	if i := matchPendingIndex(nil, 1, "same", "me", "me"); i != -1 {
+	if i := matchPendingIndex(nil, 1, 0, "same", "me", "me"); i != -1 {
 		t.Fatalf("want -1, got %d", i)
 	}
 }
@@ -271,5 +271,34 @@ func TestRenderMentions(t *testing.T) {
 	}
 	if !strings.Contains(got, "\x1b[1;96m@#7\x1b[22;39m") {
 		t.Fatalf("plain mention must still highlight: %q", got)
+	}
+}
+
+func TestMatchPendingReplyTo(t *testing.T) {
+	pending := []pendingMsg{
+		{text: "ans", tmpID: 1, replyTo: 5, sentAt: time.Now()},
+	}
+	if i := matchPendingIndex(pending, 1, 5, "ans", "me", "me"); i != 0 {
+		t.Fatalf("want 0, got %d", i)
+	}
+	// Server swapping the quote target must not resolve the placeholder.
+	if i := matchPendingIndex(pending, 1, 6, "ans", "me", "me"); i != -1 {
+		t.Fatalf("swapped reply_to must miss, got %d", i)
+	}
+}
+
+func TestFormatQuote(t *testing.T) {
+	got := formatQuote(12, "| 15:04 Alice: hello world\n", false)
+	if got != "| ↩ #12: 15:04 Alice: hello world" {
+		t.Fatalf("got %q", got)
+	}
+	got = formatQuote(12, "\x1b[90m| Bạn: x ⏳\x1b[0m\n", true)
+	if !strings.HasPrefix(got, "\x1b[90m| ↩ #12:") || !strings.HasSuffix(got, "⏳\x1b[0m") {
+		t.Fatalf("pending quote must be grey with hourglass: %q", got)
+	}
+	long := "| X: " + strings.Repeat("a", 200)
+	got = formatQuote(3, long, false)
+	if strings.Count(got, "a") > 80 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("must truncate: %q", got)
 	}
 }
