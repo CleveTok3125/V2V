@@ -239,23 +239,23 @@ var ansiSpanRe = regexp.MustCompile("\x1b\\[[0-9;]*m[\\s\\S]*?\x1b\\[[0-9;]*m|\x
 
 // renderMentions highlights @#height references whose target resolves via
 // resolve (height in buffer, suffix matching). Unresolved mentions stay
-// plain text so evicted targets never mislead.
-func renderMentions(s string, resolve func(height uint64, suffix string) bool) string {
-	if !strings.Contains(s, "@#") {
+// plain text so evicted targets never mislead. Disabled renders plain.
+func renderMentions(s string, resolve func(height uint64, suffix string) bool, enabled bool, open, close string) string {
+	if !enabled || !strings.Contains(s, "@#") {
 		return s
 	}
 	var sb strings.Builder
 	pos := 0
 	for _, loc := range ansiSpanRe.FindAllStringIndex(s, -1) {
-		sb.WriteString(renderMentionsPlain(s[pos:loc[0]], resolve))
+		sb.WriteString(renderMentionsPlain(s[pos:loc[0]], resolve, open, close))
 		sb.WriteString(s[loc[0]:loc[1]])
 		pos = loc[1]
 	}
-	sb.WriteString(renderMentionsPlain(s[pos:], resolve))
+	sb.WriteString(renderMentionsPlain(s[pos:], resolve, open, close))
 	return sb.String()
 }
 
-func renderMentionsPlain(s string, resolve func(height uint64, suffix string) bool) string {
+func renderMentionsPlain(s string, resolve func(height uint64, suffix string) bool, open, close string) string {
 	ms := findMentions(s)
 	if len(ms) == 0 {
 		return s
@@ -267,13 +267,20 @@ func renderMentionsPlain(s string, resolve func(height uint64, suffix string) bo
 			continue
 		}
 		sb.WriteString(s[pos:m.start])
-		sb.WriteString(sgrMentionOpen)
+		sb.WriteString(open)
 		sb.WriteString(s[m.start:m.end])
-		sb.WriteString(sgrMentionClose)
+		sb.WriteString(close)
 		pos = m.end
 	}
 	sb.WriteString(s[pos:])
 	return sb.String()
+}
+
+// mentionSGR builds the highlight pair from a clamped [r,g,b] triple with
+// the bold attribute the default look carries. The closer resets bold +
+// foreground so surrounding colors resume.
+func mentionSGR(c [3]int) (open, close string) {
+	return fmt.Sprintf("\x1b[1;38;2;%d;%d;%dm", c[0], c[1], c[2]), sgrMentionClose
 }
 
 var ansiStripRe = regexp.MustCompile("\x1b\\[[0-9;]*m|\x1b\\]8;;[^\x1b]*\x1b\\\\")
@@ -332,18 +339,21 @@ func findMetaMatches(lines []string, height uint64, suffix string) []int {
 }
 
 // formatQuote renders one quote preview line from a resolved head entry:
-// "| ↩ #height: first line…", truncated for narrow screens. Pending
-// (placeholder) quotes carry the grey wrapper plus ⏳ so the erase region
-// check keeps passing; confirmed quotes render plain.
-func formatQuote(height uint64, headEntry string, pending bool) string {
+// "| ↩ #height: first line…", truncated to maxRunes for narrow screens.
+// Pending (placeholder) quotes carry the grey wrapper plus ⏳ so the erase
+// region check keeps passing; confirmed quotes render plain.
+func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) string {
 	first := stripANSIForFind(headEntry)
 	if i := strings.Index(first, "\n"); i >= 0 {
 		first = first[:i]
 	}
 	first = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(first), "|"))
 	runes := []rune(first)
-	if len(runes) > 80 {
-		first = string(runes[:80]) + "…"
+	if maxRunes < 20 {
+		maxRunes = 20
+	}
+	if len(runes) > maxRunes {
+		first = string(runes[:maxRunes]) + "…"
 	}
 	line := fmt.Sprintf("| ↩ #%d: %s", height, first)
 	if pending {
