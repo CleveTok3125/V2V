@@ -749,7 +749,7 @@ func main() {
 			}
 			return
 		}
-		idx := matchPendingIndex(pendingPlaceholders, wire.TmpID, wire.Text, username, wire.DisplayName)
+		idx := matchPendingIndex(pendingPlaceholders, wire.TmpID, wire.ReplyTo, wire.Text, username, wire.DisplayName)
 		if idx == -1 {
 			if wire.TmpID != 0 {
 				pendingEchoes = stashEcho(pendingEchoes, wire, 16)
@@ -883,9 +883,25 @@ func main() {
 		return len(findMetaMatches(tabChat.lines, height, suffix)) > 0
 	}
 
+	// quoteLinesFor resolves a reply target to quote preview lines from
+	// either tab buffer (chat first). Nil when evicted. The preview shows
+	// the target's head line, so liars quoting strangers expose themselves
+	// to every receiver resolving locally. Caller must hold displayMu.
+	quoteLinesFor := func(replyTo uint64, pending bool) []string {
+		for _, buf := range []*tabBuffer{tabChat, tabSys} {
+			for _, idx := range findMetaMatches(buf.lines, replyTo, "") {
+				if idx == 0 {
+					continue
+				}
+				return []string{formatQuote(replyTo, buf.lines[idx-1], pending)}
+			}
+		}
+		return nil
+	}
+
 	// buildChatBlock renders one wire into head + trailing meta strings
 	// without emitting. Pure given (wire, av, withMeta); cached by renderChatBlock.
-	buildChatBlock := func(wire WireMessage, av, withMeta bool) (head, meta string, tab int, hasMeta bool) {
+	buildChatBlock := func(wire WireMessage, av, withMeta bool) (quote []string, head, meta string, tab int, hasMeta bool) {
 		tab = TabChat
 		if wire.Type == "system" {
 			head = fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(wire.Text))
@@ -893,8 +909,11 @@ func main() {
 		} else {
 			head = fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderMentions(renderChatText(wire.Text), resolveMentionLocked))
 		}
+		if wire.ReplyTo > 0 {
+			quote = quoteLinesFor(wire.ReplyTo, false)
+		}
 		if wire.ChainHash == "" || !withMeta {
-			return head, "", tab, false
+			return quote, head, "", tab, false
 		}
 		meta = metaLineFor(wire.ChainHeight, wire.ChainHash, "")
 		if wire.Trip != nil {
@@ -905,7 +924,7 @@ func main() {
 			}
 			meta = metaLineFor(wire.ChainHeight, wire.ChainHash, badge)
 		}
-		return head, fmt.Sprintf("| %s\n", meta), tab, true
+		return quote, head, fmt.Sprintf("| %s\n", meta), tab, true
 	}
 
 	renderCache := newRenderCache(200)
@@ -919,9 +938,9 @@ func main() {
 		// Replay and tab switches re-render the same immutable wires;
 		// the chain hash covers the content, so it is a safe cache key
 		// (verify mode and meta visibility are folded in). Messages with
-		// mentions bypass the cache: highlight depends on buffer state
-		// (eviction), which the key cannot see.
-		if wire.ChainHash != "" && !strings.Contains(wire.Text, "@#") {
+		// mentions or quotes bypass the cache: highlight and quote targets
+		// depend on buffer state (eviction), which the key cannot see.
+		if wire.ChainHash != "" && !strings.Contains(wire.Text, "@#") && wire.ReplyTo == 0 {
 			key := strings.ToLower(wire.ChainHash) + "\x00" + wire.Type +
 				"\x00" + map[bool]string{true: "v", false: "p"}[av] +
 				"\x00" + map[bool]string{true: "m", false: "n"}[withMeta]
@@ -932,7 +951,7 @@ func main() {
 				}
 				return
 			}
-			head, meta, tab, hasMeta := buildChatBlock(wire, av, withMeta)
+			_, head, meta, tab, hasMeta := buildChatBlock(wire, av, withMeta)
 			renderCache.put(key, renderedBlock{tab: tab, head: head, meta: meta, hasMeta: hasMeta})
 			emitTab(tab, head)
 			if hasMeta {
@@ -940,7 +959,10 @@ func main() {
 			}
 			return
 		}
-		head, meta, tab, hasMeta := buildChatBlock(wire, av, withMeta)
+		quote, head, meta, tab, hasMeta := buildChatBlock(wire, av, withMeta)
+		for _, q := range quote {
+			emitTab(tab, q+"\n")
+		}
 		emitTab(tab, head)
 		if hasMeta {
 			emitTab(tab, meta)
@@ -1217,6 +1239,9 @@ func main() {
 		if text == "" {
 			continue
 		}
+		// Reply targets attach to the next send only; reset here so a
+		// rejected message never leaks its quote into a later one.
+		pendingReplyTo = 0
 
 		if text == "/quit" || text == "/q" {
 			gracefulQuit()
@@ -1262,6 +1287,8 @@ func main() {
 			emitLocalFeedback("    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
 			emitLocalFeedback("    - /meta, /m [on|off]: Hiện/ẩn dòng meta #height:hash (mặc định hiện, chain vẫn verify)\n")
 			emitLocalFeedback("    - /find, /f <n>[:hash]: Tìm tin theo số height trong bộ nhớ (vd /find 1234)\n")
+			emitLocalFeedback("    - /reply <n>[:hash] text: Trả lời tin #n kèm quote (vd /reply 1234 đồng ý)\n")
+			emitLocalFeedback("    - Gõ @#n (vd @#1234) trong tin để nhắc tới tin khác (sáng lên khi còn trong bộ nhớ)\n")
 			emitLocalFeedback("    - Lệnh lạ bắt đầu bằng / bị chặn, không gửi đi (muốn gửi chữ / đầu dòng thì dùng codeblock)\n")
 			emitLocalFeedback("    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng (^C hủy nhập)\n")
 			emitLocalFeedback("    - Bọc chữ trong `dấu backtick` để hiện nền riêng (inline code một dòng)\n")
@@ -1337,6 +1364,40 @@ func main() {
 			fmt.Fprint(out, "\033[H\033[2J")
 			greeting(out, username)
 			continue
+		}
+
+		if text == "/reply" || strings.HasPrefix(text, "/reply ") {
+			rest := strings.TrimSpace(strings.TrimPrefix(text, "/reply"))
+			fields := strings.Fields(rest)
+			var target, body string
+			if len(fields) > 0 {
+				target = fields[0]
+				body = strings.TrimSpace(rest[len(target):])
+			}
+			height, suffix, err := parseFindArg(target)
+			if err != nil || body == "" {
+				displayMu.Lock()
+				emitLocalFeedback("| [Local]: Dùng /reply <height>[:hash] <tin nhắn> (vd /reply 1234 đồng ý).\n")
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			displayMu.Lock()
+			found := len(findMetaMatches(tabChat.lines, height, suffix)) > 0 ||
+				len(findMetaMatches(tabSys.lines, height, suffix)) > 0
+			displayMu.Unlock()
+			if !found {
+				displayMu.Lock()
+				emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ, không reply được.\n", height))
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			// Quote validated: the body flows through the normal dispatch
+			// below (codeblock collection, guards, send) with the target
+			// attached one-shot.
+			pendingReplyTo = height
+			text = body
 		}
 
 		if text == "/meta" || text == "/m" || strings.HasPrefix(text, "/meta ") || strings.HasPrefix(text, "/m ") {
@@ -1501,6 +1562,15 @@ func main() {
 		// match the highlighted echo anyway.
 		lines := strings.Split(codebg.Render(text), "\n")
 		phRows = len(lines)
+		// Quoted target previews first (same helper as the echo path, so
+		// both blocks share the shape; pending quotes carry ⏳ so the
+		// erase region check keeps passing).
+		if pendingReplyTo > 0 {
+			for _, q := range quoteLinesFor(pendingReplyTo, true) {
+				emitTab(TabChat, q+"\n")
+				phRows++
+			}
+		}
 		for i, line := range lines {
 			line = linkify.Linkify(line)
 			if i == 0 {
@@ -1568,6 +1638,10 @@ func main() {
 				tmpSeq--
 			}
 		}
+		// Reply targets are one-shot: consumed by the send above whether
+		// it succeeded or not (a failed send ends the session anyway).
+		// Reset happens after placeholder tracking below, which records
+		// the target for echo matching.
 		if err != nil {
 			// Mark placeholder as failed (red) is handled by server unicast; keep placeholder grey until then
 			lastMessageTime = time.Now()
@@ -1575,7 +1649,7 @@ func main() {
 			lastMessageTime = time.Now()
 			// Track placeholder so the server echo can replace it.
 			displayMu.Lock()
-			pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: printGen, bufEnd: phBufEnd, sentAt: time.Now(), tmpID: tmpSeq}
+			pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: printGen, bufEnd: phBufEnd, sentAt: time.Now(), tmpID: tmpSeq, replyTo: pendingReplyTo}
 			if tripPriv != nil {
 				pm.hasTrip = true
 				pm.seq = tripSeq
@@ -1606,6 +1680,9 @@ func main() {
 			}
 			displayMu.Unlock()
 		}
+		// Reply targets are one-shot, cleared after tracking above (the
+		// pending entry already captured the target for echo matching).
+		pendingReplyTo = 0
 		if err != nil {
 			fmt.Println("❌ Lỗi gửi tin nhắn:", err)
 			break

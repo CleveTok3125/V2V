@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,6 +31,7 @@ type pendingMsg struct {
 	hasTrip bool
 	sentAt  time.Time
 	tmpID   uint64
+	replyTo uint64
 }
 
 // metaLineFor builds the trailing metadata line of a message block:
@@ -54,18 +56,23 @@ func metaLineFor(height uint64, hashHex, badgePart string) string {
 
 // matchPendingIndex finds the pending placeholder confirmed by a server
 // echo. An exact tmp_id match wins (duplicate texts stay unambiguous);
-// otherwise the oldest text match within a minute applies (pre-chain
-// servers). It returns -1 when nothing matches.
-func matchPendingIndex(pending []pendingMsg, tmpID uint64, text, username, echoDisplay string) int {
+// the quoted target must agree too, so server-side reply swapping leaves
+// the placeholder visibly pending. Otherwise the oldest text match within
+// a minute applies (pre-chain servers). It returns -1 when nothing matches.
+func matchPendingIndex(pending []pendingMsg, tmpID uint64, replyTo uint64, text, username, echoDisplay string) int {
 	if echoDisplay != username || len(pending) == 0 {
 		return -1
 	}
 	if tmpID != 0 {
 		for i, pm := range pending {
-			if pm.tmpID == tmpID {
+			if pm.tmpID == tmpID && pm.replyTo == replyTo {
 				return i
 			}
 		}
+		// An ID-carrying echo that matches nothing is either a server
+		// rewrite or a race (handled via stash upstream) — never fall
+		// back to text, or swapped IDs would resolve anyway.
+		return -1
 	}
 	for i, pm := range pending {
 		if pm.text == text && time.Since(pm.sentAt) < time.Minute {
@@ -322,6 +329,27 @@ func findMetaMatches(lines []string, height uint64, suffix string) []int {
 		out = append(out, i)
 	}
 	return out
+}
+
+// formatQuote renders one quote preview line from a resolved head entry:
+// "| ↩ #height: first line…", truncated for narrow screens. Pending
+// (placeholder) quotes carry the grey wrapper plus ⏳ so the erase region
+// check keeps passing; confirmed quotes render plain.
+func formatQuote(height uint64, headEntry string, pending bool) string {
+	first := stripANSIForFind(headEntry)
+	if i := strings.Index(first, "\n"); i >= 0 {
+		first = first[:i]
+	}
+	first = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(first), "|"))
+	runes := []rune(first)
+	if len(runes) > 80 {
+		first = string(runes[:80]) + "…"
+	}
+	line := fmt.Sprintf("| ↩ #%d: %s", height, first)
+	if pending {
+		return "\x1b[90m" + line + " ⏳\x1b[0m"
+	}
+	return line
 }
 
 // chainTipFile derives the persisted-tip path next to the readline history.
