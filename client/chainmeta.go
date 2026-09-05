@@ -420,16 +420,27 @@ func (x *wireIndex) get(height uint64) (WireMessage, bool) {
 // formatInfoBlock renders the full metadata detail of one indexed wire.
 // Both verdicts recompute locally without network: the chain content
 // hash and, for signed messages, the trip signature.
+// formatInfoBlock renders the full metadata detail of one indexed wire.
+// Both verdicts recompute locally without network: the chain content
+// hash and, for signed messages, the trip signature.
+//
+// Layout is one field per line with a fixed label width, so every value
+// starts at the same column; trip inputs carry an explicit trip prefix
+// to never collide with chain-level labels.
 func formatInfoBlock(wire WireMessage) []string {
+	row := func(label, value string) string {
+		return fmt.Sprintf("|   %-13s %s\n", label, value)
+	}
 	out := []string{fmt.Sprintf("| [Local] #%d — chi tiết metadata:\n", wire.ChainHeight)}
-	out = append(out, fmt.Sprintf("|   %-9s %d\n", "height:", wire.ChainHeight))
-	out = append(out, fmt.Sprintf("|   %-9s %d | reply_to:  %d\n", "tmp_id:", wire.TmpID, wire.ReplyTo))
-	out = append(out, fmt.Sprintf("|   %-9s %s\n", "hash:", strings.ToLower(wire.ChainHash)))
-	out = append(out, fmt.Sprintf("|   %-9s %s\n", "prev:", strings.ToLower(wire.ChainPrev)))
-	out = append(out, fmt.Sprintf("|   %-9s %s | from: %s\n", "time:", wire.Time, wire.DisplayName))
+	out = append(out, row("height:", strconv.FormatUint(wire.ChainHeight, 10)))
+	out = append(out, row("tmp_id:", strconv.FormatUint(wire.TmpID, 10)))
+	out = append(out, row("reply_to:", strconv.FormatUint(wire.ReplyTo, 10)))
+	out = append(out, row("hash:", strings.ToLower(wire.ChainHash)))
+	out = append(out, row("prev:", strings.ToLower(wire.ChainPrev)))
+	out = append(out, row("time:", wire.Time))
+	out = append(out, row("from:", wire.DisplayName))
 	if wire.Trip != nil {
 		tm := wire.Trip
-		badge := "◆ " + shortBadge(tm.Pub)
 		verdict := "✗"
 		detail := ""
 		if _, err := trip.Verify(trip.VerifyParams{
@@ -448,27 +459,28 @@ func formatInfoBlock(wire WireMessage) []string {
 		} else {
 			detail = " (" + err.Error() + ")"
 		}
-		out = append(out, fmt.Sprintf("|   %-9s badge %s %s | seq %d%s\n", "trip:", badge, verdict, tm.Seq, detail))
+		out = append(out, row("trip:", fmt.Sprintf("◆ %s %s%s", shortBadge(tm.Pub), verdict, detail)))
+		out = append(out, row("trip.seq:", strconv.FormatUint(uint64(tm.Seq), 10)))
 		// Every signature input, so the verdict above is checkable by
 		// eye: sha256(text) against msg_hash, then ed25519 over the
 		// payload bytes against sig with pub.
-		out = append(out, fmt.Sprintf("|     %-9s %s\n", "pub:", strings.ToLower(strings.TrimSpace(tm.Pub))))
-		out = append(out, fmt.Sprintf("|     %-9s %s\n", "prev:", strings.ToLower(strings.TrimSpace(tm.Prev))))
-		out = append(out, fmt.Sprintf("|     %-9s %s\n", "sig:", strings.ToLower(strings.TrimSpace(tm.Sig))))
+		out = append(out, row("trip.pub:", strings.ToLower(strings.TrimSpace(tm.Pub))))
+		out = append(out, row("trip.prev:", strings.ToLower(strings.TrimSpace(tm.Prev))))
+		out = append(out, row("trip.sig:", strings.ToLower(strings.TrimSpace(tm.Sig))))
 		hashMark := "✗"
 		if h := sha256.Sum256([]byte(wire.Text)); hex.EncodeToString(h[:]) == strings.ToLower(strings.TrimSpace(tm.MsgHash)) {
 			hashMark = "✓"
 		}
-		out = append(out, fmt.Sprintf("|     %-9s %s %s\n", "msg_hash:", strings.ToLower(strings.TrimSpace(tm.MsgHash)), hashMark))
-		out = append(out, fmt.Sprintf("|     %-9s %s\n", "server_pub:", strings.ToLower(strings.TrimSpace(tm.ServerPub))))
-		out = append(out, fmt.Sprintf("|     %-9s %x\n", "payload:", tripPayloadBytes(wire, tm)))
+		out = append(out, row("trip.hash:", strings.ToLower(strings.TrimSpace(tm.MsgHash))+" "+hashMark))
+		out = append(out, row("trip.srv:", strings.ToLower(strings.TrimSpace(tm.ServerPub))))
+		out = append(out, row("trip.payload:", fmt.Sprintf("%x", tripPayloadBytes(wire, tm))))
 	} else {
-		out = append(out, "|   trip:      (không)\n")
+		out = append(out, row("trip:", "(không)"))
 	}
 	if err := verifyWireContent(wire); err == nil {
-		out = append(out, "|   chain:     khớp ✓\n")
+		out = append(out, row("chain:", "khớp ✓"))
 	} else {
-		out = append(out, fmt.Sprintf("|   chain:     lệch ✗ (%v)\n", err))
+		out = append(out, row("chain:", fmt.Sprintf("lệch ✗ (%v)", err)))
 	}
 	first := stripANSIForFind(wire.Text)
 	if i := strings.Index(first, "\n"); i >= 0 {
@@ -478,7 +490,7 @@ func formatInfoBlock(wire WireMessage) []string {
 	if r := []rune(first); len(r) > 80 {
 		first = string(r[:80]) + "…"
 	}
-	out = append(out, fmt.Sprintf("|   %-9s %s\n", "text:", first))
+	out = append(out, row("text:", first))
 	return out
 }
 
