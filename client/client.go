@@ -25,6 +25,7 @@ import (
 	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/trip"
 	"github.com/CleveTok3125/V2V/linkify"
+	"github.com/CleveTok3125/V2V/markup"
 
 	"github.com/alecthomas/kong"
 )
@@ -33,7 +34,9 @@ var Version = "dev"
 
 // renderChatText sanitizes incoming chat text and renders code spans with
 // the configured highlight palette, falling back to compiled defaults
-// when the client config is absent.
+// when the client config is absent. Forum markup (bold, italic,
+// strikethrough, links, quotes) renders through markup, which delegates
+// code to codebg.
 func renderChatText(text string) string {
 	st := codebg.DefaultStyle()
 	if ClientCfg != nil {
@@ -50,7 +53,7 @@ func renderChatText(text string) string {
 			Operator:   cs.Operator,
 		}
 	}
-	return codebg.RenderWithStyle(filter.SanitizeForDisplay(text), st)
+	return markup.Span(filter.SanitizeForDisplay(text), st)
 }
 
 var CLI struct {
@@ -1654,13 +1657,13 @@ func main() {
 			fmt.Fprint(out, "\033[1A\033[2K\r")
 		}
 
-		// Render code spans on the whole text first so fenced blocks
+		// Render markup on the whole text first so fenced blocks
 		// keep their state across lines; phRows then counts rendered
 		// rows (headers added, closers dropped), matching the erase math.
-		// Plain Render (no highlight): highlight's full resets would
+		// Plain rendering (no highlight): highlight's full resets would
 		// cancel the grey placeholder wrapper mid-line, and line counts
 		// match the highlighted echo anyway.
-		lines := strings.Split(codebg.Render(text), "\n")
+		lines := strings.Split(markup.SpanPlain(text), "\n")
 		phRows = len(lines)
 		// Quoted target previews first (same helper as the echo path, so
 		// both blocks share the shape; pending quotes carry ⏳ so the
