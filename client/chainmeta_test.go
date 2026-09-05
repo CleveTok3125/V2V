@@ -1,13 +1,30 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/chain"
+	"github.com/CleveTok3125/V2V/internal/tripcolor"
 )
+
+// chainedTripWire wraps a trip meta in a valid v2 chained wire for tests.
+func chainedTripWire(tm *TripMeta, text string) WireMessage {
+	prev := chain.Genesis("srv")
+	h := chain.Hash(prev, 50, tm.TmpID, tm.ReplyTo, "chat", "15:04", "Alice", text, tm.Sig)
+	return WireMessage{
+		Type: "chat", Time: "15:04", DisplayName: "Alice", Text: text,
+		TmpID: tm.TmpID, ReplyTo: tm.ReplyTo, Trip: tm,
+		ChainPrev:   hex.EncodeToString(prev[:]),
+		ChainHash:   hex.EncodeToString(h[:]),
+		ChainHeight: 50,
+		ChainVer:    2,
+	}
+}
 
 func TestMetaLineFor(t *testing.T) {
 	got := metaLineFor(1234, "abcdef0123456789", "")
@@ -385,5 +402,52 @@ func TestFormatInfoBlock(t *testing.T) {
 	joined = strings.Join(formatInfoBlock(bad), "")
 	if !strings.Contains(joined, "lệch ✗") {
 		t.Fatalf("tampered wire must show mismatch:\n%s", joined)
+	}
+}
+
+func TestFormatInfoBlockTripDetail(t *testing.T) {
+	// Real signature so the verdict path is genuine.
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 11)
+	}
+	priv := ed25519.NewKeyFromSeed(seed)
+	pub := priv.Public().(ed25519.PublicKey)
+	serverPub := strings.Repeat("ab", 32)
+	var prev [32]byte
+	text := "signed hello"
+	msgHash := sha256.Sum256([]byte(text))
+	payload := tripcolor.CanonicalPayload(serverPub, 9, prev[:], msgHash[:], pub, "Alice", 5, 3)
+	sig := ed25519.Sign(priv, payload)
+	tm := &TripMeta{
+		Pub:         hex.EncodeToString(pub),
+		Seq:         9,
+		Prev:        hex.EncodeToString(prev[:]),
+		Sig:         hex.EncodeToString(sig),
+		ServerPub:   serverPub,
+		MsgHash:     hex.EncodeToString(msgHash[:]),
+		TmpID:       5,
+		ReplyTo:     3,
+	}
+	wire := chainedTripWire(tm, text)
+	joined := strings.Join(formatInfoBlock(wire), "")
+	for _, want := range []string{
+		"badge ◆", "✓", "pub:", hex.EncodeToString(pub),
+		"seq", "prev:", "sig:", hex.EncodeToString(sig),
+		"msg_hash:", "server_pub:", "payload:",
+		hex.EncodeToString(payload),
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("block must contain %q:\n%s", want, joined)
+		}
+	}
+	// Swapping the quote target breaks the trip verdict (bound signature).
+	swapped := wire
+	swapped.Trip = &TripMeta{}
+	*swapped.Trip = *tm
+	swapped.Trip.ReplyTo = 4
+	joined = strings.Join(formatInfoBlock(swapped), "")
+	if !strings.Contains(joined, "✗") {
+		t.Fatalf("swapped reply_to must fail trip verdict:\n%s", joined)
 	}
 }
