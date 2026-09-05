@@ -102,12 +102,15 @@ type WireMessage struct {
 	Text        string    `json:"text,omitempty"`
 	Trip        *TripMeta `json:"trip,omitempty"`
 	// TmpID is the sender's per-session counter, relayed verbatim.
-	// ChainPrev/ChainHash/ChainHeight link the message into the global
-	// hash chain (see server/chain.go); absent on legacy lines.
+	// ReplyTo quotes a chain height for replies. ChainPrev/ChainHash/
+	// ChainHeight link the message into the global hash chain
+	// (see server/chain.go); absent on legacy lines.
 	TmpID       uint64 `json:"tmp_id,omitempty"`
+	ReplyTo     uint64 `json:"reply_to,omitempty"`
 	ChainPrev   string `json:"chain_prev,omitempty"`
 	ChainHash   string `json:"chain_hash,omitempty"`
 	ChainHeight uint64 `json:"chain_height,omitempty"`
+	ChainVer    int    `json:"chain_ver,omitempty"`
 }
 
 type TripMeta struct {
@@ -118,6 +121,7 @@ type TripMeta struct {
 	ServerPub string `json:"server_pub"`
 	MsgHash   string `json:"msg_hash,omitempty"`
 	TmpID     uint64 `json:"tmp_id,omitempty"`
+	ReplyTo   uint64 `json:"reply_to,omitempty"`
 }
 
 type Permission struct {
@@ -180,6 +184,7 @@ type verifyJob struct {
 	textParam   string
 	seq         uint32
 	tmpID       uint64
+	tmpReplyTo  uint64
 }
 
 func parseTripBadgeLine(line string) (verifyJob, bool) {
@@ -257,6 +262,9 @@ func parseTripBadgeLine(line string) (verifyJob, bool) {
 	}
 	if v, err := strconv.ParseUint(q.Get("tmp_id"), 10, 64); err == nil {
 		job.tmpID = v
+	}
+	if v, err := strconv.ParseUint(q.Get("reply_to"), 10, 64); err == nil {
+		job.tmpReplyTo = v
 	}
 	return job, true
 }
@@ -423,6 +431,9 @@ func main() {
 	// tmpSeq numbers every outgoing message in this session (trip and
 	// plain alike). The server relays it verbatim but never assigns it.
 	var tmpSeq uint64
+	// pendingReplyTo quotes a chain height on the next outgoing message
+	// only (/reply sets it, the send path consumes and clears it).
+	var pendingReplyTo uint64
 	passphraseBytes := []byte(CLI.Tripcode)
 	if len(passphraseBytes) > 0 {
 		priv, pub, badge := deriveTripKey(CLI.Tripcode, challenge.ServerPubKey)
@@ -845,6 +856,7 @@ func main() {
 				SigHex:      wire.Trip.Sig,
 				MsgHashHex:  wire.Trip.MsgHash,
 				TmpID:       wire.Trip.TmpID,
+				ReplyTo:     wire.Trip.ReplyTo,
 			})
 			if err == nil && res != nil {
 				colored = badgeColor(res.Badge) + res.Badge + "\x1b[0m"
@@ -855,7 +867,7 @@ func main() {
 			colored = plain
 		}
 		if u, err := url.Parse(wsURL); err == nil && u.Host != "" {
-			urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&text=%s&tmp_id=%d", u.Host, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub, url.QueryEscape(wire.DisplayName), url.QueryEscape(wire.Text), wire.Trip.TmpID)
+			urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&text=%s&tmp_id=%d&reply_to=%d", u.Host, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub, url.QueryEscape(wire.DisplayName), url.QueryEscape(wire.Text), wire.Trip.TmpID, wire.Trip.ReplyTo)
 		}
 		return colored, urlStr
 	}
@@ -864,6 +876,13 @@ func main() {
 	// one trailing meta line ("  └─  #height:hash | ✍️ badge"). Legacy
 	// lines without chain fields render content only. System wires render
 	// sanitized text to their classified tab. Caller must hold displayMu.
+	// resolveMentionLocked reports whether @#height names a buffered
+	// message (suffix checksum when given). Unresolved mentions render
+	// plain so evicted targets never mislead. Caller must hold displayMu.
+	resolveMentionLocked := func(height uint64, suffix string) bool {
+		return len(findMetaMatches(tabChat.lines, height, suffix)) > 0
+	}
+
 	// buildChatBlock renders one wire into head + trailing meta strings
 	// without emitting. Pure given (wire, av, withMeta); cached by renderChatBlock.
 	buildChatBlock := func(wire WireMessage, av, withMeta bool) (head, meta string, tab int, hasMeta bool) {
@@ -872,7 +891,7 @@ func main() {
 			head = fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(wire.Text))
 			tab = classifyTab(wire.Text)
 		} else {
-			head = fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderChatText(wire.Text))
+			head = fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderMentions(renderChatText(wire.Text), resolveMentionLocked))
 		}
 		if wire.ChainHash == "" || !withMeta {
 			return head, "", tab, false
@@ -899,8 +918,10 @@ func main() {
 		showMetaMu.RUnlock()
 		// Replay and tab switches re-render the same immutable wires;
 		// the chain hash covers the content, so it is a safe cache key
-		// (verify mode and meta visibility are folded in).
-		if wire.ChainHash != "" {
+		// (verify mode and meta visibility are folded in). Messages with
+		// mentions bypass the cache: highlight depends on buffer state
+		// (eviction), which the key cannot see.
+		if wire.ChainHash != "" && !strings.Contains(wire.Text, "@#") {
 			key := strings.ToLower(wire.ChainHash) + "\x00" + wire.Type +
 				"\x00" + map[bool]string{true: "v", false: "p"}[av] +
 				"\x00" + map[bool]string{true: "m", false: "n"}[withMeta]
@@ -992,6 +1013,7 @@ func main() {
 				SigHex:      job.sig,
 				MsgHashHex:  job.msgHash,
 				TmpID:       job.tmpID,
+				ReplyTo:     job.tmpReplyTo,
 			})
 			valid := err == nil
 			// Fallback: if textParam was empty but msgHash check failed, try empty text path
@@ -1522,7 +1544,7 @@ func main() {
 			msgHash := sha256.Sum256([]byte(text))
 			prevCopy := make([]byte, len(tripPrev))
 			copy(prevCopy, tripPrev)
-			payload := canonicalPayload(strings.ToLower(challenge.ServerPubKey), tripSeq, prevCopy, msgHash[:], []byte(tripPub), username, tmpSeq)
+			payload := canonicalPayload(strings.ToLower(challenge.ServerPubKey), tripSeq, prevCopy, msgHash[:], []byte(tripPub), username, tmpSeq, pendingReplyTo)
 			sig := ed25519.Sign(tripPriv, payload)
 			h := sha256.New()
 			h.Write(prevCopy)
@@ -1530,7 +1552,7 @@ func main() {
 			h.Write(msgHash[:])
 			newPrev := h.Sum(nil)
 			copy(tripPrev, newPrev)
-			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: username, TmpID: tmpSeq}
+			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: username, TmpID: tmpSeq, ReplyTo: pendingReplyTo}
 			err = conn.WriteJSON(tripMsg)
 			if err != nil {
 				// Rollback seq/prev on send failure to avoid permanent fork
@@ -1541,7 +1563,7 @@ func main() {
 		} else {
 			// Unsigned chat always travels in an envelope carrying the
 			// session counter; raw text is rejected by the server.
-			err = conn.WriteJSON(PlainMessage{TmpID: tmpSeq, Text: text})
+			err = conn.WriteJSON(PlainMessage{TmpID: tmpSeq, Text: text, ReplyTo: pendingReplyTo})
 			if err != nil {
 				tmpSeq--
 			}

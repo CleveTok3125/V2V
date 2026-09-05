@@ -56,8 +56,8 @@ func isWASMRuntime() bool {
 	return runtime.GOOS == "js"
 }
 
-func canonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte, displayName string, tmpID uint64) []byte {
-	return tripcolor.CanonicalPayload(serverPub, seq, prev, msgHash, pub, displayName, tmpID)
+func canonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte, displayName string, tmpID uint64, replyTo uint64) []byte {
+	return tripcolor.CanonicalPayload(serverPub, seq, prev, msgHash, pub, displayName, tmpID, replyTo)
 }
 
 func badgeColor(badge string) string {
@@ -85,14 +85,18 @@ type TripMessage struct {
 	Sig         string `json:"sig,omitempty"`  // hex 128
 	DisplayName string `json:"display_name,omitempty"`
 	TmpID       uint64 `json:"tmp_id,omitempty"`
+	// ReplyTo quotes a chain height for replies, bound into the trip
+	// signature and covered by the chain link (v2+).
+	ReplyTo uint64 `json:"reply_to,omitempty"`
 }
 
 // PlainMessage is the JSON envelope for unsigned chat messages. Break:
 // raw text is no longer accepted; every message carries a per-session
 // counter the server relays verbatim but never assigns.
 type PlainMessage struct {
-	TmpID uint64 `json:"tmp_id"`
-	Text  string `json:"text"`
+	TmpID   uint64 `json:"tmp_id"`
+	Text    string `json:"text"`
+	ReplyTo uint64 `json:"reply_to,omitempty"`
 }
 
 func (m *TripMessage) GetText() string {
