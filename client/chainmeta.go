@@ -506,15 +506,6 @@ func formatInfoBlock(wire WireMessage) []string {
 	} else {
 		out = append(out, row("chain:", fmt.Sprintf("lệch ✗ (%v)", err)))
 	}
-	first := stripANSIForFind(wire.Text)
-	if i := strings.Index(first, "\n"); i >= 0 {
-		first = first[:i]
-	}
-	first = strings.TrimSpace(filter.SanitizeForDisplay(first))
-	if r := []rune(first); len(r) > 80 {
-		first = string(r[:80]) + "…"
-	}
-	out = append(out, row("text:", first))
 	out = append(out, row("raw:", rawOneLine(wire.Text)))
 	return out
 }
