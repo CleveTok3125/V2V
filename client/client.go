@@ -614,9 +614,10 @@ func main() {
 	var verifyMu sync.Mutex
 	autoVerify := true
 	var autoVerifyMu sync.RWMutex
-	// showMeta toggles the trailing "#height:hash" line per session
-	// (/meta, default on). The chain still verifies when hidden.
-	showMeta := true
+	// showMeta toggles the trailing "#height:hash" line (/meta, default
+	// from ui.meta.show in config). The session command overrides
+	// in-memory only; the chain still verifies when hidden.
+	showMeta := ClientCfg.ShowMeta()
 	var showMetaMu sync.RWMutex
 	var displayMu sync.Mutex
 	serverPubForVerify := challenge.ServerPubKey
