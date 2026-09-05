@@ -614,6 +614,10 @@ func main() {
 	var verifyMu sync.Mutex
 	autoVerify := true
 	var autoVerifyMu sync.RWMutex
+	// showMeta toggles the trailing "#height:hash" line per session
+	// (/meta, default on). The chain still verifies when hidden.
+	showMeta := true
+	var showMetaMu sync.RWMutex
 	var displayMu sync.Mutex
 	serverPubForVerify := challenge.ServerPubKey
 	lastMessageTime := time.Now().Add(-10 * time.Second)
@@ -623,6 +627,33 @@ func main() {
 	tabChat := newTabBuffer(cl, cb)
 	tabSys := newTabBuffer(sl, sb)
 	var printGen uint64
+
+	// refreshCoalesced repaints at most every 100ms under burst; a
+	// trailing timer guarantees the last update is never swallowed, so
+	// single messages still appear instantly.
+	var refreshMu sync.Mutex
+	var lastRefresh time.Time
+	var refreshPending bool
+	refreshCoalesced := func() {
+		refreshMu.Lock()
+		if time.Since(lastRefresh) >= 100*time.Millisecond {
+			lastRefresh = time.Now()
+			refreshMu.Unlock()
+			term.Refresh()
+			return
+		}
+		if !refreshPending {
+			refreshPending = true
+			time.AfterFunc(100*time.Millisecond, func() {
+				refreshMu.Lock()
+				refreshPending = false
+				lastRefresh = time.Now()
+				refreshMu.Unlock()
+				term.Refresh()
+			})
+		}
+		refreshMu.Unlock()
+	}
 
 	// pendingPlaceholders tracks grey placeholders awaiting server echo
 	// (pendingMsg lives at package level in chainmeta.go for tests).
@@ -721,6 +752,7 @@ func main() {
 	// Chain verification state: running tip adopted from the first
 	// chained message seen, persisted tip for fork detection after sync.
 	var chainTip [32]byte
+	var chainHeight uint64
 	var chainHaveTip bool
 	var chainWarned bool
 	tipPath := chainTipFile(historyFile)
@@ -729,10 +761,25 @@ func main() {
 	syncHashes := map[string]bool{}
 	var syncFirstHeight uint64
 
-	// noteChainTip advances the running tip and persists it best-effort.
+	// noteChainTip advances the running tip, persisting it in batches:
+	// every tipBatchSaves links plus explicit flushes (quit, fork warn).
+	// A crash between batches only degrades the next sync to first-run
+	// (no fork check), never to a false warning.
+	const tipBatchSaves = 50
+	var tipSinceSave uint64
 	noteChainTip := func(tip [32]byte, height uint64) {
-		chainTip, chainHaveTip = tip, true
-		saveChainTip(tipPath, tip, height)
+		chainTip, chainHeight, chainHaveTip = tip, height, true
+		tipSinceSave++
+		if tipSinceSave >= tipBatchSaves {
+			saveChainTip(tipPath, tip, height)
+			tipSinceSave = 0
+		}
+	}
+	flushChainTip := func() {
+		if chainHaveTip {
+			saveChainTip(tipPath, chainTip, chainHeight)
+			tipSinceSave = 0
+		}
 	}
 
 	// checkChainLink verifies one received wire against the running tip:
@@ -773,6 +820,7 @@ func main() {
 			if parsed, ok := chain.ParseHex64(wire.ChainHash); ok {
 				noteChainTip(parsed, wire.ChainHeight)
 			}
+			flushChainTip()
 			return
 		}
 		noteChainTip(newTip, wire.ChainHeight)
@@ -780,12 +828,11 @@ func main() {
 
 	// badgeForWire verifies a trip badge and builds its colored display
 	// plus the manual-verify hyperlink (kept, opens the stateless API).
-	badgeForWire := func(wire WireMessage) (colored, urlStr string) {
+	// av selects verified vs plain rendering; it is part of the render
+	// cache key, so toggling /autoverify never serves stale colors.
+	badgeForWire := func(wire WireMessage, av bool) (colored, urlStr string) {
 		h := sha256.Sum256([]byte(wire.Trip.Pub))
 		plain := "◆ " + hex.EncodeToString(h[:])[:8]
-		autoVerifyMu.RLock()
-		av := autoVerify
-		autoVerifyMu.RUnlock()
 		if av {
 			res, err := trip.Verify(trip.VerifyParams{
 				Text:        wire.Text,
@@ -816,29 +863,66 @@ func main() {
 	// one trailing meta line ("  └─  #height:hash | ✍️ badge"). Legacy
 	// lines without chain fields render content only. System wires render
 	// sanitized text to their classified tab. Caller must hold displayMu.
-	renderChatBlock := func(wire WireMessage) {
+	// buildChatBlock renders one wire into head + trailing meta strings
+	// without emitting. Pure given (wire, av, withMeta); cached by renderChatBlock.
+	buildChatBlock := func(wire WireMessage, av, withMeta bool) (head, meta string, tab int, hasMeta bool) {
+		tab = TabChat
 		if wire.Type == "system" {
-			emitTab(classifyTab(wire.Text), fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(wire.Text)))
+			head = fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(wire.Text))
+			tab = classifyTab(wire.Text)
 		} else {
-			emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderChatText(wire.Text)))
+			head = fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderChatText(wire.Text))
 		}
-		if wire.ChainHash == "" {
-			return
+		if wire.ChainHash == "" || !withMeta {
+			return head, "", tab, false
 		}
-		meta := metaLineFor(wire.ChainHeight, wire.ChainHash, "")
+		meta = metaLineFor(wire.ChainHeight, wire.ChainHash, "")
 		if wire.Trip != nil {
-			colored, urlStr := badgeForWire(wire)
+			colored, urlStr := badgeForWire(wire, av)
 			badge := colored
 			if urlStr != "" {
 				badge = fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", urlStr, colored)
 			}
 			meta = metaLineFor(wire.ChainHeight, wire.ChainHash, badge)
 		}
-		tab := TabChat
-		if wire.Type == "system" {
-			tab = classifyTab(wire.Text)
+		return head, fmt.Sprintf("| %s\n", meta), tab, true
+	}
+
+	renderCache := newRenderCache(200)
+	renderChatBlock := func(wire WireMessage) {
+		autoVerifyMu.RLock()
+		av := autoVerify
+		autoVerifyMu.RUnlock()
+		showMetaMu.RLock()
+		withMeta := showMeta
+		showMetaMu.RUnlock()
+		// Replay and tab switches re-render the same immutable wires;
+		// the chain hash covers the content, so it is a safe cache key
+		// (verify mode and meta visibility are folded in).
+		if wire.ChainHash != "" {
+			key := strings.ToLower(wire.ChainHash) + "\x00" + wire.Type +
+				"\x00" + map[bool]string{true: "v", false: "p"}[av] +
+				"\x00" + map[bool]string{true: "m", false: "n"}[withMeta]
+			if hit, ok := renderCache.get(key); ok {
+				emitTab(hit.tab, hit.head)
+				if hit.hasMeta {
+					emitTab(hit.tab, hit.meta)
+				}
+				return
+			}
+			head, meta, tab, hasMeta := buildChatBlock(wire, av, withMeta)
+			renderCache.put(key, renderedBlock{tab: tab, head: head, meta: meta, hasMeta: hasMeta})
+			emitTab(tab, head)
+			if hasMeta {
+				emitTab(tab, meta)
+			}
+			return
 		}
-		emitTab(tab, fmt.Sprintf("| %s\n", meta))
+		head, meta, tab, hasMeta := buildChatBlock(wire, av, withMeta)
+		emitTab(tab, head)
+		if hasMeta {
+			emitTab(tab, meta)
+		}
 	}
 
 	// switchTab replays the target buffer under a single lock.
@@ -922,8 +1006,8 @@ func main() {
 			line := fmt.Sprintf("  └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", job.urlStr, colored)
 			displayMu.Lock()
 			emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
-			term.Refresh()
 			displayMu.Unlock()
+			refreshCoalesced()
 		}
 	}()
 
@@ -967,7 +1051,7 @@ func main() {
 				flushDateBannerLocked()
 				renderChatBlock(wire)
 				displayMu.Unlock()
-				term.Refresh()
+				refreshCoalesced()
 				continue
 			}
 			var sysWire WireMessage
@@ -977,18 +1061,18 @@ func main() {
 				if !isShowingJoin && isDateBannerLine(sysWire.Text) {
 					pendingDateBannerWire = &sysWire
 					displayMu.Unlock()
-					term.Refresh()
+					refreshCoalesced()
 					continue
 				}
 				if !isShowingJoin && isJoinLeaveSystemLine(sysWire.Text) {
 					displayMu.Unlock()
-					term.Refresh()
+					refreshCoalesced()
 					continue
 				}
 				flushDateBannerLocked()
 				renderChatBlock(sysWire)
 				displayMu.Unlock()
-				term.Refresh()
+				refreshCoalesced()
 				continue
 			}
 			lines := strings.Split(string(msg), "\n")
@@ -1037,6 +1121,7 @@ func main() {
 							tipHex := strings.ToLower(hex.EncodeToString(persistedTip[:]))
 							if !syncHashes[tipHex] && persistedHeight >= syncFirstHeight && syncFirstHeight > 0 {
 								emitLocalFeedback("| [Local]: Lịch sử server không chứa tip đã lưu — log có thể đã phân nhánh (fork).\n")
+								flushChainTip()
 							}
 						}
 					}
@@ -1067,7 +1152,7 @@ func main() {
 				emitTab(classifyTab(line), fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 				displayMu.Unlock()
 			}
-			term.Refresh()
+			refreshCoalesced()
 		}
 	}()
 
@@ -1077,6 +1162,7 @@ func main() {
 	// an explicit quit command and an EOF (Ctrl+D) leave no dangling state.
 	gracefulQuit := func() {
 		quitting <- true
+		flushChainTip()
 		conn.WriteMessage(wsCloseMessage, []byte{})
 		// Zero trip private key
 		if tripPriv != nil {
@@ -1151,6 +1237,8 @@ func main() {
 			emitLocalFeedback("    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
 			emitLocalFeedback("    - /verify        : Hướng dẫn verify thủ công qua link API\n")
 			emitLocalFeedback("    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
+			emitLocalFeedback("    - /meta, /m [on|off]: Hiện/ẩn dòng meta #height:hash (mặc định hiện, chain vẫn verify)\n")
+			emitLocalFeedback("    - /find, /f <n>[:hash]: Tìm tin theo số height trong bộ nhớ (vd /find 1234)\n")
 			emitLocalFeedback("    - Lệnh lạ bắt đầu bằng / bị chặn, không gửi đi (muốn gửi chữ / đầu dòng thì dùng codeblock)\n")
 			emitLocalFeedback("    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng (^C hủy nhập)\n")
 			emitLocalFeedback("    - Bọc chữ trong `dấu backtick` để hiện nền riêng (inline code một dòng)\n")
@@ -1225,6 +1313,85 @@ func main() {
 		if text == "/clear" || text == "/c" {
 			fmt.Fprint(out, "\033[H\033[2J")
 			greeting(out, username)
+			continue
+		}
+
+		if text == "/meta" || text == "/m" || strings.HasPrefix(text, "/meta ") || strings.HasPrefix(text, "/m ") {
+			rest := ""
+			if strings.HasPrefix(text, "/meta") {
+				rest = strings.TrimSpace(strings.TrimPrefix(text, "/meta"))
+			} else {
+				rest = strings.TrimSpace(strings.TrimPrefix(text, "/m"))
+			}
+			showMetaMu.Lock()
+			switch rest {
+			case "on":
+				showMeta = true
+			case "off":
+				showMeta = false
+			case "":
+				showMeta = !showMeta
+			default:
+				showMetaMu.Unlock()
+				displayMu.Lock()
+				emitLocalFeedback("| [Local]: Dùng /meta, /meta on hoặc /meta off.\n")
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			state := "HIỆN"
+			if !showMeta {
+				state = "ẨN"
+			}
+			showMetaMu.Unlock()
+			displayMu.Lock()
+			emitLocalFeedback(fmt.Sprintf("| [Local]: Dòng meta (#height:hash) %s (chain vẫn verify ngầm).\n", state))
+			displayMu.Unlock()
+			term.Refresh()
+			continue
+		}
+
+		if text == "/find" || text == "/f" || strings.HasPrefix(text, "/find ") || strings.HasPrefix(text, "/f ") {
+			rest := ""
+			if strings.HasPrefix(text, "/find") {
+				rest = strings.TrimSpace(strings.TrimPrefix(text, "/find"))
+			} else {
+				rest = strings.TrimSpace(strings.TrimPrefix(text, "/f"))
+			}
+			height, suffix, err := parseFindArg(rest)
+			if err != nil {
+				displayMu.Lock()
+				emitLocalFeedback(fmt.Sprintf("| [Local]: %v.\n", err))
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			displayMu.Lock()
+			shown := 0
+			fmt.Fprintf(out, "| [Local]: Tìm #%d", height)
+			if suffix != "" {
+				fmt.Fprintf(out, ":%s", suffix)
+			}
+			fmt.Fprintf(out, " trong bộ nhớ:\n")
+			printGen++
+			for _, buf := range []*tabBuffer{tabChat, tabSys} {
+				matches := findMetaMatches(buf.lines, height, suffix)
+				for _, idx := range matches {
+					if idx > 0 {
+						fmt.Fprint(out, buf.lines[idx-1])
+						printGen++
+					}
+					fmt.Fprint(out, buf.lines[idx])
+					printGen++
+				}
+				shown += len(matches)
+			}
+			if shown == 0 {
+				fmt.Fprintf(out, "| [Local]: Không thấy (tin cũ đã bị evict khỏi bộ nhớ hoặc chưa sync).\n")
+				printGen++
+			}
+			displayMu.Unlock()
+			term.Refresh()
 			continue
 		}
 
@@ -1334,8 +1501,15 @@ func main() {
 		// Trailing meta line: every block ends with exactly one meta row so
 		// the echo (carrying the real #height:hash) replaces it in place.
 		// The chain position is unknown until the server echo arrives.
-		emitTab(TabChat, "\x1b[90m|   └─  ··· ⏳\x1b[0m\n")
-		phRows++
+		// Hidden with /meta off; the echo follows the same session flag,
+		// so row counts stay consistent.
+		showMetaMu.RLock()
+		pmMeta := showMeta
+		showMetaMu.RUnlock()
+		if pmMeta {
+			emitTab(TabChat, "\x1b[90m|   └─  ··· ⏳\x1b[0m\n")
+			phRows++
+		}
 		phBufEnd = len(tabChat.lines)
 		term.Refresh()
 		displayMu.Unlock()
@@ -1385,6 +1559,14 @@ func main() {
 				pm.pub = hex.EncodeToString([]byte(tripPub))
 			}
 			pendingPlaceholders = append(pendingPlaceholders, pm)
+			// Bound the queue: echoes that never arrive (dead server, old
+			// build) must not grow memory or turn matching quadratic.
+			// Evicted entries stay grey on screen: honestly unconfirmed.
+			// Linear scan stays trivial at this bound, so no index map.
+			const maxPendingPlaceholders = 128
+			for len(pendingPlaceholders) > maxPendingPlaceholders {
+				pendingPlaceholders = pendingPlaceholders[1:]
+			}
 			// The echo may have beaten us here (local echo race): if a
 			// stashed echo matches, erase the placeholder at once. The
 			// echo itself was already rendered when it arrived.

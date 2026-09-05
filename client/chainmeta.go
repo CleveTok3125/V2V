@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -112,6 +114,106 @@ func reapStaleEchoes(stash []pendingEcho, maxAge time.Duration) (kept []pendingE
 		kept = append(kept, e)
 	}
 	return kept, stale
+}
+
+// renderedBlock is one cached message block: content head plus the
+// trailing meta line, with the tab it belongs to.
+type renderedBlock struct {
+	tab     int
+	head    string
+	meta    string
+	hasMeta bool
+}
+
+// renderCache is a bounded FIFO cache of rendered blocks keyed by chain
+// hash (+verify mode). Chain links are content-bound and immutable, so a
+// cached block never goes stale; palette changes need a restart anyway.
+type renderCache struct {
+	cap   int
+	order []string
+	items map[string]renderedBlock
+}
+
+func newRenderCache(capN int) *renderCache {
+	if capN <= 0 {
+		capN = 200
+	}
+	return &renderCache{cap: capN, items: make(map[string]renderedBlock)}
+}
+
+func (c *renderCache) get(key string) (renderedBlock, bool) {
+	b, ok := c.items[key]
+	return b, ok
+}
+
+func (c *renderCache) put(key string, b renderedBlock) {
+	if _, ok := c.items[key]; !ok {
+		c.order = append(c.order, key)
+	}
+	c.items[key] = b
+	for len(c.order) > c.cap {
+		delete(c.items, c.order[0])
+		c.order = c.order[1:]
+	}
+}
+
+// findMetaRe matches rendered meta lines ("└─  #1234:abcd"); the hash
+// part may be empty when scanning, and is compared separately.
+var findMetaRe = regexp.MustCompile(`└─\s+#(\d+):([0-9a-fA-F]*)`)
+
+var ansiStripRe = regexp.MustCompile("\x1b\\[[0-9;]*m|\x1b\\]8;;[^\x1b]*\x1b\\\\")
+
+// stripANSIForFind removes SGR/OSC8 sequences for text matching.
+func stripANSIForFind(s string) string {
+	return ansiStripRe.ReplaceAllString(s, "")
+}
+
+// parseFindArg parses "/find" arguments: "<height>" or "<height>:<hash>"
+// with an optional leading "#". A bare hash without height is rejected:
+// short hashes collide by design, only the height identifies.
+func parseFindArg(arg string) (uint64, string, error) {
+	t := strings.TrimSpace(arg)
+	t = strings.TrimPrefix(t, "#")
+	if t == "" {
+		return 0, "", errors.New("usage: /find <height> | /find <height>:<hash>")
+	}
+	heightStr := t
+	suffix := ""
+	if i := strings.Index(t, ":"); i >= 0 {
+		heightStr, suffix = t[:i], t[i+1:]
+	}
+	if heightStr == "" {
+		return 0, "", errors.New("a bare hash never identifies: give the height (/find 1234[:abcd])")
+	}
+	height, err := strconv.ParseUint(heightStr, 10, 64)
+	if err != nil || height == 0 {
+		return 0, "", errors.New("usage: /find <height> | /find <height>:<hash>")
+	}
+	for _, r := range suffix {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return 0, "", errors.New("hash suffix must be hex")
+		}
+	}
+	return height, strings.ToLower(suffix), nil
+}
+
+// findMetaMatches scans rendered buffer entries for meta lines of the
+// given height (with optional hash-prefix checksum). It returns the entry
+// indices of matches; callers print each with its preceding head entry.
+func findMetaMatches(lines []string, height uint64, suffix string) []int {
+	want := strconv.FormatUint(height, 10)
+	var out []int
+	for i, line := range lines {
+		m := findMetaRe.FindStringSubmatch(stripANSIForFind(line))
+		if m == nil || m[1] != want {
+			continue
+		}
+		if suffix != "" && !strings.HasPrefix(strings.ToLower(m[2]), suffix) {
+			continue
+		}
+		out = append(out, i)
+	}
+	return out
 }
 
 // chainTipFile derives the persisted-tip path next to the readline history.
