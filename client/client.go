@@ -437,6 +437,9 @@ func main() {
 	// pendingReplyTo quotes a chain height on the next outgoing message
 	// only (/reply sets it, the send path consumes and clears it).
 	var pendingReplyTo uint64
+	// replyDraft holds a quote target awaiting its body on the next line
+	// (bare "/reply H" form). Any slash command or empty-line ^C aborts it.
+	var replyDraft uint64
 	passphraseBytes := []byte(CLI.Tripcode)
 	if len(passphraseBytes) > 0 {
 		priv, pub, badge := deriveTripKey(CLI.Tripcode, challenge.ServerPubKey)
@@ -905,8 +908,9 @@ func main() {
 
 	quoteLinesFor := func(replyTo uint64, pending bool) []string {
 		// Rich path first: the struct carries clean time/author plus a
-		// content verdict. Buffer fallback keeps legacy heads quotable.
-		if wire, ok := wireIdx.get(replyTo); ok {
+		// content verdict. System wires are never quotable (date/join
+		// markers), only chat. Buffer fallback keeps legacy heads quotable.
+		if wire, ok := wireIdx.get(replyTo); ok && quotable(wire) {
 			return []string{formatQuoteRich(wire, pending, ClientCfg.QuoteMaxRunes())}
 		}
 		for _, buf := range []*tabBuffer{tabChat, tabSys} {
@@ -1246,6 +1250,19 @@ func main() {
 		text, err := term.ReadLine()
 		if err != nil {
 			if errors.Is(err, ErrInputCancel) {
+		// Reply targets attach to the next send only; reset first so a
+		// rejected message never leaks its quote into a later one. The
+		// draft/inline /reply handlers below re-arm it when due.
+		pendingReplyTo = 0
+		if replyDraft > 0 {
+					replyDraft = 0
+					term.SetPrompt("| > ")
+					displayMu.Lock()
+					emitLocalFeedback("| [Local]: Đã hủy reply nháp.\n")
+					displayMu.Unlock()
+					term.Refresh()
+					continue
+				}
 				term.SetPrompt("| > ")
 				displayMu.Lock()
 				emitLocalFeedback("| [Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.\n")
@@ -1261,10 +1278,20 @@ func main() {
 		if text == "" {
 			continue
 		}
-		// Reply targets attach to the next send only; reset here so a
-		// rejected message never leaks its quote into a later one.
-		pendingReplyTo = 0
-
+		if replyDraft > 0 {
+			if strings.HasPrefix(text, "/") {
+				// Any slash command aborts the draft, then runs normally
+				// through the dispatch below (a "/" body could never send
+				// anyway: the unknown-slash guard rejects it).
+				replyDraft = 0
+				term.SetPrompt("| > ")
+			} else {
+				// Draft body (codeblock fences included): attach and send.
+				pendingReplyTo = replyDraft
+				replyDraft = 0
+				term.SetPrompt("| > ")
+			}
+		}
 		if text == "/quit" || text == "/q" {
 			gracefulQuit()
 			break
@@ -1310,6 +1337,7 @@ func main() {
 			emitLocalFeedback("    - /meta, /m [on|off]: Hiện/ẩn dòng meta #height:hash (mặc định hiện, chain vẫn verify)\n")
 			emitLocalFeedback("    - /find, /f <n>[:hash]: Tìm tin theo số height trong bộ nhớ (vd /find 1234)\n")
 			emitLocalFeedback("    - /reply <n>[:hash] text: Trả lời tin #n kèm quote (vd /reply 1234 đồng ý)\n")
+			emitLocalFeedback("    - /reply <n>          : Soạn reply nháp, dòng tiếp theo là nội dung\n")
 			emitLocalFeedback("    - Gõ @#n (vd @#1234) trong tin để nhắc tới tin khác (sáng lên khi còn trong bộ nhớ)\n")
 			emitLocalFeedback("    - Lệnh lạ bắt đầu bằng / bị chặn, không gửi đi (muốn gửi chữ / đầu dòng thì dùng codeblock)\n")
 			emitLocalFeedback("    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng (^C hủy nhập)\n")
@@ -1397,9 +1425,9 @@ func main() {
 				body = strings.TrimSpace(rest[len(target):])
 			}
 			height, suffix, err := parseFindArg(target)
-			if err != nil || body == "" {
+			if err != nil {
 				displayMu.Lock()
-				emitLocalFeedback("| [Local]: Dùng /reply <height>[:hash] <tin nhắn> (vd /reply 1234 đồng ý).\n")
+				emitLocalFeedback("| [Local]: Dùng /reply <height>[:hash] [tin nhắn] (vd /reply 1234 đồng ý; /reply 1234 để soạn nháp).\n")
 				displayMu.Unlock()
 				term.Refresh()
 				continue
@@ -1411,6 +1439,21 @@ func main() {
 			if !found {
 				displayMu.Lock()
 				emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ, không reply được.\n", height))
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			if body == "" {
+				// Draft mode: quote now, body on the next line. Any slash
+				// command or empty-line ^C aborts it (see loop top).
+				replyDraft = height
+				term.SetPrompt(fmt.Sprintf("| ↩ #%d > ", height))
+				displayMu.Lock()
+				for _, q := range quoteLinesFor(height, false) {
+					fmt.Fprint(out, q+"\n")
+					printGen++
+				}
+				emitLocalFeedback("| [Local]: Gõ nội dung reply (Enter gửi, ^C ở dòng trống hủy, lệnh / khác hủy draft).\n")
 				displayMu.Unlock()
 				term.Refresh()
 				continue
