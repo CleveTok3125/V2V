@@ -257,11 +257,15 @@ func TestFindMentions(t *testing.T) {
 func TestRenderMentions(t *testing.T) {
 	resolve := func(h uint64, s string) bool { return h == 7 && (s == "" || s == "ab") }
 	open, close := mentionSGR([3]int{0, 255, 255})
-	if open != "\x1b[1;38;2;0;255;255m" || close != "\x1b[22;39m" {
-		t.Fatalf("got %q %q", open, close)
+	if open != "\x1b[1;96m" || close != "\x1b[22;39m" {
+		t.Fatalf("default must stay 16-color, got %q %q", open, close)
+	}
+	open, close = mentionSGR([3]int{255, 0, 0})
+	if open != "\x1b[1;38;2;255;0;0m" {
+		t.Fatalf("custom must be truecolor, got %q", open)
 	}
 	got := renderMentions("see @#7 and @#8 and @#7:zz", resolve, true, open, close)
-	if !strings.Contains(got, "\x1b[1;38;2;0;255;255m@#7\x1b[22;39m") {
+	if !strings.Contains(got, "\x1b[1;38;2;255;0;0m@#7\x1b[22;39m") {
 		t.Fatalf("resolved mention must highlight: %q", got)
 	}
 	if strings.Contains(got, "@#8\x1b") || strings.Contains(got, "@#7:zz\x1b") {
@@ -277,7 +281,7 @@ func TestRenderMentions(t *testing.T) {
 	if strings.Contains(got, "\x1b[48;5;236m\x1b[1;") {
 		t.Fatalf("must not highlight inside SGR span: %q", got)
 	}
-	if !strings.Contains(got, "\x1b[1;38;2;0;255;255m@#7\x1b[22;39m") {
+	if !strings.Contains(got, "\x1b[1;38;2;255;0;0m@#7\x1b[22;39m") {
 		t.Fatalf("plain mention must still highlight: %q", got)
 	}
 }
