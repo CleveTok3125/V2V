@@ -27,7 +27,7 @@ func TestHistoryTripChainPersistenceAndTamper(t *testing.T) {
 	msgText := "hello trip"
 	msgHash := sha256.Sum256([]byte(msgText))
 	displayName := "Tester#eff8"
-	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName)
+	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName, 9)
 	sig := ed25519.Sign(priv, payload)
 
 	trip := &TripMeta{
@@ -53,7 +53,7 @@ func TestHistoryTripChainPersistenceAndTamper(t *testing.T) {
 	}
 	// Tamper: different msg hash should not verify
 	badHash := sha256.Sum256([]byte("tampered"))
-	badPayload := tripcolor.CanonicalPayload(serverPub, 1, prev, badHash[:], pub, displayName)
+	badPayload := tripcolor.CanonicalPayload(serverPub, 1, prev, badHash[:], pub, displayName, 9)
 	if ed25519.Verify(pub, badPayload, sig) {
 		t.Fatalf("tampered payload should not verify")
 	}
@@ -114,7 +114,7 @@ func TestHistoryRestartRepopulation(t *testing.T) {
 	for seq := uint32(1); seq <= 2; seq++ {
 		msg := "msg" + string(rune('0'+seq))
 		h := sha256.Sum256([]byte(msg))
-		payload := tripcolor.CanonicalPayload(serverPub, seq, prev, h[:], pub, "Tester#eff8")
+		payload := tripcolor.CanonicalPayload(serverPub, seq, prev, h[:], pub, "Tester#eff8", 9)
 		sig := ed25519.Sign(priv, payload)
 		hash := sha256.New()
 		hash.Write(prev)
@@ -181,7 +181,7 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 	msgText := "original message"
 	msgHash := sha256.Sum256([]byte(msgText))
 	displayName := "Tester#eff8"
-	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName)
+	payload := tripcolor.CanonicalPayload(serverPub, 1, prev, msgHash[:], pub, displayName, 9)
 	sig := ed25519.Sign(priv, payload)
 	trip := &TripMeta{
 		Pub:         pubHex,
@@ -191,6 +191,7 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 		ServerPub:   serverPub,
 		MsgHash:     hex.EncodeToString(msgHash[:]),
 		DisplayName: displayName,
+		TmpID:       9,
 	}
 	wire3 := WireMessage{Type: "chat", DisplayName: displayName, Text: msgText, Trip: trip}
 	rec := historyRecord{
@@ -200,6 +201,15 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 	line, _ := json.Marshal(rec)
 	if err := os.WriteFile(path, append(line, '\n'), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	// tamperedCopy clones the record shell so each tamper case is independent.
+	tamperedCopy := func(r historyRecord) historyRecord {
+		cp := r
+		wc := *r.Wire
+		tc := *r.Wire.Trip
+		wc.Trip = &tc
+		cp.Wire = &wc
+		return cp
 	}
 	// Helper to verify a record like client auto-verify does
 	verify := func(r historyRecord) bool {
@@ -211,7 +221,7 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 		sigBytes, _ := hex.DecodeString(w.Trip.Sig)
 		prevBytes, _ := hex.DecodeString(w.Trip.Prev)
 		hashBytes, _ := hex.DecodeString(w.Trip.MsgHash)
-		p := tripcolor.CanonicalPayload(w.Trip.ServerPub, w.Trip.Seq, prevBytes, hashBytes, pubBytes, w.Trip.DisplayName)
+		p := tripcolor.CanonicalPayload(w.Trip.ServerPub, w.Trip.Seq, prevBytes, hashBytes, pubBytes, w.Trip.DisplayName, w.Trip.TmpID)
 		return ed25519.Verify(pubBytes, p, sigBytes)
 	}
 	// Load and verify original — should be valid (green)
@@ -250,15 +260,20 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 	if verify(loaded4) {
 		t.Fatalf("tampered seq should not verify")
 	}
-	// Tamper 5: change prev — payload differs, sig must fail (red)
-	loaded5 := rec
-	loaded5.Wire.Trip.Prev = hex.EncodeToString(make([]byte, 32))
-	loaded5.Wire.Trip.Prev = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+	// Tamper 5: server renumbers tmp_id — bound into the signature, must fail
+	loaded5 := tamperedCopy(rec)
+	loaded5.Wire.Trip.TmpID = 10
 	if verify(loaded5) {
+		t.Fatalf("renumbered tmp_id should not verify")
+	}
+	// Tamper 6: change prev — payload differs, sig must fail (red)
+	loaded6 := tamperedCopy(rec)
+	loaded6.Wire.Trip.Prev = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+	if verify(loaded6) {
 		t.Fatalf("tampered prev should not verify")
 	}
-	// Tamper 6: edit history file directly on disk (wire text) and reload — simulates client reload
-	tamperedRec := rec
+	// Tamper 7: edit history file directly on disk (wire text) and reload — simulates client reload
+	tamperedRec := tamperedCopy(rec)
 	tamperedRec.Wire.Text = "edited on disk"
 	tamperedLine, _ := json.Marshal(tamperedRec)
 	os.WriteFile(path, append(tamperedLine, '\n'), 0o600)

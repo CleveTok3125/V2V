@@ -171,7 +171,9 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			updateReadDeadline()
 			continue
 		}
-		// Try to parse as TripMessage JSON envelope for signed messages
+		// Break: every chat message arrives in a JSON envelope carrying
+		// the sender's per-session counter. The server relays tmp_id
+		// verbatim into the wire message but never assigns or alters it.
 		var tripMsg struct {
 			Text        string `json:"text"`
 			Msg         string `json:"msg"`
@@ -180,9 +182,57 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			Prev        string `json:"prev"`
 			Sig         string `json:"sig"`
 			DisplayName string `json:"display_name"`
+			TmpID       uint64 `json:"tmp_id"`
 		}
 		var tripMeta *TripMeta
+		var msgTmpID uint64
 		text := raw
+		if err := json.Unmarshal([]byte(raw), &tripMsg); err == nil && (tripMsg.Sig != "" || tripMsg.TmpID != 0 || strings.TrimSpace(tripMsg.Text+tripMsg.Msg) != "") {
+			if tripMsg.TmpID == 0 {
+				select {
+				case session.Send <- []byte("[Hệ thống]: Tin nhắn thiếu ID phiên (tmp_id). Hãy update client bản mới."):
+				default:
+				}
+				updateReadDeadline()
+				continue
+			}
+			msgTmpID = tripMsg.TmpID
+			if tripMsg.Sig == "" {
+				// Unsigned envelope: plain chat text with a session counter.
+				t := tripMsg.Text
+				if t == "" {
+					t = tripMsg.Msg
+				}
+				if t == "" {
+					select {
+					case session.Send <- []byte("[Hệ thống]: Tin nhắn trống."):
+					default:
+					}
+					updateReadDeadline()
+					continue
+				}
+				text = t
+				if err := filter.ValidateMessage(text); err != nil {
+					select {
+					case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
+					default:
+					}
+					log.Printf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
+					updateReadDeadline()
+					continue
+				}
+			} else {
+				// Signed envelope below (sets text after verification).
+				text = ""
+			}
+		} else {
+			select {
+			case session.Send <- []byte("[Hệ thống]: Định dạng tin nhắn cũ không còn hỗ trợ. Hãy update client bản mới."):
+			default:
+			}
+			updateReadDeadline()
+			continue
+		}
 		if err := json.Unmarshal([]byte(raw), &tripMsg); err == nil && tripMsg.Sig != "" {
 			// Extract text
 			t := tripMsg.Text
@@ -273,6 +323,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				PrevHex:     tripMsg.Prev,
 				SigHex:      tripMsg.Sig,
 				MsgHashHex:  msgHashHex,
+				TmpID:       tripMsg.TmpID,
 			})
 			if err != nil {
 				s.TripChainsMu.Unlock()
@@ -296,6 +347,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				ServerPub:   res.ServerPub,
 				MsgHash:     res.MsgHash,
 				DisplayName: session.DisplayName,
+				TmpID:       tripMsg.TmpID,
 			}
 			// Override session badge if not set
 			if session.TripBadge == "" {
@@ -352,6 +404,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			DisplayName: session.DisplayName,
 			Text:        text,
 			Trip:        tripMeta,
+			TmpID:       msgTmpID,
 		}
 		log.Printf("💬 [MSG từ %s] %s (%s): %s\n", clientIP, session.DisplayName, session.Tripcode, strings.ReplaceAll(text, "\n", "\\n"))
 		s.BroadcastWire(wire, session.Conn)

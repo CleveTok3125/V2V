@@ -11,6 +11,8 @@ import (
 )
 
 // VerifyParams collects all fields needed to verify a trip signature.
+// TmpID binds the sender's per-session message counter into the
+// signature, so altering it breaks verification.
 type VerifyParams struct {
 	Text        string
 	DisplayName string
@@ -20,6 +22,7 @@ type VerifyParams struct {
 	PrevHex     string
 	SigHex      string
 	MsgHashHex  string
+	TmpID       uint64
 }
 
 // VerifyResult holds successful verification data.
@@ -78,7 +81,15 @@ func Verify(p VerifyParams) (*VerifyResult, error) {
 	if hex.EncodeToString(actual[:]) != msgHashHex {
 		return nil, fmt.Errorf("msg_hash mismatch")
 	}
-	payload := tripcolor.CanonicalPayload(serverPub, p.Seq, prevBytes, msgHashBytes, pubBytes, p.DisplayName)
+	// TmpID 0 means a pre-chain signature (or a legacy browser link
+	// without tmp_id): verify against the legacy payload encoding so old
+	// history and old links keep verifying read-only. New signatures
+	// always bind a nonzero TmpID and never match the legacy encoding,
+	// so the fallback cannot be abused to strip IDs.
+	payload := tripcolor.CanonicalPayload(serverPub, p.Seq, prevBytes, msgHashBytes, pubBytes, p.DisplayName, p.TmpID)
+	if p.TmpID == 0 {
+		payload = tripcolor.CanonicalPayloadLegacy(serverPub, p.Seq, prevBytes, msgHashBytes, pubBytes, p.DisplayName)
+	}
 	if !ed25519.Verify(pubBytes, payload, sigBytes) {
 		return nil, fmt.Errorf("signature mismatch")
 	}
