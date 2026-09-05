@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -17,11 +18,39 @@ import (
 
 var guardTripCooldown = guard.NewCooldownMap()
 
+// verifyPage is the human-readable trip verify page, served from disk
+// like the other webterm statics (Docker CWD=/app already carries it).
+const verifyPage = "webterm/verify.html"
+
+// wantsVerifyPage reports whether the client navigated with a browser
+// (Accept includes text/html). API consumers (curl default */*, app.js
+// fetch, old links) keep getting JSON.
+func wantsVerifyPage(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept"), ",") {
+		media := strings.ToLower(strings.TrimSpace(strings.SplitN(part, ";", 2)[0]))
+		if media == "text/html" || media == "application/xhtml+xml" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if wantsVerifyPage(r) {
+		if data, err := os.ReadFile(verifyPage); err == nil {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(data)
+			return
+		}
+		log.Printf("⚠️ [TRIP VERIFY PAGE] %s missing, falling back to JSON", verifyPage)
+	}
+
 	// Abuse mitigation: cap query size and rate-limit per IP (ed25519 verify is cheap but still CPU)
 	if len(r.URL.RawQuery) > 2048 {
 		http.Error(w, "query too large", http.StatusRequestEntityTooLarge)
