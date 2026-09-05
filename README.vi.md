@@ -34,10 +34,13 @@ make help            # xem tất cả target
 **3. Dùng tripcode**
 
 ```bash
-./public/V2V-linux-amd64 -s wss://chat.example.com -u "TênBạn" -t "cụm bí mật của bạn"
+./public/V2V-linux-amd64 -s wss://chat.example.com -u "TênBạn" -t
+# prompt nhập tripcode bí mật (che khi gõ, không truyền qua argument);
+# hỏi lưu mã hóa vào tripcode.json sau đó.
 # bạn sẽ hiện: TênBạn#ab12
 #               └─ ✍️ ◆ ab12cd34  (màu, bấm để verify)
 ```
+Biến môi trường `V2V_TRIPCODE` cũng dùng được (chỉ cho CI — nên dùng file mã hóa).
 
 Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`).
 
