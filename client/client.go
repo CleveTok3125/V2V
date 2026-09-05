@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/CleveTok3125/V2V/codebg"
+	"github.com/CleveTok3125/V2V/internal/chain"
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/trip"
@@ -101,7 +102,12 @@ type WireMessage struct {
 	Text        string    `json:"text,omitempty"`
 	Trip        *TripMeta `json:"trip,omitempty"`
 	// TmpID is the sender's per-session counter, relayed verbatim.
-	TmpID uint64 `json:"tmp_id,omitempty"`
+	// ChainPrev/ChainHash/ChainHeight link the message into the global
+	// hash chain (see server/chain.go); absent on legacy lines.
+	TmpID       uint64 `json:"tmp_id,omitempty"`
+	ChainPrev   string `json:"chain_prev,omitempty"`
+	ChainHash   string `json:"chain_hash,omitempty"`
+	ChainHeight uint64 `json:"chain_height,omitempty"`
 }
 
 type TripMeta struct {
@@ -618,20 +624,12 @@ func main() {
 	tabSys := newTabBuffer(sl, sb)
 	var printGen uint64
 
-	// pendingMsg tracks a grey placeholder awaiting server echo.
-	type pendingMsg struct {
-		text    string
-		rows    int
-		shown   bool
-		gen     uint64
-		bufEnd  int
-		seq     uint32
-		pub     string
-		hasTrip bool
-		sentAt  time.Time
-		tmpID   uint64
-	}
+	// pendingPlaceholders tracks grey placeholders awaiting server echo
+	// (pendingMsg lives at package level in chainmeta.go for tests).
 	pendingPlaceholders := []pendingMsg{}
+	// pendingEchoes buffers our echoes that arrived before their
+	// placeholder was tracked (sub-millisecond local echo race).
+	var pendingEchoes []pendingEcho
 
 	// emitTab buffers a rendered line and prints it only when its tab is
 	// active. Caller must hold displayMu.
@@ -658,27 +656,10 @@ func main() {
 		printGen++
 	}
 
-	// consumeEchoLocked matches a server echo of our own message against the
-	// oldest pending placeholder. On match it drops the pending entry, splices
-	// the placeholder rows out of the tab buffer, and rewrites the screen
-	// region: move up past the placeholder plus any lines printed after it,
-	// clear to bottom, then reprint the intervening lines so the normal
-	// rendering below replaces the placeholder in place. Caller must hold displayMu.
-	consumeEchoLocked := func(wire WireMessage) {
-		if wire.DisplayName != username || len(pendingPlaceholders) == 0 {
-			return
-		}
-		pm := pendingPlaceholders[0]
-		matched := false
-		if wire.Trip != nil && pm.hasTrip {
-			matched = wire.Trip.Pub == pm.pub && wire.Trip.Seq == pm.seq && wire.Text == pm.text
-		} else if wire.Trip == nil && !pm.hasTrip {
-			matched = wire.Text == pm.text && time.Since(pm.sentAt) < time.Minute
-		}
-		if !matched {
-			return
-		}
-		pendingPlaceholders = pendingPlaceholders[1:]
+	// erasePlaceholderLocked splices a placeholder block out of the tab
+	// buffer and rewrites the screen region, reprinting any lines that
+	// intervened after it. Caller must hold displayMu.
+	erasePlaceholderLocked := func(pm pendingMsg) {
 		if !pm.shown || activeTab != TabChat || pm.rows <= 0 {
 			return
 		}
@@ -703,6 +684,161 @@ func main() {
 			fmt.Fprint(out, l)
 		}
 		printGen++
+	}
+
+	// consumeEchoLocked matches a server echo of our own message against
+	// pending placeholders by exact tmp_id (duplicate texts stay
+	// unambiguous), with the legacy oldest-text match as fallback. A match
+	// drops the entry and erases the placeholder. An echo from us that
+	// matches nothing is stashed: it may have beaten its placeholder
+	// (local echo race) and is retried when placeholders are tracked;
+	// entries never matched expire with a warning, which is how
+	// server-side ID tampering surfaces. Caller must hold displayMu.
+	consumeEchoLocked := func(wire WireMessage) {
+		var stale []WireMessage
+		pendingEchoes, stale = reapStaleEchoes(pendingEchoes, 10*time.Second)
+		for _, w := range stale {
+			emitLocalFeedback(fmt.Sprintf("| [Local]: Echo không khớp tin đang chờ (tmp_id=%d) — ID có thể đã bị sửa.\n", w.TmpID))
+		}
+		if wire.DisplayName != username || len(pendingPlaceholders) == 0 {
+			if wire.DisplayName == username && wire.TmpID != 0 {
+				pendingEchoes = stashEcho(pendingEchoes, wire, 16)
+			}
+			return
+		}
+		idx := matchPendingIndex(pendingPlaceholders, wire.TmpID, wire.Text, username, wire.DisplayName)
+		if idx == -1 {
+			if wire.TmpID != 0 {
+				pendingEchoes = stashEcho(pendingEchoes, wire, 16)
+			}
+			return
+		}
+		pm := pendingPlaceholders[idx]
+		pendingPlaceholders = append(pendingPlaceholders[:idx], pendingPlaceholders[idx+1:]...)
+		erasePlaceholderLocked(pm)
+	}
+
+	// Chain verification state: running tip adopted from the first
+	// chained message seen, persisted tip for fork detection after sync.
+	var chainTip [32]byte
+	var chainHaveTip bool
+	var chainWarned bool
+	tipPath := chainTipFile(historyFile)
+	persistedTip, persistedHeight, havePersistedTip := loadChainTip(tipPath)
+	inSync := false
+	syncHashes := map[string]bool{}
+	var syncFirstHeight uint64
+
+	// noteChainTip advances the running tip and persists it best-effort.
+	noteChainTip := func(tip [32]byte, height uint64) {
+		chainTip, chainHaveTip = tip, true
+		saveChainTip(tipPath, tip, height)
+	}
+
+	// checkChainLink verifies one received wire against the running tip:
+	// content hash always, prev continuity once a tip is adopted. Legacy
+	// lines without chain fields pass silently. The first chained message
+	// adopts its own prev. Any break warns once and adopts (availability),
+	// so chat stays usable while tampering stays visible. During history
+	// sync every chained hash is collected for the fork check at the end
+	// marker. Caller must hold displayMu (warns via local feedback).
+	checkChainLink := func(wire WireMessage) {
+		if wire.ChainHash == "" {
+			return
+		}
+		if inSync {
+			syncHashes[strings.ToLower(wire.ChainHash)] = true
+			if syncFirstHeight == 0 {
+				syncFirstHeight = wire.ChainHeight
+			}
+		}
+		newTip, err := verifyWireLink(wire, chainTip)
+		if err != nil && !chainHaveTip {
+			// No tip yet: adopt the message's own prev, content-check only.
+			prev, ok := chain.ParseHex64(wire.ChainPrev)
+			if !ok {
+				if !chainWarned {
+					chainWarned = true
+					emitLocalFeedback("| [Local]: Chain link đầu tiên sai định dạng — bỏ qua kiểm tra.\n")
+				}
+				return
+			}
+			newTip, err = verifyWireLink(wire, prev)
+		}
+		if err != nil {
+			if !chainWarned {
+				chainWarned = true
+				emitLocalFeedback(fmt.Sprintf("| [Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", wire.ChainHeight, err))
+			}
+			if parsed, ok := chain.ParseHex64(wire.ChainHash); ok {
+				noteChainTip(parsed, wire.ChainHeight)
+			}
+			return
+		}
+		noteChainTip(newTip, wire.ChainHeight)
+	}
+
+	// badgeForWire verifies a trip badge and builds its colored display
+	// plus the manual-verify hyperlink (kept, opens the stateless API).
+	badgeForWire := func(wire WireMessage) (colored, urlStr string) {
+		h := sha256.Sum256([]byte(wire.Trip.Pub))
+		plain := "◆ " + hex.EncodeToString(h[:])[:8]
+		autoVerifyMu.RLock()
+		av := autoVerify
+		autoVerifyMu.RUnlock()
+		if av {
+			res, err := trip.Verify(trip.VerifyParams{
+				Text:        wire.Text,
+				DisplayName: wire.DisplayName,
+				ServerPub:   wire.Trip.ServerPub,
+				PubHex:      wire.Trip.Pub,
+				Seq:         wire.Trip.Seq,
+				PrevHex:     wire.Trip.Prev,
+				SigHex:      wire.Trip.Sig,
+				MsgHashHex:  wire.Trip.MsgHash,
+				TmpID:       wire.Trip.TmpID,
+			})
+			if err == nil && res != nil {
+				colored = badgeColor(res.Badge) + res.Badge + "\x1b[0m"
+			} else {
+				colored = "\x1b[91m" + plain + " ✗\x1b[0m"
+			}
+		} else {
+			colored = plain
+		}
+		if u, err := url.Parse(wsURL); err == nil && u.Host != "" {
+			urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&text=%s&tmp_id=%d", u.Host, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub, url.QueryEscape(wire.DisplayName), url.QueryEscape(wire.Text), wire.Trip.TmpID)
+		}
+		return colored, urlStr
+	}
+
+	// renderChatBlock renders one wire message as content rows plus exactly
+	// one trailing meta line ("  └─  #height:hash | ✍️ badge"). Legacy
+	// lines without chain fields render content only. System wires render
+	// sanitized text to their classified tab. Caller must hold displayMu.
+	renderChatBlock := func(wire WireMessage) {
+		if wire.Type == "system" {
+			emitTab(classifyTab(wire.Text), fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(wire.Text)))
+		} else {
+			emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderChatText(wire.Text)))
+		}
+		if wire.ChainHash == "" {
+			return
+		}
+		meta := metaLineFor(wire.ChainHeight, wire.ChainHash, "")
+		if wire.Trip != nil {
+			colored, urlStr := badgeForWire(wire)
+			badge := colored
+			if urlStr != "" {
+				badge = fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", urlStr, colored)
+			}
+			meta = metaLineFor(wire.ChainHeight, wire.ChainHash, badge)
+		}
+		tab := TabChat
+		if wire.Type == "system" {
+			tab = classifyTab(wire.Text)
+		}
+		emitTab(tab, fmt.Sprintf("| %s\n", meta))
 	}
 
 	// switchTab replays the target buffer under a single lock.
@@ -793,7 +929,19 @@ func main() {
 
 	go func() {
 		var pendingDateBanner string
-
+		var pendingDateBannerWire *WireMessage
+		// flushDateBannerLocked prints a stashed date banner to TabSystem
+		// before the block that follows it. Caller must hold displayMu.
+		flushDateBannerLocked := func() {
+			if pendingDateBanner != "" {
+				emitTab(TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(pendingDateBanner)))
+				pendingDateBanner = ""
+			}
+			if pendingDateBannerWire != nil {
+				renderChatBlock(*pendingDateBannerWire)
+				pendingDateBannerWire = nil
+			}
+		};
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -815,57 +963,31 @@ func main() {
 			if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
 				displayMu.Lock()
 				consumeEchoLocked(wire)
-				emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderChatText(wire.Text)))
+				checkChainLink(wire)
+				flushDateBannerLocked()
+				renderChatBlock(wire)
 				displayMu.Unlock()
-				if wire.Trip != nil {
-					h := sha256.Sum256([]byte(wire.Trip.Pub))
-					// Quick pub decode to compute badge; actual verify via shared lib
-					pubBytes, _ := hex.DecodeString(wire.Trip.Pub)
-					_ = pubBytes
-					badgeTmp := "◆ " + hex.EncodeToString(h[:])[:8]
-					_ = badgeTmp
-					autoVerifyMu.RLock()
-					av := autoVerify
-					autoVerifyMu.RUnlock()
-					var colored string
-					if av {
-						res, err := trip.Verify(trip.VerifyParams{
-							Text:        wire.Text,
-							DisplayName: wire.DisplayName,
-							ServerPub:   wire.Trip.ServerPub,
-							PubHex:      wire.Trip.Pub,
-							Seq:         wire.Trip.Seq,
-							PrevHex:     wire.Trip.Prev,
-							SigHex:      wire.Trip.Sig,
-							MsgHashHex:  wire.Trip.MsgHash,
-							TmpID:       wire.Trip.TmpID,
-						})
-						if err == nil && res != nil {
-							colored = badgeColor(res.Badge) + res.Badge + "\x1b[0m"
-						} else {
-							badge := "◆ " + hex.EncodeToString(h[:])[:8]
-							colored = "\x1b[91m" + badge + " ✗\x1b[0m"
-						}
-					} else {
-						badge := "◆ " + hex.EncodeToString(h[:])[:8]
-						colored = badge
-					}
-					hostForLink2 := ""
-					if u, err := url.Parse(wsURL); err == nil {
-						hostForLink2 = u.Host
-					}
-					urlStr := ""
-					if hostForLink2 != "" {
-						urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&text=%s&tmp_id=%d", hostForLink2, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub, url.QueryEscape(wire.DisplayName), url.QueryEscape(wire.Text), wire.Trip.TmpID)
-					}
-					displayMu.Lock()
-					if urlStr != "" {
-						emitTab(TabChat, fmt.Sprintf("|   └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\\n", urlStr, colored))
-					} else {
-						emitTab(TabChat, fmt.Sprintf("|   └─ ✍️ %s\n", colored))
-					}
+				term.Refresh()
+				continue
+			}
+			var sysWire WireMessage
+			if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {
+				displayMu.Lock()
+				checkChainLink(sysWire)
+				if !isShowingJoin && isDateBannerLine(sysWire.Text) {
+					pendingDateBannerWire = &sysWire
 					displayMu.Unlock()
+					term.Refresh()
+					continue
 				}
+				if !isShowingJoin && isJoinLeaveSystemLine(sysWire.Text) {
+					displayMu.Unlock()
+					term.Refresh()
+					continue
+				}
+				flushDateBannerLocked()
+				renderChatBlock(sysWire)
+				displayMu.Unlock()
 				term.Refresh()
 				continue
 			}
@@ -873,58 +995,24 @@ func main() {
 			for _, line := range lines {
 				// Also try per-line JSON (for history blob where each line is a WireMessage JSON)
 				var wl WireMessage
-				if err := json.Unmarshal([]byte(line), &wl); err == nil && wl.Type == "chat" {
+				if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
 					displayMu.Lock()
-					consumeEchoLocked(wl)
-					emitTab(TabChat, fmt.Sprintf("| %s %s: %s\n", wl.Time, wl.DisplayName, renderChatText(wl.Text)))
-					displayMu.Unlock()
-					if wl.Trip != nil {
-						h := sha256.Sum256([]byte(wl.Trip.Pub))
-						badgeTmp2 := "◆ " + hex.EncodeToString(h[:])[:8]
-						_ = badgeTmp2
-						autoVerifyMu.RLock()
-						av := autoVerify
-						autoVerifyMu.RUnlock()
-						var colored string
-						if av {
-						res, err := trip.Verify(trip.VerifyParams{
-							Text:        wl.Text,
-							DisplayName: wl.DisplayName,
-							ServerPub:   wl.Trip.ServerPub,
-							PubHex:      wl.Trip.Pub,
-							Seq:         wl.Trip.Seq,
-							PrevHex:     wl.Trip.Prev,
-							SigHex:      wl.Trip.Sig,
-							MsgHashHex:  wl.Trip.MsgHash,
-							TmpID:       wl.Trip.TmpID,
-						})
-							if err == nil && res != nil {
-								colored = badgeColor(res.Badge) + res.Badge + "\x1b[0m"
-							} else {
-								badge := "◆ " + hex.EncodeToString(h[:])[:8]
-								colored = "\x1b[91m" + badge + " ✗\x1b[0m"
-							}
-						} else {
-							badge := "◆ " + hex.EncodeToString(h[:])[:8]
-							colored = badge
-						}
-						hostForLink2 := ""
-						if u, err := url.Parse(wsURL); err == nil {
-							hostForLink2 = u.Host
-						}
-						urlStr := ""
-						if hostForLink2 != "" {
-							urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&text=%s&tmp_id=%d", hostForLink2, wl.Trip.Pub, wl.Trip.Seq, wl.Trip.Prev, wl.Trip.Sig, wl.Trip.MsgHash, wl.Trip.ServerPub, url.QueryEscape(wl.DisplayName), url.QueryEscape(wl.Text), wl.Trip.TmpID)
-						}
-						displayMu.Lock()
-						if urlStr != "" {
-							emitTab(TabChat, fmt.Sprintf("|   └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\\n", urlStr, colored))
-						} else {
-							emitTab(TabChat, fmt.Sprintf("|   └─ ✍️ %s\n", colored))
-						}
+					if wl.Type == "chat" {
+						consumeEchoLocked(wl)
+					}
+					checkChainLink(wl)
+					if wl.Type == "system" && !isShowingJoin && isDateBannerLine(wl.Text) {
+						pendingDateBannerWire = &wl
 						displayMu.Unlock()
 						continue
 					}
+					if wl.Type == "system" && !isShowingJoin && isJoinLeaveSystemLine(wl.Text) {
+						displayMu.Unlock()
+						continue
+					}
+					flushDateBannerLocked()
+					renderChatBlock(wl)
+					displayMu.Unlock()
 					continue
 				}
 				if !isShowingJoin && isDateBannerLine(line) {
@@ -935,19 +1023,31 @@ func main() {
 					continue
 				}
 				if !isShowingJoin && isHistoryBoundaryLine(line) {
+					displayMu.Lock()
+					if strings.Contains(line, "--- Lịch sử chat gần đây ---") {
+						inSync = true
+						syncHashes = map[string]bool{}
+						syncFirstHeight = 0
+					}
 					if strings.Contains(line, "--- Kết thúc lịch sử ---") {
 						pendingDateBanner = ""
+						pendingDateBannerWire = nil
+						inSync = false
+						if havePersistedTip && len(syncHashes) > 0 {
+							tipHex := strings.ToLower(hex.EncodeToString(persistedTip[:]))
+							if !syncHashes[tipHex] && persistedHeight >= syncFirstHeight && syncFirstHeight > 0 {
+								emitLocalFeedback("| [Local]: Lịch sử server không chứa tip đã lưu — log có thể đã phân nhánh (fork).\n")
+							}
+						}
 					}
-					displayMu.Lock()
 					emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 					displayMu.Unlock()
 					continue
 				}
-				if !isShowingJoin && pendingDateBanner != "" {
+				if !isShowingJoin && (pendingDateBanner != "" || pendingDateBannerWire != nil) {
 					displayMu.Lock()
-					emitTab(TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(pendingDateBanner)))
+					flushDateBannerLocked()
 					displayMu.Unlock()
-					pendingDateBanner = ""
 				}
 				if isTripBadgeLine(line) {
 					autoVerifyMu.RLock()
@@ -1231,6 +1331,11 @@ func main() {
 				phRows++
 			}
 		}
+		// Trailing meta line: every block ends with exactly one meta row so
+		// the echo (carrying the real #height:hash) replaces it in place.
+		// The chain position is unknown until the server echo arrives.
+		emitTab(TabChat, "\x1b[90m|   └─  ··· ⏳\x1b[0m\n")
+		phRows++
 		phBufEnd = len(tabChat.lines)
 		term.Refresh()
 		displayMu.Unlock()
@@ -1280,6 +1385,20 @@ func main() {
 				pm.pub = hex.EncodeToString([]byte(tripPub))
 			}
 			pendingPlaceholders = append(pendingPlaceholders, pm)
+			// The echo may have beaten us here (local echo race): if a
+			// stashed echo matches, erase the placeholder at once. The
+			// echo itself was already rendered when it arrived.
+			var haveStashed bool
+			pendingEchoes, _, haveStashed = takeStashedEcho(pendingEchoes, pm.tmpID)
+			if haveStashed {
+				for i, p := range pendingPlaceholders {
+					if p.tmpID == pm.tmpID {
+						pendingPlaceholders = append(pendingPlaceholders[:i], pendingPlaceholders[i+1:]...)
+						break
+					}
+				}
+				erasePlaceholderLocked(pm)
+			}
 			displayMu.Unlock()
 		}
 		if err != nil {
