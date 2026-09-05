@@ -344,3 +344,46 @@ func TestWantsMeta(t *testing.T) {
 		t.Fatal("legacy lines must not render meta")
 	}
 }
+
+func TestWireIndexBounded(t *testing.T) {
+	x := newWireIndex(3)
+	for h := uint64(1); h <= 5; h++ {
+		x.put(WireMessage{Type: "chat", Text: "m", ChainHeight: h, ChainHash: "ab12"})
+	}
+	x.put(WireMessage{Type: "chat", Text: "legacy"}) // no height: skipped
+	if _, ok := x.get(1); ok {
+		t.Fatal("height 1 must evict")
+	}
+	if _, ok := x.get(2); ok {
+		t.Fatal("height 2 must evict")
+	}
+	for _, h := range []uint64{3, 4, 5} {
+		if w, ok := x.get(h); !ok || w.ChainHeight != h {
+			t.Fatalf("height %d must hit", h)
+		}
+	}
+	if _, ok := x.get(99); ok {
+		t.Fatal("missing height must miss")
+	}
+}
+
+func TestFormatInfoBlock(t *testing.T) {
+	wire := chainedTestWire(chain.Genesis("srv"), 12, 5)
+	wire.DisplayName = "Alice"
+	wire.Time = "15:04"
+	wire.Text = "hello"
+	lines := formatInfoBlock(wire)
+	joined := strings.Join(lines, "")
+	for _, want := range []string{"#12", "tmp_id:", "12", "reply_to:", "hash:", "prev:", "Alice", "15:04", "(không)", "khớp ✓", "hello"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("block must contain %q:\n%s", want, joined)
+		}
+	}
+	// Tampered content flips the chain verdict.
+	bad := wire
+	bad.Text = "edited"
+	joined = strings.Join(formatInfoBlock(bad), "")
+	if !strings.Contains(joined, "lệch ✗") {
+		t.Fatalf("tampered wire must show mismatch:\n%s", joined)
+	}
+}

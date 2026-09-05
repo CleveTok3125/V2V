@@ -39,7 +39,7 @@ make help            # xem tất cả target
 #               └─ ✍️ ◆ ab12cd34  (màu, bấm để verify)
 ```
 
-Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/verify`, `/tab`, `/meta`, `/find`, `/reply`).
+Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`).
 
 Tin nhắn của bạn hiện xám kèm `⏳` trước, rồi được thay bằng dòng xác nhận khi server gửi lại (echo). Lệnh `/` lạ bị chặn ngay trên máy, không gửi đi (muốn gửi chữ bắt đầu bằng `/` thì bọc trong codeblock ```).
 
