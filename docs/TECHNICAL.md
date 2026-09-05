@@ -68,7 +68,8 @@ make clean
 
 - Locations follow the OS (`internal/configdir`): config dir holds `key.json` + auto-created `config.json` (`~/.config/V2V/` Linux, `%AppData%\V2V` Windows, `~/Library/Application Support/V2V` macOS); cache dir holds `history.tmp`. Override with `-c/--config-dir` (`V2V_CONFIG_DIR`) and `-C/--cache-dir` (`V2V_CACHE_DIR`).
 - Identity flags: `-k` uses the default key in the config dir, `-K/--key-file <path>` uses an explicit path (old `v2v -k <path>` now errors). No key given means guest mode.
-- `template/config.json` documents every group (`defaults`, `network`, `limits`, `guard`, `channels`, `crypto`, `ui`, `commands`, `timeouts`, `tabs`); `internal/config` loads it with `LoadOrCreate` (missing `tabs` section is backfilled). Sensitive fields (tripcode, passphrases, private keys) never go in `config.json` — they stay in encrypted `key.json`.
+- `template/config.json` documents every group (`defaults`, `network`, `limits`, `guard`, `channels`, `crypto`, `ui`, `commands`, `timeouts`, `tabs`); `internal/config` loads it with `LoadOrCreate` (missing `tabs`/`codeStyle` sections, numeric `limits` and `ui.meta.show` are backfilled so partial files stay usable). Sensitive fields (tripcode, passphrases, private keys) never go in `config.json` — they stay in encrypted `key.json`.
+- `ui.meta.show` (default true, `*bool` so absent ≠ false) toggles the trailing `#height:hash` line; `/meta` overrides it for the session only. The verified chain tip persists in `<cache>/chain_tip.json` (best effort).
 - Tab buffer caps come from config, never hardcoded: chat line cap derives from `ui.web.scrollback` (10000), `tabs.chatMaxBytes` (2MiB), `tabs.systemMaxLines` (2000), `tabs.systemMaxBytes` (400KB).
 
 ## Client Tabs
@@ -85,7 +86,8 @@ make clean
 
 ## Slash Commands
 
-- Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, and the `/verify` prefix. Anything else starting with `/` is an unknown command (`client/commands.go:isUnknownSlashCommand`) rejected locally with `| [Local]: Lệnh không tồn tại…`, never broadcast or trip-signed. Code blocks (```) are unaffected, so they double as the escape hatch for sending literal text starting with `/`.
+- Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, `/meta`/`/m` with optional `on|off`, `/find`/`/f` with `<height>[:hash]`, and the `/verify` prefix. Anything else starting with `/` is an unknown command (`client/commands.go:isUnknownSlashCommand`) rejected locally with `| [Local]: Lệnh không tồn tại…`, never broadcast or trip-signed. Code blocks (```) are unaffected, so they double as the escape hatch for sending literal text starting with `/`.
+- `/find` looks up messages by chain height (the mandatory identifier; a bare hash is rejected since short hashes collide by design, and an appended `:hash` acts only as a typo checksum) across both tab buffers; evicted history reports as not found.
 - Code block input (`client.go:collectCodeblock`): a first line that already closes its fence (`codebg.NeedsContinuation`) sends immediately without multiline collection; `Ctrl+C` aborts collection via `ErrInputCancel` (empty line cancels on WASM, any interrupt cancels on desktop) and discards everything silently, while `Ctrl+D` (`io.EOF`) keeps quitting. `Ctrl+C` on the main prompt prints `| [Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.` instead of quitting.
 
 ## Wire Protocol & History
