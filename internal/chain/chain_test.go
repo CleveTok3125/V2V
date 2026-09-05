@@ -100,3 +100,26 @@ func TestShortForms(t *testing.T) {
 		t.Fatalf("got %q %q", Short(h), Short4(h))
 	}
 }
+
+func BenchmarkVerify500(b *testing.B) {
+	var prev [32]byte
+	type link struct {
+		prev   [32]byte
+		height uint64
+		hash   [32]byte
+	}
+	links := make([]link, 500)
+	for i := range links {
+		h := Hash(prev, uint64(i+1), uint64(i+1), "chat", "15:04", "Alice", "hello", "")
+		links[i] = link{prev: prev, height: uint64(i + 1), hash: h}
+		prev = h
+	}
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		for _, l := range links {
+			if !VerifyLink(l.prev, l.height, l.height, "chat", "15:04", "Alice", "hello", "", l.hash) {
+				b.Fatal("broken link")
+			}
+		}
+	}
+}
