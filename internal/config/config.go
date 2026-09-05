@@ -147,6 +147,13 @@ type ClientConfig struct {
 			Enabled       *bool `json:"enabled"`
 			QuoteMaxRunes int   `json:"quoteMaxRunes"`
 		} `json:"reply"`
+		// Clipboard controls /copy hygiene. ClearAfterSec auto-clears the
+		// clipboard N seconds after a copy (0 disables). A pointer so an
+		// absent section (old config files) backfills to the default
+		// instead of silently disabling clearing.
+		Clipboard struct {
+			ClearAfterSec *int `json:"clearAfterSec"`
+		} `json:"clipboard"`
 		CodeStyle struct {
 			Background [3]int `json:"background"`
 			Keyword    [3]int `json:"keyword"`
@@ -236,6 +243,8 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.Mention.Color = [3]int{0, 255, 255}
 	c.UI.Reply.Enabled = boolPtr(true)
 	c.UI.Reply.QuoteMaxRunes = 80
+	c.UI.Clipboard.ClearAfterSec = intPtr(30)
+	c.UI.Clipboard.ClearAfterSec = intPtr(30)
 	// Code highlight palette (dark, matching the trip palette hues).
 	// A [0,0,0] entry means "use this default".
 	c.UI.CodeStyle.Background = [3]int{48, 48, 48}
@@ -287,6 +296,8 @@ func DefaultClientConfig() *ClientConfig {
 // boolPtr allocates a bool for default config values that must tell
 // "absent" apart from "false" after JSON round-trips.
 func boolPtr(v bool) *bool { return &v }
+
+func intPtr(v int) *int { return &v }
 
 // ShowMeta reports whether message meta lines render. A nil pointer
 // (hand-edited or ancient config) means the default: shown.
@@ -347,6 +358,26 @@ func (c *ClientConfig) QuoteMaxRunes() int {
 		return 200
 	}
 	return c.UI.Reply.QuoteMaxRunes
+}
+
+// ClipboardClearAfterSec seconds until /copy auto-clears the clipboard
+// (default 30, explicit 0 disables). A nil pointer (hand-edited or
+// ancient config) means the default.
+func (c *ClientConfig) ClipboardClearAfterSec() int {
+	if c == nil || c.UI.Clipboard.ClearAfterSec == nil {
+		return 30
+	}
+	if *c.UI.Clipboard.ClearAfterSec < 0 {
+		return 30
+	}
+	return *c.UI.Clipboard.ClearAfterSec
+}
+
+// shouldClear decides whether a scheduled clearer may wipe. It fires only
+// when the clipboard still holds exactly what was copied, never touching
+// newer user content.
+func shouldClear(current, written string, readErr error) bool {
+	return readErr == nil && current == written
 }
 
 // LoadOrCreate loads config from path, creates default if missing when autoCreate is true.
@@ -419,6 +450,11 @@ func LoadOrCreate(path string, autoCreate bool) (*ClientConfig, error) {
 	}
 	if c.UI.Reply.QuoteMaxRunes <= 0 {
 		c.UI.Reply.QuoteMaxRunes = def.UI.Reply.QuoteMaxRunes
+	}
+	// Backfill clipboard autoclear (absent means default 30; explicit 0
+	// stays 0 to disable).
+	if c.UI.Clipboard.ClearAfterSec == nil {
+		c.UI.Clipboard.ClearAfterSec = def.UI.Clipboard.ClearAfterSec
 	}
 	if c.Tabs.ChatMaxBytes <= 0 {
 		c.Tabs.ChatMaxBytes = def.Tabs.ChatMaxBytes
