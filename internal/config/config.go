@@ -259,7 +259,7 @@ func DefaultClientConfig() *ClientConfig {
 		"clearHistory": {"/clearhistory", "/ch"},
 		"showJoin":     {"/showjoin", "/sj"},
 		"autoVerify":   {"/autoverify", "/av"},
-		"verify":       {"/verify"},
+		"info":         {"/info"},
 		"tab":          {"/tab", "/t"},
 		"meta":         {"/meta", "/m"},
 		"find":         {"/find", "/f"},

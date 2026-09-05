@@ -86,8 +86,9 @@ make clean
 
 ## Slash Commands
 
-- Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, `/meta`/`/m` with optional `on|off`, `/find`/`/f` with `<height>[:hash]`, and the `/verify` prefix. Anything else starting with `/` is an unknown command (`client/commands.go:isUnknownSlashCommand`) rejected locally with `| [Local]: Lệnh không tồn tại…`, never broadcast or trip-signed. Code blocks (```) are unaffected, so they double as the escape hatch for sending literal text starting with `/`.
+- Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, `/meta`/`/m` with optional `on|off`, `/find`/`/f` with `<height>[:hash]` and `/info` with `<height>[:hash]`. Anything else starting with `/` is an unknown command (`client/commands.go:isUnknownSlashCommand`) rejected locally with `| [Local]: Lệnh không tồn tại…`, never broadcast or trip-signed. Code blocks (```) are unaffected, so they double as the escape hatch for sending literal text starting with `/`.
 - `/reply <height>[:hash] <text>` quotes a buffered message (see above); the height suffix acts as a typo checksum.
+- `/info <height>[:hash]` prints the full metadata detail of one indexed wire (height/tmp/reply, full hashes, trip + chain verdicts recomputed locally, first text line). Wires index by height (cap 1000 FIFO); legacy and evicted report as missing.
 - `/find` looks up messages by chain height (the mandatory identifier; a bare hash is rejected since short hashes collide by design, and an appended `:hash` acts only as a typo checksum) across both tab buffers; evicted history reports as not found.
 - Code block input (`client.go:collectCodeblock`): a first line that already closes its fence (`codebg.NeedsContinuation`) sends immediately without multiline collection; `Ctrl+C` aborts collection via `ErrInputCancel` (empty line cancels on WASM, any interrupt cancels on desktop) and discards everything silently, while `Ctrl+D` (`io.EOF`) keeps quitting. `Ctrl+C` on the main prompt prints `| [Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.` instead of quitting.
 

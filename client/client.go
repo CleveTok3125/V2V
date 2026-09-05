@@ -940,7 +940,11 @@ func main() {
 	}
 
 	renderCache := newRenderCache(200)
+	// wireIdx keeps full wires by height for /info lookups. Populated on
+	// every render (displayMu held by all callers).
+	wireIdx := newWireIndex(1000)
 	renderChatBlock := func(wire WireMessage) {
+		wireIdx.put(wire)
 		autoVerifyMu.RLock()
 		av := autoVerify
 		autoVerifyMu.RUnlock()
@@ -1295,7 +1299,7 @@ func main() {
 			emitLocalFeedback("    - /whoami, /w    : Thông tin danh tính và quyền hiện tại\n")
 			emitLocalFeedback("    - /status        : Trạng thái kết nối và phiên bản client\n")
 			emitLocalFeedback("    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
-			emitLocalFeedback("    - /verify        : Hướng dẫn verify thủ công qua link API\n")
+			emitLocalFeedback("    - /info <n>[:hash]: Xem đầy đủ metadata tin nhắn (verify lại tại local)\n")
 			emitLocalFeedback("    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
 			emitLocalFeedback("    - /meta, /m [on|off]: Hiện/ẩn dòng meta #height:hash (mặc định hiện, chain vẫn verify)\n")
 			emitLocalFeedback("    - /find, /f <n>[:hash]: Tìm tin theo số height trong bộ nhớ (vd /find 1234)\n")
@@ -1332,13 +1336,6 @@ func main() {
 			autoVerifyMu.Unlock()
 			displayMu.Lock()
 			emitLocalFeedback(fmt.Sprintf("| [Local]: Auto-verify đã %s (mặc định BẬT, verify song song qua channel FIFO).\n", status))
-			displayMu.Unlock()
-			continue
-		}
-
-		if strings.HasPrefix(text, "/verify") {
-			displayMu.Lock()
-			emitLocalFeedback("  [Verify]: Click badge link (https://.../api/trip/verify?...) để verify thủ công qua API stateless.\n")
 			displayMu.Unlock()
 			continue
 		}
@@ -1491,6 +1488,41 @@ func main() {
 			}
 			if shown == 0 {
 				fmt.Fprintf(out, "| [Local]: Không thấy (tin cũ đã bị evict khỏi bộ nhớ hoặc chưa sync).\n")
+				printGen++
+			}
+			displayMu.Unlock()
+			term.Refresh()
+			continue
+		}
+
+		if text == "/info" || strings.HasPrefix(text, "/info ") {
+			rest := strings.TrimSpace(strings.TrimPrefix(text, "/info"))
+			height, suffix, err := parseFindArg(rest)
+			if err != nil {
+				displayMu.Lock()
+				emitLocalFeedback("| [Local]: Dùng /info <height>[:hash] (vd /info 1234).\n")
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			displayMu.Lock()
+			wire, ok := wireIdx.get(height)
+			if !ok {
+				fmt.Fprintf(out, "| [Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height)
+				printGen++
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			if suffix != "" && !strings.HasPrefix(strings.ToLower(wire.ChainHash), suffix) {
+				fmt.Fprintf(out, "| [Local]: Height đúng nhưng hash khác — kiểm tra lại số.\n")
+				printGen++
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			for _, line := range formatInfoBlock(wire) {
+				fmt.Fprint(out, line)
 				printGen++
 			}
 			displayMu.Unlock()
