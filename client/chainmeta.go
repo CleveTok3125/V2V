@@ -387,31 +387,34 @@ func chainTipFile(historyPath string) string {
 }
 
 type chainTipRecord struct {
-	Tip    string `json:"tip"`    // hex 64
-	Height uint64 `json:"height"` // last verified height
+	Tip       string `json:"tip"`        // hex 64
+	Height    uint64 `json:"height"`     // last verified height
+	ServerPub string `json:"server_pub"` // lowercase hex; namespaces the tip per server
 }
 
 // loadChainTip reads the persisted tip; best effort, false when absent.
-func loadChainTip(path string) ([32]byte, uint64, bool) {
+// Callers must compare ServerPub with the current server and ignore
+// foreign tips (switching servers is a first run, never a fork).
+func loadChainTip(path string) ([32]byte, uint64, string, bool) {
 	var zero [32]byte
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return zero, 0, false
+		return zero, 0, "", false
 	}
 	var rec chainTipRecord
 	if err := json.Unmarshal(data, &rec); err != nil {
-		return zero, 0, false
+		return zero, 0, "", false
 	}
 	tip, ok := chain.ParseHex64(rec.Tip)
 	if !ok {
-		return zero, 0, false
+		return zero, 0, "", false
 	}
-	return tip, rec.Height, true
+	return tip, rec.Height, rec.ServerPub, true
 }
 
 // saveChainTip persists the tip atomically; best effort (ignored on wasm).
-func saveChainTip(path string, tip [32]byte, height uint64) {
-	data, err := json.Marshal(chainTipRecord{Tip: hex.EncodeToString(tip[:]), Height: height})
+func saveChainTip(path string, tip [32]byte, height uint64, serverPub string) {
+	data, err := json.Marshal(chainTipRecord{Tip: hex.EncodeToString(tip[:]), Height: height, ServerPub: serverPub})
 	if err != nil {
 		return
 	}

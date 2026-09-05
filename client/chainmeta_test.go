@@ -55,13 +55,17 @@ func TestChainTipRoundtrip(t *testing.T) {
 	p := dir + "/chain_tip.json"
 	var tip [32]byte
 	tip[0] = 0x42
-	saveChainTip(p, tip, 12)
-	got, height, ok := loadChainTip(p)
-	if !ok || got != tip || height != 12 {
-		t.Fatalf("roundtrip failed: %v %d %v", got, height, ok)
+	saveChainTip(p, tip, 12, "srvpub")
+	got, height, srv, ok := loadChainTip(p)
+	if !ok || got != tip || height != 12 || srv != "srvpub" {
+		t.Fatalf("roundtrip failed: %v %d %q %v", got, height, srv, ok)
 	}
-	if _, _, ok := loadChainTip(dir + "/missing.json"); ok {
+	if _, _, _, ok := loadChainTip(dir + "/missing.json"); ok {
 		t.Fatal("missing file must not load")
+	}
+	// Foreign-server tips load but must be ignored by the caller.
+	if _, _, srv, ok := loadChainTip(p); !ok || srv == "other" {
+		t.Fatalf("server_pub must roundtrip, got %q %v", srv, ok)
 	}
 }
 
