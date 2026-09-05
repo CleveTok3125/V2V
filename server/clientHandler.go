@@ -55,7 +55,7 @@ func (s *ChatServer) registerClient(session *ClientSession, clientIP string) {
 
 	joinMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã tham gia phòng chat!", joinTime.Format("15:04"), session.DisplayName)
 	log.Printf("🟢 [JOIN] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
-	s.Broadcast(joinMsg, session.Conn)
+	s.BroadcastSystem(joinMsg, session.Conn)
 }
 
 func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
@@ -91,7 +91,7 @@ func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
 
 	leaveMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã rời phòng chat.", leaveTime.Format("15:04"), session.DisplayName)
 	log.Printf("🔴 [LEAVE] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
-	s.Broadcast(leaveMsg, nil)
+	s.BroadcastSystem(leaveMsg, nil)
 }
 
 func (c *ClientSession) WritePump() {

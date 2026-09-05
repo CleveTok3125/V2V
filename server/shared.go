@@ -76,8 +76,12 @@ type WireMessage struct {
 	Text        string    `json:"text,omitempty"`
 	Trip        *TripMeta `json:"trip,omitempty"`
 	// TmpID is the sender's per-session counter, relayed verbatim and
-	// never assigned by the server. Chain link fields are set in P3.
-	TmpID uint64 `json:"tmp_id,omitempty"`
+	// never assigned by the server. ChainPrev/ChainHash/ChainHeight link
+	// the message into the global hash chain (see server/chain.go).
+	TmpID       uint64 `json:"tmp_id,omitempty"`
+	ChainPrev   string `json:"chain_prev,omitempty"`   // hex 64
+	ChainHash   string `json:"chain_hash,omitempty"`   // hex 64
+	ChainHeight uint64 `json:"chain_height,omitempty"`
 }
 
 type AuthPacket struct {
@@ -157,6 +161,16 @@ type ChatServer struct {
 	ChatHistorySize int
 	HistoryMu       sync.RWMutex
 	HistoryStore    *HistoryStore
+
+	// BroadcastMu serializes link+send so every client receives messages
+	// in chain order (see server/chain.go). Leaf locks inside: HistoryMu,
+	// then ClientsMu.
+	BroadcastMu sync.Mutex
+
+	// Global message chain tip. Guarded by HistoryMu; set by initChainLocked.
+	chainTip    [32]byte
+	chainHeight uint64
+	chainReady  bool
 
 	LastMessageDate   string
 	LastMessageDateMu sync.Mutex

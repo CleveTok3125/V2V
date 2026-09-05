@@ -17,7 +17,12 @@ import (
 func (s *ChatServer) appendMessageToHistory(msg string) {
 	s.HistoryMu.Lock()
 	defer s.HistoryMu.Unlock()
+	s.appendMessageLocked(msg)
+}
 
+// appendMessageLocked appends one history line with dual-limit eviction.
+// Caller must hold HistoryMu.
+func (s *ChatServer) appendMessageLocked(msg string) {
 	msgSize := len(msg)
 	s.ChatHistory = append(s.ChatHistory, msg)
 	s.ChatHistorySize += msgSize
@@ -38,20 +43,6 @@ func (s *ChatServer) appendMessageToHistory(msg string) {
 		n := make([]string, len(s.ChatHistory), newCap)
 		copy(n, s.ChatHistory)
 		s.ChatHistory = n
-	}
-}
-
-func (s *ChatServer) AddMessageToHistory(msg string) {
-	s.appendMessageToHistory(msg)
-	if s.HistoryStore != nil {
-		s.HistoryStore.Enqueue(msg, time.Now().In(Cfg.Static.Timezone))
-	}
-}
-
-func (s *ChatServer) AddMessageWithTrip(msg string, trip *TripMeta) {
-	s.appendMessageToHistory(msg)
-	if s.HistoryStore != nil {
-		s.HistoryStore.EnqueueWithTrip(msg, trip, time.Now().In(Cfg.Static.Timezone))
 	}
 }
 
@@ -153,37 +144,31 @@ func (s *ChatServer) sendWithRetry(conn *websocket.Conn, client *ClientSession, 
 	}
 }
 
-func (s *ChatServer) Broadcast(message string, sender *websocket.Conn) {
-	s.AddMessageToHistory(message)
-	msgBytes := []byte(message)
+// BroadcastSystem chains a server-originated line (join/leave/date) as a
+// Type system wire so every message in the log carries a chain link.
+// Unicast warnings stay raw strings: they are per-client, never chained.
+func (s *ChatServer) BroadcastSystem(text string, sender *websocket.Conn) {
+	now := time.Now().In(Cfg.Static.Timezone)
+	s.BroadcastMu.Lock()
+	defer s.BroadcastMu.Unlock()
+	wire := s.linkAndStore(WireMessage{Type: "system", Time: now.Format("15:04"), Text: text})
+	data, _ := json.Marshal(wire)
 
 	s.ClientsMu.RLock()
 	defer s.ClientsMu.RUnlock()
 
 	for conn, client := range s.Clients {
 		if conn != sender {
-			s.sendWithRetry(conn, client, msgBytes, true)
-		}
-	}
-}
-
-func (s *ChatServer) BroadcastWithTrip(message string, trip *TripMeta, sender *websocket.Conn) {
-	s.AddMessageWithTrip(message, trip)
-	msgBytes := []byte(message)
-
-	s.ClientsMu.RLock()
-	defer s.ClientsMu.RUnlock()
-
-	for conn, client := range s.Clients {
-		if conn != sender {
-			s.sendWithRetry(conn, client, msgBytes, true)
+			s.sendWithRetry(conn, client, data, true)
 		}
 	}
 }
 
 func (s *ChatServer) BroadcastWire(wire WireMessage, sender *websocket.Conn) {
+	s.BroadcastMu.Lock()
+	defer s.BroadcastMu.Unlock()
+	wire = s.linkAndStore(wire)
 	data, _ := json.Marshal(wire)
-	s.AddWireMessageToHistory(wire)
 	s.ClientsMu.RLock()
 	defer s.ClientsMu.RUnlock()
 	for conn, client := range s.Clients {
@@ -224,7 +209,7 @@ func (s *ChatServer) CheckAndBroadcastDate(now time.Time) {
 
 		dateMsg := fmt.Sprintf("\x1b[36m--- Ngày %s ---\x1b[0m", currentDate)
 
-		s.Broadcast(dateMsg, nil)
+		s.BroadcastSystem(dateMsg, nil)
 	}
 }
 
