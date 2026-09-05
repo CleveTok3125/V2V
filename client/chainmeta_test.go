@@ -451,3 +451,56 @@ func TestFormatInfoBlockTripDetail(t *testing.T) {
 		t.Fatalf("swapped reply_to must fail trip verdict:\n%s", joined)
 	}
 }
+
+func TestFormatQuoteRich(t *testing.T) {
+	wire := chainedTripWire(mustTestTrip(t), "hello base msg")
+	got := formatQuoteRich(wire, false, 80)
+	want := "| ↩ #50 | 15:04 Alice ✓: hello base msg"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	got = formatQuoteRich(wire, true, 80)
+	if !strings.HasPrefix(got, "\x1b[90m") || !strings.HasSuffix(got, "⏳\x1b[0m") {
+		t.Fatalf("pending shape broken: %q", got)
+	}
+	// Tampered target flips the mark.
+	bad := wire
+	bad.Text = "edited"
+	if got := formatQuoteRich(bad, false, 80); !strings.Contains(got, "✗") {
+		t.Fatalf("tampered target must mark ✗: %q", got)
+	}
+	// Single line always, and never shaped like a meta line.
+	multi := wire
+	multi.Text = "line one\nline two"
+	if got := formatQuoteRich(multi, false, 80); strings.Contains(got, "\n") {
+		t.Fatalf("quote must stay single-line: %q", got)
+	}
+	if m := findMetaRe.FindString(formatQuoteRich(wire, false, 80)); m != "" {
+		t.Fatalf("quote must not match the meta regex: %q", m)
+	}
+}
+
+func mustTestTrip(t *testing.T) *TripMeta {
+	t.Helper()
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 21)
+	}
+	priv := ed25519.NewKeyFromSeed(seed)
+	pub := priv.Public().(ed25519.PublicKey)
+	serverPub := strings.Repeat("cd", 32)
+	var prev [32]byte
+	text := "hello base msg"
+	msgHash := sha256.Sum256([]byte(text))
+	payload := tripcolor.CanonicalPayload(serverPub, 4, prev[:], msgHash[:], pub, "Alice", 6, 0)
+	sig := ed25519.Sign(priv, payload)
+	return &TripMeta{
+		Pub:       hex.EncodeToString(pub),
+		Seq:       4,
+		Prev:      hex.EncodeToString(prev[:]),
+		Sig:       hex.EncodeToString(sig),
+		ServerPub: serverPub,
+		MsgHash:   hex.EncodeToString(msgHash[:]),
+		TmpID:     6,
+	}
+}

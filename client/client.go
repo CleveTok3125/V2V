@@ -899,7 +899,16 @@ func main() {
 	// either tab buffer (chat first). Nil when evicted. The preview shows
 	// the target's head line, so liars quoting strangers expose themselves
 	// to every receiver resolving locally. Caller must hold displayMu.
+	// wireIdx keeps full wires by height for /info lookups and rich
+	// quotes. Populated on every render (displayMu held by all callers).
+	wireIdx := newWireIndex(1000)
+
 	quoteLinesFor := func(replyTo uint64, pending bool) []string {
+		// Rich path first: the struct carries clean time/author plus a
+		// content verdict. Buffer fallback keeps legacy heads quotable.
+		if wire, ok := wireIdx.get(replyTo); ok {
+			return []string{formatQuoteRich(wire, pending, ClientCfg.QuoteMaxRunes())}
+		}
 		for _, buf := range []*tabBuffer{tabChat, tabSys} {
 			for _, idx := range findMetaMatches(buf.lines, replyTo, "") {
 				if idx == 0 {
@@ -940,9 +949,6 @@ func main() {
 	}
 
 	renderCache := newRenderCache(200)
-	// wireIdx keeps full wires by height for /info lookups. Populated on
-	// every render (displayMu held by all callers).
-	wireIdx := newWireIndex(1000)
 	renderChatBlock := func(wire WireMessage) {
 		wireIdx.put(wire)
 		autoVerifyMu.RLock()
