@@ -541,6 +541,13 @@ func shortBadge(pubHex string) string {
 	return h
 }
 
+// quotable reports whether a wire may be quoted or mentioned by ID:
+// real chat messages only, never server markers (date/join) or legacy
+// lines without a chain height.
+func quotable(wire WireMessage) bool {
+	return wire.Type == "chat" && wire.ChainHeight > 0
+}
+
 // chainTipFile derives the persisted-tip path next to the readline history.
 func chainTipFile(historyPath string) string {
 	if historyPath == "" {

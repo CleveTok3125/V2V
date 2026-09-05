@@ -504,3 +504,18 @@ func mustTestTrip(t *testing.T) *TripMeta {
 		TmpID:     6,
 	}
 }
+
+func TestQuotable(t *testing.T) {
+	if !quotable(WireMessage{Type: "chat", ChainHeight: 7}) {
+		t.Fatal("chained chat must be quotable")
+	}
+	if quotable(WireMessage{Type: "system", ChainHeight: 7}) {
+		t.Fatal("server markers must not be quotable")
+	}
+	if quotable(WireMessage{Type: "chat"}) {
+		t.Fatal("legacy lines without height must not be quotable")
+	}
+	if quotable(WireMessage{}) {
+		t.Fatal("empty wire must not be quotable")
+	}
+}
