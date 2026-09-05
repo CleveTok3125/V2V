@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/CleveTok3125/V2V/internal/chain"
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/trip"
+	"github.com/CleveTok3125/V2V/internal/tripcolor"
 )
 
 // Chain meta line and echo matching helpers. Pure logic lives here for
@@ -426,26 +428,40 @@ func formatInfoBlock(wire WireMessage) []string {
 	out = append(out, fmt.Sprintf("|   %-9s %s\n", "prev:", strings.ToLower(wire.ChainPrev)))
 	out = append(out, fmt.Sprintf("|   %-9s %s | from: %s\n", "time:", wire.Time, wire.DisplayName))
 	if wire.Trip != nil {
-		badge := "◆ " + shortBadge(wire.Trip.Pub)
+		tm := wire.Trip
+		badge := "◆ " + shortBadge(tm.Pub)
 		verdict := "✗"
 		detail := ""
 		if _, err := trip.Verify(trip.VerifyParams{
 			Text:        wire.Text,
 			DisplayName: wire.DisplayName,
-			ServerPub:   wire.Trip.ServerPub,
-			PubHex:      wire.Trip.Pub,
-			Seq:         wire.Trip.Seq,
-			PrevHex:     wire.Trip.Prev,
-			SigHex:      wire.Trip.Sig,
-			MsgHashHex:  wire.Trip.MsgHash,
-			TmpID:       wire.Trip.TmpID,
-			ReplyTo:     wire.Trip.ReplyTo,
+			ServerPub:   tm.ServerPub,
+			PubHex:      tm.Pub,
+			Seq:         tm.Seq,
+			PrevHex:     tm.Prev,
+			SigHex:      tm.Sig,
+			MsgHashHex:  tm.MsgHash,
+			TmpID:       tm.TmpID,
+			ReplyTo:     tm.ReplyTo,
 		}); err == nil {
 			verdict = "✓"
 		} else {
 			detail = " (" + err.Error() + ")"
 		}
-		out = append(out, fmt.Sprintf("|   %-9s badge %s %s | seq %d%s\n", "trip:", badge, verdict, wire.Trip.Seq, detail))
+		out = append(out, fmt.Sprintf("|   %-9s badge %s %s | seq %d%s\n", "trip:", badge, verdict, tm.Seq, detail))
+		// Every signature input, so the verdict above is checkable by
+		// eye: sha256(text) against msg_hash, then ed25519 over the
+		// payload bytes against sig with pub.
+		out = append(out, fmt.Sprintf("|     %-9s %s\n", "pub:", strings.ToLower(strings.TrimSpace(tm.Pub))))
+		out = append(out, fmt.Sprintf("|     %-9s %s\n", "prev:", strings.ToLower(strings.TrimSpace(tm.Prev))))
+		out = append(out, fmt.Sprintf("|     %-9s %s\n", "sig:", strings.ToLower(strings.TrimSpace(tm.Sig))))
+		hashMark := "✗"
+		if h := sha256.Sum256([]byte(wire.Text)); hex.EncodeToString(h[:]) == strings.ToLower(strings.TrimSpace(tm.MsgHash)) {
+			hashMark = "✓"
+		}
+		out = append(out, fmt.Sprintf("|     %-9s %s %s\n", "msg_hash:", strings.ToLower(strings.TrimSpace(tm.MsgHash)), hashMark))
+		out = append(out, fmt.Sprintf("|     %-9s %s\n", "server_pub:", strings.ToLower(strings.TrimSpace(tm.ServerPub))))
+		out = append(out, fmt.Sprintf("|     %-9s %x\n", "payload:", tripPayloadBytes(wire, tm)))
 	} else {
 		out = append(out, "|   trip:      (không)\n")
 	}
@@ -464,6 +480,21 @@ func formatInfoBlock(wire WireMessage) []string {
 	}
 	out = append(out, fmt.Sprintf("|   %-9s %s\n", "text:", first))
 	return out
+}
+
+// tripPayloadBytes rebuilds the exact signed bytes trip.Verify checks
+// (same normalization, same field order), so /info shows everything
+// needed to re-verify by hand with any ed25519 tool. Nil when the stored
+// hex does not decode — the verdict line already reports that case.
+func tripPayloadBytes(wire WireMessage, tm *TripMeta) []byte {
+	lower := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+	pub, err1 := hex.DecodeString(lower(tm.Pub))
+	prev, err2 := hex.DecodeString(lower(tm.Prev))
+	msgHash, err3 := hex.DecodeString(lower(tm.MsgHash))
+	if err1 != nil || err2 != nil || err3 != nil {
+		return nil
+	}
+	return tripcolor.CanonicalPayload(lower(tm.ServerPub), tm.Seq, prev, msgHash, pub, wire.DisplayName, tm.TmpID, tm.ReplyTo)
 }
 
 // shortBadge derives the visible badge from a pubkey hex, tolerating junk.
