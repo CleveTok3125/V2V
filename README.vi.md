@@ -4,12 +4,13 @@
 <a href="README.md">English</a> · <a href="docs/TECHNICAL.md">Tài liệu kỹ thuật</a>
 </p>
 
-Chat ẩn danh, nhẹ, chạy hoàn toàn bằng Go — không cần database.
+Chat ẩn danh, nhẹ, thời gian thực, kèm log chống sửa — chạy hoàn toàn bằng Go, không cần database.
 
 - **Ẩn danh mặc định** — mọi người, kể cả admin, đều có `Tên#a1b2` từ IP hash với salt ngẫu nhiên mỗi phiên (tự mở rộng, thêm `-2` khi trùng). Không cần đăng ký, đặt tên thoải mái.
-- **Đăng nhập không mật khẩu** — key Ed25519 hoặc passkey WebAuthn (Touch ID / Windows Hello).
-- **Tripcode tùy chọn** — badge `◆ ab12` từ passphrase, có thể xác thực bằng mật mã.
-- **Nhanh & riêng tư** — lịch sử trong RAM + file, chống spam, key được mã hóa trên máy bạn.
+- **Log chống sửa** — mọi tin nhắn nối vào một hash chain chung toàn server, mỗi tin mang ID `#height:hash`. Sửa, đảo thứ tự hay đánh lại số bất kỳ tin nào cũng làm đứt chain, mọi client đều thấy — không cần ai ký tay.
+- **Hội thoại dẫn chiếu được** — trả lời kèm quote (`/reply 1234`), nhắc tin (`@#1234`), tìm tin theo số (`/find`); code block có syntax highlight.
+- **Danh tính xác thực được, tùy chọn** — badge tripcode `◆ ab12` nhiều màu từ passphrase, kiểm chứng bằng mật mã (hoặc đăng nhập không mật khẩu cho staff bằng key Ed25519 / passkey WebAuthn).
+- **Nhanh & riêng tư** — lịch sử RAM có giới hạn, lưu local dạng JSONL, chống spam, key mã hóa nằm trên máy bạn.
 
 ## Bắt đầu nhanh
 
@@ -38,7 +39,7 @@ make help            # xem tất cả target
 #               └─ ✍️ ◆ ab12cd34  (màu, bấm để verify)
 ```
 
-Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/verify`, `/tab`).
+Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/verify`, `/tab`, `/meta`, `/find`, `/reply`).
 
 Tin nhắn của bạn hiện xám kèm `⏳` trước, rồi được thay bằng dòng xác nhận khi server gửi lại (echo). Lệnh `/` lạ bị chặn ngay trên máy, không gửi đi (muốn gửi chữ bắt đầu bằng `/` thì bọc trong codeblock ```).
 
