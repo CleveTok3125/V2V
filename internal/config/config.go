@@ -237,6 +237,8 @@ func DefaultClientConfig() *ClientConfig {
 		"autoVerify":   {"/autoverify", "/av"},
 		"verify":       {"/verify"},
 		"tab":          {"/tab", "/t"},
+		"meta":         {"/meta", "/m"},
+		"find":         {"/find", "/f"},
 		"whoami":       {"/whoami", "/w"},
 		"status":       {"/status"},
 		"help":         {"/help", "/h"},
