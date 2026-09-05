@@ -253,6 +253,10 @@
           }
           if (j.pub) addField("pub", j.pub, true);
           addField("seq", String(j.seq), true);
+          ["prev", "sig", "msg_hash"].forEach(function (k) {
+            var v = q.get(k) || "";
+            if (v) addField(k, v, true);
+          });
           if (j.server_pub) addField("server_pub", j.server_pub, true);
           var dn = q.get("display_name") || "";
           if (dn) addField("tên", dn, true);
