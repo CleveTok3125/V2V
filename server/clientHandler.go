@@ -55,7 +55,10 @@ func (s *ChatServer) registerClient(session *ClientSession, clientIP string) {
 
 	joinMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã tham gia phòng chat!", joinTime.Format("15:04"), session.DisplayName)
 	log.Printf("🟢 [JOIN] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
-	s.BroadcastSystem(joinMsg, session.Conn)
+	// The joiner receives its own join too (nil sender): chain continuity
+	// requires every client to see every link; display gating (!showJoin)
+	// still hides it locally.
+	s.BroadcastSystem(joinMsg, nil)
 }
 
 func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
