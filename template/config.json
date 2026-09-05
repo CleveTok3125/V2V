@@ -58,6 +58,7 @@
     "meta": {"show": true},
     "mention": {"enabled": true, "color": [0,255,255]},
     "reply": {"enabled": true, "quoteMaxRunes": 80},
+    "clipboard": {"clearAfterSec": 30},
     "codeStyle": {"background":[48,48,48],"keyword":[255,183,77],"string":[174,213,129],"comment":[144,164,174],"number":[255,213,79],"name":[100,181,246],"function":[77,208,225],"type":[149,117,205],"operator":[216,222,233]},
     "linkify": {"trailingPunct": ".,;:!?)»\"'’\"…"},
     "theme": {"background": "#101014", "accent": "#4f7dff", "error": "#ff6b6b"},

@@ -1628,6 +1628,7 @@ func main() {
 				emitLocalFeedback(fmt.Sprintf("| [Local]: %v.\n", err))
 			} else {
 				emitLocalFeedback(fmt.Sprintf("| [Local]: Đã copy nội dung tin #%d.\n", height))
+				scheduleClipboardClear(wire.Text, ClientCfg.ClipboardClearAfterSec())
 			}
 			displayMu.Unlock()
 			term.Refresh()

@@ -124,6 +124,7 @@
   <main>
     <h1>Kiểm tra Trip</h1>
     <p class="sub">Xác thực stateless chữ ký tripcode, không cần đăng nhập.</p>
+    <div id="insecure" class="hidden" style="background:rgba(255,107,107,.12);color:#ff6b6b;border:1px solid #ff6b6b;border-radius:10px;padding:10px 14px;margin:0 0 12px;font-size:13px">Kết nối không mã hóa (không phải HTTPS/localhost): kiểm chứng nội dung đã tắt, và chữ dán vào đây có thể bị đọc trộm giữa đường. Hãy dùng HTTPS.</div>
     <div id="pill" class="pill wait">Đang kiểm tra…</div>
 
     <section id="content-sec" class="hidden">
@@ -240,6 +241,12 @@
       function fail(message) {
         setPill(message, "bad");
       }
+
+      try {
+        if (!window.isSecureContext) {
+          document.getElementById("insecure").classList.remove("hidden");
+        }
+      } catch (e) { /* banner is advisory; never block verification */ }
 
       apiInput.value = location.href;
       document.getElementById("copy-api").addEventListener("click", function () {
