@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -108,6 +109,31 @@ func decryptJSON(data []byte, passphrase string) ([]byte, error) {
 		return nil, errors.New("incorrect passphrase or corrupted file")
 	}
 	return plain, nil
+}
+
+// EncryptData seals an arbitrary JSON payload in the version 3 envelope
+// (argon2id + XChaCha20Poly1305), the same construction key files use.
+// Exported so sibling secrets (e.g. the client tripcode file) share one
+// audited envelope instead of reinventing it.
+func EncryptData(plain []byte, passphrase string) ([]byte, error) {
+	return encryptJSON(plain, passphrase, defaultParams())
+}
+
+// DecryptData opens a version 3 envelope. Wrong passphrase and corrupt
+// files both fail closed.
+func DecryptData(data []byte, passphrase string) ([]byte, error) {
+	return decryptJSON(data, passphrase)
+}
+
+// IsEncryptedData reports whether raw bytes look like a version 3 envelope.
+func IsEncryptedData(data []byte) bool {
+	return isEncrypted(data)
+}
+
+// AtomicWriteFile durably writes data with owner-only permissions via
+// temp-file + fsync + rename. Exported for sibling secret files.
+func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	return atomicWriteFile(path, data, perm)
 }
 
 func isEncrypted(data []byte) bool {
