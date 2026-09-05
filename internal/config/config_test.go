@@ -111,3 +111,57 @@ func TestMentionReplyBackfillAndClamp(t *testing.T) {
 		t.Fatalf("runes must clamp to 200, got %d", c.QuoteMaxRunes())
 	}
 }
+
+func TestClipboardClearAfterSec(t *testing.T) {
+	c := DefaultClientConfig()
+	if c.ClipboardClearAfterSec() != 30 {
+		t.Fatalf("default = %d, want 30", c.ClipboardClearAfterSec())
+	}
+	var nilCfg *ClientConfig
+	if nilCfg.ClipboardClearAfterSec() != 30 {
+		t.Fatal("nil config must fall back to 30")
+	}
+	zero := 0
+	c.UI.Clipboard.ClearAfterSec = &zero
+	if c.ClipboardClearAfterSec() != 0 {
+		t.Fatal("explicit 0 must disable")
+	}
+	neg := -5
+	c.UI.Clipboard.ClearAfterSec = &neg
+	if c.ClipboardClearAfterSec() != 30 {
+		t.Fatalf("negative must fall back to 30, got %d", c.ClipboardClearAfterSec())
+	}
+	v := 90
+	c.UI.Clipboard.ClearAfterSec = &v
+	if c.ClipboardClearAfterSec() != 90 {
+		t.Fatalf("got %d, want 90", c.ClipboardClearAfterSec())
+	}
+}
+
+func TestClipboardBackfill(t *testing.T) {
+	dir := t.TempDir()
+	old := map[string]any{"defaults": map[string]any{"username": "A"}}
+	data, _ := json.Marshal(old)
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadOrCreate(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.UI.Clipboard.ClearAfterSec == nil || c.ClipboardClearAfterSec() != 30 {
+		t.Fatal("absent clipboard section must backfill to 30")
+	}
+	raw, _ := json.Marshal(map[string]any{"ui": map[string]any{"clipboard": map[string]any{"clearAfterSec": 0}}})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err = LoadOrCreate(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ClipboardClearAfterSec() != 0 {
+		t.Fatal("explicit 0 must survive backfill (disable)")
+	}
+}
