@@ -362,6 +362,17 @@ func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) st
 	return line
 }
 
+// wantsMeta reports whether a wire earns a trailing meta line. Server
+// notices (Type system: date, join/leave) stay chained and verified but
+// render none: stamping markers with IDs reads silly and nobody
+// references them. Legacy lines without chain fields render none either.
+func wantsMeta(wire WireMessage, withMeta bool) bool {
+	if !withMeta || wire.Type == "system" || wire.ChainHash == "" {
+		return false
+	}
+	return true
+}
+
 // chainTipFile derives the persisted-tip path next to the readline history.
 func chainTipFile(historyPath string) string {
 	if historyPath == "" {

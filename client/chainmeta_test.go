@@ -318,3 +318,21 @@ func TestFormatQuote(t *testing.T) {
 		t.Fatalf("must clamp tiny max: %q", got)
 	}
 }
+
+func TestWantsMeta(t *testing.T) {
+	chained := WireMessage{Type: "chat", ChainHash: "ab12", ChainHeight: 3}
+	if !wantsMeta(chained, true) {
+		t.Fatal("chained chat must earn meta")
+	}
+	if wantsMeta(chained, false) {
+		t.Fatal("/meta off must hide meta")
+	}
+	sys := WireMessage{Type: "system", Text: "--- Ngày x ---", ChainHash: "ab12", ChainHeight: 1}
+	if wantsMeta(sys, true) {
+		t.Fatal("server notices must not render meta")
+	}
+	legacy := WireMessage{Type: "chat", Text: "old"}
+	if wantsMeta(legacy, true) {
+		t.Fatal("legacy lines must not render meta")
+	}
+}
