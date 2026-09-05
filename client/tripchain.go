@@ -56,8 +56,8 @@ func isWASMRuntime() bool {
 	return runtime.GOOS == "js"
 }
 
-func canonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte, displayName string) []byte {
-	return tripcolor.CanonicalPayload(serverPub, seq, prev, msgHash, pub, displayName)
+func canonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte, displayName string, tmpID uint64) []byte {
+	return tripcolor.CanonicalPayload(serverPub, seq, prev, msgHash, pub, displayName, tmpID)
 }
 
 func badgeColor(badge string) string {
@@ -74,6 +74,8 @@ func zeroTripBytes(b []byte) {
 }
 
 // TripMessage is the JSON envelope for signed chat messages.
+// TmpID is the sender's per-session counter, bound into the signature so
+// the server cannot renumber messages without breaking verification.
 type TripMessage struct {
 	Text        string `json:"text,omitempty"` // for compatibility, also support Msg alias
 	Msg         string `json:"msg,omitempty"`
@@ -82,6 +84,15 @@ type TripMessage struct {
 	Prev        string `json:"prev,omitempty"` // hex 64
 	Sig         string `json:"sig,omitempty"`  // hex 128
 	DisplayName string `json:"display_name,omitempty"`
+	TmpID       uint64 `json:"tmp_id,omitempty"`
+}
+
+// PlainMessage is the JSON envelope for unsigned chat messages. Break:
+// raw text is no longer accepted; every message carries a per-session
+// counter the server relays verbatim but never assigns.
+type PlainMessage struct {
+	TmpID uint64 `json:"tmp_id"`
+	Text  string `json:"text"`
 }
 
 func (m *TripMessage) GetText() string {

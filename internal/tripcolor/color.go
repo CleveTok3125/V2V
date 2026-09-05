@@ -49,6 +49,14 @@ func clamp(v int) int {
 
 // CanonicalPayload is the signed payload for trip messages, shared by client/server.
 // displayName is the final server-rendered name (e.g. "[Admin] Anonymous" or "Anonymous#abcd") — binding it prevents displayName spoofing.
-func CanonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte, displayName string) []byte {
+// tmpID is the sender's per-session message counter — binding it makes server-side ID tampering fail verification.
+func CanonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte, displayName string, tmpID uint64) []byte {
+	return []byte(fmt.Sprintf("%s\x00%d\x00%x\x00%x\x00%x\x00%s\x00%d", serverPub, seq, prev, msgHash, pub, displayName, tmpID))
+}
+
+// CanonicalPayloadLegacy is the pre-chain payload encoding (no tmpID).
+// It exists only so pre-upgrade history and legacy browser verify links
+// keep verifying read-only; nothing new is ever signed with it.
+func CanonicalPayloadLegacy(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte, displayName string) []byte {
 	return []byte(fmt.Sprintf("%s\x00%d\x00%x\x00%x\x00%x\x00%s", serverPub, seq, prev, msgHash, pub, displayName))
 }

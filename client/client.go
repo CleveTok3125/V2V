@@ -100,6 +100,8 @@ type WireMessage struct {
 	DisplayName string    `json:"displayName,omitempty"`
 	Text        string    `json:"text,omitempty"`
 	Trip        *TripMeta `json:"trip,omitempty"`
+	// TmpID is the sender's per-session counter, relayed verbatim.
+	TmpID uint64 `json:"tmp_id,omitempty"`
 }
 
 type TripMeta struct {
@@ -109,6 +111,7 @@ type TripMeta struct {
 	Sig       string `json:"sig"`
 	ServerPub string `json:"server_pub"`
 	MsgHash   string `json:"msg_hash,omitempty"`
+	TmpID     uint64 `json:"tmp_id,omitempty"`
 }
 
 type Permission struct {
@@ -170,6 +173,7 @@ type verifyJob struct {
 	displayName string
 	textParam   string
 	seq         uint32
+	tmpID       uint64
 }
 
 func parseTripBadgeLine(line string) (verifyJob, bool) {
@@ -244,6 +248,9 @@ func parseTripBadgeLine(line string) (verifyJob, bool) {
 	}
 	if v, err := strconv.ParseUint(job.seqStr, 10, 32); err == nil {
 		job.seq = uint32(v)
+	}
+	if v, err := strconv.ParseUint(q.Get("tmp_id"), 10, 64); err == nil {
+		job.tmpID = v
 	}
 	return job, true
 }
@@ -407,6 +414,9 @@ func main() {
 	var tripBadge string
 	var tripSeq uint32
 	var tripPrev []byte = make([]byte, 32)
+	// tmpSeq numbers every outgoing message in this session (trip and
+	// plain alike). The server relays it verbatim but never assigns it.
+	var tmpSeq uint64
 	passphraseBytes := []byte(CLI.Tripcode)
 	if len(passphraseBytes) > 0 {
 		priv, pub, badge := deriveTripKey(CLI.Tripcode, challenge.ServerPubKey)
@@ -619,6 +629,7 @@ func main() {
 		pub     string
 		hasTrip bool
 		sentAt  time.Time
+		tmpID   uint64
 	}
 	pendingPlaceholders := []pendingMsg{}
 
@@ -759,6 +770,7 @@ func main() {
 				PrevHex:     job.prev,
 				SigHex:      job.sig,
 				MsgHashHex:  job.msgHash,
+				TmpID:       job.tmpID,
 			})
 			valid := err == nil
 			// Fallback: if textParam was empty but msgHash check failed, try empty text path
@@ -826,6 +838,7 @@ func main() {
 							PrevHex:     wire.Trip.Prev,
 							SigHex:      wire.Trip.Sig,
 							MsgHashHex:  wire.Trip.MsgHash,
+							TmpID:       wire.Trip.TmpID,
 						})
 						if err == nil && res != nil {
 							colored = badgeColor(res.Badge) + res.Badge + "\x1b[0m"
@@ -843,7 +856,7 @@ func main() {
 					}
 					urlStr := ""
 					if hostForLink2 != "" {
-						urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&text=%s", hostForLink2, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub, url.QueryEscape(wire.DisplayName), url.QueryEscape(wire.Text))
+						urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&text=%s&tmp_id=%d", hostForLink2, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub, url.QueryEscape(wire.DisplayName), url.QueryEscape(wire.Text), wire.Trip.TmpID)
 					}
 					displayMu.Lock()
 					if urlStr != "" {
@@ -874,16 +887,17 @@ func main() {
 						autoVerifyMu.RUnlock()
 						var colored string
 						if av {
-							res, err := trip.Verify(trip.VerifyParams{
-								Text:        wl.Text,
-								DisplayName: wl.DisplayName,
-								ServerPub:   wl.Trip.ServerPub,
-								PubHex:      wl.Trip.Pub,
-								Seq:         wl.Trip.Seq,
-								PrevHex:     wl.Trip.Prev,
-								SigHex:      wl.Trip.Sig,
-								MsgHashHex:  wl.Trip.MsgHash,
-							})
+						res, err := trip.Verify(trip.VerifyParams{
+							Text:        wl.Text,
+							DisplayName: wl.DisplayName,
+							ServerPub:   wl.Trip.ServerPub,
+							PubHex:      wl.Trip.Pub,
+							Seq:         wl.Trip.Seq,
+							PrevHex:     wl.Trip.Prev,
+							SigHex:      wl.Trip.Sig,
+							MsgHashHex:  wl.Trip.MsgHash,
+							TmpID:       wl.Trip.TmpID,
+						})
 							if err == nil && res != nil {
 								colored = badgeColor(res.Badge) + res.Badge + "\x1b[0m"
 							} else {
@@ -900,7 +914,7 @@ func main() {
 						}
 						urlStr := ""
 						if hostForLink2 != "" {
-							urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&text=%s", hostForLink2, wl.Trip.Pub, wl.Trip.Seq, wl.Trip.Prev, wl.Trip.Sig, wl.Trip.MsgHash, wl.Trip.ServerPub, url.QueryEscape(wl.DisplayName), url.QueryEscape(wl.Text))
+							urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&text=%s&tmp_id=%d", hostForLink2, wl.Trip.Pub, wl.Trip.Seq, wl.Trip.Prev, wl.Trip.Sig, wl.Trip.MsgHash, wl.Trip.ServerPub, url.QueryEscape(wl.DisplayName), url.QueryEscape(wl.Text), wl.Trip.TmpID)
 						}
 						displayMu.Lock()
 						if urlStr != "" {
@@ -1221,13 +1235,14 @@ func main() {
 		term.Refresh()
 		displayMu.Unlock()
 
+		tmpSeq++
 		if tripPriv != nil {
 			// Sign message with trip chain — bind displayName for anti-spoof
 			tripSeq++
 			msgHash := sha256.Sum256([]byte(text))
 			prevCopy := make([]byte, len(tripPrev))
 			copy(prevCopy, tripPrev)
-			payload := canonicalPayload(strings.ToLower(challenge.ServerPubKey), tripSeq, prevCopy, msgHash[:], []byte(tripPub), username)
+			payload := canonicalPayload(strings.ToLower(challenge.ServerPubKey), tripSeq, prevCopy, msgHash[:], []byte(tripPub), username, tmpSeq)
 			sig := ed25519.Sign(tripPriv, payload)
 			h := sha256.New()
 			h.Write(prevCopy)
@@ -1235,17 +1250,21 @@ func main() {
 			h.Write(msgHash[:])
 			newPrev := h.Sum(nil)
 			copy(tripPrev, newPrev)
-			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: username}
+			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: username, TmpID: tmpSeq}
 			err = conn.WriteJSON(tripMsg)
 			if err != nil {
 				// Rollback seq/prev on send failure to avoid permanent fork
 				tripSeq--
 				copy(tripPrev, prevCopy)
+				tmpSeq--
 			}
-		} else if CLI.Tripcode != "" {
-			err = conn.WriteMessage(wsTextMessage, []byte(text))
 		} else {
-			err = conn.WriteMessage(wsTextMessage, []byte(text))
+			// Unsigned chat always travels in an envelope carrying the
+			// session counter; raw text is rejected by the server.
+			err = conn.WriteJSON(PlainMessage{TmpID: tmpSeq, Text: text})
+			if err != nil {
+				tmpSeq--
+			}
 		}
 		if err != nil {
 			// Mark placeholder as failed (red) is handled by server unicast; keep placeholder grey until then
@@ -1254,7 +1273,7 @@ func main() {
 			lastMessageTime = time.Now()
 			// Track placeholder so the server echo can replace it.
 			displayMu.Lock()
-			pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: printGen, bufEnd: phBufEnd, sentAt: time.Now()}
+			pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: printGen, bufEnd: phBufEnd, sentAt: time.Now(), tmpID: tmpSeq}
 			if tripPriv != nil {
 				pm.hasTrip = true
 				pm.seq = tripSeq
