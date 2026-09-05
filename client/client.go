@@ -904,7 +904,10 @@ func main() {
 			colored = plain
 		}
 		if u, err := url.Parse(wsURL); err == nil && u.Host != "" {
-			urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&text=%s&tmp_id=%d&reply_to=%d", u.Host, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub, url.QueryEscape(wire.DisplayName), url.QueryEscape(wire.Text), wire.Trip.TmpID, wire.Trip.ReplyTo)
+			// No text= param: msg_hash suffices for verification, keeping
+			// links bounded and content out of URLs/history. Old links
+			// carrying text keep working (server checks it when present).
+			urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&tmp_id=%d&reply_to=%d", u.Host, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub, url.QueryEscape(wire.DisplayName), wire.Trip.TmpID, wire.Trip.ReplyTo)
 		}
 		return colored, urlStr
 	}
@@ -1072,18 +1075,20 @@ func main() {
 				serverPub = strings.ToLower(serverPubForVerify)
 			}
 			textForVerify := job.textParam
-			// If textParam empty, we still verify via msgHash (trip.Verify recomputes)
+			// Links without text= verify the signature over msgHash alone;
+			// nothing is displayed from the link, so no text binding exists.
 			_, err := trip.Verify(trip.VerifyParams{
-				Text:        textForVerify,
-				DisplayName: job.displayName,
-				ServerPub:   serverPub,
-				PubHex:      job.pub,
-				Seq:         job.seq,
-				PrevHex:     job.prev,
-				SigHex:      job.sig,
-				MsgHashHex:  job.msgHash,
-				TmpID:       job.tmpID,
-				ReplyTo:     job.tmpReplyTo,
+				Text:          textForVerify,
+				DisplayName:   job.displayName,
+				ServerPub:     serverPub,
+				PubHex:        job.pub,
+				Seq:           job.seq,
+				PrevHex:       job.prev,
+				SigHex:        job.sig,
+				MsgHashHex:    job.msgHash,
+				TmpID:         job.tmpID,
+				ReplyTo:       job.tmpReplyTo,
+				SkipTextCheck: textForVerify == "",
 			})
 			valid := err == nil
 			// Fallback: if textParam was empty but msgHash check failed, try empty text path
@@ -1355,6 +1360,7 @@ func main() {
 			emitLocalFeedback("    - /status        : Trạng thái kết nối và phiên bản client\n")
 			emitLocalFeedback("    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
 			emitLocalFeedback("    - /info <n>[:hash]: Xem đầy đủ metadata tin nhắn (verify lại tại local)\n")
+			emitLocalFeedback("    - /copy <n>[:hash]: Copy nội dung thô tin nhắn vào clipboard\n")
 			emitLocalFeedback("    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
 			emitLocalFeedback("    - /meta, /m [on|off]: Hiện/ẩn dòng meta #height:hash (mặc định hiện, chain vẫn verify)\n")
 			emitLocalFeedback("    - /find, /f <n>[:hash]: Tìm tin theo số height trong bộ nhớ (vd /find 1234)\n")
@@ -1594,6 +1600,34 @@ func main() {
 			}
 			for _, line := range formatInfoBlock(wire) {
 				emitLocalFeedback(line)
+			}
+			displayMu.Unlock()
+			term.Refresh()
+			continue
+		}
+
+		if text == "/copy" || strings.HasPrefix(text, "/copy ") {
+			rest := strings.TrimSpace(strings.TrimPrefix(text, "/copy"))
+			height, _, err := parseFindArg(rest)
+			if err != nil {
+				displayMu.Lock()
+				emitLocalFeedback("| [Local]: Dùng /copy <height>[:hash] (vd /copy 1234).\n")
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			displayMu.Lock()
+			wire, ok := wireIdx.get(height)
+			if !ok {
+				emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height))
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			if err := copyToClipboard(wire.Text); err != nil {
+				emitLocalFeedback(fmt.Sprintf("| [Local]: %v.\n", err))
+			} else {
+				emitLocalFeedback(fmt.Sprintf("| [Local]: Đã copy nội dung tin #%d.\n", height))
 			}
 			displayMu.Unlock()
 			term.Refresh()

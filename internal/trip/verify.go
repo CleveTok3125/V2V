@@ -13,17 +13,22 @@ import (
 // VerifyParams collects all fields needed to verify a trip signature.
 // TmpID binds the sender's per-session message counter and ReplyTo the
 // quote target into the signature, so altering either breaks verification.
+// SkipTextCheck verifies the signature over msgHash without binding any
+// displayed text. Set it only when no text is shown from the verified
+// data (e.g. text-less badge links); everywhere else an empty Text must
+// keep failing so accidental unbound displays never verify.
 type VerifyParams struct {
-	Text        string
-	DisplayName string
-	ServerPub   string
-	PubHex      string
-	Seq         uint32
-	PrevHex     string
-	SigHex      string
-	MsgHashHex  string
-	TmpID       uint64
-	ReplyTo     uint64
+	Text          string
+	DisplayName   string
+	ServerPub     string
+	PubHex        string
+	Seq           uint32
+	PrevHex       string
+	SigHex        string
+	MsgHashHex    string
+	TmpID         uint64
+	ReplyTo       uint64
+	SkipTextCheck bool
 }
 
 // VerifyResult holds successful verification data.
@@ -77,10 +82,14 @@ func Verify(p VerifyParams) (*VerifyResult, error) {
 	if err != nil || len(msgHashBytes) != 32 {
 		return nil, fmt.Errorf("bad msg_hash hex")
 	}
-	// Recompute msg hash from text and compare
-	actual := sha256.Sum256([]byte(p.Text))
-	if hex.EncodeToString(actual[:]) != msgHashHex {
-		return nil, fmt.Errorf("msg_hash mismatch")
+	// Recompute msg hash from text and compare, unless the caller shows
+	// no text from this data (SkipTextCheck): then the signature over
+	// msgHash alone is the whole statement being verified.
+	if !p.SkipTextCheck {
+		actual := sha256.Sum256([]byte(p.Text))
+		if hex.EncodeToString(actual[:]) != msgHashHex {
+			return nil, fmt.Errorf("msg_hash mismatch")
+		}
 	}
 	// TmpID 0 with ReplyTo 0 means a pre-chain signature (or a legacy
 	// browser link without tmp_id): verify against the legacy payload
