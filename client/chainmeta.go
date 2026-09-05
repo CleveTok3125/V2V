@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/CleveTok3125/V2V/internal/chain"
+	"github.com/CleveTok3125/V2V/internal/filter"
+	"github.com/CleveTok3125/V2V/internal/trip"
 )
 
 // Chain meta line and echo matching helpers. Pure logic lives here for
@@ -378,6 +380,101 @@ func wantsMeta(wire WireMessage, withMeta bool) bool {
 	return true
 }
 
+// wireIndex maps chain heights to full wires for /info lookups.
+// Bounded FIFO (~1KB per wire); entries never mutate once stored.
+type wireIndex struct {
+	cap   int
+	order []uint64
+	items map[uint64]WireMessage
+}
+
+func newWireIndex(capN int) *wireIndex {
+	if capN <= 0 {
+		capN = 1000
+	}
+	return &wireIndex{cap: capN, items: make(map[uint64]WireMessage)}
+}
+
+// put indexes wires carrying a chain height; legacy lines are skipped.
+func (x *wireIndex) put(wire WireMessage) {
+	if wire.ChainHeight == 0 {
+		return
+	}
+	if _, ok := x.items[wire.ChainHeight]; !ok {
+		x.order = append(x.order, wire.ChainHeight)
+	}
+	x.items[wire.ChainHeight] = wire
+	for len(x.order) > x.cap {
+		delete(x.items, x.order[0])
+		x.order = x.order[1:]
+	}
+}
+
+func (x *wireIndex) get(height uint64) (WireMessage, bool) {
+	wire, ok := x.items[height]
+	return wire, ok
+}
+
+// formatInfoBlock renders the full metadata detail of one indexed wire.
+// Both verdicts recompute locally without network: the chain content
+// hash and, for signed messages, the trip signature.
+func formatInfoBlock(wire WireMessage) []string {
+	out := []string{fmt.Sprintf("| [Local] #%d — chi tiết metadata:\n", wire.ChainHeight)}
+	out = append(out, fmt.Sprintf("|   %-9s %d\n", "height:", wire.ChainHeight))
+	out = append(out, fmt.Sprintf("|   %-9s %d | reply_to:  %d\n", "tmp_id:", wire.TmpID, wire.ReplyTo))
+	out = append(out, fmt.Sprintf("|   %-9s %s\n", "hash:", strings.ToLower(wire.ChainHash)))
+	out = append(out, fmt.Sprintf("|   %-9s %s\n", "prev:", strings.ToLower(wire.ChainPrev)))
+	out = append(out, fmt.Sprintf("|   %-9s %s | from: %s\n", "time:", wire.Time, wire.DisplayName))
+	if wire.Trip != nil {
+		badge := "◆ " + shortBadge(wire.Trip.Pub)
+		verdict := "✗"
+		detail := ""
+		if _, err := trip.Verify(trip.VerifyParams{
+			Text:        wire.Text,
+			DisplayName: wire.DisplayName,
+			ServerPub:   wire.Trip.ServerPub,
+			PubHex:      wire.Trip.Pub,
+			Seq:         wire.Trip.Seq,
+			PrevHex:     wire.Trip.Prev,
+			SigHex:      wire.Trip.Sig,
+			MsgHashHex:  wire.Trip.MsgHash,
+			TmpID:       wire.Trip.TmpID,
+			ReplyTo:     wire.Trip.ReplyTo,
+		}); err == nil {
+			verdict = "✓"
+		} else {
+			detail = " (" + err.Error() + ")"
+		}
+		out = append(out, fmt.Sprintf("|   %-9s badge %s %s | seq %d%s\n", "trip:", badge, verdict, wire.Trip.Seq, detail))
+	} else {
+		out = append(out, "|   trip:      (không)\n")
+	}
+	if err := verifyWireContent(wire); err == nil {
+		out = append(out, "|   chain:     khớp ✓\n")
+	} else {
+		out = append(out, fmt.Sprintf("|   chain:     lệch ✗ (%v)\n", err))
+	}
+	first := stripANSIForFind(wire.Text)
+	if i := strings.Index(first, "\n"); i >= 0 {
+		first = first[:i]
+	}
+	first = strings.TrimSpace(filter.SanitizeForDisplay(first))
+	if r := []rune(first); len(r) > 80 {
+		first = string(r[:80]) + "…"
+	}
+	out = append(out, fmt.Sprintf("|   %-9s %s\n", "text:", first))
+	return out
+}
+
+// shortBadge derives the visible badge from a pubkey hex, tolerating junk.
+func shortBadge(pubHex string) string {
+	h := strings.ToLower(strings.TrimSpace(pubHex))
+	if len(h) >= 8 {
+		return h[:8]
+	}
+	return h
+}
+
 // chainTipFile derives the persisted-tip path next to the readline history.
 func chainTipFile(historyPath string) string {
 	if historyPath == "" {
@@ -448,20 +545,35 @@ func verifyWireLink(wire WireMessage, prev [32]byte) ([32]byte, error) {
 	if !ok {
 		return zero, errChainLink("malformed chain_hash")
 	}
+	if err := verifyWireContent(wire); err != nil {
+		return zero, err
+	}
+	return want, nil
+}
+
+// verifyWireContent recomputes a wire link from its own fields, without
+// any tip context: it proves the content is intact but says nothing about
+// position in the log (that needs the running tip in checkChainLink).
+func verifyWireContent(wire WireMessage) error {
+	want, ok := chain.ParseHex64(wire.ChainHash)
+	if !ok {
+		return errChainLink("malformed chain_hash")
+	}
 	var sig string
 	if wire.Trip != nil {
 		sig = wire.Trip.Sig
 	}
+	prev, _ := chain.ParseHex64(wire.ChainPrev)
 	var linked bool
 	if wire.ChainVer >= 2 {
-		linked = chain.VerifyLink(gotPrev, wire.ChainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, sig, want)
+		linked = chain.VerifyLink(prev, wire.ChainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, sig, want)
 	} else {
-		linked = chain.VerifyLinkV1(gotPrev, wire.ChainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, sig, want)
+		linked = chain.VerifyLinkV1(prev, wire.ChainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, sig, want)
 	}
 	if !linked {
-		return zero, errChainLink("hash does not match content")
+		return errChainLink("hash does not match content")
 	}
-	return want, nil
+	return nil
 }
 
 type chainLinkError struct{ msg string }
