@@ -23,8 +23,9 @@ const (
 )
 
 // Hash links one message into the log. Fields are length-prefixed so
-// concatenation is unambiguous regardless of embedded separators.
-func Hash(prev [32]byte, height uint64, typ, tim, display, text, tripSig string) [32]byte {
+// concatenation is unambiguous regardless of embedded separators. tmpID
+// is covered too, so renumbering breaks the link for every observer.
+func Hash(prev [32]byte, height uint64, tmpID uint64, typ, tim, display, text, tripSig string) [32]byte {
 	h := sha256.New()
 	h.Write([]byte(domainLink))
 	h.Write([]byte{0})
@@ -36,6 +37,8 @@ func Hash(prev [32]byte, height uint64, typ, tim, display, text, tripSig string)
 	}
 	put(prev[:])
 	n := binary.PutUvarint(buf[:], height)
+	h.Write(buf[:n])
+	n = binary.PutUvarint(buf[:], tmpID)
 	h.Write(buf[:n])
 	put([]byte(typ))
 	put([]byte(tim))
@@ -62,8 +65,8 @@ func LegacyAnchor(lastLegacyMsg string) [32]byte {
 }
 
 // VerifyLink recomputes the link and compares it with want.
-func VerifyLink(prev [32]byte, height uint64, typ, tim, display, text, tripSig string, want [32]byte) bool {
-	return Hash(prev, height, typ, tim, display, text, tripSig) == want
+func VerifyLink(prev [32]byte, height uint64, tmpID uint64, typ, tim, display, text, tripSig string, want [32]byte) bool {
+	return Hash(prev, height, tmpID, typ, tim, display, text, tripSig) == want
 }
 
 // ParseHex64 decodes a 64-char lowercase hex hash; it reports false for
