@@ -432,9 +432,9 @@ func TestFormatInfoBlockTripDetail(t *testing.T) {
 	wire := chainedTripWire(tm, text)
 	joined := strings.Join(formatInfoBlock(wire), "")
 	for _, want := range []string{
-		"badge ◆", "✓", "pub:", hex.EncodeToString(pub),
-		"seq", "prev:", "sig:", hex.EncodeToString(sig),
-		"msg_hash:", "server_pub:", "payload:",
+		"◆", "✓", "trip.pub:", hex.EncodeToString(pub),
+		"trip.seq:", "trip.prev:", "trip.sig:", hex.EncodeToString(sig),
+		"trip.hash:", "trip.srv:", "trip.payload:",
 		hex.EncodeToString(payload),
 	} {
 		if !strings.Contains(joined, want) {
