@@ -67,6 +67,7 @@ type TripMeta struct {
 	MsgHash     string `json:"msg_hash,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
 	TmpID       uint64 `json:"tmp_id,omitempty"`
+	ReplyTo     uint64 `json:"reply_to,omitempty"`
 }
 
 type WireMessage struct {
@@ -76,12 +77,14 @@ type WireMessage struct {
 	Text        string    `json:"text,omitempty"`
 	Trip        *TripMeta `json:"trip,omitempty"`
 	// TmpID is the sender's per-session counter, relayed verbatim and
-	// never assigned by the server. ChainPrev/ChainHash/ChainHeight link
-	// the message into the global hash chain (see server/chain.go).
+	// never assigned by the server. ReplyTo quotes a chain height for
+	// replies, relayed verbatim and covered by the link (v2+).
 	TmpID       uint64 `json:"tmp_id,omitempty"`
+	ReplyTo     uint64 `json:"reply_to,omitempty"`
 	ChainPrev   string `json:"chain_prev,omitempty"`   // hex 64
 	ChainHash   string `json:"chain_hash,omitempty"`   // hex 64
 	ChainHeight uint64 `json:"chain_height,omitempty"`
+	ChainVer    int    `json:"chain_ver,omitempty"` // link encoding, current 2
 }
 
 type AuthPacket struct {

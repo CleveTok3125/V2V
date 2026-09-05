@@ -9,20 +9,20 @@ func TestGoldenVector(t *testing.T) {
 	// Locks the link encoding: any format drift fails loudly here first.
 	var prev [32]byte
 	prev[0] = 0xAB
-	got := Hash(prev, 7, 5, "chat", "15:04", "Alice", "hello", "sig")
-	want := Hash(prev, 7, 5, "chat", "15:04", "Alice", "hello", "sig")
+	got := Hash(prev, 7, 5, 0, "chat", "15:04", "Alice", "hello", "sig")
+	want := Hash(prev, 7, 5, 0, "chat", "15:04", "Alice", "hello", "sig")
 	if got != want {
 		t.Fatal("hash must be deterministic")
 	}
-	if !VerifyLink(prev, 7, 5, "chat", "15:04", "Alice", "hello", "sig", got) {
+	if !VerifyLink(prev, 7, 5, 0, "chat", "15:04", "Alice", "hello", "sig", got) {
 		t.Fatal("valid link must verify")
 	}
 	// Encoded fields must not collide across boundaries: "ab"+"c" differs
 	// from "a"+"bc" because of length prefixes.
-	other := Hash(prev, 7, 5, "chat", "15:04", "Alice", "hell", "o")
+	other := Hash(prev, 7, 5, 0, "chat", "15:04", "Alice", "hell", "o")
 	_ = other
-	joined1 := Hash(prev, 7, 5, "ch", "at", "Alice", "hello", "sig")
-	joined2 := Hash(prev, 7, 5, "chat", "15:04", "Alice", "hello", "sig")
+	joined1 := Hash(prev, 7, 5, 0, "ch", "at", "Alice", "hello", "sig")
+	joined2 := Hash(prev, 7, 5, 0, "chat", "15:04", "Alice", "hello", "sig")
 	if joined1 == joined2 {
 		t.Fatal("field boundaries must matter")
 	}
@@ -30,26 +30,28 @@ func TestGoldenVector(t *testing.T) {
 
 func TestTamperEachField(t *testing.T) {
 	var prev [32]byte
-	base := Hash(prev, 3, 5, "chat", "15:04", "Alice", "hello", "sig")
+	base := Hash(prev, 3, 5, 0, "chat", "15:04", "Alice", "hello", "sig")
 	cases := []struct {
 		name                    string
 		prev                    [32]byte
 		height                  uint64
 		tmpID                   uint64
+		replyTo                 uint64
 		typ, tim, display, text string
 		sig                     string
 	}{
-		{"prev", [32]byte{1}, 3, 5, "chat", "15:04", "Alice", "hello", "sig"},
-		{"height", prev, 4, 5, "chat", "15:04", "Alice", "hello", "sig"},
-		{"tmpid", prev, 3, 6, "chat", "15:04", "Alice", "hello", "sig"},
-		{"type", prev, 3, 5, "system", "15:04", "Alice", "hello", "sig"},
-		{"time", prev, 3, 5, "chat", "15:05", "Alice", "hello", "sig"},
-		{"display", prev, 3, 5, "chat", "15:04", "Alice2", "hello", "sig"},
-		{"text", prev, 3, 5, "chat", "15:04", "Alice", "hello!", "sig"},
-		{"sig", prev, 3, 5, "chat", "15:04", "Alice", "hello", "sig2"},
+		{"prev", [32]byte{1}, 3, 5, 0, "chat", "15:04", "Alice", "hello", "sig"},
+		{"height", prev, 4, 5, 0, "chat", "15:04", "Alice", "hello", "sig"},
+		{"tmpid", prev, 3, 6, 0, "chat", "15:04", "Alice", "hello", "sig"},
+		{"type", prev, 3, 5, 0, "system", "15:04", "Alice", "hello", "sig"},
+		{"time", prev, 3, 5, 0, "chat", "15:05", "Alice", "hello", "sig"},
+		{"display", prev, 3, 5, 0, "chat", "15:04", "Alice2", "hello", "sig"},
+		{"text", prev, 3, 5, 0, "chat", "15:04", "Alice", "hello!", "sig"},
+		{"sig", prev, 3, 5, 0, "chat", "15:04", "Alice", "hello", "sig2"},
+		{"replyto", prev, 3, 5, 9, "chat", "15:04", "Alice", "hello", "sig"},
 	}
 	for _, c := range cases {
-		if VerifyLink(c.prev, c.height, c.tmpID, c.typ, c.tim, c.display, c.text, c.sig, base) {
+		if VerifyLink(c.prev, c.height, c.tmpID, c.replyTo, c.typ, c.tim, c.display, c.text, c.sig, base) {
 			t.Errorf("tampered %s must break the link", c.name)
 		}
 	}
@@ -110,16 +112,34 @@ func BenchmarkVerify500(b *testing.B) {
 	}
 	links := make([]link, 500)
 	for i := range links {
-		h := Hash(prev, uint64(i+1), uint64(i+1), "chat", "15:04", "Alice", "hello", "")
+		h := Hash(prev, uint64(i+1), uint64(i+1), 0, "chat", "15:04", "Alice", "hello", "")
 		links[i] = link{prev: prev, height: uint64(i + 1), hash: h}
 		prev = h
 	}
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		for _, l := range links {
-			if !VerifyLink(l.prev, l.height, l.height, "chat", "15:04", "Alice", "hello", "", l.hash) {
+			if !VerifyLink(l.prev, l.height, l.height, 0, "chat", "15:04", "Alice", "hello", "", l.hash) {
 				b.Fatal("broken link")
 			}
 		}
+	}
+}
+
+func TestVerifyLinkV1Legacy(t *testing.T) {
+	// A v2 link never verifies as v1 (different encoding).
+	var prev [32]byte
+	v2 := Hash(prev, 1, 1, 0, "chat", "15:04", "A", "hi", "")
+	if VerifyLinkV1(prev, 1, 1, "chat", "15:04", "A", "hi", "", v2) {
+		t.Fatal("v2 link must not verify as v1")
+	}
+	// V1 self-chain verifies end to end (legacy history replays).
+	tip := prev
+	for i := uint64(1); i <= 3; i++ {
+		want := hashV1(tip, i, i, "chat", "15:04", "A", "hi", "")
+		if !VerifyLinkV1(tip, i, i, "chat", "15:04", "A", "hi", "", want) {
+			t.Fatalf("v1 self-chain must verify at %d", i)
+		}
+		tip = want
 	}
 }

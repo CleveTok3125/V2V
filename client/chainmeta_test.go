@@ -65,13 +65,14 @@ func TestChainTipRoundtrip(t *testing.T) {
 	}
 }
 
-func chainedTestWire(prev [32]byte, height, tmpID uint64) WireMessage {	h := chain.Hash(prev, height, tmpID, "chat", "15:04", "Alice", "hello", "")
+func chainedTestWire(prev [32]byte, height, tmpID uint64) WireMessage {	h := chain.Hash(prev, height, tmpID, 0, "chat", "15:04", "Alice", "hello", "")
 	return WireMessage{
 		Type: "chat", Time: "15:04", DisplayName: "Alice", Text: "hello",
 		TmpID:       tmpID,
 		ChainPrev:   hex.EncodeToString(prev[:]),
 		ChainHash:   hex.EncodeToString(h[:]),
 		ChainHeight: height,
+		ChainVer:    2,
 	}
 }
 
@@ -218,5 +219,57 @@ func TestRenderCacheBounded(t *testing.T) {
 	c.put("f", mk(1))
 	if _, ok := c.get("b"); ok {
 		t.Fatal("b must evict after order advanced")
+	}
+}
+
+func TestFindMentions(t *testing.T) {
+	ms := findMentions("see @#1234 and @#56:abcd ok")
+	if len(ms) != 2 || ms[0].height != 1234 || ms[1].height != 56 || ms[1].suffix != "abcd" {
+		t.Fatalf("got %+v", ms)
+	}
+	for _, s := range []string{
+		"mail a@#1234x",   // trailing ident char
+		"x@#1234",         // Wait: @ preceded by ident char -> skip
+		"@#0",             // zero height
+		"@#12:xyz",        // non-hex tail voids
+		"name#123 ok",     // no @ prefix
+		"@#12#34",         // trailing # voids
+	} {
+		_ = s
+	}
+	if got := findMentions("mail a@#1234x"); len(got) != 0 {
+		t.Fatalf("trailing ident must void: %+v", got)
+	}
+	if got := findMentions("x@#1234"); len(got) != 0 {
+		t.Fatalf("leading ident must void: %+v", got)
+	}
+	if got := findMentions("@#0"); len(got) != 0 {
+		t.Fatalf("zero height must void: %+v", got)
+	}
+	if got := findMentions("@#12:xyz"); len(got) != 0 {
+		t.Fatalf("non-hex tail must void: %+v", got)
+	}
+	if got := findMentions("name#123 ok"); len(got) != 0 {
+		t.Fatalf("missing @ must void: %+v", got)
+	}
+}
+
+func TestRenderMentions(t *testing.T) {
+	resolve := func(h uint64, s string) bool { return h == 7 && (s == "" || s == "ab") }
+	got := renderMentions("see @#7 and @#8 and @#7:zz", resolve)
+	if !strings.Contains(got, "\x1b[1;96m@#7\x1b[22;39m") {
+		t.Fatalf("resolved mention must highlight: %q", got)
+	}
+	if strings.Contains(got, "\x1b[1;96m@#8") || strings.Contains(got, "@#7:zz\x1b") {
+		t.Fatalf("unresolved/suffix-mismatch must stay plain: %q", got)
+	}
+	// SGR spans are never entered.
+	in := "\x1b[48;5;236m@#7\x1b[49m tail @#7"
+	got = renderMentions(in, resolve)
+	if strings.Contains(got, "\x1b[48;5;236m\x1b[1;96m") {
+		t.Fatalf("must not highlight inside SGR span: %q", got)
+	}
+	if !strings.Contains(got, "\x1b[1;96m@#7\x1b[22;39m") {
+		t.Fatalf("plain mention must still highlight: %q", got)
 	}
 }
