@@ -352,23 +352,46 @@ func findMetaMatches(lines []string, height uint64, suffix string) []int {
 // Pending (placeholder) quotes carry the grey wrapper plus ⏳ so the erase
 // region check keeps passing; confirmed quotes render plain.
 func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) string {
-	first := stripANSIForFind(headEntry)
-	if i := strings.Index(first, "\n"); i >= 0 {
-		first = first[:i]
-	}
-	first = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(first), "|"))
-	runes := []rune(first)
-	if maxRunes < 20 {
-		maxRunes = 20
-	}
-	if len(runes) > maxRunes {
-		first = string(runes[:maxRunes]) + "…"
-	}
-	line := fmt.Sprintf("| ↩ #%d: %s", height, first)
+	line := fmt.Sprintf("| ↩ #%d: %s", height, quoteFirstLine(headEntry, maxRunes))
 	if pending {
 		return "\x1b[90m" + line + " ⏳\x1b[0m"
 	}
 	return line
+}
+
+// formatQuoteRich renders a quote from the indexed wire itself instead of
+// a parsed buffer line: time, author and a chain-content verdict join the
+// preview. Falls back to formatQuote when the caller only has text.
+func formatQuoteRich(wire WireMessage, pending bool, maxRunes int) string {
+	mark := "✓"
+	if err := verifyWireContent(wire); err != nil {
+		mark = "✗"
+	}
+	line := fmt.Sprintf("| ↩ #%d | %s %s %s: %s",
+		wire.ChainHeight, wire.Time, wire.DisplayName, mark,
+		quoteFirstLine(wire.Text, maxRunes))
+	if pending {
+		return "\x1b[90m" + line + " ⏳\x1b[0m"
+	}
+	return line
+}
+
+// quoteFirstLine strips a rendered head entry (or raw text) down to one
+// truncated preview line. Single-line output keeps placeholder erase
+// math exact.
+func quoteFirstLine(s string, maxRunes int) string {
+	first := stripANSIForFind(s)
+	if i := strings.Index(first, "\n"); i >= 0 {
+		first = first[:i]
+	}
+	first = strings.TrimSpace(filter.SanitizeForDisplay(strings.TrimPrefix(strings.TrimSpace(first), "|")))
+	if maxRunes < 20 {
+		maxRunes = 20
+	}
+	if runes := []rune(first); len(runes) > maxRunes {
+		first = string(runes[:maxRunes]) + "…"
+	}
+	return first
 }
 
 // wantsMeta reports whether a wire earns a trailing meta line. Server
