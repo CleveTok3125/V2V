@@ -4,12 +4,13 @@
 <a href="README.vi.md">Tiếng Việt</a> · <a href="docs/TECHNICAL.md">Technical Docs</a>
 </p>
 
-A lightweight, real-time anonymous chat — pure Go, WebSocket, no database.
+A lightweight, real-time anonymous chat with a tamper-evident message log — pure Go, WebSocket, no database.
 
 - **Anonymous by default** — everyone gets `Name#a1b2` from a per-session salted IP hash (auto-extends, adds `-2` on collision). No signup, comfortable naming.
-- **Passwordless login for staff** — Ed25519 key files or WebAuthn passkeys (Touch ID / Windows Hello).
-- **Optional tripcode** — a colorful `◆ ab12` badge derived from a passphrase, cryptographically verifiable.
-- **Fast & private** — in-memory history, anti-spam limits, and encrypted key files stay on your device.
+- **Tamper-evident log** — every message links into one server-wide hash chain and carries a `#height:hash` ID. Editing, reordering or renumbering any message breaks the chain, and every client sees it — no per-user signing needed for that.
+- **Referenceable conversation** — quote replies (`/reply 1234`), `@#1234` mentions, and `/find` lookup by message number; code blocks render with syntax highlight.
+- **Verifiable identity, optional** — a colorful `◆ ab12` tripcode badge derived from a passphrase, cryptographically verifiable (or log in passwordless as staff with Ed25519 key files / WebAuthn passkeys).
+- **Fast & private** — capped in-memory history persisted as local JSONL, anti-spam limits, and encrypted key files stay on your device.
 
 ## Quick Start
 
@@ -38,7 +39,7 @@ make help            # see all targets
 #                      └─ ✍️ ◆ ab12cd34  (colored, clickable to verify)
 ```
 
-Type `/help` inside the chat for commands (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/verify`, `/tab`).
+Type `/help` inside the chat for commands (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/verify`, `/tab`, `/meta`, `/find`, `/reply`).
 
 Your message first appears grey with `⏳` and is replaced by the confirmed line once the server echoes it back. Unknown `/commands` are rejected locally and never broadcast (to send text starting with `/`, wrap it in a ``` code block).
 
