@@ -4,7 +4,7 @@
 <a href="README.vi.md">Tiếng Việt</a> · <a href="docs/TECHNICAL.md">Technical Docs</a>
 </p>
 
-A lightweight, real-time anonymous chat with a tamper-evident message log — pure Go, WebSocket, no database.
+Anonymous chat where no one — not even the server — can rewrite history.
 
 - **Anonymous by default** — everyone gets `Name#a1b2` from a per-session salted IP hash (auto-extends, adds `-2` on collision). No signup, comfortable naming.
 - **Tamper-evident log** — every message links into one server-wide hash chain and carries a `#height:hash` ID. Editing, reordering or renumbering any message breaks the chain, and every client sees it — no per-user signing needed for that.
