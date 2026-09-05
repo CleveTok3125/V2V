@@ -128,6 +128,12 @@ type ClientConfig struct {
 			EOF       string `json:"eof"`
 		} `json:"prompts"`
 		TripPalette [][3]int `json:"tripPalette"`
+		// Meta controls the trailing "#height:hash" line. Show is a
+		// pointer so an absent section (old config files) backfills to
+		// the default instead of silently disabling the line.
+		Meta struct {
+			Show *bool `json:"show"`
+		} `json:"meta"`
 		CodeStyle struct {
 			Background [3]int `json:"background"`
 			Keyword    [3]int `json:"keyword"`
@@ -212,6 +218,7 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.Prompts.Interrupt = "^C"
 	c.UI.Prompts.EOF = "/quit"
 	c.UI.TripPalette = [][3]int{{79, 129, 255}, {129, 199, 132}, {255, 183, 77}, {149, 117, 205}, {77, 208, 225}, {255, 138, 101}, {174, 213, 129}, {144, 164, 174}, {255, 213, 79}, {100, 181, 246}}
+	c.UI.Meta.Show = boolPtr(true)
 	// Code highlight palette (dark, matching the trip palette hues).
 	// A [0,0,0] entry means "use this default".
 	c.UI.CodeStyle.Background = [3]int{48, 48, 48}
@@ -258,6 +265,19 @@ func DefaultClientConfig() *ClientConfig {
 	return c
 }
 
+// boolPtr allocates a bool for default config values that must tell
+// "absent" apart from "false" after JSON round-trips.
+func boolPtr(v bool) *bool { return &v }
+
+// ShowMeta reports whether message meta lines render. A nil pointer
+// (hand-edited or ancient config) means the default: shown.
+func (c *ClientConfig) ShowMeta() bool {
+	if c == nil || c.UI.Meta.Show == nil {
+		return true
+	}
+	return *c.UI.Meta.Show
+}
+
 // LoadOrCreate loads config from path, creates default if missing when autoCreate is true.
 func LoadOrCreate(path string, autoCreate bool) (*ClientConfig, error) {
 	data, err := os.ReadFile(path)
@@ -280,6 +300,42 @@ func LoadOrCreate(path string, autoCreate bool) (*ClientConfig, error) {
 	}
 	// Backfill tab caps for config files written before the tabs section existed.
 	def := DefaultClientConfig()
+	// Backfill numeric limits: a partial config must never zero out the
+	// send guards (a zero MaxMessageLength would reject every message).
+	if c.Limits.MaxConnectionsPerIP <= 0 {
+		c.Limits.MaxConnectionsPerIP = def.Limits.MaxConnectionsPerIP
+	}
+	if c.Limits.MaxMessageLength <= 0 {
+		c.Limits.MaxMessageLength = def.Limits.MaxMessageLength
+	}
+	if c.Limits.MaxMessageLine <= 0 {
+		c.Limits.MaxMessageLine = def.Limits.MaxMessageLine
+	}
+	if c.Limits.MessageCooldown <= 0 {
+		c.Limits.MessageCooldown = def.Limits.MessageCooldown
+	}
+	if c.Limits.IdleChatTimeout <= 0 {
+		c.Limits.IdleChatTimeout = def.Limits.IdleChatTimeout
+	}
+	if c.Limits.MaxHistoryBytes <= 0 {
+		c.Limits.MaxHistoryBytes = def.Limits.MaxHistoryBytes
+	}
+	if c.Limits.MaxHistorySend <= 0 {
+		c.Limits.MaxHistorySend = def.Limits.MaxHistorySend
+	}
+	if c.Limits.MaxUsernameLength <= 0 {
+		c.Limits.MaxUsernameLength = def.Limits.MaxUsernameLength
+	}
+	if c.Limits.MaxTripcodeLength <= 0 {
+		c.Limits.MaxTripcodeLength = def.Limits.MaxTripcodeLength
+	}
+	if c.Limits.ConnectionCooldown <= 0 {
+		c.Limits.ConnectionCooldown = def.Limits.ConnectionCooldown
+	}
+	// Backfill meta visibility (absent section means default: shown).
+	if c.UI.Meta.Show == nil {
+		c.UI.Meta.Show = def.UI.Meta.Show
+	}
 	if c.Tabs.ChatMaxBytes <= 0 {
 		c.Tabs.ChatMaxBytes = def.Tabs.ChatMaxBytes
 	}
