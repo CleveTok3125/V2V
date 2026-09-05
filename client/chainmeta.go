@@ -277,9 +277,14 @@ func renderMentionsPlain(s string, resolve func(height uint64, suffix string) bo
 }
 
 // mentionSGR builds the highlight pair from a clamped [r,g,b] triple with
-// the bold attribute the default look carries. The closer resets bold +
+// the bold attribute the default look carries. The default cyan emits the
+// legacy 16-color sequence, which every terminal renders; custom colors
+// use truecolor (needs truecolor support). The closer resets bold +
 // foreground so surrounding colors resume.
 func mentionSGR(c [3]int) (open, close string) {
+	if c == ([3]int{0, 255, 255}) {
+		return "\x1b[1;96m", sgrMentionClose
+	}
 	return fmt.Sprintf("\x1b[1;38;2;%d;%d;%dm", c[0], c[1], c[2]), sgrMentionClose
 }
 
