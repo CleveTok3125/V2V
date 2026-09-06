@@ -11,6 +11,7 @@ import (
 
 	"github.com/CleveTok3125/V2V/identity"
 
+	"github.com/CleveTok3125/V2V/internal/passprompt"
 	xterm "github.com/charmbracelet/x/term"
 )
 
@@ -26,11 +27,20 @@ func LoadIdentityFile(path string) (*IdentityFile, error) {
 		if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
 			return identity.LoadEncrypted(path, pass)
 		}
-		// Prompt for passphrase (hidden input)
-		fmt.Print("🔒 Nhập passphrase cho key file: ")
-		// Try to use term.ReadPassword if available, fallback to plain
-		pass, err := readPassphrase()
-		fmt.Println()
+		// Prompt for passphrase (hidden input). TTY sessions use the
+		// shared program; piped input keeps the legacy hidden reader.
+		var pass string
+		var err error
+		if passprompt.Interactive() {
+			pass, err = passprompt.Password(passprompt.PasswordOpts{
+				Title: "🔒 Nhập passphrase cho key file",
+			})
+		} else {
+			fmt.Print("🔒 Nhập passphrase cho key file: ")
+			// Try to use term.ReadPassword if available, fallback to plain
+			pass, err = readPassphrase()
+			fmt.Println()
+		}
 		if err != nil {
 			return nil, err
 		}
