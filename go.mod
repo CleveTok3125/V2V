@@ -8,6 +8,7 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/alecthomas/kong v1.14.0
 	github.com/atotto/clipboard v0.1.4
+	github.com/ccojocar/zxcvbn-go v1.0.4
 	github.com/charmbracelet/huh v0.7.0
 	github.com/charmbracelet/x/term v0.2.1
 	github.com/chzyer/readline v1.5.1
