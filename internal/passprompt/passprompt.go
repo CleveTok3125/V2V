@@ -29,11 +29,14 @@ const DefaultMaxRounds = 3
 
 // Assessment is the caller-computed meter snapshot for one input value.
 // Bits is capped display entropy, Label its human band, Weak whether
-// the caller treats the value as too weak.
+// the caller treats the value as too weak. Capped marks a clamped
+// value so the meter can show a "+" suffix instead of implying
+// false precision.
 type Assessment struct {
-	Bits  float64
-	Label string
-	Weak  bool
+	Bits   float64
+	Capped bool
+	Label  string
+	Weak   bool
 }
 
 // PasswordOpts tunes Password. Title and ConfirmTitle are printed

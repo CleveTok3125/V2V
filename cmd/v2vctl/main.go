@@ -693,6 +693,7 @@ func promptPassphrase() (string, error) {
 func assessFilePassphrase(s string) passprompt.Assessment {
 	r := zxcvbn.PasswordStrength(s, nil)
 	e := r.Entropy
+	capped := !math.IsNaN(e) && e > 128
 	if math.IsNaN(e) || e < 0 {
 		e = 0
 	}
@@ -710,7 +711,7 @@ func assessFilePassphrase(s string) passprompt.Assessment {
 	default:
 		label = "rất mạnh"
 	}
-	return passprompt.Assessment{Bits: e, Label: label, Weak: r.Score <= 1}
+	return passprompt.Assessment{Bits: e, Capped: capped, Label: label, Weak: r.Score <= 1}
 }
 
 func loadContainer(path string) (*identity.IdentityFile, error) {
