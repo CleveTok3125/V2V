@@ -83,7 +83,10 @@ func resolveTripcode(useFlag bool, configDir, username, serverHost string) (stri
 		}
 	}
 	if offerTripcodeSave(os.Stdin) {
-		if err := saveTripcodePrompt(path, tc); err != nil {
+		assessUnlock := func(s string) passprompt.Assessment {
+			return toAssessment(AssessPassphrase(s, ctx))
+		}
+		if err := saveTripcodePrompt(path, tc, assessUnlock); err != nil {
 			fmt.Printf("⚠️ Không lưu được tripcode: %v\n", err)
 		} else {
 			fmt.Println("💾 Đã lưu tripcode mã hóa.")
@@ -92,21 +95,28 @@ func resolveTripcode(useFlag bool, configDir, username, serverHost string) (stri
 	return tc, nil
 }
 
-// meteredTripcodeEntry is the unified TTY flow: live-meter double
-// entry, the 64-byte cap, weak warn+confirm, and the encrypted-save
-// offer. ctx feeds the meter's personal-info context. Assessment stays
-// a client-side callback so passprompt never imports zxcvbn.
+// toAssessment maps a strength report to the shared prompt meter. Pure
+// so tests pin the mapping without a TTY.
+func toAssessment(rep StrengthReport) passprompt.Assessment {
+	return passprompt.Assessment{Bits: rep.Entropy, Label: rep.Label, Weak: rep.Weak}
+}
+
+// meteredTripcodeEntry is the unified TTY flow: single live-meter
+// entry, the 64-byte cap, weak warn+confirm, then the encrypted-save
+// offer. Re-entry is asked only when the user chooses to save: a
+// session-only typo shows up on the badge immediately, while a saved
+// typo (or a wrong unlock passphrase) is permanent. ctx feeds the
+// meter's personal-info context. Assessment stays a client-side
+// callback so passprompt never imports zxcvbn. The piped path keeps
+// the upfront double-entry order for script stability.
 func meteredTripcodeEntry(path string, ctx []string) (string, error) {
 	assess := func(s string) passprompt.Assessment {
-		rep := AssessPassphrase(s, ctx)
-		return passprompt.Assessment{Bits: rep.Entropy, Label: rep.Label, Weak: rep.Weak}
+		return toAssessment(AssessPassphrase(s, ctx))
 	}
 	tc, err := passprompt.Password(passprompt.PasswordOpts{
-		Title:        "🔑 Nhập tripcode mới",
-		ConfirmTitle: "🔑 Nhập lại để xác nhận",
-		Confirm:      true,
-		MaxRounds:    maxEntryAttempts,
-		Assess:       assess,
+		Title:     "🔑 Nhập tripcode mới",
+		MaxRounds: maxEntryAttempts,
+		Assess:    assess,
 	})
 	if err != nil {
 		return "", err
@@ -127,12 +137,23 @@ func meteredTripcodeEntry(path string, ctx []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if ok {
-		if err := saveTripcodePrompt(path, tc); err != nil {
-			fmt.Printf("⚠️ Không lưu được tripcode: %v\n", err)
-		} else {
-			fmt.Println("💾 Đã lưu tripcode mã hóa.")
-		}
+	if !ok {
+		return tc, nil
+	}
+	if _, err := passprompt.Password(passprompt.PasswordOpts{
+		ConfirmTitle: "🔑 Nhập lại để xác nhận",
+		MaxRounds:    maxEntryAttempts,
+		Expect:       tc,
+	}); err != nil {
+		return "", err
+	}
+	assessUnlock := func(s string) passprompt.Assessment {
+		return toAssessment(AssessPassphrase(s, ctx))
+	}
+	if err := saveTripcodePrompt(path, tc, assessUnlock); err != nil {
+		fmt.Printf("⚠️ Không lưu được tripcode: %v\n", err)
+	} else {
+		fmt.Println("💾 Đã lưu tripcode mã hóa.")
 	}
 	return tc, nil
 }
@@ -210,14 +231,21 @@ func saveTripcodeFile(path, tripcode, unlock string) error {
 }
 
 // saveTripcodePrompt asks for an unlock passphrase (hidden) and saves.
-// Empty unlock skips saving without error.
-func saveTripcodePrompt(path, tripcode string) error {
+// Empty unlock skips saving without error. The TTY branch uses
+// double-entry with a live meter: a typo here locks the file forever.
+// assess maps input to the meter; the piped path reuses the legacy
+// single hidden read.
+func saveTripcodePrompt(path, tripcode string, assess func(string) passprompt.Assessment) error {
 	var unlock string
 	var err error
 	if passprompt.Interactive() {
 		unlock, err = passprompt.Password(passprompt.PasswordOpts{
-			Title:      "🔒 Đặt unlock passphrase cho file tripcode (trống = không lưu)",
-			AllowEmpty: true,
+			Title:        "🔒 Đặt unlock passphrase cho file tripcode (trống = không lưu)",
+			ConfirmTitle: "🔒 Nhập lại unlock passphrase",
+			Confirm:      true,
+			AllowEmpty:   true,
+			MaxRounds:    maxEntryAttempts,
+			Assess:       assess,
 		})
 	} else {
 		fmt.Print("🔒 Đặt unlock passphrase cho file tripcode (trống = không lưu): ")
