@@ -94,7 +94,11 @@ func meterColor(a Assessment) lipgloss.Color {
 func renderMeterLine(a Assessment) string {
 	bar := MeterBar(a.Bits / 128)
 	styled := lipgloss.NewStyle().Foreground(meterColor(a)).Render(bar)
-	return fmt.Sprintf("%s %s bits — %s", styled, FormatBits(a.Bits), a.Label)
+	bits := FormatBits(a.Bits)
+	if a.Capped {
+		bits += "+"
+	}
+	return fmt.Sprintf("%s %s bits — %s", styled, bits, a.Label)
 }
 
 // passwordModel is the entry + double-entry state machine. assess runs

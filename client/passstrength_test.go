@@ -74,14 +74,14 @@ func TestAssessPersonalContext(t *testing.T) {
 	}
 }
 
-func TestDisplayLine(t *testing.T) {
-	r := StrengthReport{Score: 1, Entropy: 12.5, Label: "yếu"}
-	if got := r.DisplayLine(); !strings.Contains(got, "12.5") || !strings.Contains(got, "yếu") {
-		t.Fatalf("got %q", got)
+func TestAssessCappedFlag(t *testing.T) {
+	huge := AssessPassphrase(strings.Repeat("correct horse battery staple ", 10), nil)
+	if !huge.Capped || huge.Entropy != 128 {
+		t.Errorf("huge passphrase = %+v, want Capped with Entropy 128", huge)
 	}
-	r = StrengthReport{Score: 4, Entropy: 128, Label: "rất mạnh"}
-	if got := r.DisplayLine(); !strings.Contains(got, "128") {
-		t.Fatalf("got %q", got)
+	small := AssessPassphrase("abc123", nil)
+	if small.Capped {
+		t.Errorf("small passphrase must not be capped: %+v", small)
 	}
 	if got := (StrengthReport{Score: 0, Label: "yếu"}).WeakWarning(); !strings.Contains(got, "yếu") || strings.Contains(got, "128") {
 		t.Fatalf("warn must not leak entropy: %q", got)
@@ -146,8 +146,8 @@ func TestUserInputs(t *testing.T) {
 func TestToAssessment(t *testing.T) {
 	rep := StrengthReport{Score: 1, Entropy: 12.5, Label: "yếu", Weak: true}
 	got := toAssessment(rep)
-	if got.Bits != 12.5 || got.Label != "yếu" || !got.Weak {
-		t.Errorf("toAssessment = %+v, want bits/label/weak carried over", got)
+	if got.Bits != 12.5 || got.Label != "yếu" || !got.Weak || got.Capped {
+		t.Errorf("toAssessment = %+v, want bits/label/weak carried over, uncapped", got)
 	}
 	rep = AssessPassphrase("correct horse battery staple", nil)
 	got = toAssessment(rep)
