@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/huh"
 
 	"github.com/CleveTok3125/V2V/identity"
+	"github.com/CleveTok3125/V2V/internal/passprompt"
 )
 
 var Version = "dev"
@@ -674,29 +675,12 @@ func nonEmpty(s string) error {
 }
 
 func promptPassphrase() (string, error) {
-	var pass string
-	form := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Passphrase (Enter = không mã hóa)").EchoMode(huh.EchoModePassword).Value(&pass),
-	))
-	if err := form.Run(); err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(pass) == "" {
-		return "", nil
-	}
-	var confirm string
-	form2 := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Nhập lại passphrase").EchoMode(huh.EchoModePassword).Value(&confirm).Validate(func(s string) error {
-			if s != pass {
-				return errors.New("không khớp")
-			}
-			return nil
-		}),
-	))
-	if err := form2.Run(); err != nil {
-		return "", err
-	}
-	return pass, nil
+	return passprompt.Password(passprompt.PasswordOpts{
+		Title:        "Passphrase (Enter = không mã hóa)",
+		ConfirmTitle: "Nhập lại passphrase",
+		Confirm:      true,
+		AllowEmpty:   true,
+	})
 }
 
 func loadContainer(path string) (*identity.IdentityFile, error) {
@@ -727,14 +711,21 @@ func loadContainer(path string) (*identity.IdentityFile, error) {
 }
 
 func promptPassphraseForLoad() (string, error) {
-	var pass string
-	form := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Nhập passphrase").EchoMode(huh.EchoModePassword).Value(&pass).Validate(nonEmpty),
-	))
-	if err := form.Run(); err != nil {
-		return "", err
+	// Empty can never unlock: retry until non-empty, like the old
+	// huh Validate(nonEmpty) loop. Esc aborts via passprompt.
+	for {
+		pass, err := passprompt.Password(passprompt.PasswordOpts{
+			Title:      "Nhập passphrase",
+			AllowEmpty: true,
+		})
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(pass) != "" {
+			return pass, nil
+		}
+		fmt.Println("❌ bắt buộc, nhập lại.")
 	}
-	return pass, nil
 }
 
 func saveContainer(idf *identity.IdentityFile, path string) error {
