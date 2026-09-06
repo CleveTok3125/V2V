@@ -36,6 +36,15 @@ func Password(opts PasswordOpts) (string, error) {
 		return runPassword(opts)
 	}
 	stdin := func() (string, error) { return ReadLine(os.Stdin) }
+	if opts.Expect != "" {
+		return ExpectPiped(stdin, opts.Expect, opts.rounds(), func(round, max int) {
+			if round == 1 {
+				fmt.Print(opts.ConfirmTitle + " ")
+			} else {
+				fmt.Printf("%s (lần %d/%d) ", opts.ConfirmTitle, round, max)
+			}
+		})
+	}
 	if !opts.Confirm {
 		fmt.Print(opts.Title + " ")
 		return SinglePiped(stdin, opts.AllowEmpty)
@@ -79,23 +88,27 @@ func meterColor(a Assessment) lipgloss.Color {
 	}
 }
 
-// renderMeterLine is the live meter: bits + label + fixed-width bar.
-// Pure (no lipgloss state) so tests pin it exactly.
+// renderMeterLine is the live meter: fixed-width bar beside bits +
+// label on one line, no icon prefix. Pure (no lipgloss state beyond
+// the color choice) so tests pin it exactly.
 func renderMeterLine(a Assessment) string {
 	bar := MeterBar(a.Bits / 128)
 	styled := lipgloss.NewStyle().Foreground(meterColor(a)).Render(bar)
-	return fmt.Sprintf("📊 Độ mạnh: %s bits — %s\n%s", FormatBits(a.Bits), a.Label, styled)
+	return fmt.Sprintf("%s %s bits — %s", styled, FormatBits(a.Bits), a.Label)
 }
 
 // passwordModel is the entry + double-entry state machine. assess runs
 // synchronously on every keystroke (a zxcvbn eval costs ~0.1ms); the
-// snapshot renders on the next View.
+// snapshot renders on the next View. With opts.Expect the model starts
+// in confirmation phase against the known value and never shows the
+// meter.
 type passwordModel struct {
 	input   textinput.Model
 	opts    PasswordOpts
 	assess  func(string) Assessment
 	snap    Assessment
 	phase   int // 0 = entry, 1 = confirmation
+	expect  bool // confirm-against-known-value mode (opts.Expect)
 	first   string
 	round   int
 	errMsg  string
@@ -115,6 +128,9 @@ func newPasswordModel(opts PasswordOpts) passwordModel {
 		assess = func(string) Assessment { return Assessment{} }
 	}
 	m := passwordModel{input: ti, opts: opts, assess: assess, round: 1}
+	if opts.Expect != "" {
+		m.expect, m.phase, m.first = true, 1, opts.Expect
+	}
 	m.snap = assess("")
 	return m
 }
@@ -143,6 +159,11 @@ func (m passwordModel) submit() passwordModel {
 			return m
 		}
 		m.round++
+		if m.expect {
+			m.errMsg = "❌ Hai lần nhập không khớp, nhập lại."
+			m.input.Reset()
+			return m
+		}
 		m.phase, m.first, m.errMsg = 0, "", "❌ Hai lần nhập không khớp, nhập lại."
 		m.input.Reset()
 		m.snap = m.assess("")
@@ -190,13 +211,14 @@ func (m passwordModel) View() string {
 	if m.phase == 1 {
 		title = m.opts.ConfirmTitle
 	}
-	if m.round > 1 && m.phase == 0 {
+	if m.round > 1 {
 		title = fmt.Sprintf("%s (lần %d/%d)", title, m.round, m.opts.rounds())
 	}
-	out := titleStyle.Render(title) + "\n" + m.input.View() + "\n"
+	out := titleStyle.Render(title) + "\n"
 	if m.opts.Assess != nil && m.phase == 0 {
 		out += renderMeterLine(m.snap) + "\n"
 	}
+	out += m.input.View() + "\n"
 	if m.errMsg != "" {
 		out += errStyle.Render(m.errMsg) + "\n"
 	}

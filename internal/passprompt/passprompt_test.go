@@ -111,6 +111,26 @@ func TestConfirmPiped(t *testing.T) {
 	}
 }
 
+func TestExpectPiped(t *testing.T) {
+	var prompts int
+	got, err := ExpectPiped(script("wrong", "right"), "right", 3, func(_, _ int) { prompts++ })
+	if err != nil || got != "right" {
+		t.Errorf("retry match = %q, %v", got, err)
+	}
+	if prompts != 2 {
+		t.Errorf("onPrompt calls = %d, want 2", prompts)
+	}
+	if _, err := ExpectPiped(script("a", "b"), "z", 2, nil); err != ErrMismatch {
+		t.Errorf("exhaustion = %v, want ErrMismatch", err)
+	}
+	if _, err := ExpectPiped(script("\x00err"), "z", 3, nil); err == nil {
+		t.Error("read error must abort")
+	}
+	if _, err := ExpectPiped(script("z"), "z", 0, nil); err != nil {
+		t.Errorf("non-positive rounds must default: %v", err)
+	}
+}
+
 func TestReadLineKeepsRemainder(t *testing.T) {
 	r := strings.NewReader("first\nsecond\n")
 	first, err := ReadLine(r)
