@@ -141,3 +141,16 @@ func TestTripMessageJSON(t *testing.T) {
 		t.Fatalf("GetText fallback failed")
 	}
 }
+
+// BenchmarkDeriveTripKey calibrates the passphrase threshold math: one
+// offline guess costs roughly this long (native argon2id t=3/m=64MB),
+// so score<=1 (<1e6 guesses) means days of single-CPU work.
+func BenchmarkDeriveTripKey(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		priv, _, _ := deriveTripKey("con meo ngu trua", "deadbeef00112233445566778899aabbccddeeff00112233445566778899aabbcc")
+		for j := range priv {
+			priv[j] = 0
+		}
+	}
+}
