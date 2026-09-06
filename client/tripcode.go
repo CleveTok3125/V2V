@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/CleveTok3125/V2V/identity"
+	"github.com/CleveTok3125/V2V/internal/passprompt"
 )
 
 // TripcodeFileName is the secret file inside the config dir.
@@ -57,6 +58,15 @@ func resolveTripcode(useFlag bool, configDir, username, serverHost string) (stri
 		return tc, nil
 	}
 	fmt.Println(ReminderLine())
+	var tc string
+	if passprompt.Interactive() {
+		var err error
+		tc, err = meteredTripcodeEntry(path, ctx)
+		if err != nil {
+			return "", err
+		}
+		return tc, nil
+	}
 	tc, err := readDoubleEntry(readPassphrase)
 	if err != nil {
 		return "", err
@@ -73,6 +83,51 @@ func resolveTripcode(useFlag bool, configDir, username, serverHost string) (stri
 		}
 	}
 	if offerTripcodeSave(os.Stdin) {
+		if err := saveTripcodePrompt(path, tc); err != nil {
+			fmt.Printf("⚠️ Không lưu được tripcode: %v\n", err)
+		} else {
+			fmt.Println("💾 Đã lưu tripcode mã hóa.")
+		}
+	}
+	return tc, nil
+}
+
+// meteredTripcodeEntry is the unified TTY flow: live-meter double
+// entry, the 64-byte cap, weak warn+confirm, and the encrypted-save
+// offer. ctx feeds the meter's personal-info context. Assessment stays
+// a client-side callback so passprompt never imports zxcvbn.
+func meteredTripcodeEntry(path string, ctx []string) (string, error) {
+	assess := func(s string) passprompt.Assessment {
+		rep := AssessPassphrase(s, ctx)
+		return passprompt.Assessment{Bits: rep.Entropy, Label: rep.Label, Weak: rep.Weak}
+	}
+	tc, err := passprompt.Password(passprompt.PasswordOpts{
+		Title:        "🔑 Nhập tripcode mới",
+		ConfirmTitle: "🔑 Nhập lại để xác nhận",
+		Confirm:      true,
+		MaxRounds:    maxEntryAttempts,
+		Assess:       assess,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(tc) > 64 {
+		return "", errors.New("tripcode quá dài (tối đa 64 byte, server sẽ từ chối)")
+	}
+	rep := AssessPassphrase(tc, ctx)
+	fmt.Println(rep.DisplayLine())
+	if rep.Weak {
+		fmt.Println(rep.WeakWarning())
+		ok, err := passprompt.Confirm("Vẫn dùng tripcode này?")
+		if err != nil || !ok {
+			return "", errors.New("đã hủy tripcode yếu")
+		}
+	}
+	ok, err := passprompt.Confirm("Lưu tripcode mã hóa vào file?")
+	if err != nil {
+		return "", err
+	}
+	if ok {
 		if err := saveTripcodePrompt(path, tc); err != nil {
 			fmt.Printf("⚠️ Không lưu được tripcode: %v\n", err)
 		} else {
@@ -110,9 +165,15 @@ func loadTripcodeFile(path string) (tc string, found bool, err error) {
 	}
 	unlock := os.Getenv("V2V_PASSPHRASE")
 	if unlock == "" {
-		fmt.Print("🔒 Nhập passphrase mở tripcode: ")
-		unlock, err = readPassphrase()
-		fmt.Println()
+		if passprompt.Interactive() {
+			unlock, err = passprompt.Password(passprompt.PasswordOpts{
+				Title: "🔒 Nhập passphrase mở tripcode",
+			})
+		} else {
+			fmt.Print("🔒 Nhập passphrase mở tripcode: ")
+			unlock, err = readPassphrase()
+			fmt.Println()
+		}
 		if err != nil {
 			return "", false, err
 		}
@@ -151,9 +212,18 @@ func saveTripcodeFile(path, tripcode, unlock string) error {
 // saveTripcodePrompt asks for an unlock passphrase (hidden) and saves.
 // Empty unlock skips saving without error.
 func saveTripcodePrompt(path, tripcode string) error {
-	fmt.Print("🔒 Đặt unlock passphrase cho file tripcode (trống = không lưu): ")
-	unlock, err := readPassphrase()
-	fmt.Println()
+	var unlock string
+	var err error
+	if passprompt.Interactive() {
+		unlock, err = passprompt.Password(passprompt.PasswordOpts{
+			Title:      "🔒 Đặt unlock passphrase cho file tripcode (trống = không lưu)",
+			AllowEmpty: true,
+		})
+	} else {
+		fmt.Print("🔒 Đặt unlock passphrase cho file tripcode (trống = không lưu): ")
+		unlock, err = readPassphrase()
+		fmt.Println()
+	}
 	if err != nil {
 		return err
 	}
