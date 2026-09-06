@@ -390,7 +390,7 @@ func main() {
 	// after the challenge. Key derivation still happens after the
 	// challenge so serverPub stays salt-bound.
 	if CLI.UseTripcode && CLI.Tripcode == "" {
-		tc, terr := resolveTripcode(true, CLI.ConfigDir)
+		tc, terr := resolveTripcode(true, CLI.ConfigDir, username, CLI.Server)
 		if terr != nil {
 			fmt.Printf("❌ Tripcode: %v\n", terr)
 			notifyQuit()

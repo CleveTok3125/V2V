@@ -14,6 +14,17 @@ github.com/aymanbagabas/go-osc52/v2
 # github.com/catppuccin/go v0.3.0
 ## explicit; go 1.19
 github.com/catppuccin/go
+# github.com/ccojocar/zxcvbn-go v1.0.4
+## explicit; go 1.20
+github.com/ccojocar/zxcvbn-go
+github.com/ccojocar/zxcvbn-go/adjacency
+github.com/ccojocar/zxcvbn-go/data
+github.com/ccojocar/zxcvbn-go/entropy
+github.com/ccojocar/zxcvbn-go/frequency
+github.com/ccojocar/zxcvbn-go/match
+github.com/ccojocar/zxcvbn-go/matching
+github.com/ccojocar/zxcvbn-go/scoring
+github.com/ccojocar/zxcvbn-go/utils/math
 # github.com/charmbracelet/bubbles v0.21.0
 ## explicit; go 1.23.0
 github.com/charmbracelet/bubbles/cursor

@@ -31,30 +31,46 @@ type tripcodeFile struct {
 // resolveTripcode returns the tripcode string for this session.
 // Empty + nil error means "no tripcode requested" only when useFlag is
 // false; callers pass the -t state. WASM returns the JS-provided value.
-func resolveTripcode(useFlag bool, configDir string) (string, error) {
+// username and serverHost feed the strength meter's personal-info
+// context; strength is only ever displayed on the interactive path.
+func resolveTripcode(useFlag bool, configDir, username, serverHost string) (string, error) {
 	if isWASMRuntime() {
 		return CLI.Tripcode, nil
 	}
 	if !useFlag {
 		return "", nil
 	}
+	ctx := userInputs(username, serverHost)
 	if v := os.Getenv("V2V_TRIPCODE"); v != "" {
+		if rep := AssessPassphrase(v, ctx); rep.Weak {
+			fmt.Printf("⚠️ Tripcode trong env yếu, cân nhắc đổi.\n")
+		}
 		return v, nil
 	}
 	path := filepath.Join(configDir, TripcodeFileName)
 	if tc, found, err := loadTripcodeFile(path); err != nil {
 		return "", err
 	} else if found {
+		if rep := AssessPassphrase(tc, ctx); rep.Weak {
+			fmt.Println(rep.WeakWarning())
+		}
 		return tc, nil
 	}
-	fmt.Print("🔑 Nhập tripcode: ")
-	tc, err := readPassphrase()
-	fmt.Println()
+	fmt.Println(ReminderLine())
+	tc, err := readDoubleEntry(readPassphrase)
 	if err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(tc) == "" {
-		return "", errors.New("tripcode trống")
+	if len(tc) > 64 {
+		return "", errors.New("tripcode quá dài (tối đa 64 byte, server sẽ từ chối)")
+	}
+	rep := AssessPassphrase(tc, ctx)
+	fmt.Println(rep.DisplayLine())
+	if rep.Weak {
+		fmt.Println(rep.WeakWarning())
+		if !confirmUseWeak(os.Stdin) {
+			return "", errors.New("đã hủy tripcode yếu")
+		}
 	}
 	if offerTripcodeSave(os.Stdin) {
 		if err := saveTripcodePrompt(path, tc); err != nil {
@@ -64,6 +80,19 @@ func resolveTripcode(useFlag bool, configDir string) (string, error) {
 		}
 	}
 	return tc, nil
+}
+
+// userInputs builds zxcvbn personal context from public identity data
+// the attacker already knows: display name and server host.
+func userInputs(username, serverHost string) []string {
+	var out []string
+	if u := strings.TrimSpace(username); u != "" {
+		out = append(out, u)
+	}
+	if h := strings.TrimSpace(serverHost); h != "" {
+		out = append(out, h)
+	}
+	return out
 }
 
 // loadTripcodeFile reads the secret file. found=false when absent.

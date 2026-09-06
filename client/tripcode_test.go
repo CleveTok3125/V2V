@@ -74,14 +74,14 @@ func TestOfferTripcodeSave(t *testing.T) {
 
 func TestResolveTripcodeEnvPrecedence(t *testing.T) {
 	t.Setenv("V2V_TRIPCODE", "from-env")
-	tc, err := resolveTripcode(true, t.TempDir())
+	tc, err := resolveTripcode(true, t.TempDir(), "u", "h")
 	if err != nil || tc != "from-env" {
 		t.Fatalf("got %q %v", tc, err)
 	}
 }
 
 func TestResolveTripcodeNoFlag(t *testing.T) {
-	tc, err := resolveTripcode(false, t.TempDir())
+	tc, err := resolveTripcode(false, t.TempDir(), "u", "h")
 	if err != nil || tc != "" {
 		t.Fatalf("got %q %v", tc, err)
 	}
@@ -92,7 +92,7 @@ func TestResolveTripcodeFromFile(t *testing.T) {
 	writeTripcodeFixture(t, dir, "from-file", "unlock-9")
 	t.Setenv("V2V_TRIPCODE", "")
 	t.Setenv("V2V_PASSPHRASE", "unlock-9")
-	tc, err := resolveTripcode(true, dir)
+	tc, err := resolveTripcode(true, dir, "u", "h")
 	if err != nil || tc != "from-file" {
 		t.Fatalf("got %q %v", tc, err)
 	}
