@@ -1,16 +1,16 @@
-# 🚀 V2V Anonymous WebSocket Chat
+# 🚀 V2V — Verifiable Anonymous Chat
 <p align="left">
 🇻🇳
 <a href="README.vi.md">Tiếng Việt</a> · <a href="docs/TECHNICAL.md">Technical Docs</a>
 </p>
 
-Anonymous chat where no one — not even the server — can rewrite history.
+Chat without accounts. The server never asks for email, phone numbers, or any real identifying information.
 
-- **Anonymous by default** — everyone gets `Name#a1b2` from a per-session salted IP hash (auto-extends, adds `-2` on collision). No signup, comfortable naming.
-- **Tamper-evident log** — every message links into one server-wide hash chain and carries a `#height:hash` ID. Editing, reordering or renumbering any message breaks the chain, and every client sees it — no per-user signing needed for that.
-- **Referenceable conversation** — quote replies (`/reply 1234`), `@#1234` mentions, and `/find` lookup by message number; code blocks render with syntax highlight.
-- **Verifiable identity, optional** — a colorful `◆ ab12` tripcode badge derived from a passphrase, cryptographically verifiable (or log in passwordless as staff with Ed25519 key files / WebAuthn passkeys).
-- **Fast & private** — capped in-memory history persisted as local JSONL, anti-spam limits, and encrypted key files stay on your device.
+- **No signup** — you join with a name like `Name#a1b2` and start chatting right away. No data links that name to you.
+- **Optional identifier** — a tripcode badge (`◆ ab12`) generated from a passphrase lets others recognize you across sessions, as long as you keep using it.
+- **Disposable identities** — just stop using a name or passphrase and that identity is gone. Starting over leaves no link between the old and the new.
+- **Transparent history** — every message links into a single server-wide hash chain. If a message is edited or reordered, every client can detect the break.
+- **Passwordless admin login** — moderators use Ed25519 key files or WebAuthn passkeys. No personal identifying information required.
 
 ## Quick Start
 
