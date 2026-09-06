@@ -18,12 +18,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/ccojocar/zxcvbn-go"
 	"github.com/charmbracelet/huh"
 
 	"github.com/CleveTok3125/V2V/identity"
@@ -680,7 +682,35 @@ func promptPassphrase() (string, error) {
 		ConfirmTitle: "Nhập lại passphrase",
 		Confirm:      true,
 		AllowEmpty:   true,
+		Assess:       assessFilePassphrase,
 	})
+}
+
+// assessFilePassphrase maps a candidate file passphrase to the shared
+// prompt meter. Context-free: v2vctl has no username/host to feed
+// zxcvbn. Display only — v2vctl never gates on strength. Label bands
+// and the 128-bit cap mirror client/passstrength.go, the policy owner.
+func assessFilePassphrase(s string) passprompt.Assessment {
+	r := zxcvbn.PasswordStrength(s, nil)
+	e := r.Entropy
+	if math.IsNaN(e) || e < 0 {
+		e = 0
+	}
+	if e > 128 {
+		e = 128
+	}
+	var label string
+	switch {
+	case r.Score <= 1:
+		label = "yếu"
+	case r.Score == 2:
+		label = "trung bình"
+	case r.Score == 3:
+		label = "mạnh"
+	default:
+		label = "rất mạnh"
+	}
+	return passprompt.Assessment{Bits: e, Label: label, Weak: r.Score <= 1}
 }
 
 func loadContainer(path string) (*identity.IdentityFile, error) {

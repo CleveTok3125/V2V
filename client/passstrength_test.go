@@ -142,3 +142,16 @@ func TestUserInputs(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestToAssessment(t *testing.T) {
+	rep := StrengthReport{Score: 1, Entropy: 12.5, Label: "yếu", Weak: true}
+	got := toAssessment(rep)
+	if got.Bits != 12.5 || got.Label != "yếu" || !got.Weak {
+		t.Errorf("toAssessment = %+v, want bits/label/weak carried over", got)
+	}
+	rep = AssessPassphrase("correct horse battery staple", nil)
+	got = toAssessment(rep)
+	if got.Bits != rep.Entropy || got.Label != rep.Label || got.Weak != rep.Weak {
+		t.Errorf("toAssessment(assessed) = %+v vs %+v", got, rep)
+	}
+}

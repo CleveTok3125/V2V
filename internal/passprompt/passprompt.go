@@ -47,6 +47,11 @@ type PasswordOpts struct {
 	AllowEmpty   bool
 	MaxRounds    int
 	Assess       func(string) Assessment
+	// Expect switches to confirm-against-known-value mode: the caller
+	// already holds the value (e.g. entered moments ago) and only
+	// asks the user to repeat it. Confirm/Assess are ignored; the
+	// meter never shows in this mode.
+	Expect string
 }
 
 func (o PasswordOpts) rounds() int {
@@ -158,6 +163,29 @@ func DoubleEntryPiped(read func() (string, error), maxRounds int, onPrompt OnPro
 	}
 	if lastErr != nil {
 		return "", lastErr
+	}
+	return "", ErrMismatch
+}
+
+// ExpectPiped reads lines until one equals expect, up to maxRounds
+// (<=0 means DefaultMaxRounds). A read error aborts; exhaustion
+// returns ErrMismatch. onPrompt, when non-nil, prints before each
+// round; nil keeps the function silent for tests.
+func ExpectPiped(read func() (string, error), expect string, maxRounds int, onPrompt func(round, max int)) (string, error) {
+	if maxRounds <= 0 {
+		maxRounds = DefaultMaxRounds
+	}
+	for round := 1; round <= maxRounds; round++ {
+		if onPrompt != nil {
+			onPrompt(round, maxRounds)
+		}
+		v, err := read()
+		if err != nil {
+			return "", err
+		}
+		if v == expect {
+			return v, nil
+		}
 	}
 	return "", ErrMismatch
 }
