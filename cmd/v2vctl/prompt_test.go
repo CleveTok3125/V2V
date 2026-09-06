@@ -17,6 +17,10 @@ func TestAssessFilePassphrase(t *testing.T) {
 	if strong.Bits > 128 {
 		t.Errorf("bits must cap at 128, got %v", strong.Bits)
 	}
+	huge := assessFilePassphrase("correct horse battery staple radio tower antenna satellite ocean mountain river valley forest desert")
+	if !huge.Capped || huge.Bits != 128 {
+		t.Errorf("assessFilePassphrase(huge) = %+v, want Capped at 128", huge)
+	}
 }
 
 // withPipedStdin swaps os.Stdin for a pipe feeding input, restoring it

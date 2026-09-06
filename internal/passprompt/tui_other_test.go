@@ -27,6 +27,14 @@ func TestRenderMeterLine(t *testing.T) {
 	if !strings.Contains(frac, "12.3 bits — yếu") {
 		t.Errorf("fractional bits: %q", frac)
 	}
+	capped := renderMeterLine(Assessment{Bits: 128, Capped: true, Label: "rất mạnh"})
+	if !strings.Contains(capped, "128+ bits — rất mạnh") {
+		t.Errorf("capped value must show + suffix: %q", capped)
+	}
+	uncapped := renderMeterLine(Assessment{Bits: 128, Label: "rất mạnh"})
+	if strings.Contains(uncapped, "128+") {
+		t.Errorf("uncapped value must not show + suffix: %q", uncapped)
+	}
 }
 
 func TestMeterColorBands(t *testing.T) {

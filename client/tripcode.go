@@ -75,7 +75,6 @@ func resolveTripcode(useFlag bool, configDir, username, serverHost string) (stri
 		return "", errors.New("tripcode quá dài (tối đa 64 byte, server sẽ từ chối)")
 	}
 	rep := AssessPassphrase(tc, ctx)
-	fmt.Println(rep.DisplayLine())
 	if rep.Weak {
 		fmt.Println(rep.WeakWarning())
 		if !confirmUseWeak(os.Stdin) {
@@ -98,7 +97,7 @@ func resolveTripcode(useFlag bool, configDir, username, serverHost string) (stri
 // toAssessment maps a strength report to the shared prompt meter. Pure
 // so tests pin the mapping without a TTY.
 func toAssessment(rep StrengthReport) passprompt.Assessment {
-	return passprompt.Assessment{Bits: rep.Entropy, Label: rep.Label, Weak: rep.Weak}
+	return passprompt.Assessment{Bits: rep.Entropy, Capped: rep.Capped, Label: rep.Label, Weak: rep.Weak}
 }
 
 // meteredTripcodeEntry is the unified TTY flow: single live-meter
@@ -125,7 +124,6 @@ func meteredTripcodeEntry(path string, ctx []string) (string, error) {
 		return "", errors.New("tripcode quá dài (tối đa 64 byte, server sẽ từ chối)")
 	}
 	rep := AssessPassphrase(tc, ctx)
-	fmt.Println(rep.DisplayLine())
 	if rep.Weak {
 		fmt.Println(rep.WeakWarning())
 		ok, err := passprompt.Confirm("Vẫn dùng tripcode này?")

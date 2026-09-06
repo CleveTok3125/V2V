@@ -39,6 +39,7 @@ const (
 type StrengthReport struct {
 	Score   int
 	Entropy float64 // capped at displayEntropyCap, >= 0
+	Capped  bool    // raw entropy exceeded displayEntropyCap: display with a "+" suffix
 	Label   string  // yếu / trung bình / mạnh / rất mạnh
 	Weak    bool    // Score <= weakMaxScore: caller must warn + confirm
 	Tokens  int     // unicode letter/digit runs
@@ -82,6 +83,7 @@ func strengthLabel(score int) string {
 func AssessPassphrase(passphrase string, userInputs []string) StrengthReport {
 	r := zxcvbn.PasswordStrength(passphrase, userInputs)
 	e := r.Entropy
+	capped := !math.IsNaN(e) && e > displayEntropyCap
 	if math.IsNaN(e) || e < 0 {
 		e = 0
 	}
@@ -91,6 +93,7 @@ func AssessPassphrase(passphrase string, userInputs []string) StrengthReport {
 	return StrengthReport{
 		Score:   r.Score,
 		Entropy: e,
+		Capped:  capped,
 		Label:   strengthLabel(r.Score),
 		Weak:    r.Score <= weakMaxScore,
 		Tokens:  countTokens(passphrase),
@@ -102,16 +105,6 @@ func AssessPassphrase(passphrase string, userInputs []string) StrengthReport {
 func ReminderLine() string {
 	return fmt.Sprintf("💡 Nên dùng câu dài dễ nhớ (≥%d ký tự, ≥%d từ).",
 		reminderMinRunes, reminderMinTokens)
-}
-
-// DisplayLine renders entropy + label for interactive entry. Bits only,
-// never time estimates (see package doc).
-func (r StrengthReport) DisplayLine() string {
-	bits := r.Entropy
-	if bits == float64(int(bits)) {
-		return fmt.Sprintf("📊 Độ mạnh: %d bits — %s.", int(bits), r.Label)
-	}
-	return fmt.Sprintf("📊 Độ mạnh: %.1f bits — %s.", bits, r.Label)
 }
 
 // WeakWarning is the one-line alert for weak secrets on non-interactive
