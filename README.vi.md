@@ -1,16 +1,16 @@
-# 🚀 V2V Anonymous WebSocket Chat
+# 🚀 V2V — Verifiable Anonymous Chat
 <p align="left">
 🌐
 <a href="README.md">English</a> · <a href="docs/TECHNICAL.md">Tài liệu kỹ thuật</a>
 </p>
 
-Chat ẩn danh mà không ai — kể cả server — có thể sửa lịch sử.
+Trò chuyện không cần tài khoản. Máy chủ không bao giờ yêu cầu email, số điện thoại hay bất kỳ thông tin định danh thực nào.
 
-- **Ẩn danh mặc định** — mọi người, kể cả admin, đều có `Tên#a1b2` từ IP hash với salt ngẫu nhiên mỗi phiên (tự mở rộng, thêm `-2` khi trùng). Không cần đăng ký, đặt tên thoải mái.
-- **Log chống sửa** — mọi tin nhắn nối vào một hash chain chung toàn server, mỗi tin mang ID `#height:hash`. Sửa, đảo thứ tự hay đánh lại số bất kỳ tin nào cũng làm đứt chain, mọi client đều thấy — không cần ai ký tay.
-- **Hội thoại dẫn chiếu được** — trả lời kèm quote (`/reply 1234`), nhắc tin (`@#1234`), tìm tin theo số (`/find`); code block có syntax highlight.
-- **Danh tính xác thực được, tùy chọn** — badge tripcode `◆ ab12` nhiều màu từ passphrase, kiểm chứng bằng mật mã (hoặc đăng nhập không mật khẩu cho staff bằng key Ed25519 / passkey WebAuthn).
-- **Nhanh & riêng tư** — lịch sử RAM có giới hạn, lưu local dạng JSONL, chống spam, key mã hóa nằm trên máy bạn.
+- **Không cần đăng ký** — bạn tham gia với tên dạng `Name#a1b2` và bắt đầu trò chuyện ngay. Không có dữ liệu nào liên kết tên đó với bạn.
+- **Tên định danh tùy chọn** — mã định danh tripcode (`◆ ab12`) tạo từ cụm mật khẩu giúp người khác nhận ra bạn qua các phiên trò chuyện, miễn là bạn vẫn tiếp tục sử dụng nó.
+- **Danh tính dùng một lần** — chỉ cần ngừng sử dụng tên hoặc cụm mật khẩu, danh tính đó sẽ biến mất. Khi bắt đầu lại, sẽ không có mối liên kết nào giữa danh tính cũ và mới.
+- **Lịch sử minh bạch** — mọi tin nhắn đều được liên kết vào một chuỗi băm (hash chain) duy nhất trên toàn hệ thống máy chủ. Nếu tin nhắn bị chỉnh sửa hoặc thay đổi thứ tự, mọi ứng dụng khách (client) đều có thể phát hiện sự đứt gãy của chuỗi này.
+- **Đăng nhập cho quản trị viên không cần mật khẩu** — người điều hành sử dụng tệp khóa Ed25519 hoặc khóa truy cập WebAuthn (passkey). Không yêu cầu thông tin định danh cá nhân.
 
 ## Bắt đầu nhanh
 
