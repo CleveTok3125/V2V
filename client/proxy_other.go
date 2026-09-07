@@ -2,12 +2,14 @@
 
 package main
 
-// SOCKS5 transport for dialWS: raw TCP to the proxy, RFC 1928
-// handshake, TLS when the target is wss, then the WebSocket
-// handshake over the established stream via gorilla NewClient.
+// SOCKS5 transport for dialWS: raw TCP to the proxy plus the RFC 1928
+// handshake, handed to gorilla as a NetDialContext so gorilla itself
+// owns TLS for wss targets. Doing TLS here as well would handshake
+// twice inside the tunnel; the inner bytes are not a valid outer
+// handshake ("first record does not look like a TLS handshake").
 
 import (
-	"crypto/tls"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -26,64 +28,67 @@ import (
 	"github.com/CleveTok3125/V2V/internal/tui"
 )
 
-// socks5DialTimeout bounds the whole TCP + handshake + TLS setup.
+// socks5DialTimeout bounds the TCP + handshake setup and the gorilla
+// handshake that follows.
 const socks5DialTimeout = 45 * time.Second
+
+// socks5NetDialer returns a gorilla NetDialContext that connects to
+// the proxy and handshakes to host:port, leaving a bare stream.
+// gorilla applies TLS itself when the URL asks for wss.
+func socks5NetDialer(p *proxyConfig) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, portStr, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, fmt.Errorf("địa chỉ server không hợp lệ: %q", addr)
+		}
+		targetPort, err := strconv.Atoi(portStr)
+		if err != nil || targetPort < 1 || targetPort > 65535 {
+			return nil, fmt.Errorf("port server không hợp lệ: %q", portStr)
+		}
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(p.Host, strconv.Itoa(p.Port)), socks5DialTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("không tới được proxy: %w", err)
+		}
+		// Fail closed on any setup error: never leak a half-open socket.
+		failed := true
+		defer func() {
+			if failed {
+				_ = conn.Close()
+			}
+		}()
+		if err := conn.SetDeadline(time.Now().Add(socks5DialTimeout)); err != nil {
+			return nil, err
+		}
+		if err := socks5Handshake(conn, host, targetPort, []byte(p.User), p.Pass); err != nil {
+			return nil, err
+		}
+		p.wipe()
+		if err := conn.SetDeadline(time.Time{}); err != nil {
+			return nil, err
+		}
+		failed = false
+		return conn, nil
+	}
+}
 
 // dialSocks5WS connects to a ws/wss URL through a SOCKS5 proxy. The
 // target hostname is never resolved locally; the proxy resolves it.
-// The proxy password wipes from the config once dialing succeeds.
 func dialSocks5WS(wsURL string, headers http.Header, p *proxyConfig) (wsConn, *http.Response, error) {
-	u, err := url.Parse(wsURL)
-	if err != nil {
+	return dialSocks5WSWithDialer(wsURL, headers, p, websocket.Dialer{HandshakeTimeout: socks5DialTimeout})
+}
+
+// dialSocks5WSWithDialer is dialSocks5WS with an injectable dialer so
+// tests can set TLSClientConfig against a local TLS server.
+func dialSocks5WSWithDialer(wsURL string, headers http.Header, p *proxyConfig, d websocket.Dialer) (wsConn, *http.Response, error) {
+	if _, err := url.Parse(wsURL); err != nil {
 		return nil, nil, fmt.Errorf("URL server không hợp lệ: %w", err)
 	}
-	host := u.Hostname()
-	port := u.Port()
-	if port == "" {
-		port = "80"
-		if u.Scheme == "wss" {
-			port = "443"
-		}
+	d.NetDialContext = socks5NetDialer(p)
+	if d.HandshakeTimeout == 0 {
+		d.HandshakeTimeout = socks5DialTimeout
 	}
-	targetPort, err := strconv.Atoi(port)
-	if err != nil || targetPort < 1 || targetPort > 65535 {
-		return nil, nil, fmt.Errorf("port server không hợp lệ: %q", port)
-	}
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(p.Host, strconv.Itoa(p.Port)), socks5DialTimeout)
-	if err != nil {
-		return nil, nil, fmt.Errorf("không tới được proxy: %w", err)
-	}
-	// Fail closed on any setup error: never leak a half-open socket.
-	failed := true
-	defer func() {
-		if failed {
-			_ = conn.Close()
-		}
-	}()
-	if err := conn.SetDeadline(time.Now().Add(socks5DialTimeout)); err != nil {
-		return nil, nil, err
-	}
-	if err := socks5Handshake(conn, host, targetPort, []byte(p.User), p.Pass); err != nil {
-		return nil, nil, err
-	}
-	p.wipe()
-	stream := net.Conn(conn)
-	if u.Scheme == "wss" {
-		tlsConn := tls.Client(conn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
-		if err := tlsConn.Handshake(); err != nil {
-			return nil, nil, fmt.Errorf("TLS qua proxy thất bại: %w", err)
-		}
-		stream = tlsConn
-	}
-	if err := stream.SetDeadline(time.Time{}); err != nil {
-		return nil, nil, err
-	}
-	c, resp, err := websocket.NewClient(stream, u, headers, 4096, 4096)
-	if err != nil {
-		return nil, resp, err
-	}
-	failed = false
-	return c, resp, nil
+	conn, resp, err := d.Dial(wsURL, headers)
+	return conn, resp, err
 }
 
 // resolveProxy picks the proxy for this session. Precedence: the
