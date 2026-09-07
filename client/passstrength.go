@@ -19,6 +19,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/ccojocar/zxcvbn-go"
+
+	"github.com/CleveTok3125/V2V/internal/tui"
 )
 
 const (
@@ -163,16 +165,9 @@ var (
 
 // confirmUseWeak asks whether to proceed with a weak secret. Default is
 // No: empty input, read errors and anything but an explicit yes abort.
+// Parsing delegates to the shared tui core; only this prompt's wording
+// stays local.
 func confirmUseWeak(r io.Reader) bool {
 	fmt.Print("Vẫn dùng tripcode này? (y/N): ")
-	line, err := readLineRaw(r)
-	if err != nil && len(line) == 0 {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "y", "yes", "có", "co":
-		return true
-	default:
-		return false
-	}
+	return tui.ConfirmPiped(r)
 }

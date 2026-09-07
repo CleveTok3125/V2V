@@ -12,6 +12,7 @@ import (
 	"github.com/CleveTok3125/V2V/identity"
 
 	"github.com/CleveTok3125/V2V/internal/passprompt"
+	"github.com/CleveTok3125/V2V/internal/tui"
 	xterm "github.com/charmbracelet/x/term"
 )
 
@@ -31,7 +32,7 @@ func LoadIdentityFile(path string) (*IdentityFile, error) {
 		// shared program; piped input keeps the legacy hidden reader.
 		var pass string
 		var err error
-		if passprompt.Interactive() {
+		if tui.Interactive() {
 			pass, err = passprompt.Password(passprompt.PasswordOpts{
 				Title: "🔒 Nhập passphrase cho key file",
 			})
@@ -101,9 +102,11 @@ func pickIdentity(f *IdentityFile) (useEd, usePk bool) {
 	return pickIdentityFrom(os.Stdin, f)
 }
 
-// pickIdentityFrom is the injectable core of pickIdentity. Interactive
-// sessions get a numbered menu; a non-interactive reader (piped, closed)
-// prefers the passkey and falls back to ed25519.
+// pickIdentityFrom is the injectable core of pickIdentity. Both slots
+// filled asks via the shared tui select: huh form defaulting to
+// passkey on TTY, numbered menu with the same default on pipes. r
+// feeds the piped path so tests stay headless; a single filled slot
+// returns without prompting.
 func pickIdentityFrom(r io.Reader, f *IdentityFile) (useEd, usePk bool) {
 	hasEd, hasPk := f.Ed25519 != nil, f.Passkey != nil
 	switch {
@@ -111,22 +114,23 @@ func pickIdentityFrom(r io.Reader, f *IdentityFile) (useEd, usePk bool) {
 	default:
 		return hasEd, hasPk // only one slot filled
 	}
-
-	fmt.Println("key.json chứa 2 danh tính — chọn loại đăng nhập:")
-	fmt.Println("  [1] ed25519 key-file  role: " + f.Ed25519.Role)
-	fmt.Println("  [2] passkey           role: " + f.Passkey.Role)
-	fmt.Print("Chọn (1/2, Enter = passkey): ")
-
-	line, err := readLineRaw(r)
-	if err != nil && line == "" {
-		return false, true // stdin closed: deterministic default
+	title := "key.json chứa 2 danh tính — chọn loại đăng nhập:"
+	options := []string{
+		"ed25519 key-file  role: " + f.Ed25519.Role,
+		"passkey           role: " + f.Passkey.Role,
 	}
-	switch strings.TrimSpace(line) {
-	case "1":
+	var idx int
+	if tui.Interactive() {
+		var err error
+		idx, err = tui.Select(title, options, 1)
+		if err != nil {
+			return false, true // aborted: deterministic default
+		}
+	} else {
+		idx, _ = tui.SelectPiped(r, title, options, 1)
+	}
+	if idx == 0 {
 		return true, false
-	case "2":
-		return false, true
-	default:
-		return false, true
 	}
+	return false, true
 }

@@ -10,29 +10,21 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
-	xterm "github.com/charmbracelet/x/term"
+
+	"github.com/CleveTok3125/V2V/internal/tui"
 )
 
 var (
 	titleStyle = lipgloss.NewStyle().Bold(true)
 	errStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	hintStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	selStyle   = lipgloss.NewStyle().Reverse(true).Bold(true)
-	optStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
-
-// Interactive reports whether the full-screen prompt program can run:
-// stdin must be a real terminal. Callers branch to the piped readers
-// otherwise.
-func Interactive() bool {
-	return xterm.IsTerminal(os.Stdin.Fd())
-}
 
 // Password prompts for a secret. On a TTY it runs the meter-capable
 // program; otherwise it reads plain lines from stdin with the same
 // round semantics. Titles print verbatim on the fallback path.
 func Password(opts PasswordOpts) (string, error) {
-	if Interactive() {
+	if tui.Interactive() {
 		return runPassword(opts)
 	}
 	stdin := func() (string, error) { return ReadLine(os.Stdin) }
@@ -60,17 +52,6 @@ func Password(opts PasswordOpts) (string, error) {
 			fmt.Print(opts.ConfirmTitle + " ")
 		}
 	})
-}
-
-// Confirm asks a yes/no question with a hardcoded default of No: the
-// initial focus sits on Không, and piped answers need an explicit yes.
-// TTY sessions get the keyboard program; otherwise one plain line.
-func Confirm(title string) (bool, error) {
-	if Interactive() {
-		return runConfirm(title)
-	}
-	fmt.Print(title + " (y/N): ")
-	return ConfirmPiped(os.Stdin), nil
 }
 
 // meterColor bands the meter bar. Weak is always red; the rest is a
@@ -243,71 +224,4 @@ func runPassword(opts PasswordOpts) (string, error) {
 		return "", pm.fail
 	}
 	return pm.value, nil
-}
-
-// confirmModel is a two-option keyboard confirm with the initial focus
-// hardcoded on Không (default No). y/Y picks Có, n/N picks Không,
-// arrows or h/l move, Enter accepts, Esc aborts with an error.
-type confirmModel struct {
-	title   string
-	yes     bool // true = focus on Có
-	done    bool
-	aborted bool
-}
-
-func (m confirmModel) Init() tea.Cmd { return nil }
-
-func (m confirmModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	key, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
-	}
-	if key.Type == tea.KeyCtrlC || key.Type == tea.KeyEsc {
-		m.aborted, m.done = true, true
-		return m, tea.Quit
-	}
-	switch key.Type {
-	case tea.KeyEnter:
-		m.done = true
-		return m, tea.Quit
-	case tea.KeyLeft, tea.KeyRight:
-		m.yes = !m.yes
-		return m, nil
-	}
-	switch key.String() {
-	case "y", "Y":
-		m.yes, m.done = true, true
-		return m, tea.Quit
-	case "n", "N":
-		m.yes, m.done = false, true
-		return m, tea.Quit
-	case "h", "l":
-		m.yes = !m.yes
-	}
-	return m, nil
-}
-
-func (m confirmModel) View() string {
-	yes, no := " Có ", " Không "
-	if m.yes {
-		yes = selStyle.Render(yes)
-		no = optStyle.Render(no)
-	} else {
-		yes = optStyle.Render(yes)
-		no = selStyle.Render(no)
-	}
-	return titleStyle.Render(m.title) + "\n" + yes + "  " + no + "\n" +
-		hintStyle.Render("←/→ chọn • Enter xác nhận • Esc hủy")
-}
-
-func runConfirm(title string) (bool, error) {
-	m, err := tea.NewProgram(confirmModel{title: title}).Run()
-	if err != nil {
-		return false, err
-	}
-	cm := m.(confirmModel)
-	if cm.aborted {
-		return false, ErrAborted
-	}
-	return cm.yes, nil
 }
