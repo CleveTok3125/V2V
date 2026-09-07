@@ -13,9 +13,11 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/CleveTok3125/V2V/identity"
+	"github.com/CleveTok3125/V2V/internal/strutil"
 )
 
 const (
@@ -91,54 +93,12 @@ func (s *WebAuthnStore) loadFile() (*webauthnFile, error) {
 	return f, nil
 }
 
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err
-		}
-	}
-	tmpFile, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmpFile.Name()
-	if err := tmpFile.Chmod(perm); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if dirFile, err := os.Open(dir); err == nil {
-		_ = dirFile.Sync()
-		dirFile.Close()
-	}
-	return nil
-}
-
 func (s *WebAuthnStore) saveFile(f *webauthnFile) error {
 	out, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(s.path, out, 0o600)
+	return identity.AtomicWriteFile(s.path, out, 0o600)
 }
 
 func (s *WebAuthnStore) mutate(fn func(f *webauthnFile) error) error {
@@ -205,7 +165,7 @@ func (s *WebAuthnStore) CreatePendingTicket(role, label string, ttl time.Duratio
 		return nil
 	})
 	if err == nil {
-		log.Printf("🎫 [TICKET CREATED] code=%s… role=%s label=%q expires=%s", code[:12], role, label, time.Now().Add(ttl).Format(time.RFC3339))
+		log.Printf("🎫 [TICKET CREATED] code=%s… role=%s label=%q expires=%s", strutil.Short(code), role, label, time.Now().Add(ttl).Format(time.RFC3339))
 	} else {
 		log.Printf("❌ [TICKET CREATE FAILED] role=%s: %v", role, err)
 	}
@@ -226,9 +186,9 @@ func (s *WebAuthnStore) BindChallenge(code, challengeB64 string) (role string, e
 		return nil
 	})
 	if err != nil {
-		log.Printf("❌ [TICKET BIND] code=%s… failed: %v", shortTicket(code), err)
+		log.Printf("❌ [TICKET BIND] code=%s… failed: %v", strutil.Short(code), err)
 	} else {
-		log.Printf("🔗 [TICKET BIND] code=%s… role=%s challenge=%s…", shortTicket(code), role, challengeB64[:12])
+		log.Printf("🔗 [TICKET BIND] code=%s… role=%s challenge=%s…", strutil.Short(code), role, strutil.Short(challengeB64))
 	}
 	return role, err
 }
@@ -248,9 +208,9 @@ func (s *WebAuthnStore) BindSessionData(code string, sessionData []byte, challen
 		return nil
 	})
 	if err != nil {
-		log.Printf("❌ [TICKET BIND SESSION] code=%s… failed: %v", shortTicket(code), err)
+		log.Printf("❌ [TICKET BIND SESSION] code=%s… failed: %v", strutil.Short(code), err)
 	} else {
-		log.Printf("🔗 [TICKET BIND SESSION] code=%s… role=%s", shortTicket(code), role)
+		log.Printf("🔗 [TICKET BIND SESSION] code=%s… role=%s", strutil.Short(code), role)
 	}
 	return role, err
 }
@@ -270,13 +230,6 @@ func (s *WebAuthnStore) SessionData(code string) ([]byte, error) {
 		return nil
 	})
 	return data, err
-}
-
-func shortTicket(s string) string {
-	if len(s) > 12 {
-		return s[:12] + "…"
-	}
-	return s
 }
 
 // CompleteEnrollment stores the credential under the ticket's role and marks
@@ -300,9 +253,9 @@ func (s *WebAuthnStore) CompleteEnrollment(code string, cred *WAStoredCred) erro
 		return nil
 	})
 	if err != nil {
-		log.Printf("❌ [ENROLL STORE] CompleteEnrollment code=%s… failed: %v", shortTicket(code), err)
+		log.Printf("❌ [ENROLL STORE] CompleteEnrollment code=%s… failed: %v", strutil.Short(code), err)
 	} else {
-		log.Printf("✅ [ENROLL STORE] CompleteEnrollment code=%s… credential_id=%s… stored", shortTicket(code), shortTicket(cred.CredentialID))
+		log.Printf("✅ [ENROLL STORE] CompleteEnrollment code=%s… credential_id=%s… stored", strutil.Short(code), strutil.Short(cred.CredentialID))
 	}
 	return err
 }
