@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"testing"
+
+	"github.com/CleveTok3125/V2V/identity"
 )
 
 func TestAssessFilePassphrase(t *testing.T) {
@@ -58,4 +60,28 @@ func TestPromptPassphraseForLoadRetry(t *testing.T) {
 	if err != nil || got != "secret" {
 		t.Errorf("promptPassphraseForLoad = %q, %v, want retry past blank", got, err)
 	}
+}
+
+func TestPromptPassphraseWeakPipedWarnsOnly(t *testing.T) {
+	// Piped weak passphrase warns but never consumes a confirm line:
+	// the script protocol stays exactly two lines per round.
+	withPipedStdin(t, "123\n123\n")
+	got, err := promptPassphrase()
+	if err != nil || got != "123" {
+		t.Errorf("promptPassphrase = %q, %v, want warn-only pass-through", got, err)
+	}
+}
+
+func TestSaveContainerWeakEnvWarnsOnly(t *testing.T) {
+	withTempDir(t, func() {
+		// Weak env passphrase warns but still saves: env paths never
+		// refuse, keeping scripts unbroken.
+		t.Setenv("V2V_PASSPHRASE", "123")
+		if err := saveContainer(&identity.IdentityFile{}, "key.json"); err != nil {
+			t.Errorf("save with weak env must warn, not fail: %v", err)
+		}
+		if _, err := os.Stat("key.json"); err != nil {
+			t.Errorf("warned save must still write: %v", err)
+		}
+	})
 }

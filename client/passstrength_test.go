@@ -155,3 +155,13 @@ func TestToAssessment(t *testing.T) {
 		t.Errorf("toAssessment(assessed) = %+v vs %+v", got, rep)
 	}
 }
+
+func TestFileWeakWarning(t *testing.T) {
+	got := (StrengthReport{Score: 1, Label: "yếu", Weak: true}).FileWeakWarning()
+	if !strings.Contains(got, "yếu") || strings.Contains(got, "bits") {
+		t.Errorf("file warn must name weakness without entropy: %q", got)
+	}
+	if strings.Contains(got, "Tripcode") {
+		t.Errorf("file warn must not mention tripcode: %q", got)
+	}
+}
