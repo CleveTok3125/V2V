@@ -54,26 +54,39 @@ func Password(opts PasswordOpts) (string, error) {
 	})
 }
 
-// meterColor bands the meter bar. Weak is always red; the rest is a
-// display-only gradient by capped bits, never a security gate.
+// meterColor bands the meter bar by score, matching the label bands
+// one-to-one: bar, color, and label can never contradict each other.
+// The bits number stays informational only.
 func meterColor(a Assessment) lipgloss.Color {
 	switch {
-	case a.Weak:
+	case a.Score <= 1:
 		return lipgloss.Color("1")
-	case a.Bits < 50:
+	case a.Score == 2:
 		return lipgloss.Color("3")
-	case a.Bits < 80:
+	case a.Score == 3:
 		return lipgloss.Color("2")
 	default:
 		return lipgloss.Color("6")
 	}
 }
 
+// scoreFill maps score 0-4 to bar fill linearly: empty input shows
+// an empty bar, top score fills it.
+func scoreFill(score int) float64 {
+	if score < 0 {
+		score = 0
+	}
+	if score > 4 {
+		score = 4
+	}
+	return float64(score) / 4
+}
+
 // renderMeterLine is the live meter: fixed-width bar beside bits +
 // label on one line, no icon prefix. Pure (no lipgloss state beyond
 // the color choice) so tests pin it exactly.
 func renderMeterLine(a Assessment) string {
-	bar := MeterBar(a.Bits / 128)
+	bar := MeterBar(scoreFill(a.Score))
 	styled := lipgloss.NewStyle().Foreground(meterColor(a)).Render(bar)
 	bits := FormatBits(a.Bits)
 	if a.Capped {

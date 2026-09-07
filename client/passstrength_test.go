@@ -146,12 +146,12 @@ func TestUserInputs(t *testing.T) {
 func TestToAssessment(t *testing.T) {
 	rep := StrengthReport{Score: 1, Entropy: 12.5, Label: "yếu", Weak: true}
 	got := toAssessment(rep)
-	if got.Bits != 12.5 || got.Label != "yếu" || !got.Weak || got.Capped {
-		t.Errorf("toAssessment = %+v, want bits/label/weak carried over, uncapped", got)
+	if got.Bits != 12.5 || got.Score != 1 || got.Label != "yếu" || !got.Weak || got.Capped {
+		t.Errorf("toAssessment = %+v, want fields carried over, uncapped", got)
 	}
 	rep = AssessPassphrase("correct horse battery staple", nil)
 	got = toAssessment(rep)
-	if got.Bits != rep.Entropy || got.Label != rep.Label || got.Weak != rep.Weak {
+	if got.Bits != rep.Entropy || got.Score != rep.Score || got.Label != rep.Label || got.Weak != rep.Weak {
 		t.Errorf("toAssessment(assessed) = %+v vs %+v", got, rep)
 	}
 }

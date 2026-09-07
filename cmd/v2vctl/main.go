@@ -711,7 +711,7 @@ func assessFilePassphrase(s string) passprompt.Assessment {
 	default:
 		label = "rất mạnh"
 	}
-	return passprompt.Assessment{Bits: e, Capped: capped, Label: label, Weak: r.Score <= 1}
+	return passprompt.Assessment{Bits: e, Score: r.Score, Capped: capped, Label: label, Weak: r.Score <= 1}
 }
 
 func loadContainer(path string) (*identity.IdentityFile, error) {

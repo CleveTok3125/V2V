@@ -28,12 +28,14 @@ var (
 const DefaultMaxRounds = 3
 
 // Assessment is the caller-computed meter snapshot for one input value.
-// Bits is capped display entropy, Label its human band, Weak whether
-// the caller treats the value as too weak. Capped marks a clamped
-// value so the meter can show a "+" suffix instead of implying
-// false precision.
+// Bits is capped display entropy (reference only), Score the 0-4 band
+// driving every judgmental visual (bar fill, color, label), Weak
+// whether the caller treats the value as too weak. Capped marks a
+// clamped value so the meter can show a "+" suffix instead of
+// implying false precision.
 type Assessment struct {
 	Bits   float64
+	Score  int
 	Capped bool
 	Label  string
 	Weak   bool
@@ -74,19 +76,22 @@ func FormatBits(bits float64) string {
 	return fmt.Sprintf("%.1f", bits)
 }
 
+// MeterWidth is the fixed bar length in cells. Wide enough to show
+// five score bands distinctly; score 4 always fills it.
+const MeterWidth = 20
+
 // MeterBar builds the ASCII strength bar. frac is fill in [0,1];
 // values outside clamp. Width is fixed so the bar never reflows as
 // the user types.
 func MeterBar(frac float64) string {
-	const width = 10
 	if frac < 0 {
 		frac = 0
 	}
 	if frac > 1 {
 		frac = 1
 	}
-	full := int(frac*width + 0.5)
-	return strings.Repeat("█", full) + strings.Repeat("░", width-full)
+	full := int(frac*MeterWidth + 0.5)
+	return strings.Repeat("█", full) + strings.Repeat("░", MeterWidth-full)
 }
 
 // ReadLine reads one line without read-ahead: byte-by-byte, so bytes
