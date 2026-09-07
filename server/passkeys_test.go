@@ -216,3 +216,27 @@ func TestChallengeFromNonceDeterministic(t *testing.T) {
 		t.Fatal("challenge derivation not deterministic 32-byte")
 	}
 }
+
+func TestParseCreation_ShortAttackerFieldsNoPanic(t *testing.T) {
+	setupWA(t)
+	mkCD := func(challenge string) string {
+		raw, _ := json.Marshal(map[string]string{
+			"type":      "webauthn.create",
+			"challenge": challenge,
+			"origin":    testOrigin,
+		})
+		return base64.RawURLEncoding.EncodeToString(raw)
+	}
+	want := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+
+	// A short attacker challenge must error, not overrun the log prefix.
+	if _, err := parseCreationForImport(mkCD("ab"), "AA", want); err == nil {
+		t.Fatal("short challenge accepted")
+	}
+	// A 1-byte attestation passes the challenge check but is too short
+	// for the debug hex prefix.
+	goodCD := mkCD(want)
+	if _, err := parseCreationForImport(goodCD, "AA", want); err == nil {
+		t.Fatal("1-byte attestation accepted")
+	}
+}

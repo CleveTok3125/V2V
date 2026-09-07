@@ -106,7 +106,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 				ReplyTo:     tripForChain.ReplyTo,
 			})
 			if err != nil {
-				log.Printf("⚠️ [HISTORY TAMPER] %s seq %d: %v", tripForChain.Pub[:12], tripForChain.Seq, err)
+				log.Printf("⚠️ [HISTORY TAMPER] %s seq %d: %v", shortID(tripForChain.Pub), tripForChain.Seq, err)
 				continue
 			}
 			// Success: derive newPrev via result

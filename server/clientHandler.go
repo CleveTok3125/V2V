@@ -400,15 +400,24 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		updateReadDeadline()
 
 		if err := guard.ValidateMessageForSend(text, lastMessageTime, dynCfg, session.Perms.CanMessageUnlimited); err != nil {
+			// Unicast warnings must never block ReadPump: if WritePump is
+			// wedged and Send is full, drop the warning instead of leaking
+			// the goroutine and pinning the IP slot.
+			warn := func(msg string) {
+				select {
+				case session.Send <- []byte(msg):
+				default:
+				}
+			}
 			switch err {
 			case guard.ErrTooLong:
-				session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn của bạn quá dài (tối đa %d ký tự).", dynCfg.MaxMessageLength))
+				warn(fmt.Sprintf("[Hệ thống]: Tin nhắn của bạn quá dài (tối đa %d ký tự).", dynCfg.MaxMessageLength))
 			case guard.ErrTooManyLines:
-				session.Send <- []byte("[Hệ thống]: Tin nhắn chứa quá nhiều dòng. Vui lòng gộp lại!")
+				warn("[Hệ thống]: Tin nhắn chứa quá nhiều dòng. Vui lòng gộp lại!")
 			case guard.ErrTooFast:
-				session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Bạn đang chat quá nhanh! Vui lòng đợi %v.", dynCfg.MessageCooldown))
+				warn(fmt.Sprintf("[Hệ thống]: Bạn đang chat quá nhanh! Vui lòng đợi %v.", dynCfg.MessageCooldown))
 			default:
-				session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err))
+				warn(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err))
 			}
 			continue
 		}

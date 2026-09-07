@@ -316,7 +316,7 @@ func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string)
 
 	s.LastConnectMu.Lock()
 	if lastTime, exists := s.LastConnectTime[clientIP]; exists {
-		if ok, _ := guard.CheckConnectionRate(now, guard.RateLimitRecord{}, lastTime, Cfg.Dynamic.Load().ConnectionCooldown); !ok {
+		if ok, _ := guard.CheckConnectionRate(now, rec, lastTime, Cfg.Dynamic.Load().ConnectionCooldown); !ok {
 			s.LastConnectMu.Unlock()
 			log.Printf("⛔ Từ chối: %s kết nối ra/vào quá nhanh.\n", clientIP)
 			http.Error(w, "Bạn thao tác ra/vào quá nhanh! Vui lòng đợi vài giây rồi thử lại.", http.StatusTooManyRequests)

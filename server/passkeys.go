@@ -184,7 +184,7 @@ func parseCreationForImport(clientDataB64, attObjB64, wantChallengeB64 string) (
 	gotChal, err := base64.RawURLEncoding.DecodeString(cd.Challenge)
 	wantChal, err2 := base64.RawURLEncoding.DecodeString(wantChallengeB64)
 	if err != nil || err2 != nil || !bytes.Equal(gotChal, wantChal) {
-		fmt.Printf("🔍 [PARSE FAIL] challenge mismatch: got=%s want=%s\n", cd.Challenge[:12], wantChallengeB64[:12])
+		fmt.Printf("🔍 [PARSE FAIL] challenge mismatch: got=%s want=%s\n", shortID(cd.Challenge), shortID(wantChallengeB64))
 		return nil, perr("challenge_mismatch")
 	}
 	if subtle.ConstantTimeCompare([]byte(cd.Origin), []byte(WAConfig.Origin)) != 1 {
@@ -261,7 +261,11 @@ func parseCreationForImport(clientDataB64, attObjB64, wantChallengeB64 string) (
 					obj[ik] = v
 				}
 			} else {
-				fmt.Printf("🔍 [PARSE FAIL] attestation CBOR error: %v (rawLen=%d hex=%x…)\n", err, len(rawAtt), rawAtt[:16])
+				rawHex := rawAtt
+			if len(rawHex) > 16 {
+				rawHex = rawHex[:16]
+			}
+			fmt.Printf("🔍 [PARSE FAIL] attestation CBOR error: %v (rawLen=%d hex=%x…)\n", err, len(rawAtt), rawHex)
 				return nil, perr("attestation_invalid_cbor")
 			}
 		}
