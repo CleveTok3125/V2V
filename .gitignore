@@ -44,7 +44,7 @@ logs/
 !template/*
 template/*.log
 .co*
-data/
+/data/
 
 # Web terminal build outputs
 webterm/app.wasm
