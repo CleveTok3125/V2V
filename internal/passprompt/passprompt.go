@@ -192,24 +192,3 @@ func ExpectPiped(read func() (string, error), expect string, maxRounds int, onPr
 	}
 	return "", ErrMismatch
 }
-
-// confirmYes is the exact accept set of the legacy y/N prompts:
-// an explicit yes only, everything else (empty, errors, "n") is No.
-func confirmYes(line string) bool {
-	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "y", "yes", "có", "co":
-		return true
-	default:
-		return false
-	}
-}
-
-// ConfirmPiped parses one y/N answer with no printing. Default is No:
-// unreadable input also means No.
-func ConfirmPiped(r io.Reader) bool {
-	line, err := ReadLine(r)
-	if err != nil && len(line) == 0 {
-		return false
-	}
-	return confirmYes(line)
-}
