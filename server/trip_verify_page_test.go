@@ -189,3 +189,40 @@ func TestVerifyPageShowsSeq(t *testing.T) {
 		t.Fatalf("tampered seq must be invalid: %v", j)
 	}
 }
+
+// Oversized queries are rejected and rapid repeats from one IP are
+// rate-limited, not verified: ed25519 verification stays cheap per call.
+func TestTripVerify_AbuseGuards(t *testing.T) {
+	s := NewChatServer()
+	big := doVerify(t, s, "9.9.9.9", "", "/verify?"+strings.Repeat("x", 3000))
+	if big.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized query: code=%d, want 413", big.Code)
+	}
+	first := doVerify(t, s, "9.9.9.10", "", "/verify?pub=ab")
+	second := doVerify(t, s, "9.9.9.10", "", "/verify?pub=ab")
+	if first.Code == http.StatusTooManyRequests {
+		t.Fatal("first request must not be rate-limited")
+	}
+	if second.Code != http.StatusTooManyRequests {
+		t.Fatalf("rapid repeat: code=%d, want 429", second.Code)
+	}
+}
+
+// A missing WebAuthn store must answer 503, never nil-deref.
+func TestEnroll_NilStoreNoPanic(t *testing.T) {
+	s := NewChatServer()
+	s.WebAuthn = nil
+	req := httptest.NewRequest(http.MethodGet, "/enroll/begin?ticket=abc", nil)
+	rec := httptest.NewRecorder()
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("handleEnrollBegin panicked: %v", r)
+			}
+		}()
+		s.handleEnrollBegin(rec, req)
+	}()
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("nil store: code=%d, want 503", rec.Code)
+	}
+}

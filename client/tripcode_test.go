@@ -97,3 +97,54 @@ func TestResolveTripcodeFromFile(t *testing.T) {
 		t.Fatalf("got %q %v", tc, err)
 	}
 }
+
+// withPipedStdin swaps os.Stdin for a pipe feeding input. passprompt and
+// tui detect the pipe as non-TTY and take the plain-line fallbacks.
+func withPipedStdin(t *testing.T, input string) {
+	t.Helper()
+	old := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString(input); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = old
+		_ = r.Close()
+	})
+}
+
+// Weak-gate behavior on the piped path: a weak tripcode warns and asks;
+// "n" aborts, "y" proceeds without saving.
+func TestResolveTripcode_WeakGate(t *testing.T) {
+	dir := t.TempDir()
+	// Abort path: weak tc, matching re-entry, "n" at the weak gate.
+	withPipedStdin(t, "password123\npassword123\nn\n")
+	if _, err := resolveTripcode(true, dir, "Alice", "example.com"); err == nil {
+		t.Fatal("weak tripcode without confirm must abort")
+	}
+	// Accept path: weak tc, "y" at gate, "n" at save offer.
+	withPipedStdin(t, "password123\npassword123\ny\nn\n")
+	tc, err := resolveTripcode(true, dir, "Alice", "example.com")
+	if err != nil || tc != "password123" {
+		t.Fatalf("weak tripcode with confirm: tc=%q err=%v", tc, err)
+	}
+	// Mismatch path: re-entry differs, three rounds then error.
+	withPipedStdin(t, "aaa\naab\naaa\naab\naaa\naab\n")
+	if _, err := resolveTripcode(true, dir, "Alice", "example.com"); err == nil {
+		t.Fatal("mismatched re-entry must fail after 3 rounds")
+	}
+}
+
+// TestResolveTripcode_EnvWarnOnly: env secrets warn but never refuse.
+func TestResolveTripcode_EnvWarnOnly(t *testing.T) {
+	t.Setenv("V2V_TRIPCODE", "password123")
+	tc, err := resolveTripcode(true, t.TempDir(), "Alice", "example.com")
+	if err != nil || tc != "password123" {
+		t.Fatalf("env tripcode must pass with warning only: %q %v", tc, err)
+	}
+}

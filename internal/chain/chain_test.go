@@ -143,3 +143,37 @@ func TestVerifyLinkV1Legacy(t *testing.T) {
 		tip = want
 	}
 }
+
+// TestParseHex64_Malformed pins the fail-closed contract every link
+// check relies on: short, odd-length and non-hex inputs never verify.
+func TestParseHex64_Malformed(t *testing.T) {
+	for _, s := range []string{"", "zz", "abc", strings.Repeat("a", 63), strings.Repeat("g", 64), "0x" + strings.Repeat("a", 64)} {
+		if _, ok := ParseHex64(s); ok {
+			t.Errorf("ParseHex64(%q) accepted", s)
+		}
+	}
+	if _, ok := ParseHex64(strings.Repeat("ab", 32)); !ok {
+		t.Error("valid 64-hex rejected")
+	}
+}
+
+// TestVerifyLink_Tamper: flipping any bound field must break the link.
+func TestVerifyLink_Tamper(t *testing.T) {
+	var prev [32]byte
+	want := Hash(prev, 1, 7, 0, "chat", "12:00", "A#1", "hello", "sig")
+	if !VerifyLink(prev, 1, 7, 0, "chat", "12:00", "A#1", "hello", "sig", want) {
+		t.Fatal("honest link rejected")
+	}
+	if VerifyLink(prev, 1, 7, 0, "chat", "12:00", "A#1", "HELLO", "sig", want) {
+		t.Error("tampered text verified")
+	}
+	if VerifyLink(prev, 1, 7, 0, "chat", "12:00", "B#2", "hello", "sig", want) {
+		t.Error("tampered display verified")
+	}
+	if VerifyLink(prev, 2, 7, 0, "chat", "12:00", "A#1", "hello", "sig", want) {
+		t.Error("tampered height verified")
+	}
+	if VerifyLink(prev, 1, 8, 0, "chat", "12:00", "A#1", "hello", "sig", want) {
+		t.Error("tampered tmpID verified")
+	}
+}

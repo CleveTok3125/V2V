@@ -421,6 +421,7 @@ func main() {
 		return
 	}
 	defer term.Close()
+	defer ClearLoadedPassphrase()
 	out := term.Writer()
 
 	quitting := make(chan bool, 1)
@@ -925,6 +926,7 @@ func main() {
 					// leaving the terminal raw.
 					flushChainTip()
 					term.Close()
+					ClearLoadedPassphrase()
 					os.Exit(1)
 				}
 			}
