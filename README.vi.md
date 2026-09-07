@@ -29,6 +29,7 @@ make help            # xem tất cả target
 
 ```bash
 ./public/V2V-linux-amd64 -s wss://chat.example.com -u "TênBạn"
+# qua proxy: --proxy socks5://127.0.0.1:1080 (hoặc env V2V_PROXY, hoặc --ask-proxy để nhập bằng prompt)
 ```
 
 **3. Dùng tripcode**
