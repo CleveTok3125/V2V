@@ -114,6 +114,10 @@ func SanitizeForDisplay(s string) string {
 				if found {
 					continue
 				}
+				// Unterminated OSC8: fail closed. Everything after was
+				// meant as escape payload (link target); emitting it as
+				// text would leak URLs, so drop the tail.
+				return b.String()
 			}
 			// Unknown ESC - strip it
 			i++
