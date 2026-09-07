@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"time"
 )
 
@@ -25,30 +24,6 @@ type DynamicConfig struct {
 	MaxTripcodeLength   int           `json:"maxTripcodeLength"`
 	ConnectionCooldown  time.Duration `json:"connectionCooldown"`
 }
-
-type AppConfig struct {
-	Static  StaticConfig
-	Dynamic atomic.Pointer[DynamicConfig]
-}
-
-type StaticConfig struct {
-	Port                 string
-	RequireTLS           bool
-	AllowedOrigins       []string
-	InstanceID           string
-	Timezone             *time.Location
-	LogFilePath          string
-	MaxLogSizeMB         int
-	HistoryFilePath      string
-	MaxHistoryFileSizeMB int
-}
-
-var Cfg AppConfig
-
-var (
-	EnvFilePaths   = []string{".env"}
-	RolesFilePaths = []string{"./roles.json"}
-)
 
 // DefaultDynamic returns defaults matching server template/.env.
 func DefaultDynamic() *DynamicConfig {
@@ -244,7 +219,6 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.Reply.Enabled = boolPtr(true)
 	c.UI.Reply.QuoteMaxRunes = 80
 	c.UI.Clipboard.ClearAfterSec = intPtr(30)
-	c.UI.Clipboard.ClearAfterSec = intPtr(30)
 	// Code highlight palette (dark, matching the trip palette hues).
 	// A [0,0,0] entry means "use this default".
 	c.UI.CodeStyle.Background = [3]int{48, 48, 48}
@@ -371,13 +345,6 @@ func (c *ClientConfig) ClipboardClearAfterSec() int {
 		return 30
 	}
 	return *c.UI.Clipboard.ClearAfterSec
-}
-
-// shouldClear decides whether a scheduled clearer may wipe. It fires only
-// when the clipboard still holds exactly what was copied, never touching
-// newer user content.
-func shouldClear(current, written string, readErr error) bool {
-	return readErr == nil && current == written
 }
 
 // LoadOrCreate loads config from path, creates default if missing when autoCreate is true.

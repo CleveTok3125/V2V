@@ -79,7 +79,6 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 		}
 		s.appendMessageToHistory(msgForHistory)
 		if tripForChain != nil && tripForChain.Pub != "" && wireForVerify != nil {
-			textForHash := wireForVerify.Text
 			displayName := wireForVerify.DisplayName
 			if displayName == "" {
 				displayName = tripForChain.DisplayName
@@ -89,10 +88,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 				serverPub = s.ServerID.PublicKey
 			}
 			// For wire case, set Text field so trip.Verify recomputes correctly
-			verifyText := textForHash
-			if wireForVerify != nil {
-				verifyText = wireForVerify.Text
-			}
+			verifyText := wireForVerify.Text
 			_, err := trip.Verify(trip.VerifyParams{
 				Text:        verifyText,
 				DisplayName: displayName,
@@ -203,16 +199,6 @@ func (s *ChatServer) BroadcastWire(wire WireMessage, sender *websocket.Conn) {
 			default:
 			}
 		}
-	}
-}
-
-func (s *ChatServer) AddWireMessageToHistory(wire WireMessage) {
-	// Store as JSON string for history (structured)
-	data, _ := json.Marshal(wire)
-	msgStr := string(data)
-	s.appendMessageToHistory(msgStr)
-	if s.HistoryStore != nil {
-		s.HistoryStore.EnqueueWire(wire, time.Now().In(Cfg.Static.Timezone))
 	}
 }
 
