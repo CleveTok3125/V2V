@@ -29,6 +29,7 @@ make help            # see all targets
 
 ```bash
 ./public/V2V-linux-amd64 -s wss://chat.example.com -u "YourName"
+# via proxy: --proxy socks5://127.0.0.1:1080 (or V2V_PROXY env, or --ask-proxy for an interactive prompt)
 ```
 
 **3. Join with a tripcode**

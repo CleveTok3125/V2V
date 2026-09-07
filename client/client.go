@@ -68,6 +68,8 @@ var CLI struct {
 
 	UseKey    bool   `help:"Dùng key mặc định trong config-dir" short:"k"`
 	KeyFile   string `help:"Đường dẫn file chứa khóa xác thực" short:"K" name:"key-file"`
+	Proxy     string `help:"Proxy http/https/socks5 (VD: socks5://127.0.0.1:1080). Thắng V2V_PROXY và proxy hệ thống" env:"V2V_PROXY"`
+	AskProxy  bool   `help:"Hỏi thông tin proxy bằng prompt (thắng mọi cấu hình proxy khác)" name:"ask-proxy"`
 	ConfigDir string `help:"Thư mục config" short:"c" env:"V2V_CONFIG_DIR"`
 	CacheDir  string `help:"Thư mục cache/history" short:"C" env:"V2V_CACHE_DIR"`
 }
