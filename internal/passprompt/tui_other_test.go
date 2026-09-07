@@ -20,8 +20,8 @@ func TestRenderMeterLine(t *testing.T) {
 	if !strings.Contains(line, "42 bits — mạnh") {
 		t.Errorf("meter missing bits + label: %q", line)
 	}
-	if strings.Count(line, "█")+strings.Count(line, "░") != 10 {
-		t.Errorf("meter missing 10-cell bar: %q", line)
+	if strings.Count(line, "█")+strings.Count(line, "░") != MeterWidth {
+		t.Errorf("meter missing %d-cell bar: %q", MeterWidth, line)
 	}
 	frac := renderMeterLine(Assessment{Bits: 12.34, Label: "yếu", Weak: true})
 	if !strings.Contains(frac, "12.3 bits — yếu") {
@@ -42,15 +42,11 @@ func TestMeterColorBands(t *testing.T) {
 		in   Assessment
 		want string
 	}{
-		{Assessment{Bits: 99, Label: "x", Weak: true}, "1"},
-		{Assessment{Bits: 0, Label: "yếu", Weak: true}, "1"},
-		{Assessment{Bits: 10}, "3"},
-		{Assessment{Bits: 49.9}, "3"},
-		{Assessment{Bits: 50}, "2"},
-		{Assessment{Bits: 60}, "2"},
-		{Assessment{Bits: 79.9}, "2"},
-		{Assessment{Bits: 80}, "6"},
-		{Assessment{Bits: 128}, "6"},
+		{Assessment{Score: 0, Label: "yếu", Weak: true}, "1"},
+		{Assessment{Score: 1, Label: "yếu", Weak: true}, "1"},
+		{Assessment{Score: 2, Label: "trung bình"}, "3"},
+		{Assessment{Score: 3, Label: "mạnh"}, "2"},
+		{Assessment{Score: 4, Label: "rất mạnh"}, "6"},
 	}
 	for _, c := range cases {
 		if got := string(meterColor(c.in)); got != c.want {
@@ -59,18 +55,30 @@ func TestMeterColorBands(t *testing.T) {
 	}
 }
 
-func TestMeterBarBitsMapping(t *testing.T) {
+func TestMeterScoreFill(t *testing.T) {
 	cases := []struct {
-		bits float64
-		full int
+		score int
+		full  int
 	}{
-		{0, 0}, {64, 5}, {128, 10}, {200, 10},
+		{0, 0}, {1, 5}, {2, 10}, {3, 15}, {4, 20},
 	}
 	for _, c := range cases {
-		line := renderMeterLine(Assessment{Bits: c.bits, Label: "x"})
+		line := renderMeterLine(Assessment{Score: c.score, Label: "x"})
 		if got := strings.Count(line, "█"); got != c.full {
-			t.Errorf("bits %v: full cells = %d, want %d (%q)", c.bits, got, c.full, line)
+			t.Errorf("score %d: full cells = %d, want %d (%q)", c.score, got, c.full, line)
 		}
+	}
+}
+
+func TestMeterConsistentLabel(t *testing.T) {
+	// Regression: modest bits with a top score must render a full
+	// bar, never an almost-empty one next to "rất mạnh".
+	line := renderMeterLine(Assessment{Bits: 41.2, Score: 4, Label: "rất mạnh"})
+	if got := strings.Count(line, "█"); got != MeterWidth {
+		t.Errorf("score 4 must fill the bar regardless of bits: %q", line)
+	}
+	if !strings.Contains(line, "41.2 bits — rất mạnh") {
+		t.Errorf("bits stay informational: %q", line)
 	}
 }
 
