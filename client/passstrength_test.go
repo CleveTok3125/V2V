@@ -30,15 +30,6 @@ func TestCountTokens(t *testing.T) {
 	}
 }
 
-func TestStrengthLabels(t *testing.T) {
-	cases := map[int]string{0: "yếu", 1: "yếu", 2: "trung bình", 3: "mạnh", 4: "rất mạnh", 9: "rất mạnh"}
-	for score, want := range cases {
-		if got := strengthLabel(score); got != want {
-			t.Errorf("strengthLabel(%d) = %q, want %q", score, got, want)
-		}
-	}
-}
-
 func TestAssessWeakAndStrong(t *testing.T) {
 	weak := AssessPassphrase("password123", nil)
 	if !weak.Weak || weak.Score > 1 {

@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/CleveTok3125/V2V/internal/guard"
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 type Identity struct {
@@ -27,10 +30,7 @@ type PasskeyIdentity struct {
 	AddedAt      string `json:"added_at,omitempty"`
 }
 
-type Permission struct {
-	CanMessageUnlimited bool   `json:"can_message_unlimited"`
-	CustomPrefix        string `json:"custom_prefix"`
-}
+type Permission = wire.Permission
 
 type RoleDefinition struct {
 	Identities []Identity        `json:"identities"`
@@ -58,77 +58,14 @@ type TripChain struct {
 	LastHash []byte // msgHash of last message for debugging
 }
 
-type TripMeta struct {
-	Pub         string `json:"pub"`
-	Seq         uint32 `json:"seq"`
-	Prev        string `json:"prev"`
-	Sig         string `json:"sig"`
-	ServerPub   string `json:"server_pub"`
-	MsgHash     string `json:"msg_hash,omitempty"`
-	DisplayName string `json:"display_name,omitempty"`
-	TmpID       uint64 `json:"tmp_id,omitempty"`
-	ReplyTo     uint64 `json:"reply_to,omitempty"`
-}
-
-type WireMessage struct {
-	Type        string    `json:"type"` // "chat" or "system"
-	Time        string    `json:"time,omitempty"`
-	DisplayName string    `json:"displayName,omitempty"`
-	Text        string    `json:"text,omitempty"`
-	Trip        *TripMeta `json:"trip,omitempty"`
-	// TmpID is the sender's per-session counter, relayed verbatim and
-	// never assigned by the server. ReplyTo quotes a chain height for
-	// replies, relayed verbatim and covered by the link (v2+).
-	TmpID       uint64 `json:"tmp_id,omitempty"`
-	ReplyTo     uint64 `json:"reply_to,omitempty"`
-	ChainPrev   string `json:"chain_prev,omitempty"`   // hex 64
-	ChainHash   string `json:"chain_hash,omitempty"`   // hex 64
-	ChainHeight uint64 `json:"chain_height,omitempty"`
-	ChainVer    int    `json:"chain_ver,omitempty"` // link encoding, current 2
-}
-
-type AuthPacket struct {
-	Type      string `json:"type"`
-	Nonce     string `json:"nonce,omitempty"`
-	Role      string `json:"role,omitempty"`
-	Signature string `json:"signature,omitempty"`
-	Hmac      string `json:"hmac,omitempty"`
-	Username  string `json:"username,omitempty"`
-	Tripcode  string `json:"tripcode,omitempty"`
-
-	// TripPub is the hex-encoded ed25519 pubkey derived from passphrase.
-	// Sent in AuthPacket alongside Tripcode for hashchain sync.
-	TripPub string `json:"trip_pub,omitempty"`
-
-	// WebAuthn assertion (all base64url). When present, the nonce is
-	// verified as the SHA-256 of the challenge the authenticator signed.
-	PasskeyID         string `json:"passkey_id,omitempty"`
-	PasskeyAuthData   string `json:"passkey_auth_data,omitempty"`
-	PasskeyClientData string `json:"passkey_client_data,omitempty"`
-	PasskeySig        string `json:"passkey_sig,omitempty"`
-
-	// Server identity proof (auth_challenge from server)
-	ServerPubKey string `json:"server_pubkey,omitempty"`
-	ServerSig    string `json:"server_sig,omitempty"`
-	ServerHost   string `json:"server_host,omitempty"`
-
-	// Error carries the rejection reason in type=="auth_failed" packets so
-	// clients can show why authentication was refused.
-	Error string `json:"error,omitempty"`
-
-	// IdentityPub is set server-side on successful ed25519 logins (not
-	// serialized) to track concurrent use of the same identity.
-	IdentityPub string `json:"-"`
-
-	// AuthType/Perms ride along in auth_success so clients can render
-	// /whoami without extra round-trips.
-	AuthType string      `json:"auth_type,omitempty"`
-	Perms    *Permission `json:"perms,omitempty"`
-
-	// Trip sync fields for hashchain reconnect
-	TripSeq  uint32 `json:"trip_seq,omitempty"`
-	TripPrev string `json:"trip_prev,omitempty"` // hex 64
-}
+// Protocol schema lives in internal/wire (single source). Aliases keep
+// every existing reference compiling while guaranteeing client and
+// server serialize identically.
+type (
+	TripMeta    = wire.TripMeta
+	WireMessage = wire.WireMessage
+	AuthPacket  = wire.AuthPacket
+)
 
 type ServerIdentity struct {
 	PublicKey  string `json:"public_key"`
@@ -140,10 +77,9 @@ type NonceMeta struct {
 	IP        string
 }
 
-type RateLimitRecord struct {
-	FailCount  int
-	UnlockTime time.Time
-}
+// RateLimitRecord is the guard penalty record. Aliased (not copied) so
+// auth paths never convert between two identical structs.
+type RateLimitRecord = guard.RateLimitRecord
 
 type ChatServer struct {
 	StartTime time.Time

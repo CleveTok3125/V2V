@@ -129,7 +129,7 @@ func resolveProxy(r io.Reader) (*proxyConfig, error) {
 // reader aborts instead of looping forever; plain Enter yields "".
 func wizardLine(r io.Reader, prompt string) (string, error) {
 	fmt.Print(prompt)
-	line, err := readLineRaw(r)
+	line, err := tui.ReadLine(r)
 	if err != nil && len(line) == 0 {
 		return "", errors.New("stdin đóng giữa lúc nhập proxy")
 	}
@@ -298,13 +298,24 @@ func promptProxyScheme(r io.Reader) (int, error) {
 // promptProxySchemePiped is the non-TTY fallback: the printed numbered
 // menu, same accepted inputs as the huh select.
 func promptProxySchemePiped(r io.Reader) (int, error) {
-	printNumberedMenu("Loại proxy:", []string{
+	fmt.Println("Loại proxy:")
+	for i, opt := range []string{
 		"http   (mặc định, Enter)",
 		"socks5",
 		"https  (CONNECT qua TLS)",
 		"tự nhập...",
-	}, "Chọn (1-4, Enter = http): ")
-	choice := readMenuLine(r, "1")
+	} {
+		fmt.Printf("  [%d] %s\n", i+1, opt)
+	}
+	fmt.Print("Chọn (1-4, Enter = http): ")
+	line, err := tui.ReadLine(r)
+	choice := "1"
+	if err == nil || len(line) != 0 {
+		choice = strings.TrimSpace(line)
+		if choice == "" {
+			choice = "1"
+		}
+	}
 	switch choice {
 	case "1":
 		return 0, nil
@@ -350,7 +361,7 @@ func readSchemeFreeText(r io.Reader) (int, error) {
 	}
 	for {
 		fmt.Print("Nhập loại proxy (http/socks5/https): ")
-		typed, err := readLineRaw(r)
+		typed, err := tui.ReadLine(r)
 		if err != nil && len(typed) == 0 {
 			return 0, err
 		}
@@ -375,27 +386,4 @@ func normalizeProxyScheme(s string) (int, bool) {
 	default:
 		return 0, false
 	}
-}
-
-// printNumberedMenu renders a title, 1-based options, and a prompt
-// line with no input handling. Pure print, so callers own reading.
-func printNumberedMenu(title string, options []string, prompt string) {
-	fmt.Println(title)
-	for i, opt := range options {
-		fmt.Printf("  [%d] %s\n", i+1, opt)
-	}
-	fmt.Print(prompt)
-}
-
-// readMenuLine reads one raw line and trims it. Empty input or a read
-// error yields def, keeping menus deterministic on closed pipes.
-func readMenuLine(r io.Reader, def string) string {
-	line, err := readLineRaw(r)
-	if err != nil && len(line) == 0 {
-		return def
-	}
-	if strings.TrimSpace(line) == "" {
-		return def
-	}
-	return strings.TrimSpace(line)
 }

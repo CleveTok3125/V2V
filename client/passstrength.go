@@ -13,22 +13,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/ccojocar/zxcvbn-go"
-
+	"github.com/CleveTok3125/V2V/internal/strength"
 	"github.com/CleveTok3125/V2V/internal/tui"
 )
 
 const (
-	// weakMaxScore gates the warn+confirm prompt. Scores above pass silent.
-	weakMaxScore = 1
-	// displayEntropyCap bounds shown bits. Beyond 128 bits is physically
-	// uncrackable; larger numbers imply false precision.
-	displayEntropyCap = 128.0
 	// maxEntryAttempts bounds double-entry rounds (typos + weak rejects).
 	maxEntryAttempts = 3
 	// reminderMinRunes / reminderMinTokens feed the static reminder line
@@ -40,10 +33,10 @@ const (
 // StrengthReport is the assessed meter for one passphrase.
 type StrengthReport struct {
 	Score   int
-	Entropy float64 // capped at displayEntropyCap, >= 0
-	Capped  bool    // raw entropy exceeded displayEntropyCap: display with a "+" suffix
+	Entropy float64 // capped at 128 bits, >= 0
+	Capped  bool    // raw entropy exceeded the cap: display with a "+" suffix
 	Label   string  // yếu / trung bình / mạnh / rất mạnh
-	Weak    bool    // Score <= weakMaxScore: caller must warn + confirm
+	Weak    bool    // Score <= 1: caller must warn + confirm
 	Tokens  int     // unicode letter/digit runs
 	Runes   int
 }
@@ -66,38 +59,18 @@ func countTokens(s string) int {
 	return n
 }
 
-func strengthLabel(score int) string {
-	switch {
-	case score <= 1:
-		return "yếu"
-	case score == 2:
-		return "trung bình"
-	case score == 3:
-		return "mạnh"
-	default:
-		return "rất mạnh"
-	}
-}
-
 // AssessPassphrase runs the meter. userInputs carries public personal
 // context (username, server host) so the score reflects an attacker who
-// knows who you are, not a blind brute-forcer.
+// knows who you are, not a blind brute-forcer. Core policy (bands,
+// weak gate, cap) lives in internal/strength; this adds client extras.
 func AssessPassphrase(passphrase string, userInputs []string) StrengthReport {
-	r := zxcvbn.PasswordStrength(passphrase, userInputs)
-	e := r.Entropy
-	capped := !math.IsNaN(e) && e > displayEntropyCap
-	if math.IsNaN(e) || e < 0 {
-		e = 0
-	}
-	if e > displayEntropyCap {
-		e = displayEntropyCap
-	}
+	a := strength.Assess(passphrase, userInputs)
 	return StrengthReport{
-		Score:   r.Score,
-		Entropy: e,
-		Capped:  capped,
-		Label:   strengthLabel(r.Score),
-		Weak:    r.Score <= weakMaxScore,
+		Score:   a.Score,
+		Entropy: a.Bits,
+		Capped:  a.Capped,
+		Label:   a.Label,
+		Weak:    a.Weak,
 		Tokens:  countTokens(passphrase),
 		Runes:   utf8.RuneCountInString(passphrase),
 	}

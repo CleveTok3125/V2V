@@ -26,6 +26,8 @@ import (
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/trip"
+	"github.com/CleveTok3125/V2V/internal/tripcolor"
+	"github.com/CleveTok3125/V2V/internal/wire"
 	"github.com/CleveTok3125/V2V/linkify"
 	"github.com/CleveTok3125/V2V/markup"
 
@@ -76,67 +78,15 @@ var CLI struct {
 	CacheDir  string `help:"Thư mục cache/history" short:"C" env:"V2V_CACHE_DIR"`
 }
 
-type AuthPacket struct {
-	Type      string `json:"type"`
-	Nonce     string `json:"nonce,omitempty"`
-	Role      string `json:"role,omitempty"`
-	Signature string `json:"signature,omitempty"`
-	Hmac      string `json:"hmac,omitempty"`
-	Username  string `json:"username,omitempty"`
-	Tripcode  string `json:"tripcode,omitempty"`
-
-	TripPub string `json:"trip_pub,omitempty"`
-
-	PasskeyID         string `json:"passkey_id,omitempty"`
-	PasskeyAuthData   string `json:"passkey_auth_data,omitempty"`
-	PasskeyClientData string `json:"passkey_client_data,omitempty"`
-	PasskeySig        string `json:"passkey_sig,omitempty"`
-
-	ServerPubKey string `json:"server_pubkey,omitempty"`
-	ServerSig    string `json:"server_sig,omitempty"`
-	ServerHost   string `json:"server_host,omitempty"`
-
-	Error    string      `json:"error,omitempty"`
-	AuthType string      `json:"auth_type,omitempty"`
-	Perms    *Permission `json:"perms,omitempty"`
-
-	TripSeq  uint32 `json:"trip_seq,omitempty"`
-	TripPrev string `json:"trip_prev,omitempty"`
-}
-
-type WireMessage struct {
-	Type        string    `json:"type"`
-	Time        string    `json:"time,omitempty"`
-	DisplayName string    `json:"displayName,omitempty"`
-	Text        string    `json:"text,omitempty"`
-	Trip        *TripMeta `json:"trip,omitempty"`
-	// TmpID is the sender's per-session counter, relayed verbatim.
-	// ReplyTo quotes a chain height for replies. ChainPrev/ChainHash/
-	// ChainHeight link the message into the global hash chain
-	// (see server/chain.go); absent on legacy lines.
-	TmpID       uint64 `json:"tmp_id,omitempty"`
-	ReplyTo     uint64 `json:"reply_to,omitempty"`
-	ChainPrev   string `json:"chain_prev,omitempty"`
-	ChainHash   string `json:"chain_hash,omitempty"`
-	ChainHeight uint64 `json:"chain_height,omitempty"`
-	ChainVer    int    `json:"chain_ver,omitempty"`
-}
-
-type TripMeta struct {
-	Pub       string `json:"pub"`
-	Seq       uint32 `json:"seq"`
-	Prev      string `json:"prev"`
-	Sig       string `json:"sig"`
-	ServerPub string `json:"server_pub"`
-	MsgHash   string `json:"msg_hash,omitempty"`
-	TmpID     uint64 `json:"tmp_id,omitempty"`
-	ReplyTo   uint64 `json:"reply_to,omitempty"`
-}
-
-type Permission struct {
-	CanMessageUnlimited bool   `json:"can_message_unlimited"`
-	CustomPrefix        string `json:"custom_prefix"`
-}
+// Protocol schema lives in internal/wire (single source). Aliases keep
+// every existing reference compiling while guaranteeing client and
+// server serialize identically.
+type (
+	AuthPacket  = wire.AuthPacket
+	WireMessage = wire.WireMessage
+	TripMeta    = wire.TripMeta
+	Permission  = wire.Permission
+)
 
 // WebSocket message type constants (RFC 6455) so the shared chat logic does
 // not depend on a specific websocket implementation.
@@ -1797,7 +1747,7 @@ func main() {
 			msgHash := sha256.Sum256([]byte(text))
 			prevCopy := make([]byte, len(tripPrev))
 			copy(prevCopy, tripPrev)
-			payload := canonicalPayload(strings.ToLower(challenge.ServerPubKey), tripSeq, prevCopy, msgHash[:], []byte(tripPub), username, tmpSeq, pendingReplyTo)
+			payload := tripcolor.CanonicalPayload(strings.ToLower(challenge.ServerPubKey), tripSeq, prevCopy, msgHash[:], []byte(tripPub), username, tmpSeq, pendingReplyTo)
 			sig := ed25519.Sign(tripPriv, payload)
 			h := sha256.New()
 			h.Write(prevCopy)

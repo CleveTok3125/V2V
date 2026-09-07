@@ -11,7 +11,6 @@ package passprompt
 import (
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 )
 
@@ -92,30 +91,6 @@ func MeterBar(frac float64) string {
 	}
 	full := int(frac*MeterWidth + 0.5)
 	return strings.Repeat("█", full) + strings.Repeat("░", MeterWidth-full)
-}
-
-// ReadLine reads one line without read-ahead: byte-by-byte, so bytes
-// meant for later readers stay on the fd. Buffered readers would
-// swallow piped input past the newline.
-func ReadLine(r io.Reader) (string, error) {
-	var buf []byte
-	one := make([]byte, 1)
-	for {
-		n, err := r.Read(one)
-		if n > 0 {
-			if one[0] == '\n' {
-				break
-			}
-			buf = append(buf, one[0])
-		}
-		if err != nil {
-			if len(buf) == 0 {
-				return "", err
-			}
-			break
-		}
-	}
-	return strings.TrimRight(string(buf), "\r"), nil
 }
 
 // OnPrompt prints round prompts for piped double-entry. first selects

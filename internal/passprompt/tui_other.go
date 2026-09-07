@@ -27,7 +27,7 @@ func Password(opts PasswordOpts) (string, error) {
 	if tui.Interactive() {
 		return runPassword(opts)
 	}
-	stdin := func() (string, error) { return ReadLine(os.Stdin) }
+	stdin := func() (string, error) { return tui.ReadLine(os.Stdin) }
 	if opts.Expect != "" {
 		return ExpectPiped(stdin, opts.Expect, opts.rounds(), func(round, max int) {
 			if round == 1 {

@@ -27,6 +27,8 @@ import (
 	"github.com/fxamacker/cbor/v2"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
+
+	"github.com/CleveTok3125/V2V/internal/strutil"
 )
 
 const (
@@ -184,7 +186,7 @@ func parseCreationForImport(clientDataB64, attObjB64, wantChallengeB64 string) (
 	gotChal, err := base64.RawURLEncoding.DecodeString(cd.Challenge)
 	wantChal, err2 := base64.RawURLEncoding.DecodeString(wantChallengeB64)
 	if err != nil || err2 != nil || !bytes.Equal(gotChal, wantChal) {
-		fmt.Printf("🔍 [PARSE FAIL] challenge mismatch: got=%s want=%s\n", shortID(cd.Challenge), shortID(wantChallengeB64))
+		fmt.Printf("🔍 [PARSE FAIL] challenge mismatch: got=%s want=%s\n", strutil.Short(cd.Challenge), strutil.Short(wantChallengeB64))
 		return nil, perr("challenge_mismatch")
 	}
 	if subtle.ConstantTimeCompare([]byte(cd.Origin), []byte(WAConfig.Origin)) != 1 {

@@ -18,18 +18,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/ccojocar/zxcvbn-go"
 	"github.com/charmbracelet/huh"
 
 	"github.com/CleveTok3125/V2V/identity"
 	"github.com/CleveTok3125/V2V/internal/passprompt"
+	"github.com/CleveTok3125/V2V/internal/strength"
+	"github.com/CleveTok3125/V2V/internal/strutil"
 	"github.com/CleveTok3125/V2V/internal/tui"
 )
 
@@ -146,7 +146,7 @@ func loadRolesMap() (map[string]any, error) {
 func readPasteJSON() ([]byte, error) {
 	// Try file first if provided via --file handled separately
 	// For --paste, read from stdin; if interactive and no pipe, prompt via huh
-	if isInteractive() {
+	if tui.HasControllingTTY() {
 		var pasted string
 		form := huh.NewForm(huh.NewGroup(
 			huh.NewText().Title("Paste JSON snippet").Value(&pasted).Validate(nonEmpty),
@@ -180,7 +180,7 @@ func readPasteJSON() ([]byte, error) {
 }
 
 func (c *RoleCreateCmd) Run() error {
-	if isInteractive() && c.Role == "" {
+	if tui.HasControllingTTY() && c.Role == "" {
 		form := huh.NewForm(huh.NewGroup(
 			huh.NewInput().Title("Tên role").Value(&c.Role).Validate(nonEmpty),
 			huh.NewInput().Title("Prefix hiển thị").Value(&c.Prefix),
@@ -199,7 +199,7 @@ func (c *RoleCreateCmd) Run() error {
 	}
 	_, exists := root[c.Role]
 	if exists && !c.Force {
-		if isInteractive() {
+		if tui.HasControllingTTY() {
 			var overwrite bool
 			form := huh.NewForm(huh.NewGroup(
 				huh.NewConfirm().Title(fmt.Sprintf("Role \"%s\" đã tồn tại — ghi đè?", c.Role)).Affirmative("Ghi đè").Negative("Hủy").Value(&overwrite),
@@ -289,7 +289,7 @@ func (c *RoleUpdateCmd) Run() error {
 		return fmt.Errorf("role \"%s\" không tồn tại, dùng `role create` trước", c.Role)
 	}
 	// Interactive prefill if needed
-	if isInteractive() {
+	if tui.HasControllingTTY() {
 		m, _ := entry.(map[string]any)
 		curPrefix, _ := m["custom_prefix"].(string)
 		curUnlimited, _ := m["can_message_unlimited"].(bool)
@@ -342,7 +342,7 @@ func (c *RoleDeleteCmd) Run() error {
 	if _, ok := root[c.Role]; !ok {
 		return fmt.Errorf("role \"%s\" không tồn tại", c.Role)
 	}
-	if !c.Force && isInteractive() {
+	if !c.Force && tui.HasControllingTTY() {
 		var confirm bool
 		form := huh.NewForm(huh.NewGroup(
 			huh.NewConfirm().Title(fmt.Sprintf("Xóa role \"%s\"?", c.Role)).Affirmative("Xóa").Negative("Hủy").Value(&confirm),
@@ -366,7 +366,7 @@ func (c *RoleDeleteCmd) Run() error {
 }
 
 func (c *RoleAddIdentityCmd) Run() error {
-	if isInteractive() && c.Role == "" {
+	if tui.HasControllingTTY() && c.Role == "" {
 		form := huh.NewForm(huh.NewGroup(
 			huh.NewInput().Title("Role").Value(&c.Role).Validate(nonEmpty),
 		))
@@ -429,7 +429,7 @@ func (c *RoleAddIdentityCmd) Run() error {
 		}
 	}
 	// Interactive prompt for missing fields if still empty and TTY
-	if isInteractive() {
+	if tui.HasControllingTTY() {
 		if c.PublicKey == "" || c.HmacShield == "" {
 			form := huh.NewForm(huh.NewGroup(
 				huh.NewInput().Title("Public key hex").Value(&c.PublicKey).Validate(nonEmpty),
@@ -485,7 +485,7 @@ func (c *RoleAddIdentityCmd) Run() error {
 }
 
 func (c *RoleAddPasskeyCmd) Run() error {
-	if isInteractive() && c.Role == "" {
+	if tui.HasControllingTTY() && c.Role == "" {
 		form := huh.NewForm(huh.NewGroup(
 			huh.NewInput().Title("Role").Value(&c.Role).Validate(nonEmpty),
 		))
@@ -553,7 +553,7 @@ func (c *RoleAddPasskeyCmd) Run() error {
 			}
 		}
 	}
-	if isInteractive() && (c.CredentialID == "" || c.PublicKey == "") {
+	if tui.HasControllingTTY() && (c.CredentialID == "" || c.PublicKey == "") {
 		form := huh.NewForm(huh.NewGroup(
 			huh.NewInput().Title("Credential ID base64url").Value(&c.CredentialID).Validate(nonEmpty),
 			huh.NewInput().Title("Public key COSE base64url").Value(&c.PublicKey).Validate(nonEmpty),
@@ -617,7 +617,7 @@ func (c *RoleImportCmd) Run() error {
 		}
 	} else {
 		// Try stdin
-		if isInteractive() {
+		if tui.HasControllingTTY() {
 			return errors.New("dùng --file <path> hoặc --paste để import")
 		}
 		data, err = os.ReadFile("/dev/stdin")
@@ -658,18 +658,6 @@ func main() {
 	ctx.FatalIfErrorf(ctx.Run())
 }
 
-// isInteractive reports whether a real controlling terminal exists. huh
-// opens /dev/tty directly (it ignores piped stdin), so this must probe the
-// tty device rather than os.Stdin.
-func isInteractive() bool {
-	tty, err := os.Open("/dev/tty")
-	if err != nil {
-		return false
-	}
-	_ = tty.Close()
-	return true
-}
-
 func nonEmpty(s string) error {
 	if strings.TrimSpace(s) == "" {
 		return errors.New("bắt buộc")
@@ -684,14 +672,14 @@ func promptPassphrase() (string, error) {
 		Title:      "Passphrase (Enter = không mã hóa)",
 		AllowEmpty: true,
 		MaxRounds:  passprompt.DefaultMaxRounds,
-		Assess:     assessFilePassphrase,
+		Assess:     func(s string) passprompt.Assessment { return strength.Assess(s, nil) },
 	})
 	if err != nil || strings.TrimSpace(pass) == "" {
 		return pass, err
 	}
-	if assessFilePassphrase(pass).Weak {
+	if strength.Assess(pass, nil).Weak {
 		fmt.Println("⚠️ Passphrase yếu — file mã hóa dễ bị bẻ nếu lọt ra ngoài.")
-		if tui.Interactive() {
+		if tui.HasControllingTTY() {
 			ok, err := tui.Confirm("Vẫn dùng passphrase này?")
 			if err != nil || !ok {
 				return "", errors.New("đã hủy passphrase yếu")
@@ -708,33 +696,6 @@ func promptPassphrase() (string, error) {
 	return pass, nil
 }
 
-// assessFilePassphrase maps a candidate file passphrase to the shared
-// prompt meter. Context-free: v2vctl has no username/host to feed
-// zxcvbn. Display only — v2vctl never gates on strength. Label bands
-// and the 128-bit cap mirror client/passstrength.go, the policy owner.
-func assessFilePassphrase(s string) passprompt.Assessment {
-	r := zxcvbn.PasswordStrength(s, nil)
-	e := r.Entropy
-	capped := !math.IsNaN(e) && e > 128
-	if math.IsNaN(e) || e < 0 {
-		e = 0
-	}
-	if e > 128 {
-		e = 128
-	}
-	var label string
-	switch {
-	case r.Score <= 1:
-		label = "yếu"
-	case r.Score == 2:
-		label = "trung bình"
-	case r.Score == 3:
-		label = "mạnh"
-	default:
-		label = "rất mạnh"
-	}
-	return passprompt.Assessment{Bits: e, Score: r.Score, Capped: capped, Label: label, Weak: r.Score <= 1}
-}
 
 func loadContainer(path string) (*identity.IdentityFile, error) {
 	// Check if file is encrypted and need passphrase
@@ -747,7 +708,7 @@ func loadContainer(path string) (*identity.IdentityFile, error) {
 			identity.ZeroBytes(pw)
 			return idf, err
 		}
-		if isInteractive() {
+		if tui.HasControllingTTY() {
 			fmt.Println("🔒 File đã mã hóa, nhập passphrase để mở...")
 			pass, err := promptPassphraseForLoad()
 			if err != nil {
@@ -790,7 +751,7 @@ func promptPassphraseForLoad() (string, error) {
 }
 
 func saveContainer(idf *identity.IdentityFile, path string) error {
-	if isInteractive() {
+	if tui.HasControllingTTY() {
 		pass, err := promptPassphrase()
 		if err != nil {
 			return err
@@ -805,7 +766,7 @@ func saveContainer(idf *identity.IdentityFile, path string) error {
 	}
 	// Check env for non-interactive
 	if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
-		if assessFilePassphrase(pass).Weak {
+		if strength.Assess(pass, nil).Weak {
 			fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
 		}
 		pw := []byte(pass)
@@ -822,7 +783,7 @@ func rolesPath() string { return "roles.json" }
 // --- keygen ed25519 -----------------------------------------------------
 
 func (c *Ed25519Keygen) Run() error {
-	if isInteractive() {
+	if tui.HasControllingTTY() {
 		if c.ServerPubKey == "" {
 			if data, err := os.ReadFile("data/server_identity.json"); err == nil {
 				var sid map[string]any
@@ -886,7 +847,7 @@ func (c *Ed25519Keygen) Run() error {
 // --- keygen passkey (soft) -----------------------------------------------
 
 func (c *PasskeyKeygen) Run() error {
-	if isInteractive() {
+	if tui.HasControllingTTY() {
 		if c.RPID == "" {
 			c.RPID = os.Getenv("WEBAUTHN_RPID")
 		}
@@ -950,7 +911,7 @@ type EnrollCmd struct {
 }
 
 func (e *EnrollCmd) Run() error {
-	if isInteractive() {
+	if tui.HasControllingTTY() {
 		form := huh.NewForm(huh.NewGroup(
 			huh.NewInput().Title("Role").Value(&e.Role).Validate(nonEmpty),
 			huh.NewInput().Title("Nhãn thiết bị/người (tùy chọn)").Value(&e.Label),
@@ -1028,7 +989,7 @@ func (m *MigrateCmd) Run() error {
 		curPreset = "plaintext (không mã hóa)"
 	}
 
-	if isInteractive() {
+	if tui.HasControllingTTY() {
 		// Distinct TUI: show current status, then choose preset, then passphrases
 		var presetChoice string
 		form := huh.NewForm(huh.NewGroup(
@@ -1050,7 +1011,7 @@ func (m *MigrateCmd) Run() error {
 	oldPath := inPath + ".old"
 	if _, err := os.Stat(oldPath); err == nil {
 		if !m.Force {
-			if isInteractive() {
+			if tui.HasControllingTTY() {
 				var overwrite bool
 				confirm := huh.NewForm(huh.NewGroup(
 					huh.NewConfirm().Title(fmt.Sprintf("%s đã tồn tại — ghi đè?", oldPath)).Affirmative("Ghi đè").Negative("Hủy").Value(&overwrite),
@@ -1074,7 +1035,7 @@ func (m *MigrateCmd) Run() error {
 	if enc {
 		if p := os.Getenv("V2V_PASSPHRASE"); p != "" {
 			oldPass = p
-		} else if isInteractive() {
+		} else if tui.HasControllingTTY() {
 			fmt.Println("🔒 File đã mã hóa, nhập passphrase hiện tại để mở...")
 			var err error
 			oldPass, err = promptPassphraseForLoad()
@@ -1111,7 +1072,7 @@ func (m *MigrateCmd) Run() error {
 		p = &pp
 	case "custom":
 		// For custom, prompt for t/m/p if interactive
-		if isInteractive() {
+		if tui.HasControllingTTY() {
 			var tStr, mStr string
 			form := huh.NewForm(huh.NewGroup(
 				huh.NewInput().Title("Time (t)").Value(&tStr),
@@ -1142,7 +1103,7 @@ func (m *MigrateCmd) Run() error {
 	// Prompt for new passphrase if target is encrypted (preset != plaintext)
 	// For migrate, we always re-encrypt (unless user wants plaintext)
 	var newPass string
-	if isInteractive() {
+	if tui.HasControllingTTY() {
 		fmt.Println("🔒 Nhập passphrase mới cho file đích (Enter = không mã hóa):")
 		var err error
 		newPass, err = promptPassphrase()
@@ -1150,7 +1111,7 @@ func (m *MigrateCmd) Run() error {
 			return err
 		}
 	} else if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
-		if assessFilePassphrase(pass).Weak {
+		if strength.Assess(pass, nil).Weak {
 			fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
 		}
 		newPass = pass
@@ -1241,12 +1202,6 @@ func str(v any) string {
 	return fmt.Sprint(v)
 }
 
-func short(code string) string {
-	if len(code) > 12 {
-		return code[:12] + "…"
-	}
-	return code
-}
 
 type ListCmd struct {
 	Store string `help:"Đường dẫn store" default:"data/webauthn.json" env:"WEBAUTHN_STORE"`
@@ -1318,12 +1273,12 @@ func (l *ListCmd) Run() error {
 			state = "EXPIRED"
 		}
 		fmt.Printf("  [%s] role=%s label=%q expires=%s code=%s…\n",
-			state, p.Role, p.Label, p.ExpiresAt.Format(time.RFC3339), short(p.Code))
+			state, p.Role, p.Label, p.ExpiresAt.Format(time.RFC3339), strutil.Short(p.Code))
 	}
 	fmt.Println("== Credentials ==")
 	for role, creds := range f.Credentials {
 		for _, c := range creds {
-			fmt.Printf("  role=%s cred=%s… added=%v\n", role, short(str(c["credential_id"])), str(c["added_at"]))
+			fmt.Printf("  role=%s cred=%s… added=%v\n", role, strutil.Short(str(c["credential_id"])), str(c["added_at"]))
 		}
 	}
 	return nil
