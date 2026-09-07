@@ -29,27 +29,29 @@ make help            # xem tất cả target
 
 ```bash
 ./public/V2V-linux-amd64 -s wss://chat.example.com -u "TênBạn"
-# qua proxy: --proxy socks5://127.0.0.1:1080 (hoặc env V2V_PROXY, hoặc --ask-proxy để nhập bằng prompt)
+# qua proxy: --proxy socks5://127.0.0.1:1080 (http/https/socks5/socks5h;
+# thứ tự --ask-proxy > --proxy > env V2V_PROXY > proxy hệ thống, hoặc --ask-proxy để nhập bằng prompt)
 ```
 
 **3. Dùng tripcode**
 
 ```bash
 ./public/V2V-linux-amd64 -s wss://chat.example.com -u "TênBạn" -t
-# prompt nhập tripcode bí mật (che khi gõ, không truyền qua argument);
+# prompt nhập tripcode bí mật (che khi gõ, có thước đo độ mạnh realtime,
+# không truyền qua argument); secret yếu hỏi xác nhận (mặc định Không);
 # hỏi lưu mã hóa vào tripcode.json sau đó.
 # bạn sẽ hiện: TênBạn#ab12
 #               └─ ✍️ ◆ ab12cd34  (màu, bấm để verify)
 ```
 Biến môi trường `V2V_TRIPCODE` cũng dùng được (chỉ cho CI — nên dùng file mã hóa).
 
-Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`, `/copy`).
+Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/clearhistory`, `/whoami`, `/status`, `/showjoin`, `/autoverify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`, `/copy`).
 
 Tin nhắn của bạn hiện xám kèm `⏳` trước, rồi được thay bằng dòng xác nhận khi server gửi lại (echo). Lệnh `/` lạ bị chặn ngay trên máy, không gửi đi (muốn gửi chữ bắt đầu bằng `/` thì bọc trong codeblock ```).
 
 Chat và system nằm ở 2 tab riêng: `/tab` chuyển giữa Tab 1 (chat) và Tab 2 (local & system). Thanh tab hiện `[1:chat] 2:system`, tab đang xem nằm trong ngoặc.
 
-Key và cấu hình nằm trong thư mục config của hệ điều hành (`~/.config/V2V/` trên Linux, `%AppData%\V2V` trên Windows, `~/Library/Application Support/V2V` trên macOS): `key.json` cho danh tính, `config.json` tự tạo cho cài đặt. Ghi đè bằng `-c/--config-dir` và `-C/--cache-dir`.
+Key và cấu hình nằm trong thư mục config của hệ điều hành (`~/.config/V2V/` trên Linux, `%AppData%\V2V` trên Windows, `~/Library/Application Support/V2V` trên macOS): `key.json` cho danh tính, `config.json` tự tạo cho cài đặt. Ghi đè bằng `-c/--config-dir` (`V2V_CONFIG_DIR`) và `-C/--cache-dir` (`V2V_CACHE_DIR`). Flag phụ: `-v` phiên bản, `-a` user-agent, `-i` thông tin server, `-j` hiện ra/vào.
 
 ## Dành cho Admin
 
@@ -70,7 +72,7 @@ Tạo danh tính bằng `v2vctl` (`make v2vctl` / `make v2vctl ALL=1` cho full m
 ./public/V2V-linux-amd64 -s wss://chat.example.com -u "Admin" -K key.json
 ```
 
-Key có thể mã hóa (`v2vctl` sẽ hỏi passphrase, hoặc dùng `V2V_PASSPHRASE`).
+Key có thể mã hóa (`v2vctl` sẽ hỏi passphrase, hoặc dùng `V2V_PASSPHRASE`). Secret đi qua `[]byte` và bị xóa khỏi RAM sau khi dùng.
 
 Cấp passkey web (link dùng 1 lần, 10 phút):
 
@@ -99,6 +101,6 @@ Mở `http://localhost:10000/web/` cho bản web.
 
 - **Chi tiết kỹ thuật:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — kiến trúc, giao thức wire, tripcode, lưu trữ, bảo mật.
 - **Cấu hình:** `template/.env` có đủ biến môi trường với comment.
-- **Công cụ quản trị:** `v2vctl --help` và `v2vctl keygen --help`.
+- **Công cụ quản trị:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/add-passkey/import`, `keygen ed25519|passkey`, `enroll`, `migrate --preset native|wasm|custom`, `list`).
 
 Báo lỗi và PR luôn được chào đón.

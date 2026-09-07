@@ -29,27 +29,29 @@ make help            # see all targets
 
 ```bash
 ./public/V2V-linux-amd64 -s wss://chat.example.com -u "YourName"
-# via proxy: --proxy socks5://127.0.0.1:1080 (or V2V_PROXY env, or --ask-proxy for an interactive prompt)
+# via proxy: --proxy socks5://127.0.0.1:1080 (http/https/socks5/socks5h;
+# precedence --ask-proxy > --proxy > V2V_PROXY env > system proxy, or --ask-proxy for an interactive prompt)
 ```
 
 **3. Join with a tripcode**
 
 ```bash
 ./public/V2V-linux-amd64 -s wss://chat.example.com -u "YourName" -t
-# prompts for the secret tripcode (hidden input, never passed as an
-# argument); offers to save it encrypted in tripcode.json afterwards.
+# prompts for the secret tripcode (hidden input with a live strength
+# meter, never passed as an argument); weak secrets ask to confirm
+# (default No); offers to save it encrypted in tripcode.json afterwards.
 # you will appear as: YourName#ab12
 #                      └─ ✍️ ◆ ab12cd34  (colored, clickable to verify)
 ```
 `V2V_TRIPCODE` env also works (CI only — prefer the encrypted file).
 
-Type `/help` inside the chat for commands (`/quit`, `/clear`, `/whoami`, `/status`, `/autoverify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`, `/copy`).
+Type `/help` inside the chat for commands (`/quit`, `/clear`, `/clearhistory`, `/whoami`, `/status`, `/showjoin`, `/autoverify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`, `/copy`).
 
 Your message first appears grey with `⏳` and is replaced by the confirmed line once the server echoes it back. Unknown `/commands` are rejected locally and never broadcast (to send text starting with `/`, wrap it in a ``` code block).
 
 Chat and system messages live on separate tabs: `/tab` switches between Tab 1 (chat) and Tab 2 (local & system). The bar shows `[1:chat] 2:system` with the active tab in brackets.
 
-Keys and settings live in your OS config dir (`~/.config/V2V/` on Linux, `%AppData%\V2V` on Windows, `~/Library/Application Support/V2V` on macOS): `key.json` for identities, auto-created `config.json` for settings. Override with `-c/--config-dir` and `-C/--cache-dir`.
+Keys and settings live in your OS config dir (`~/.config/V2V/` on Linux, `%AppData%\V2V` on Windows, `~/Library/Application Support/V2V` on macOS): `key.json` for identities, auto-created `config.json` for settings. Override with `-c/--config-dir` (`V2V_CONFIG_DIR`) and `-C/--cache-dir` (`V2V_CACHE_DIR`). Extra flags: `-v` version, `-a` user-agent, `-i` server info, `-j` show join/leave.
 
 ## For Admins
 
@@ -70,7 +72,7 @@ Create identities with `v2vctl` (build with `make v2vctl` / `make v2vctl ALL=1` 
 ./public/V2V-linux-amd64 -s wss://chat.example.com -u "Admin" -K key.json
 ```
 
-Key files can be encrypted (`v2vctl` will ask for a passphrase, or use `V2V_PASSPHRASE`).
+Key files can be encrypted (`v2vctl` will ask for a passphrase, or use `V2V_PASSPHRASE`). Secrets travel as `[]byte` and are wiped from RAM after use.
 
 Web passkey enrollment (one-time link, 10 min):
 
@@ -99,6 +101,6 @@ Open `http://localhost:10000/web/` for the browser client.
 
 - **How it works:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — architecture, wire protocol, tripcode crypto, storage, and security model.
 - **Configuration:** `template/.env` has all env vars with comments (`PORT`, `MAX_MESSAGE_LENGTH`, `HISTORY_FILE_PATH`, `WEBAUTHN_*`, etc.).
-- **Management tool:** `v2vctl --help` and `v2vctl keygen --help`.
+- **Management tool:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/add-passkey/import`, `keygen ed25519|passkey`, `enroll`, `migrate --preset native|wasm|custom`, `list`).
 
 Issues and PRs are welcome.
