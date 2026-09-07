@@ -26,6 +26,12 @@ type (
 func LoadIdentityFile(path string) (*IdentityFile, error) {
 	if enc, _ := identity.IsEncrypted(path); enc {
 		if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
+			// Env unlock only warns when weak: refusing here would
+			// lock out legitimate files. No personal context feeds
+			// this check; it still catches trivial secrets.
+			if AssessPassphrase(pass, nil).Weak {
+				fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
+			}
 			return identity.LoadEncrypted(path, pass)
 		}
 		// Prompt for passphrase (hidden input). TTY sessions use the

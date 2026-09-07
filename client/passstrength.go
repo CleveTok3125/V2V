@@ -118,6 +118,12 @@ func (r StrengthReport) WeakWarning() string {
 	return "⚠️ Tripcode yếu — dễ bị đoán từ badge công khai."
 }
 
+// FileWeakWarning is the one-line alert for a weak file-encryption
+// passphrase. Like WeakWarning it carries no entropy number.
+func (r StrengthReport) FileWeakWarning() string {
+	return "⚠️ Passphrase mở file yếu — ai có file sẽ mở được."
+}
+
 // readDoubleEntry reads a hidden entry plus confirmation, up to
 // maxEntryAttempts rounds. Mismatches restart the round; exhaustion or a
 // read error aborts. Piped stdin consumes exactly two lines per round.

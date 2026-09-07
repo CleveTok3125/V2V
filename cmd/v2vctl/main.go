@@ -30,6 +30,7 @@ import (
 
 	"github.com/CleveTok3125/V2V/identity"
 	"github.com/CleveTok3125/V2V/internal/passprompt"
+	"github.com/CleveTok3125/V2V/internal/tui"
 )
 
 var Version = "dev"
@@ -677,13 +678,26 @@ func nonEmpty(s string) error {
 }
 
 func promptPassphrase() (string, error) {
-	return passprompt.Password(passprompt.PasswordOpts{
+	pass, err := passprompt.Password(passprompt.PasswordOpts{
 		Title:        "Passphrase (Enter = không mã hóa)",
 		ConfirmTitle: "Nhập lại passphrase",
 		Confirm:      true,
 		AllowEmpty:   true,
 		Assess:       assessFilePassphrase,
 	})
+	if err != nil || strings.TrimSpace(pass) == "" {
+		return pass, err
+	}
+	if assessFilePassphrase(pass).Weak {
+		fmt.Println("⚠️ Passphrase yếu — file mã hóa dễ bị bẻ nếu lọt ra ngoài.")
+		if tui.Interactive() {
+			ok, err := tui.Confirm("Vẫn dùng passphrase này?")
+			if err != nil || !ok {
+				return "", errors.New("đã hủy passphrase yếu")
+			}
+		}
+	}
+	return pass, nil
 }
 
 // assessFilePassphrase maps a candidate file passphrase to the shared
@@ -771,6 +785,9 @@ func saveContainer(idf *identity.IdentityFile, path string) error {
 	}
 	// Check env for non-interactive
 	if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
+		if assessFilePassphrase(pass).Weak {
+			fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
+		}
 		return idf.SaveEncrypted(path, pass, nil)
 	}
 	return idf.Save(path)
@@ -1102,6 +1119,9 @@ func (m *MigrateCmd) Run() error {
 			return err
 		}
 	} else if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
+		if assessFilePassphrase(pass).Weak {
+			fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
+		}
 		newPass = pass
 	}
 
