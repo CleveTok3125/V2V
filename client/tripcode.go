@@ -98,14 +98,15 @@ func toAssessment(rep StrengthReport) passprompt.Assessment {
 	return passprompt.Assessment{Bits: rep.Entropy, Score: rep.Score, Capped: rep.Capped, Label: rep.Label, Weak: rep.Weak}
 }
 
-// meteredTripcodeEntry is the unified TTY flow: single live-meter
-// entry, the 64-byte cap, weak warn+confirm, then the encrypted-save
-// offer. Re-entry is asked only when the user chooses to save: a
-// session-only typo shows up on the badge immediately, while a saved
-// typo (or a wrong unlock passphrase) is permanent. ctx feeds the
-// meter's personal-info context. Assessment stays a client-side
-// callback so passprompt never imports zxcvbn. The piped path keeps
-// the upfront double-entry order for script stability.
+// meteredTripcodeEntry is the unified TTY flow: single masked entry,
+// immediate re-entry check, the 64-byte cap, weak warn+confirm, then
+// the encrypted-save offer. The value is verified before anything is
+// asked about saving. Session-only typos show up on the badge
+// immediately, while a saved typo (or a wrong unlock passphrase) is
+// permanent. ctx feeds the meter's personal-info context. Assessment
+// stays a client-side callback so passprompt never imports zxcvbn.
+// The piped path keeps the upfront double-entry order for script
+// stability.
 func meteredTripcodeEntry(path string, ctx []string) (string, error) {
 	assess := func(s string) passprompt.Assessment {
 		return toAssessment(AssessPassphrase(s, ctx))
@@ -129,19 +130,21 @@ func meteredTripcodeEntry(path string, ctx []string) (string, error) {
 			return "", errors.New("đã hủy tripcode yếu")
 		}
 	}
-	ok, err := tui.Confirm("Lưu tripcode mã hóa vào file?")
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return tc, nil
-	}
+	// Verify the match before asking anything about saving: the save
+	// offer must come after the value is confirmed, not before.
 	if _, err := passprompt.Password(passprompt.PasswordOpts{
 		ConfirmTitle: "🔑 Nhập lại để xác nhận",
 		MaxRounds:    maxEntryAttempts,
 		Expect:       tc,
 	}); err != nil {
 		return "", err
+	}
+	ok, err := tui.Confirm("Lưu tripcode mã hóa vào file?")
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return tc, nil
 	}
 	if err := saveTripcodePrompt(path, tc, ctx); err != nil {
 		fmt.Printf("⚠️ Không lưu được tripcode: %v\n", err)
@@ -227,8 +230,10 @@ func saveTripcodeFile(path, tripcode, unlock string) error {
 }
 
 // saveTripcodePrompt asks for an unlock passphrase (hidden) and saves.
-// Empty unlock skips saving without error. The TTY branch uses
-// double-entry with a live meter: a typo here locks the file forever.
+// Empty unlock skips saving without error. The TTY branch enters once
+// with a live meter, gates weak immediately, then asks re-entry: a
+// typo here locks the file forever, and a weak warning after the
+// confirm round would come too late to reconsider cheaply.
 // A weak passphrase warns everywhere and asks for confirmation on TTY;
 // piped input warns only, keeping the script protocol unchanged.
 func saveTripcodePrompt(path, tripcode string, ctx []string) error {
@@ -239,32 +244,46 @@ func saveTripcodePrompt(path, tripcode string, ctx []string) error {
 	var err error
 	if tui.Interactive() {
 		unlock, err = passprompt.Password(passprompt.PasswordOpts{
-			Title:        "🔒 Đặt unlock passphrase cho file tripcode (trống = không lưu)",
-			ConfirmTitle: "🔒 Nhập lại unlock passphrase",
-			Confirm:      true,
-			AllowEmpty:   true,
-			MaxRounds:    maxEntryAttempts,
-			Assess:       assess,
+			Title:      "🔒 Đặt unlock passphrase cho file tripcode (trống = không lưu)",
+			AllowEmpty: true,
+			MaxRounds:  maxEntryAttempts,
+			Assess:     assess,
 		})
-	} else {
-		fmt.Print("🔒 Đặt unlock passphrase cho file tripcode (trống = không lưu): ")
-		unlock, err = readPassphrase()
-		fmt.Println()
+		if err != nil {
+			return err
+		}
+		if unlock == "" {
+			return errors.New("bỏ qua lưu file")
+		}
+		if rep := AssessPassphrase(unlock, ctx); rep.Weak {
+			fmt.Println(rep.FileWeakWarning())
+			ok, err := tui.Confirm("Vẫn dùng passphrase này?")
+			if err != nil || !ok {
+				return errors.New("đã hủy passphrase yếu")
+			}
+		}
+		if _, err := passprompt.Password(passprompt.PasswordOpts{
+			ConfirmTitle: "🔒 Nhập lại unlock passphrase",
+			MaxRounds:    maxEntryAttempts,
+			Expect:       unlock,
+		}); err != nil {
+			return err
+		}
+		return saveTripcodeFile(path, tripcode, unlock)
 	}
+	fmt.Print("🔒 Đặt unlock passphrase cho file tripcode (trống = không lưu): ")
+	unlock, err = readPassphrase()
+	fmt.Println()
 	if err != nil {
 		return err
 	}
 	if unlock == "" {
 		return errors.New("bỏ qua lưu file")
 	}
+	// Piped input warns only: no confirm round exists here, and the
+	// protocol stays one line.
 	if rep := AssessPassphrase(unlock, ctx); rep.Weak {
 		fmt.Println(rep.FileWeakWarning())
-		if tui.Interactive() {
-			ok, err := tui.Confirm("Vẫn dùng passphrase này?")
-			if err != nil || !ok {
-				return errors.New("đã hủy passphrase yếu")
-			}
-		}
 	}
 	return saveTripcodeFile(path, tripcode, unlock)
 }
