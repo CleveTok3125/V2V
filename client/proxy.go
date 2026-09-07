@@ -12,6 +12,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"strconv"
@@ -217,13 +218,9 @@ func socks5Auth(conn net.Conn, user, pass []byte) error {
 }
 
 // readFull is io.ReadFull with a shorter name for handshake code.
+// io.ReadFull (not a hand loop) also handles (0, nil) reads without
+// spinning forever on half-closed connections.
 func readFull(conn net.Conn, buf []byte) error {
-	for len(buf) > 0 {
-		n, err := conn.Read(buf)
-		buf = buf[n:]
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := io.ReadFull(conn, buf)
+	return err
 }

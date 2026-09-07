@@ -109,16 +109,33 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 				log.Printf("⚠️ [HISTORY TAMPER] %s seq %d: %v", shortID(tripForChain.Pub), tripForChain.Seq, err)
 				continue
 			}
-			// Success: derive newPrev via result
-			prevBytes, _ := hex.DecodeString(tripForChain.Prev)
-			sigBytes, _ := hex.DecodeString(tripForChain.Sig)
-			hashBytes, _ := hex.DecodeString(tripForChain.MsgHash)
+			// Success: derive newPrev via result. Malformed hex aborts
+			// the record instead of chaining zeros.
+			prevBytes, err := hex.DecodeString(tripForChain.Prev)
+			if err != nil {
+				log.Printf("⚠️ [HISTORY TAMPER] %s: bad prev hex: %v", shortID(tripForChain.Pub), err)
+				continue
+			}
+			sigBytes, err := hex.DecodeString(tripForChain.Sig)
+			if err != nil {
+				log.Printf("⚠️ [HISTORY TAMPER] %s: bad sig hex: %v", shortID(tripForChain.Pub), err)
+				continue
+			}
+			hashBytes, err := hex.DecodeString(tripForChain.MsgHash)
+			if err != nil {
+				log.Printf("⚠️ [HISTORY TAMPER] %s: bad msg_hash hex: %v", shortID(tripForChain.Pub), err)
+				continue
+			}
 			h := sha256.New()
 			h.Write(prevBytes)
 			h.Write(sigBytes)
 			h.Write(hashBytes)
 			newPrev := h.Sum(nil)
-			s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: newPrev})
+			// An older duplicate later in the file must not rewind a
+			// newer tip: keep the highest sequence per key.
+			if cur, ok := s.TripChains.Load(tripForChain.Pub); !ok || tripForChain.Seq > cur.(TripChain).Seq {
+				s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: newPrev})
+			}
 		}
 	}
 

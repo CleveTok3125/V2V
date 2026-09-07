@@ -1123,10 +1123,14 @@ func (m *MigrateCmd) Run() error {
 			// Parse and set custom, fallback to native if invalid
 			pp := identity.PresetNative
 			if tStr != "" {
-				fmt.Sscanf(tStr, "%d", &pp.Time)
+				if _, err := fmt.Sscanf(tStr, "%d", &pp.Time); err != nil {
+					return fmt.Errorf("Time (t) không hợp lệ %q: %w", tStr, err)
+				}
 			}
 			if mStr != "" {
-				fmt.Sscanf(mStr, "%d", &pp.Memory)
+				if _, err := fmt.Sscanf(mStr, "%d", &pp.Memory); err != nil {
+					return fmt.Errorf("Memory KiB (m) không hợp lệ %q: %w", mStr, err)
+				}
 			}
 			p = &pp
 		}

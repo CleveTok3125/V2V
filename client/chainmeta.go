@@ -601,22 +601,24 @@ func loadChainTip(path string) ([32]byte, uint64, string, bool) {
 }
 
 // saveChainTip persists the tip atomically; best effort (ignored on wasm).
-func saveChainTip(path string, tip [32]byte, height uint64, serverPub string) {
+// A rename/write failure returns an error so callers keep tipSinceSave
+// and retry on the next batch instead of losing the tip silently.
+func saveChainTip(path string, tip [32]byte, height uint64, serverPub string) error {
 	data, err := json.Marshal(chainTipRecord{Tip: hex.EncodeToString(tip[:]), Height: height, ServerPub: serverPub})
 	if err != nil {
-		return
+		return err
 	}
 	dir := filepath.Dir(path)
 	if dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return
+			return err
 		}
 	}
 	tmp := filepath.Join(dir, ".tmp-chain-tip.json")
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return
+		return err
 	}
-	_ = os.Rename(tmp, path)
+	return os.Rename(tmp, path)
 }
 
 // verifyWireLink recomputes a received wire link against the running tip.
@@ -654,7 +656,10 @@ func verifyWireContent(wire WireMessage) error {
 	if wire.Trip != nil {
 		sig = wire.Trip.Sig
 	}
-	prev, _ := chain.ParseHex64(wire.ChainPrev)
+	prev, ok := chain.ParseHex64(wire.ChainPrev)
+	if !ok {
+		return errChainLink("malformed chain_prev")
+	}
 	var linked bool
 	if wire.ChainVer >= 2 {
 		linked = chain.VerifyLink(prev, wire.ChainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, sig, want)

@@ -109,6 +109,22 @@ func (s *ChatServer) StartCleanupTasks() {
 			s.LastConnectMu.Unlock()
 		}
 	}()
+
+	// Sweep expired pre-auth nonces on a slow ticker instead of one
+	// timer per connection.
+	go func() {
+		nonceSweep := time.NewTicker(30 * time.Second)
+		defer nonceSweep.Stop()
+		for range nonceSweep.C {
+			now := time.Now()
+			s.ActiveNonces.Range(func(k, v any) bool {
+				if meta, ok := v.(NonceMeta); ok && now.After(meta.ExpiresAt) {
+					s.ActiveNonces.Delete(k)
+				}
+				return true
+			})
+		}
+	}()
 }
 
 func loadStaticConfig() (StaticConfig, error) {

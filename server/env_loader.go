@@ -155,6 +155,9 @@ func getEnvAsBoolOptional(key string, fallback bool) bool {
 func generateRandomID(length int) string {
 	bytesNeeded := (length + 1) / 2
 	b := make([]byte, bytesNeeded)
-	rand.Read(b)
+	// Entropy exhaustion must not yield a zero ID: fall back to time-based.
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
+	}
 	return hex.EncodeToString(b)[:length]
 }

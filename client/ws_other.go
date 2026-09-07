@@ -38,5 +38,8 @@ func dialWS(wsURL string) (wsConn, *http.Response, error) {
 	d := *websocket.DefaultDialer
 	d.Proxy = http.ProxyURL(resolvedProxy.dialURL())
 	conn, resp, err := d.Dial(wsURL, headers)
+	if err == nil {
+		resolvedProxy.wipe()
+	}
 	return conn, resp, err
 }

@@ -369,6 +369,9 @@ func (p *PasskeyIdentity) BuildAssertion(nonceHex string) (credID, authDataB64, 
 	cnt[1] = byte(p.SignCount >> 16)
 	cnt[2] = byte(p.SignCount >> 8)
 	cnt[3] = byte(p.SignCount)
+	// The counter must actually ride in authData[33:37]: a zero counter
+	// disables server clone-detection, so the copy is load-bearing.
+	copy(authData[33:37], cnt[:])
 
 	challenge := sha256.Sum256([]byte(nonceHex))
 	cd, _ := json.Marshal(map[string]any{

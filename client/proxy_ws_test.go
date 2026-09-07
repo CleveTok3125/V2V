@@ -174,3 +174,55 @@ func targetPort(addr string) string {
 	}
 	return port
 }
+
+func echoWSPlain(t *testing.T) *httptest.Server {
+	t.Helper()
+	up := websocket.Upgrader{}
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := up.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		mt, msg, err := c.ReadMessage()
+		if err != nil {
+			return
+		}
+		_ = c.WriteMessage(mt, msg)
+	}))
+}
+
+// A failed WS dial over a successful SOCKS handshake must keep the
+// password for the ws->wss retry; only a fully successful dial wipes it.
+func TestSocks5WipeOnlyAfterWSSuccess(t *testing.T) {
+	proxy := startFakeSocksProxy(t)
+	plain := echoWSPlain(t)
+	defer plain.Close()
+	plainAddr := strings.TrimPrefix(plain.URL, "http://")
+
+	p := &proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: proxyPort(t, proxy),
+		User: "u", Pass: []byte("secret")}
+	headers := http.Header{}
+	d := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, HandshakeTimeout: 10 * time.Second}
+
+	// wss:// against a plain-WS server: SOCKS ok, TLS fails.
+	if _, _, err := dialSocks5WSWithDialer("wss://"+plainAddr+"/ws", headers, p, d); err == nil {
+		t.Fatal("wss against plain ws unexpectedly succeeded")
+	}
+	if string(p.Pass) != "secret" {
+		t.Fatal("password wiped after failed dial; retry would lose auth")
+	}
+
+	// Correct target: full success wipes.
+	target := echoWS(t)
+	defer target.Close()
+	targetAddr := strings.TrimPrefix(target.URL, "https://")
+	conn, _, err := dialSocks5WSWithDialer("wss://localhost:"+targetPort(targetAddr)+"/ws", headers, p, d)
+	if err != nil {
+		t.Fatalf("wss through proxy: %v", err)
+	}
+	conn.Close()
+	if p.Pass != nil {
+		t.Error("password must wipe after successful dial")
+	}
+}

@@ -79,6 +79,9 @@ func decryptJSON(data, passphrase []byte) ([]byte, error) {
 	if err := json.Unmarshal(data, &env); err != nil {
 		return nil, err
 	}
+	if env.Version != 3 || env.Encrypted.KDF != "argon2id" || env.Encrypted.Cipher != "xchacha20poly1305" {
+		return nil, errors.New("unsupported envelope (want v3 argon2id+xchacha20poly1305)")
+	}
 	if env.Encrypted.Ciphertext == "" {
 		return nil, errors.New("not encrypted")
 	}
@@ -97,6 +100,11 @@ func decryptJSON(data, passphrase []byte) ([]byte, error) {
 	p := Params{Time: env.Encrypted.Time, Memory: env.Encrypted.Memory, Threads: env.Encrypted.Threads}
 	if p.Time == 0 {
 		p = defaultParams()
+	}
+	// Clamp file-supplied cost: a crafted envelope must not trigger
+	// multi-GB allocation or an argon2 thread panic. Memory is KiB.
+	if p.Time < 1 || p.Time > 10 || p.Memory < 8*1024 || p.Memory > 256*1024 || p.Threads < 1 || p.Threads > 8 {
+		return nil, errors.New("argon2 parameters out of range")
 	}
 	key := argon2.IDKey(passphrase, salt, p.Time, p.Memory, p.Threads, chacha20poly1305.KeySize)
 	defer ZeroBytes(key)

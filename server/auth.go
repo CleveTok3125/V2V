@@ -41,9 +41,8 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		IP:        clientIP,
 	})
 
-	time.AfterFunc(11*time.Second, func() {
-		s.ActiveNonces.Delete(nonceHex)
-	})
+	// No per-nonce timer: a periodic sweep expires nonces instead, so a
+	// pre-auth flood cannot pile up one timer goroutine per connection.
 
 	serverPub := ""
 	serverSig := ""
