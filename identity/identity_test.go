@@ -180,7 +180,7 @@ func TestEncryptedRoundtrip(t *testing.T) {
 	}
 	// Use fast params for test
 	p := Params{Time: 1, Memory: 8 * 1024, Threads: 1}
-	if err := f.SaveEncrypted(path, "s3cret", &p); err != nil {
+	if err := f.SaveEncrypted(path, []byte("s3cret"), &p); err != nil {
 		t.Fatal(err)
 	}
 	// Check file is encrypted
@@ -188,10 +188,10 @@ func TestEncryptedRoundtrip(t *testing.T) {
 		t.Fatal("file should be encrypted")
 	}
 	// Wrong passphrase should fail
-	if _, err := LoadEncrypted(path, "wrong"); err == nil {
+	if _, err := LoadEncrypted(path, []byte("wrong")); err == nil {
 		t.Fatal("wrong passphrase should fail")
 	}
-	got, err := LoadEncrypted(path, "s3cret")
+	got, err := LoadEncrypted(path, []byte("s3cret"))
 	if err != nil {
 		t.Fatal(err)
 	}
