@@ -83,10 +83,7 @@ func resolveTripcode(useFlag bool, configDir, username, serverHost string) (stri
 		}
 	}
 	if offerTripcodeSave(os.Stdin) {
-		assessUnlock := func(s string) passprompt.Assessment {
-			return toAssessment(AssessPassphrase(s, ctx))
-		}
-		if err := saveTripcodePrompt(path, tc, assessUnlock); err != nil {
+		if err := saveTripcodePrompt(path, tc, ctx); err != nil {
 			fmt.Printf("⚠️ Không lưu được tripcode: %v\n", err)
 		} else {
 			fmt.Println("💾 Đã lưu tripcode mã hóa.")
@@ -146,10 +143,7 @@ func meteredTripcodeEntry(path string, ctx []string) (string, error) {
 	}); err != nil {
 		return "", err
 	}
-	assessUnlock := func(s string) passprompt.Assessment {
-		return toAssessment(AssessPassphrase(s, ctx))
-	}
-	if err := saveTripcodePrompt(path, tc, assessUnlock); err != nil {
+	if err := saveTripcodePrompt(path, tc, ctx); err != nil {
 		fmt.Printf("⚠️ Không lưu được tripcode: %v\n", err)
 	} else {
 		fmt.Println("💾 Đã lưu tripcode mã hóa.")
@@ -198,6 +192,9 @@ func loadTripcodeFile(path string) (tc string, found bool, err error) {
 			return "", false, err
 		}
 	}
+	if os.Getenv("V2V_PASSPHRASE") != "" && AssessPassphrase(unlock, nil).Weak {
+		fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
+	}
 	plain, err := identity.DecryptData(data, unlock)
 	if err != nil {
 		return "", false, fmt.Errorf("không mở được tripcode.json: %w", err)
@@ -232,9 +229,12 @@ func saveTripcodeFile(path, tripcode, unlock string) error {
 // saveTripcodePrompt asks for an unlock passphrase (hidden) and saves.
 // Empty unlock skips saving without error. The TTY branch uses
 // double-entry with a live meter: a typo here locks the file forever.
-// assess maps input to the meter; the piped path reuses the legacy
-// single hidden read.
-func saveTripcodePrompt(path, tripcode string, assess func(string) passprompt.Assessment) error {
+// A weak passphrase warns everywhere and asks for confirmation on TTY;
+// piped input warns only, keeping the script protocol unchanged.
+func saveTripcodePrompt(path, tripcode string, ctx []string) error {
+	assess := func(s string) passprompt.Assessment {
+		return toAssessment(AssessPassphrase(s, ctx))
+	}
 	var unlock string
 	var err error
 	if tui.Interactive() {
@@ -256,6 +256,15 @@ func saveTripcodePrompt(path, tripcode string, assess func(string) passprompt.As
 	}
 	if unlock == "" {
 		return errors.New("bỏ qua lưu file")
+	}
+	if rep := AssessPassphrase(unlock, ctx); rep.Weak {
+		fmt.Println(rep.FileWeakWarning())
+		if tui.Interactive() {
+			ok, err := tui.Confirm("Vẫn dùng passphrase này?")
+			if err != nil || !ok {
+				return errors.New("đã hủy passphrase yếu")
+			}
+		}
 	}
 	return saveTripcodeFile(path, tripcode, unlock)
 }
