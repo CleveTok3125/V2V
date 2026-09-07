@@ -21,3 +21,7 @@ jobs:
         run: make vet
       - name: Test
         run: make test
+      - name: WASM build
+        # Build only: several server-only dependency trees are not
+        # js-compatible, so vet ./... cannot run under GOOS=js.
+        run: GOOS=js GOARCH=wasm go build -o /dev/null ./client/

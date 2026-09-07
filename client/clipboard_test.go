@@ -1,3 +1,7 @@
+//go:build !js
+
+// Desktop-only: shouldClear lives in clipboard_other.go; the wasm
+// clipboard is an untestable browser stub.
 package main
 
 import (
