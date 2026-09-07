@@ -338,8 +338,11 @@ func (s *WebAuthnStore) Credential(role, credentialID string) (*WAStoredCred, bo
 	if err != nil {
 		return nil, false
 	}
+	if out == nil {
+		return nil, false
+	}
 	cp := *out
-	return &cp, out != nil
+	return &cp, true
 }
 
 // UpdateSignCount persists an increased sign counter. Per WebAuthn spec,
