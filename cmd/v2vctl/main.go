@@ -678,12 +678,13 @@ func nonEmpty(s string) error {
 }
 
 func promptPassphrase() (string, error) {
+	// Single entry first so a weak passphrase warns and confirms
+	// before the re-entry round, not after it.
 	pass, err := passprompt.Password(passprompt.PasswordOpts{
-		Title:        "Passphrase (Enter = không mã hóa)",
-		ConfirmTitle: "Nhập lại passphrase",
-		Confirm:      true,
-		AllowEmpty:   true,
-		Assess:       assessFilePassphrase,
+		Title:      "Passphrase (Enter = không mã hóa)",
+		AllowEmpty: true,
+		MaxRounds:  passprompt.DefaultMaxRounds,
+		Assess:     assessFilePassphrase,
 	})
 	if err != nil || strings.TrimSpace(pass) == "" {
 		return pass, err
@@ -696,6 +697,13 @@ func promptPassphrase() (string, error) {
 				return "", errors.New("đã hủy passphrase yếu")
 			}
 		}
+	}
+	if _, err := passprompt.Password(passprompt.PasswordOpts{
+		ConfirmTitle: "Nhập lại passphrase",
+		MaxRounds:    passprompt.DefaultMaxRounds,
+		Expect:       pass,
+	}); err != nil {
+		return "", err
 	}
 	return pass, nil
 }
