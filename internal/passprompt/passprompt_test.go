@@ -35,18 +35,18 @@ func TestFormatBits(t *testing.T) {
 
 func TestMeterBar(t *testing.T) {
 	full := MeterBar(1)
-	if got := len([]rune(full)); got != 10 {
-		t.Errorf("bar width = %d, want 10", got)
+	if got := len([]rune(full)); got != MeterWidth {
+		t.Errorf("bar width = %d, want %d", got, MeterWidth)
 	}
-	if strings.Count(full, "█") != 10 {
+	if strings.Count(full, "█") != MeterWidth {
 		t.Errorf("MeterBar(1) = %q, want full", full)
 	}
 	empty := MeterBar(0)
-	if strings.Count(empty, "░") != 10 {
+	if strings.Count(empty, "░") != MeterWidth {
 		t.Errorf("MeterBar(0) = %q, want empty", empty)
 	}
 	half := MeterBar(0.5)
-	if strings.Count(half, "█") != 5 {
+	if strings.Count(half, "█") != MeterWidth/2 {
 		t.Errorf("MeterBar(0.5) = %q, want half", half)
 	}
 	if MeterBar(-1) != empty || MeterBar(2) != full {

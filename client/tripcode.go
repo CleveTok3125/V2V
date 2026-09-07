@@ -98,7 +98,7 @@ func resolveTripcode(useFlag bool, configDir, username, serverHost string) (stri
 // toAssessment maps a strength report to the shared prompt meter. Pure
 // so tests pin the mapping without a TTY.
 func toAssessment(rep StrengthReport) passprompt.Assessment {
-	return passprompt.Assessment{Bits: rep.Entropy, Capped: rep.Capped, Label: rep.Label, Weak: rep.Weak}
+	return passprompt.Assessment{Bits: rep.Entropy, Score: rep.Score, Capped: rep.Capped, Label: rep.Label, Weak: rep.Weak}
 }
 
 // meteredTripcodeEntry is the unified TTY flow: single live-meter
