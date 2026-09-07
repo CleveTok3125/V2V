@@ -82,6 +82,9 @@ func (s *ChatServer) initChainLocked() {
 		want, ok2 := chain.ParseHex64(wire.ChainHash)
 		if !ok1 || !ok2 {
 			broken = true
+			// Drop the anchor: a malformed line between the legacy tail
+			// and this record makes the cached anchor stale.
+			anchored = false
 			log.Printf("⛔ [CHAIN TAMPER] height %d: malformed link fields", wire.ChainHeight)
 			continue
 		}

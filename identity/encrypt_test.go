@@ -40,3 +40,19 @@ func TestZeroBytes(t *testing.T) {
 	}
 	ZeroBytes(nil) // must not panic
 }
+
+func TestDecryptEvilParamsRejected(t *testing.T) {
+	// Crafted cost parameters must fail closed, never reach argon2.
+	evil := `{"version":3,"encrypted":{"kdf":"argon2id","t":255,"m":4294967295,"p":255,` +
+		`"salt":"AAAAAAAAAAAAAAAAAAAAAA","nonce":"AAAAAAAAAAAAAAAAAAAAAAAAAAA","cipher":"xchacha20poly1305",` +
+		`"ciphertext":"AA"}}`
+	if _, err := DecryptData([]byte(evil), []byte("x")); err == nil {
+		t.Fatal("evil argon2 params accepted")
+	}
+	wrongKDF := `{"version":3,"encrypted":{"kdf":"scrypt","t":1,"m":32768,"p":1,` +
+		`"salt":"AAAAAAAAAAAAAAAAAAAAAA","nonce":"AAAAAAAAAAAAAAAAAAAAAAAAAAA","cipher":"xchacha20poly1305",` +
+		`"ciphertext":"AA"}}`
+	if _, err := DecryptData([]byte(wrongKDF), []byte("x")); err == nil {
+		t.Fatal("non-argon2id envelope accepted")
+	}
+}

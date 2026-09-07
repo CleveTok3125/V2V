@@ -95,8 +95,12 @@ func (h *HistoryStore) writeLoop() {
 		case <-ticker.C:
 			h.mu.Lock()
 			if h.file != nil && h.dirty {
-				_ = h.file.Sync()
-				h.dirty = false
+				// Keep dirty on failure so the next tick retries.
+				if err := h.file.Sync(); err != nil {
+					log.Printf("⚠️ [HISTORY] Sync thất bại, thử lại tick sau: %v", err)
+				} else {
+					h.dirty = false
+				}
 			}
 			h.mu.Unlock()
 		}
@@ -113,8 +117,11 @@ func (h *HistoryStore) Close() error {
 	close(h.queue)
 	if h.file != nil {
 		if h.dirty {
-			_ = h.file.Sync()
-			h.dirty = false
+			if err := h.file.Sync(); err != nil {
+				log.Printf("⚠️ [HISTORY] Sync cuối thất bại: %v", err)
+			} else {
+				h.dirty = false
+			}
 		}
 		err := h.file.Close()
 		h.mu.Unlock()

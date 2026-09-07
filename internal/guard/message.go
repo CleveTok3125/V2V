@@ -19,7 +19,8 @@ func ValidateMessageForSend(text string, last time.Time, cfg *config.DynamicConf
 		if utf8.RuneCountInString(text) > cfg.MaxMessageLength {
 			return ErrTooLong
 		}
-		if strings.Count(text, "\n") > cfg.MaxMessageLine {
+		// Line count, not break count: N newlines make N+1 lines.
+		if strings.Count(text, "\n")+1 > cfg.MaxMessageLine {
 			return ErrTooManyLines
 		}
 		if time.Since(last) < cfg.MessageCooldown {
