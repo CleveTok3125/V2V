@@ -11,6 +11,9 @@ import (
 // UI, never from a terminal program.
 func Interactive() bool { return false }
 
+// HasControllingTTY is always false on wasm: no /dev/tty exists.
+func HasControllingTTY() bool { return false }
+
 // Confirm is unreachable on wasm; the browser form owns confirmation.
 func Confirm(string) (bool, error) {
 	return false, errors.New("tui: không dùng được trên wasm")

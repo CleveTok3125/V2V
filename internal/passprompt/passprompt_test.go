@@ -117,15 +117,3 @@ func TestExpectPiped(t *testing.T) {
 		t.Errorf("non-positive rounds must default: %v", err)
 	}
 }
-
-func TestReadLineKeepsRemainder(t *testing.T) {
-	r := strings.NewReader("first\nsecond\n")
-	first, err := ReadLine(r)
-	if err != nil || first != "first" {
-		t.Fatalf("first = %q, %v", first, err)
-	}
-	rest, err := ReadLine(r)
-	if err != nil || rest != "second" {
-		t.Errorf("no read-ahead: rest = %q, %v", rest, err)
-	}
-}

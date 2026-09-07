@@ -14,11 +14,25 @@ import (
 	xterm "github.com/charmbracelet/x/term"
 )
 
-// Interactive reports whether the full-screen huh forms can run:
-// stdin must be a real terminal. Callers branch to the piped readers
-// otherwise.
+// Interactive reports whether stdin is a real terminal. Stdin-reading
+// programs (passprompt, piped fallbacks) gate on this.
+// HasControllingTTY reports whether a controlling terminal device
+// exists (/dev/tty probe). huh forms open /dev/tty directly and ignore
+// piped stdin, so they gate on this instead: piped stdin with a live
+// tty can still run huh, but must not run stdin readers.
 func Interactive() bool {
 	return xterm.IsTerminal(os.Stdin.Fd())
+}
+
+// HasControllingTTY reports whether /dev/tty opens. huh forms gate on
+// this (see Interactive for the distinction).
+func HasControllingTTY() bool {
+	tty, err := os.Open("/dev/tty")
+	if err != nil {
+		return false
+	}
+	_ = tty.Close()
+	return true
 }
 
 // Confirm asks a yes/no question. TTY sessions get a huh form with

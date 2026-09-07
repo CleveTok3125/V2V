@@ -10,6 +10,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"log"
+
+	"github.com/CleveTok3125/V2V/internal/strutil"
 	"net/http"
 	"time"
 )
@@ -80,21 +82,21 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.WebAuthn.PruneExpired()
-	log.Printf("🔐 [ENROLL BEGIN] ticket=%s… from=%s", shortCode(code), r.RemoteAddr)
+	log.Printf("🔐 [ENROLL BEGIN] ticket=%s… from=%s", strutil.Short(code), r.RemoteAddr)
 
 	challenge, err := randomB64url(32)
 	if err != nil {
-		log.Printf("❌ [ENROLL BEGIN] ticket=%s… entropy error: %v", shortCode(code), err)
+		log.Printf("❌ [ENROLL BEGIN] ticket=%s… entropy error: %v", strutil.Short(code), err)
 		http.Error(w, "entropy error", http.StatusInternalServerError)
 		return
 	}
 	role, err := s.WebAuthn.BindChallenge(code, challenge)
 	if err != nil {
-		log.Printf("❌ [ENROLL BEGIN] ticket=%s… bind failed: %v", shortCode(code), err)
+		log.Printf("❌ [ENROLL BEGIN] ticket=%s… bind failed: %v", strutil.Short(code), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	log.Printf("✅ [ENROLL BEGIN] ticket=%s… role=%s challenge=%s…", shortCode(code), role, challenge[:12])
+	log.Printf("✅ [ENROLL BEGIN] ticket=%s… role=%s challenge=%s…", strutil.Short(code), role, strutil.Short(challenge))
 	userID, _ := randomB64url(16)
 
 	requireResidentKey := true
@@ -148,26 +150,26 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if req.Ticket == "" || req.ID == "" || req.ClientDataJSON == "" || req.AttestationObject == "" {
-		log.Printf("❌ [ENROLL FINISH] ticket=%s… missing fields (id=%q)", shortCode(req.Ticket), req.ID)
+		log.Printf("❌ [ENROLL FINISH] ticket=%s… missing fields (id=%q)", strutil.Short(req.Ticket), req.ID)
 		http.Error(w, "missing fields", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("🔐 [ENROLL FINISH] ticket=%s… id=%s… from=%s", shortCode(req.Ticket), shortID(req.ID), r.RemoteAddr)
+	log.Printf("🔐 [ENROLL FINISH] ticket=%s… id=%s… from=%s", strutil.Short(req.Ticket), strutil.Short(req.ID), r.RemoteAddr)
 	_, boundChallenge, err := s.WebAuthn.PendingInfo(req.Ticket)
 	if err != nil {
-		log.Printf("❌ [ENROLL FINISH] ticket=%s… pending lookup failed: %v", shortCode(req.Ticket), err)
+		log.Printf("❌ [ENROLL FINISH] ticket=%s… pending lookup failed: %v", strutil.Short(req.Ticket), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	log.Printf("🔍 [ENROLL FINISH] ticket=%s… boundChallenge=%s…", shortCode(req.Ticket), boundChallenge[:12])
+	log.Printf("🔍 [ENROLL FINISH] ticket=%s… boundChallenge=%s…", strutil.Short(req.Ticket), strutil.Short(boundChallenge))
 	parsed, err := parseCreationForImport(req.ClientDataJSON, req.AttestationObject, boundChallenge)
 	if err != nil {
-		log.Printf("❌ [ENROLL FINISH] ticket=%s… parse failed: %v", shortCode(req.Ticket), err)
+		log.Printf("❌ [ENROLL FINISH] ticket=%s… parse failed: %v", strutil.Short(req.Ticket), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	log.Printf("✅ [ENROLL FINISH] parsed credential_id=%s… counter=%d", shortID(parsed.CredentialID), parsed.Counter)
+	log.Printf("✅ [ENROLL FINISH] parsed credential_id=%s… counter=%d", strutil.Short(parsed.CredentialID), parsed.Counter)
 
 	err = s.WebAuthn.CompleteEnrollment(req.Ticket, &WAStoredCred{
 		CredentialID: parsed.CredentialID,
@@ -175,26 +177,12 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 		SignCount:    parsed.Counter,
 	})
 	if err != nil {
-		log.Printf("❌ [ENROLL FINISH] ticket=%s… store failed: %v", shortCode(req.Ticket), err)
+		log.Printf("❌ [ENROLL FINISH] ticket=%s… store failed: %v", strutil.Short(req.Ticket), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	log.Printf("✅ [ENROLL FINISH] ticket=%s… stored credential_id=%s…", shortCode(req.Ticket), shortID(parsed.CredentialID))
+	log.Printf("✅ [ENROLL FINISH] ticket=%s… stored credential_id=%s…", strutil.Short(req.Ticket), strutil.Short(parsed.CredentialID))
 	writeJSON(w, map[string]any{"ok": true, "credential_id": parsed.CredentialID})
-}
-
-func shortCode(s string) string {
-	if len(s) > 12 {
-		return s[:12] + "…"
-	}
-	return s
-}
-
-func shortID(s string) string {
-	if len(s) > 12 {
-		return s[:12] + "…"
-	}
-	return s
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

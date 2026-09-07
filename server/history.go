@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+
+	"github.com/CleveTok3125/V2V/internal/strutil"
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/filter"
@@ -102,24 +104,24 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 				ReplyTo:     tripForChain.ReplyTo,
 			})
 			if err != nil {
-				log.Printf("⚠️ [HISTORY TAMPER] %s seq %d: %v", shortID(tripForChain.Pub), tripForChain.Seq, err)
+				log.Printf("⚠️ [HISTORY TAMPER] %s seq %d: %v", strutil.Short(tripForChain.Pub), tripForChain.Seq, err)
 				continue
 			}
 			// Success: derive newPrev via result. Malformed hex aborts
 			// the record instead of chaining zeros.
 			prevBytes, err := hex.DecodeString(tripForChain.Prev)
 			if err != nil {
-				log.Printf("⚠️ [HISTORY TAMPER] %s: bad prev hex: %v", shortID(tripForChain.Pub), err)
+				log.Printf("⚠️ [HISTORY TAMPER] %s: bad prev hex: %v", strutil.Short(tripForChain.Pub), err)
 				continue
 			}
 			sigBytes, err := hex.DecodeString(tripForChain.Sig)
 			if err != nil {
-				log.Printf("⚠️ [HISTORY TAMPER] %s: bad sig hex: %v", shortID(tripForChain.Pub), err)
+				log.Printf("⚠️ [HISTORY TAMPER] %s: bad sig hex: %v", strutil.Short(tripForChain.Pub), err)
 				continue
 			}
 			hashBytes, err := hex.DecodeString(tripForChain.MsgHash)
 			if err != nil {
-				log.Printf("⚠️ [HISTORY TAMPER] %s: bad msg_hash hex: %v", shortID(tripForChain.Pub), err)
+				log.Printf("⚠️ [HISTORY TAMPER] %s: bad msg_hash hex: %v", strutil.Short(tripForChain.Pub), err)
 				continue
 			}
 			h := sha256.New()

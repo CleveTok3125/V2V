@@ -39,7 +39,7 @@ func deriveTripKey(passphrase string, serverPubHex string) (ed25519.PrivateKey, 
 		p = identity.PresetWASM
 	}
 	key := argon2.IDKey([]byte(passphrase), salt, p.Time, p.Memory, p.Threads, 32)
-	defer zeroTripBytes(key)
+	defer identity.ZeroBytes(key)
 	priv := ed25519.NewKeyFromSeed(key)
 	pub := priv.Public().(ed25519.PublicKey)
 	h := sha256.Sum256(pub)
@@ -51,10 +51,6 @@ func isWASMRuntime() bool {
 	return runtime.GOOS == "js"
 }
 
-func canonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte, displayName string, tmpID uint64, replyTo uint64) []byte {
-	return tripcolor.CanonicalPayload(serverPub, seq, prev, msgHash, pub, displayName, tmpID, replyTo)
-}
-
 func badgeColor(badge string) string {
 	if ClientCfg != nil && len(ClientCfg.UI.TripPalette) > 0 {
 		return tripcolor.BadgeColorWithPalette(badge, ClientCfg.UI.TripPalette)
@@ -62,11 +58,6 @@ func badgeColor(badge string) string {
 	return tripcolor.BadgeColor(badge)
 }
 
-func zeroTripBytes(b []byte) {
-	for i := range b {
-		b[i] = 0
-	}
-}
 
 // TripMessage is the JSON envelope for signed chat messages.
 // TmpID is the sender's per-session counter, bound into the signature so

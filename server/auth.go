@@ -303,7 +303,7 @@ func (s *ChatServer) LoadRoles() {
 
 func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string) bool {
 	s.AuthFailsMu.Lock()
-	rec := guard.RateLimitRecord(s.AuthFails[clientIP])
+	rec := s.AuthFails[clientIP]
 	now := time.Now()
 	if guard.IsBanned(rec, now) {
 		s.AuthFailsMu.Unlock()
@@ -332,9 +332,9 @@ func (s *ChatServer) handleAuthPenalty(clientIP string) {
 	s.AuthFailsMu.Lock()
 	defer s.AuthFailsMu.Unlock()
 
-	rec := guard.RateLimitRecord(s.AuthFails[clientIP])
+	rec := s.AuthFails[clientIP]
 	rec = guard.NextPenalty(rec, time.Now())
-	s.AuthFails[clientIP] = RateLimitRecord(rec)
+	s.AuthFails[clientIP] = rec
 }
 
 func (s *ChatServer) generateDisplayName(username string, clientIP string, perms Permission) string {
@@ -406,14 +406,6 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 	return fmt.Sprintf("%s-%d", baseDisplay, time.Now().UnixNano()%1000)
 }
 
-func generateTripcode(secret string, length int) string {
-	return guard.GenerateTripcode(secret, length)
-}
-
-func tripBadgeFromPubHex(pubHex string) string {
-	return guard.TripBadgeFromPubHex(pubHex)
-}
-
 func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expectedHost string) (*ClientSession, error) {
 	perms, authPacket, err := s.HandleAuth(conn, clientIP, expectedHost)
 	if err != nil {
@@ -453,7 +445,7 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 		// Validate pub hex is 64 chars (32 bytes)
 		if b, err := hex.DecodeString(authPacket.TripPub); err == nil && len(b) == ed25519.PublicKeySize {
 			tripPub = strings.ToLower(authPacket.TripPub)
-			tripBadge = tripBadgeFromPubHex(tripPub)
+			tripBadge = guard.TripBadgeFromPubHex(tripPub)
 			if v, ok := s.TripChains.Load(tripPub); ok {
 				if ch, ok := v.(TripChain); ok {
 					tripSeq = ch.Seq
@@ -485,7 +477,7 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 	// Prefer new pub-based badge, fallback to legacy hash
 	badge := tripBadge
 	if badge == "" {
-		badge = generateTripcode(authPacket.Tripcode, 8)
+		badge = guard.GenerateTripcode(authPacket.Tripcode, 8)
 	}
 	return &ClientSession{
 		Conn:        conn,
