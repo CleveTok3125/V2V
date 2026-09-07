@@ -370,6 +370,18 @@ func checkServerInfo(input string) {
 	fmt.Println("\n" + string(body))
 }
 
+// emitWhoami prints the /whoami identity lines under displayMu. The mutex
+// is released on every path via defer: guests (empty role) take no early
+// return that could skip the unlock and freeze the terminal.
+func emitWhoami(mu *sync.Mutex, emit func(string), username, authType, role string, unlimited bool, prefix string) {
+	mu.Lock()
+	defer mu.Unlock()
+	emit(fmt.Sprintf("| [Local]: Người dùng: %s | Xác thực: %s\n", username, authType))
+	if role != "" {
+		emit(fmt.Sprintf("| [Local]: Role: %s | Unlimited: %v | Prefix: %q\n", role, unlimited, prefix))
+	}
+}
+
 func main() {
 	parseFlags()
 
@@ -1327,12 +1339,7 @@ func main() {
 		}
 
 		if text == "/whoami" || text == "/w" {
-			displayMu.Lock()
-			emitLocalFeedback(fmt.Sprintf("| [Local]: Người dùng: %s | Xác thực: %s\n", username, sessAuthType))
-			if sessRole != "" {
-				emitLocalFeedback(fmt.Sprintf("| [Local]: Role: %s | Unlimited: %v | Prefix: %q\n", sessRole, sessUnlimited, sessPrefix))
-				displayMu.Unlock()
-			}
+			emitWhoami(&displayMu, emitLocalFeedback, username, sessAuthType, sessRole, sessUnlimited, sessPrefix)
 			continue
 		}
 

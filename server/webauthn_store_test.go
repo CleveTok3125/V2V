@@ -144,3 +144,24 @@ func TestAtomicWriteAndEnrollMerge(t *testing.T) {
 		t.Errorf("tmp files not cleaned: %v", files)
 	}
 }
+
+func TestCredential_UnknownReturnsFalse(t *testing.T) {
+	s := newTestStore(t)
+	code, err := s.CreatePendingTicket("member", "bob-laptop", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteEnrollment(code, &WAStoredCred{
+		CredentialID: "cid-1", PublicKey: "cose-blob", SignCount: 5,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Unknown credential ID under a known role must not panic (B8).
+	if cred, ok := s.Credential("member", "no-such-id"); ok || cred != nil {
+		t.Fatalf("unknown credential accepted: %+v ok=%v", cred, ok)
+	}
+	// Unknown role must not panic either.
+	if cred, ok := s.Credential("no-such-role", "cid-1"); ok || cred != nil {
+		t.Fatalf("unknown role accepted: %+v ok=%v", cred, ok)
+	}
+}
