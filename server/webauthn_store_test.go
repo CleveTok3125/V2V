@@ -156,7 +156,8 @@ func TestCredential_UnknownReturnsFalse(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Unknown credential ID under a known role must not panic (B8).
+	// Unknown credential ID under a known role must report not-found,
+	// never dereference a nil credential.
 	if cred, ok := s.Credential("member", "no-such-id"); ok || cred != nil {
 		t.Fatalf("unknown credential accepted: %+v ok=%v", cred, ok)
 	}

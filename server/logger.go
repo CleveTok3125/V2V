@@ -55,22 +55,30 @@ func (l *RotatingLogger) Write(p []byte) (n int, err error) {
 
 	writeLen := int64(len(p))
 	if l.size+writeLen > l.MaxSize {
-		l.rotate()
+		// Rotate best-effort: a failed rotate keeps l.file nil and the
+		// nil guard below degrades to stdout-only.
+		_ = l.rotate()
 	}
 
+	// open/rotate may fail (bad path, permissions): never nil-deref.
+	// stdout still carries the line via MultiWriter.
+	if l.file == nil {
+		return len(p), nil
+	}
 	n, err = l.file.Write(p)
 	l.size += int64(n)
 	return n, err
 }
 
-func (l *RotatingLogger) rotate() {
+func (l *RotatingLogger) rotate() error {
 	if l.file != nil {
 		_ = l.file.Close()
+		l.file = nil
 	}
 
 	oldFile := l.Filename + ".old"
 	_ = os.Rename(l.Filename, oldFile)
 
 	l.size = 0
-	_ = l.open()
+	return l.open()
 }

@@ -28,6 +28,10 @@ type HistoryStore struct {
 
 	queue chan historyRecord
 	mu    sync.Mutex
+	// closed guards EnqueueWire against send-on-closed-queue panics;
+	// drops counts records shed under backpressure.
+	closed bool
+	drops  uint64
 }
 
 type historyRecord struct {
@@ -100,16 +104,23 @@ func (h *HistoryStore) writeLoop() {
 }
 
 func (h *HistoryStore) Close() error {
-	close(h.queue)
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	if h.closed {
+		h.mu.Unlock()
+		return nil
+	}
+	h.closed = true
+	close(h.queue)
 	if h.file != nil {
 		if h.dirty {
 			_ = h.file.Sync()
 			h.dirty = false
 		}
-		return h.file.Close()
+		err := h.file.Close()
+		h.mu.Unlock()
+		return err
 	}
+	h.mu.Unlock()
 	return nil
 }
 
@@ -176,9 +187,21 @@ func (h *HistoryStore) EnqueueWire(wire WireMessage, now time.Time) {
 	if h == nil {
 		return
 	}
-	h.queue <- historyRecord{
+	// Never block the broadcast path on a stalled disk, and never panic
+	// on send-after-Close: shed load with a counter instead.
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return
+	}
+	select {
+	case h.queue <- historyRecord{
 		Timestamp: now.Format(time.RFC3339Nano),
 		Wire:      &wire,
+	}:
+	default:
+		h.drops++
+		log.Printf("⚠️ [HISTORY] write queue full, dropping record (total drops=%d)", h.drops)
 	}
 }
 
