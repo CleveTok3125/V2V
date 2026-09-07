@@ -741,7 +741,11 @@ func loadContainer(path string) (*identity.IdentityFile, error) {
 	if enc, _ := identity.IsEncrypted(path); enc {
 		// Try env first
 		if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
-			return identity.LoadEncrypted(path, pass)
+			pw := []byte(pass)
+			pass = ""
+			idf, err := identity.LoadEncrypted(path, pw)
+			identity.ZeroBytes(pw)
+			return idf, err
 		}
 		if isInteractive() {
 			fmt.Println("🔒 File đã mã hóa, nhập passphrase để mở...")
@@ -749,7 +753,11 @@ func loadContainer(path string) (*identity.IdentityFile, error) {
 			if err != nil {
 				return nil, err
 			}
-			return identity.LoadEncrypted(path, pass)
+			pw := []byte(pass)
+			pass = ""
+			idf, err := identity.LoadEncrypted(path, pw)
+			identity.ZeroBytes(pw)
+			return idf, err
 		}
 		return nil, errors.New("key file is encrypted — set V2V_PASSPHRASE or run in TTY to unlock")
 	}
@@ -788,7 +796,11 @@ func saveContainer(idf *identity.IdentityFile, path string) error {
 			return err
 		}
 		if pass != "" {
-			return idf.SaveEncrypted(path, pass, nil)
+			pw := []byte(pass)
+			pass = ""
+			err := idf.SaveEncrypted(path, pw, nil)
+			identity.ZeroBytes(pw)
+			return err
 		}
 	}
 	// Check env for non-interactive
@@ -796,7 +808,11 @@ func saveContainer(idf *identity.IdentityFile, path string) error {
 		if assessFilePassphrase(pass).Weak {
 			fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
 		}
-		return idf.SaveEncrypted(path, pass, nil)
+		pw := []byte(pass)
+		pass = ""
+		err := idf.SaveEncrypted(path, pw, nil)
+		identity.ZeroBytes(pw)
+		return err
 	}
 	return idf.Save(path)
 }
@@ -1069,7 +1085,10 @@ func (m *MigrateCmd) Run() error {
 			return errors.New("key file is encrypted — set V2V_PASSPHRASE")
 		}
 		var err error
-		idf, err = identity.LoadEncrypted(inPath, oldPass)
+		oldPw := []byte(oldPass)
+		oldPass = ""
+		idf, err = identity.LoadEncrypted(inPath, oldPw)
+		identity.ZeroBytes(oldPw)
 		if err != nil {
 			return fmt.Errorf("sai passphrase hoặc file hỏng: %w", err)
 		}
@@ -1140,7 +1159,10 @@ func (m *MigrateCmd) Run() error {
 	}
 	var err error
 	if newPass != "" {
-		err = idf.SaveEncrypted(tmpOut, newPass, p)
+		newPw := []byte(newPass)
+		newPass = ""
+		err = idf.SaveEncrypted(tmpOut, newPw, p)
+		identity.ZeroBytes(newPw)
 	} else {
 		err = idf.Save(tmpOut)
 	}

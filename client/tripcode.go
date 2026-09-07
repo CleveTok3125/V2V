@@ -198,7 +198,10 @@ func loadTripcodeFile(path string) (tc string, found bool, err error) {
 	if os.Getenv("V2V_PASSPHRASE") != "" && AssessPassphrase(unlock, nil).Weak {
 		fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
 	}
-	plain, err := identity.DecryptData(data, unlock)
+	unlockPw := []byte(unlock)
+	unlock = ""
+	defer identity.ZeroBytes(unlockPw)
+	plain, err := identity.DecryptData(data, unlockPw)
 	if err != nil {
 		return "", false, fmt.Errorf("không mở được tripcode.json: %w", err)
 	}
@@ -222,7 +225,10 @@ func saveTripcodeFile(path, tripcode, unlock string) error {
 	if err != nil {
 		return err
 	}
-	enc, err := identity.EncryptData(plain, unlock)
+	encPw := []byte(unlock)
+	unlock = ""
+	defer identity.ZeroBytes(encPw)
+	enc, err := identity.EncryptData(plain, encPw)
 	if err != nil {
 		return err
 	}
