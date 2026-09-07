@@ -32,7 +32,10 @@ func LoadIdentityFile(path string) (*IdentityFile, error) {
 			if AssessPassphrase(pass, nil).Weak {
 				fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
 			}
-			return identity.LoadEncrypted(path, pass)
+			pw := []byte(pass)
+			pass = ""
+			defer identity.ZeroBytes(pw)
+			return identity.LoadEncrypted(path, pw)
 		}
 		// Prompt for passphrase (hidden input). TTY sessions use the
 		// shared program; piped input keeps the legacy hidden reader.
@@ -51,12 +54,15 @@ func LoadIdentityFile(path string) (*IdentityFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		return identity.LoadEncrypted(path, pass)
+		pw := []byte(pass)
+		pass = ""
+		defer identity.ZeroBytes(pw)
+		return identity.LoadEncrypted(path, pw)
 	}
 	return identity.Load(path)
 }
 
-var loadedPassphrase string
+var loadedPassphrase []byte
 var loadedWasEncrypted bool
 
 // readLineRaw reads one line without read-ahead: byte-by-byte, so bytes
@@ -90,6 +96,7 @@ func readPassphrase() (string, error) {
 		if err != nil {
 			return "", err
 		}
+		defer identity.ZeroBytes(b)
 		return string(b), nil
 	}
 	// Fallback for piped/non-TTY (CI): read full line including spaces
@@ -97,7 +104,7 @@ func readPassphrase() (string, error) {
 }
 
 func SaveIdentityFileEncrypted(path string, idf *IdentityFile) error {
-	if loadedWasEncrypted && loadedPassphrase != "" {
+	if loadedWasEncrypted && len(loadedPassphrase) != 0 {
 		return idf.SaveEncrypted(path, loadedPassphrase, nil)
 	}
 	return idf.Save(path)

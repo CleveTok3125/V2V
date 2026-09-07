@@ -43,8 +43,8 @@ func defaultParams() Params {
 	return PresetWASM
 }
 
-func encryptJSON(plain []byte, passphrase string, p Params) ([]byte, error) {
-	if passphrase == "" {
+func encryptJSON(plain, passphrase []byte, p Params) ([]byte, error) {
+	if len(passphrase) == 0 {
 		return nil, errors.New("empty passphrase")
 	}
 	salt := make([]byte, 16)
@@ -55,8 +55,8 @@ func encryptJSON(plain []byte, passphrase string, p Params) ([]byte, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
-	key := argon2.IDKey([]byte(passphrase), salt, p.Time, p.Memory, p.Threads, chacha20poly1305.KeySize)
-	defer zeroBytes(key)
+	key := argon2.IDKey(passphrase, salt, p.Time, p.Memory, p.Threads, chacha20poly1305.KeySize)
+	defer ZeroBytes(key)
 	aead, err := chacha20poly1305.NewX(key)
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ func encryptJSON(plain []byte, passphrase string, p Params) ([]byte, error) {
 	return json.MarshalIndent(env, "", "  ")
 }
 
-func decryptJSON(data []byte, passphrase string) ([]byte, error) {
+func decryptJSON(data, passphrase []byte) ([]byte, error) {
 	var env encryptEnvelope
 	if err := json.Unmarshal(data, &env); err != nil {
 		return nil, err
@@ -98,8 +98,8 @@ func decryptJSON(data []byte, passphrase string) ([]byte, error) {
 	if p.Time == 0 {
 		p = defaultParams()
 	}
-	key := argon2.IDKey([]byte(passphrase), salt, p.Time, p.Memory, p.Threads, chacha20poly1305.KeySize)
-	defer zeroBytes(key)
+	key := argon2.IDKey(passphrase, salt, p.Time, p.Memory, p.Threads, chacha20poly1305.KeySize)
+	defer ZeroBytes(key)
 	aead, err := chacha20poly1305.NewX(key)
 	if err != nil {
 		return nil, err
@@ -115,13 +115,13 @@ func decryptJSON(data []byte, passphrase string) ([]byte, error) {
 // (argon2id + XChaCha20Poly1305), the same construction key files use.
 // Exported so sibling secrets (e.g. the client tripcode file) share one
 // audited envelope instead of reinventing it.
-func EncryptData(plain []byte, passphrase string) ([]byte, error) {
+func EncryptData(plain, passphrase []byte) ([]byte, error) {
 	return encryptJSON(plain, passphrase, defaultParams())
 }
 
 // DecryptData opens a version 3 envelope. Wrong passphrase and corrupt
 // files both fail closed.
-func DecryptData(data []byte, passphrase string) ([]byte, error) {
+func DecryptData(data, passphrase []byte) ([]byte, error) {
 	return decryptJSON(data, passphrase)
 }
 
@@ -145,7 +145,9 @@ func isEncrypted(data []byte) bool {
 	return ok
 }
 
-func zeroBytes(b []byte) {
+// ZeroBytes wipes a secret buffer in place. Callers convert their
+// secret once, defer this, and drop the reference on return.
+func ZeroBytes(b []byte) {
 	for i := range b {
 		b[i] = 0
 	}

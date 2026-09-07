@@ -92,7 +92,7 @@ func Load(path string) (*IdentityFile, error) {
 }
 
 // LoadEncrypted reads an encrypted key file (version 3).
-func LoadEncrypted(path, passphrase string) (*IdentityFile, error) {
+func LoadEncrypted(path string, passphrase []byte) (*IdentityFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -174,7 +174,7 @@ func (f *IdentityFile) Save(path string) error {
 }
 
 // SaveEncrypted writes the container encrypted with XChaCha20Poly1305 + Argon2id.
-func (f *IdentityFile) SaveEncrypted(path, passphrase string, p *Params) error {
+func (f *IdentityFile) SaveEncrypted(path string, passphrase []byte, p *Params) error {
 	f.Version = Version
 	plain, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
