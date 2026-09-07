@@ -34,21 +34,6 @@ func DefaultCacheDir() string {
 	return os.TempDir()
 }
 
-// DefaultKeyFile returns the default key.json path inside config dir.
-func DefaultKeyFile(configDir string) string {
-	if configDir == "" {
-		configDir = DefaultConfigDir()
-	}
-	return filepath.Join(configDir, "key.json")
-}
-
-// DefaultHistoryFile returns the default history file path inside cache dir.
-func DefaultHistoryFile(cacheDir string) string {
-	if cacheDir == "" {
-		cacheDir = DefaultCacheDir()
-	}
-	return filepath.Join(cacheDir, "history.tmp")
-}
 
 // DefaultConfigFile returns the default config.json path (for future use).
 func DefaultConfigFile(configDir string) string {

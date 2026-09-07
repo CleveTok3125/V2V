@@ -47,11 +47,6 @@ func deriveTripKey(passphrase string, serverPubHex string) (ed25519.PrivateKey, 
 	return priv, pub, badge
 }
 
-func deriveTripKeyWASM(passphrase string, serverPubHex string) (ed25519.PrivateKey, ed25519.PublicKey, string) {
-	// Alias for explicit WASM call
-	return deriveTripKey(passphrase, serverPubHex)
-}
-
 func isWASMRuntime() bool {
 	return runtime.GOOS == "js"
 }
