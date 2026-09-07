@@ -24,6 +24,8 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/gorilla/websocket"
 
+	"github.com/CleveTok3125/V2V/identity"
+
 	"github.com/CleveTok3125/V2V/internal/passprompt"
 	"github.com/CleveTok3125/V2V/internal/tui"
 )
@@ -45,7 +47,10 @@ func socks5NetDialer(p *proxyConfig) func(ctx context.Context, network, addr str
 		if err != nil || targetPort < 1 || targetPort > 65535 {
 			return nil, fmt.Errorf("port server không hợp lệ: %q", portStr)
 		}
-		conn, err := net.DialTimeout("tcp", net.JoinHostPort(p.Host, strconv.Itoa(p.Port)), socks5DialTimeout)
+		// Honor cancellation: DialContext aborts the TCP setup when the
+		// caller gives up instead of pinning a socket for the full 45s.
+		dialer := &net.Dialer{Timeout: socks5DialTimeout}
+		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(p.Host, strconv.Itoa(p.Port)))
 		if err != nil {
 			return nil, fmt.Errorf("không tới được proxy: %w", err)
 		}
@@ -59,10 +64,16 @@ func socks5NetDialer(p *proxyConfig) func(ctx context.Context, network, addr str
 		if err := conn.SetDeadline(time.Now().Add(socks5DialTimeout)); err != nil {
 			return nil, err
 		}
-		if err := socks5Handshake(conn, host, targetPort, []byte(p.User), p.Pass); err != nil {
+		// Handshake with per-attempt copies: the shared config must keep
+		// its secret for ws->wss retry, so only these copies wipe here.
+		// The []byte(user) conversion also copies; wipe it too.
+		userCopy := []byte(p.User)
+		passCopy := append([]byte(nil), p.Pass...)
+		defer identity.ZeroBytes(userCopy)
+		defer identity.ZeroBytes(passCopy)
+		if err := socks5Handshake(conn, host, targetPort, userCopy, passCopy); err != nil {
 			return nil, err
 		}
-		p.wipe()
 		if err := conn.SetDeadline(time.Time{}); err != nil {
 			return nil, err
 		}
@@ -88,6 +99,12 @@ func dialSocks5WSWithDialer(wsURL string, headers http.Header, p *proxyConfig, d
 		d.HandshakeTimeout = socks5DialTimeout
 	}
 	conn, resp, err := d.Dial(wsURL, headers)
+	if err == nil {
+		// Wipe only after the FULL dial succeeds: dialWS retries ws->wss
+		// with this same config, and wiping after a mere TCP+SOCKS
+		// success would starve the retry of its password.
+		p.wipe()
+	}
 	return conn, resp, err
 }
 

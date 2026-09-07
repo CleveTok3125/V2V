@@ -303,6 +303,9 @@ func (t *wasmTerm) dispatchEsc(seq string) {
 
 // dispatchCSI parses the body of a CSI sequence (params + final byte).
 func (t *wasmTerm) dispatchCSI(body string) {
+	if len(body) == 0 {
+		return
+	}
 	final := body[len(body)-1]
 	params := body[:len(body)-1]
 	switch final {

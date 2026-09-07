@@ -1,6 +1,11 @@
 package identity
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -201,5 +206,42 @@ func TestEncryptedRoundtrip(t *testing.T) {
 	// Plaintext load should refuse encrypted file
 	if _, err := Load(path); err == nil || !contains(err.Error(), "encrypted") {
 		t.Fatalf("Load should refuse encrypted file, got %v", err)
+	}
+}
+
+func TestBuildAssertionCounterIncreases(t *testing.T) {
+	// authData[33:37] must carry the real counter: a zero counter
+	// disables server clone-detection.
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509MarshalPKCS8(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pk := &PasskeyIdentity{
+		Role: "member", CredentialID: "cid",
+		PrivateKey: base64.RawURLEncoding.EncodeToString(der),
+		RPID:       "example.com", Origin: "https://example.com",
+	}
+	var last uint32
+	for want := uint32(1); want <= 2; want++ {
+		_, adB64, _, _, err := pk.BuildAssertion("cafebabe")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ad, err := base64.RawURLEncoding.DecodeString(adB64)
+		if err != nil || len(ad) != 37 {
+			t.Fatalf("bad authData: len=%d err=%v", len(ad), err)
+		}
+		got := binary.BigEndian.Uint32(ad[33:37])
+		if got != want {
+			t.Fatalf("counter = %d, want %d", got, want)
+		}
+		last = got
+	}
+	if last != 2 {
+		t.Fatalf("counter did not advance, last=%d", last)
 	}
 }

@@ -3,8 +3,10 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/hmac"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -466,7 +468,13 @@ func main() {
 	// plain alike). The server relays it verbatim but never assigns it.
 	// The base is random per connection (upper 32 bits) so a reconnect
 	// never reuses another session's IDs in stash/pending matching.
+	// CSPRNG: a predictable base would let an observer pre-compute
+	// placeholder collisions.
 	var tmpSeq uint64 = (uint64(rand.Uint32()) + 1) << 32
+	var seed [4]byte
+	if _, rerr := cryptorand.Read(seed[:]); rerr == nil {
+		tmpSeq = (uint64(binary.BigEndian.Uint32(seed[:])) + 1) << 32
+	}
 	// pendingReplyTo quotes a chain height on the next outgoing message
 	// only (/reply sets it, the send path consumes and clears it).
 	var pendingReplyTo uint64
@@ -519,7 +527,11 @@ func main() {
 			respPacket.PasskeyAuthData = ad
 			respPacket.PasskeyClientData = cd
 			respPacket.PasskeySig = sig
-			_ = SaveIdentityFileEncrypted(CLI.KeyFile, idf) // persist counter, keep encryption
+			// Persist the incremented counter: losing it replays an old
+			// counter next login and the server flags a false clone.
+			if serr := SaveIdentityFileEncrypted(CLI.KeyFile, idf); serr != nil {
+				fmt.Printf("⚠️ Không lưu được sign-count (%v) — lần đăng nhập sau có thể bị báo clone giả.\n", serr)
+			}
 			fmt.Printf("🔑 Đang yêu cầu cấp quyền bằng passkey: [%s]...\n", pk.Role)
 		case useEd25519:
 			id := idf.Ed25519
@@ -834,14 +846,16 @@ func main() {
 		chainTip, chainHeight, chainHaveTip = tip, height, true
 		tipSinceSave++
 		if tipSinceSave >= tipBatchSaves {
-			saveChainTip(tipPath, tip, height, serverPubHex)
-			tipSinceSave = 0
+			if saveChainTip(tipPath, tip, height, serverPubHex) == nil {
+				tipSinceSave = 0
+			}
 		}
 	}
 	flushChainTip := func() {
 		if chainHaveTip {
-			saveChainTip(tipPath, chainTip, chainHeight, serverPubHex)
-			tipSinceSave = 0
+			if saveChainTip(tipPath, chainTip, chainHeight, serverPubHex) == nil {
+				tipSinceSave = 0
+			}
 		}
 	}
 
@@ -1146,6 +1160,11 @@ func main() {
 					return
 				default:
 					fmt.Fprintf(out, "\r\033[K\n ❌ Mất kết nối server\n")
+					// Flush before exit: os.Exit skips deferred
+					// term.Close/flushChainTip, losing the newest tip and
+					// leaving the terminal raw.
+					flushChainTip()
+					term.Close()
 					os.Exit(1)
 				}
 			}
