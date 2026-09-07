@@ -167,29 +167,6 @@ func (h *HistoryStore) loadZstdFile(path string) ([]historyRecord, error) {
 	return out, nil
 }
 
-func (h *HistoryStore) Enqueue(message string, now time.Time) {
-	if h == nil {
-		return
-	}
-
-	h.queue <- historyRecord{
-		Timestamp: now.Format(time.RFC3339Nano),
-		Message:   message,
-	}
-}
-
-func (h *HistoryStore) EnqueueWithTrip(message string, trip *TripMeta, now time.Time) {
-	if h == nil {
-		return
-	}
-	// Legacy path: wrap Message+Trip into Wire for dedup storage
-	wire := WireMessage{Type: "chat", Text: message, Trip: trip}
-	h.queue <- historyRecord{
-		Timestamp: now.Format(time.RFC3339Nano),
-		Wire:      &wire,
-	}
-}
-
 func (h *HistoryStore) EnqueueWire(wire WireMessage, now time.Time) {
 	if h == nil {
 		return

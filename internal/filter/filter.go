@@ -42,8 +42,6 @@ func ValidateMessage(text string) error {
 	return nil
 }
 
-func IsValidMessage(text string) bool { return ValidateMessage(text) == nil }
-
 // ValidateDisplayName forbids newline and same invalid set.
 func ValidateDisplayName(name string) error {
 	if !utf8.ValidString(name) {

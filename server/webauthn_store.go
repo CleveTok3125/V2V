@@ -170,8 +170,6 @@ func (s *WebAuthnStore) view(fn func(f *webauthnFile) error) error {
 	return fn(f)
 }
 
-var errPendingNotFound = errors.New("pending ticket not found")
-
 func findPending(f *webauthnFile, code string) (*WAPending, error) {
 	for _, p := range f.Pending {
 		if p.Code == code {
