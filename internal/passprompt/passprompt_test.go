@@ -98,19 +98,6 @@ func TestSinglePiped(t *testing.T) {
 	}
 }
 
-func TestConfirmPiped(t *testing.T) {
-	cases := map[string]bool{
-		"y\n": true, "Y\n": true, "yes\n": true, "YES\n": true,
-		"có\n": true, "co\n": true, "n\n": false, "\n": false,
-		"no\n": false, "maybe\n": false, "": false,
-	}
-	for in, want := range cases {
-		if got := ConfirmPiped(strings.NewReader(in)); got != want {
-			t.Errorf("ConfirmPiped(%q) = %v, want %v", in, got, want)
-		}
-	}
-}
-
 func TestExpectPiped(t *testing.T) {
 	var prompts int
 	got, err := ExpectPiped(script("wrong", "right"), "right", 3, func(_, _ int) { prompts++ })

@@ -17,6 +17,7 @@ import (
 
 	"github.com/CleveTok3125/V2V/identity"
 	"github.com/CleveTok3125/V2V/internal/passprompt"
+	"github.com/CleveTok3125/V2V/internal/tui"
 )
 
 // TripcodeFileName is the secret file inside the config dir.
@@ -59,7 +60,7 @@ func resolveTripcode(useFlag bool, configDir, username, serverHost string) (stri
 	}
 	fmt.Println(ReminderLine())
 	var tc string
-	if passprompt.Interactive() {
+	if tui.Interactive() {
 		var err error
 		tc, err = meteredTripcodeEntry(path, ctx)
 		if err != nil {
@@ -126,12 +127,12 @@ func meteredTripcodeEntry(path string, ctx []string) (string, error) {
 	rep := AssessPassphrase(tc, ctx)
 	if rep.Weak {
 		fmt.Println(rep.WeakWarning())
-		ok, err := passprompt.Confirm("Vẫn dùng tripcode này?")
+		ok, err := tui.Confirm("Vẫn dùng tripcode này?")
 		if err != nil || !ok {
 			return "", errors.New("đã hủy tripcode yếu")
 		}
 	}
-	ok, err := passprompt.Confirm("Lưu tripcode mã hóa vào file?")
+	ok, err := tui.Confirm("Lưu tripcode mã hóa vào file?")
 	if err != nil {
 		return "", err
 	}
@@ -184,7 +185,7 @@ func loadTripcodeFile(path string) (tc string, found bool, err error) {
 	}
 	unlock := os.Getenv("V2V_PASSPHRASE")
 	if unlock == "" {
-		if passprompt.Interactive() {
+		if tui.Interactive() {
 			unlock, err = passprompt.Password(passprompt.PasswordOpts{
 				Title: "🔒 Nhập passphrase mở tripcode",
 			})
@@ -236,7 +237,7 @@ func saveTripcodeFile(path, tripcode, unlock string) error {
 func saveTripcodePrompt(path, tripcode string, assess func(string) passprompt.Assessment) error {
 	var unlock string
 	var err error
-	if passprompt.Interactive() {
+	if tui.Interactive() {
 		unlock, err = passprompt.Password(passprompt.PasswordOpts{
 			Title:        "🔒 Đặt unlock passphrase cho file tripcode (trống = không lưu)",
 			ConfirmTitle: "🔒 Nhập lại unlock passphrase",
@@ -260,18 +261,11 @@ func saveTripcodePrompt(path, tripcode string, assess func(string) passprompt.As
 }
 
 // offerTripcodeSave asks whether to persist a hand-entered tripcode.
-// Default is No; unreadable input also means No. Reads are unbuffered
-// so piped answers never starve later readers (prompts, chat loop).
+// Default is No; unreadable input also means No. Parsing delegates
+// to the shared tui core; only this prompt's wording stays local.
+// Reads stay unbuffered so piped answers never starve later readers
+// (prompts, then readline's chat loop).
 func offerTripcodeSave(r io.Reader) bool {
 	fmt.Print("Lưu tripcode mã hóa vào file? (y/N): ")
-	line, err := readLineRaw(r)
-	if err != nil && len(line) == 0 {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "y", "yes", "có", "co":
-		return true
-	default:
-		return false
-	}
+	return tui.ConfirmPiped(r)
 }
