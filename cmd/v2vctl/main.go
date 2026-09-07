@@ -1,7 +1,7 @@
 package main
 
-// v2vctl is the identity & server management tool split out of the chat client
-// and the server per BLUEPRINTS.md.
+// v2vctl is the identity & server management tool split out of the chat
+// client and the server.
 //
 // Layout mirrors real CLIs: `keygen` is a parent command with one leaf per
 // identity flavor, so each flavor owns exactly the flags it needs.

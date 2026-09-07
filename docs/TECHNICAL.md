@@ -21,7 +21,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 
 ```
 .
-├── client/           # CLI and WASM client (shared Go code, platform-specific shims)
+├── client/           # CLI and WASM client (shared Go code, platform-specific shims; render.go holds display helpers, client.go the session loop)
 ├── server/           # WebSocket server, history, auth, WebAuthn
 ├── identity/         # Shared key file logic (Load/Save, encryption)
 ├── internal/
@@ -29,13 +29,18 @@ For a friendly getting-started guide, see [README.md](../README.md).
 │   ├── trip/         # Trip verification (Verify)
 │   ├── tripcolor/    # Badge color palette + CanonicalPayload
 │   ├── chain/        # Global message hash chain (Hash/VerifyLink/genesis)
-│   ├── wire/         # Shared TripMeta / WireMessage / AuthPacket types (future)
-│   ├── passprompt/   # Masked password entry + strength meter (imports tui)
+│   ├── wire/         # Single protocol source (TripMeta/WireMessage/AuthPacket); client/server alias these types, wire_test pins the JSON key set
+│   ├── strength/     # Shared zxcvbn policy (bands, weak gate, bit cap) for client + v2vctl
+│   ├── strutil/      # One-line log-truncation helper shared by the two package-main binaries
+│   ├── passprompt/   # Masked password entry + strength meter (uses tui line readers and TTY probes)
+│   ├── guard/        # Pure send/rate/ban/tripcode policy (fully unit-tested)
+│   ├── config/       # Client/server config schema + defaults
+│   └── configdir/    # XDG-aware default dirs
 │   └── tui/          # General huh confirms/selects + piped fallbacks
 ├── linkify/          # URL → OSC8 hyperlink
 ├── codebg/           # inline `code` + ``` blocks → background SGR + chroma highlight (display only)
 ├── webterm/          # Browser terminal (xterm.js + WASM glue)
-├── cmd/v2vctl/       # Management tool (keygen, enroll, list, migrate)
+├── cmd/v2vctl/       # Management tool, one file per concern (main, role, keygen, enroll, migrate, list, prompt)
 ├── template/         # Example .env / key.json / roles.json
 └── docs/             # This file
 ```
@@ -100,6 +105,7 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 ## Slash Commands
 
 - Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, `/meta`/`/m` with optional `on|off`, `/find`/`/f` with `<height>[:hash]` and `/info` with `<height>[:hash>`.
+- Session commands: `/whoami`/`/w`, `/status`, `/showjoin`/`/sj`, `/autoverify`/`/av`, `/clear`/`/c`, `/clearhistory`/`/ch` (deletes the keystroke history file), `/copy <height>[:hash]` (clipboard, auto-cleared).
 - Anything else starting with `/` is an unknown command (`client/commands.go:isUnknownSlashCommand`) rejected locally with `| [Local]: Lệnh không tồn tại…`, never broadcast or trip-signed.
 - Code blocks (```) are unaffected, so they double as the escape hatch for sending literal text starting with `/`.
 - `/reply <height>[:hash] <text>` quotes a buffered message; the height suffix acts as a typo checksum.
@@ -116,7 +122,7 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 ## Wire Protocol & History
 
 ### Live messages
-Chat messages are `WireMessage` JSON, not raw ANSI:
+Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `internal/wire` alone; client and server alias it, and `wire_test` pins the exact key set so drift fails loudly instead of dropping fields silently:
 
 ```json
 {"type":"chat","time":"15:04","displayName":"[Admin] Alice#ab12","text":"hello","tmp_id":7,"reply_to":3,"trip":{"pub":"...","seq":1,"prev":"...","sig":"...","server_pub":"...","msg_hash":"...","display_name":"...","tmp_id":7},"chain_prev":"...","chain_hash":"...","chain_height":1234}
@@ -187,6 +193,12 @@ Every broadcast message links to the previous one (`internal/chain`, `server/cha
 - **Serial for duplicates:** `server/shared.go:DisplayNameCount map[string]int` + `DisplayNameCountMu` tracks active `fullDisplayName`s.
 - If `base = prefix+name+"#"+hash` already exists, the next duplicate becomes `base-2`, then `-3`, etc. (`auth.go:370`).
 - On `unregisterClient` the exact `session.DisplayName` is `delete`d (`clientHandler.go:82`), freeing the slot. The check and claim are `O(1)` and happen once per login.
+
+### Connection serving order
+- `serveAuthenticated` starts `WritePump` before `registerClient`: history replay pushes up to `MaxHistorySend` lines into the buffered `Send` channel synchronously, so registering first with a full history and no reader deadlocks every new connection.
+- History sends are non-blocking with drop (`sendWithRetry`); unicast guard warnings never block `ReadPump` on a wedged pump.
+- The history disk queue is non-blocking with a drop counter and idempotent `Close`, so a stalled disk sheds load instead of stalling broadcasts.
+- Pre-auth nonces expire by sweep (30s ticker), not one timer per connection, and expiry is enforced again at consume.
 
 Final form: `[CustomPrefix]name#hash` or `[CustomPrefix]name#hash-2` (e.g., `[Admin] Alice#a1b2`, `Bob#a1b2-2`). The full `displayName` (including hash and serial) is what is signed in trip messages (`payload = serverPub|seq|prev|msgHash|pub|displayName|tmpID`) and stored in `WireMessage`/`TripMeta`.
 
@@ -282,12 +294,14 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - `data/server_identity.json` — server's long-term Ed25519 keypair, auto-generated, used for `serverPub` pinning.
 - `data/history.jsonl` / `.old.zst` — chat history, `zstd` compressed old generation, smart batch `Sync`.
 - `data/webauthn.json` — WebAuthn tickets and credentials, `atomicWriteFile` via `CreateTemp+Sync+Rename+dir Sync`.
-- `key.json` — encrypted at rest via `XChaCha20Poly1305 + Argon2id` (`version:3` envelope, `chmod 600`, `V2V_PASSPHRASE` env or hidden prompt via `charmbracelet/x/term`, same palette as `v2vctl`).
+- `key.json` — encrypted at rest via `XChaCha20Poly1305 + Argon2id` (`version:3` envelope, `chmod 600`, `V2V_PASSPHRASE` env or hidden prompt via `internal/passprompt` on TTY / `charmbracelet/x/term` piped fallback, same flow as `v2vctl`).
+- The successful unlock secret is remembered for the session so counter saves re-encrypt instead of dropping to plaintext, and wiped at exit (`ClearLoadedPassphrase`, deferred plus the conn-drop path).
+- File-supplied argon2 costs are clamped (t 1-10, m 8-256MiB, p 1-8) and the envelope identity (v3/argon2id/xchacha20poly1305) verified, so crafted files fail closed instead of exhausting RAM.
 
 ## Security Model
 
 - **Injection:** All inbound `text` and `username` go through `internal/filter`.
-- `ValidateMessage` rejects `Cf/Mn/Me/Zl/Zp/0xFFFD/non-graphic`, `SanitizeForDisplay` keeps only whitelisted `SGR \x1b[...m` and `OSC8 \x1b]8;;...\x1b\\`.
+- `ValidateMessage` rejects `Cf/Mn/Me/Zl/Zp/0xFFFD/non-graphic`, `SanitizeForDisplay` keeps only whitelisted `SGR \x1b[...m` and `OSC8 \x1b]8;;...\x1b\\`; an unterminated OSC8 drops the tail instead of leaking the link target.
 - Client double-filters before display, so a compromised server's tampered history cannot execute `ESC[2J` etc.
 - **Phishing:** Privileged identities are pinned to `server_pubkey` (not hostname); real passkeys are pinned by `RPID`/`origin`.
 - **Spam/Abuse:** `MaxConnectionsPerIP`, `MessageCooldown`, `IdleChatTimeout`, `Trip verify 200ms/IP` rate limit, `SetReadLimit` `64KB` for auth and `MaxMessageLength*3` for chat.
