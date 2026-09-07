@@ -6,8 +6,11 @@ package main
 
 import (
 	"net"
+	"net/http"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/CleveTok3125/V2V/identity"
 )
@@ -285,4 +288,81 @@ func TestProxyFieldValidators(t *testing.T) {
 			t.Errorf("validPort(%q) must fail", p)
 		}
 	}
+}
+
+func TestSocks5HandshakeAuthFail(t *testing.T) {
+	client, server := net.Pipe()
+	done := make(chan struct{})
+	var got []byte
+	go func() {
+		defer close(done)
+		// Server expects u/p; client offers wrong secret.
+		fakeSocks5Server(t, server, 0x02, "u", "p", 0x00, &got)
+	}()
+	if err := socks5Handshake(client, "h", 80, []byte("u"), []byte("WRONG")); err == nil {
+		t.Error("wrong proxy password must fail the handshake")
+	}
+	_ = client.Close()
+	<-done
+}
+
+// TestDialSocks5WS_AuthFail: end-to-end dial against a proxy that
+// rejects the password must surface an error, not hang or proceed.
+func TestDialSocks5WS_AuthFail(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				var got []byte
+				fakeSocks5Server(t, c, 0x02, "u", "p", 0x00, &got)
+			}()
+		}
+	}()
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	p := &proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, port), User: "u", Pass: []byte("WRONG")}
+	if _, _, err := dialSocks5WS("ws://127.0.0.1:1/ws", http.Header{}, p); err == nil {
+		t.Error("dial through auth-rejecting proxy must fail")
+	}
+}
+
+// TestDialSocks5WS_Unreachable: a dead proxy address must fail within
+// the handshake timeout, never hang the dial.
+func TestDialSocks5WS_Unreachable(t *testing.T) {
+	p := &proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: deadPort(t)}
+	start := time.Now()
+	if _, _, err := dialSocks5WS("ws://127.0.0.1:1/ws", http.Header{}, p); err == nil {
+		t.Error("dial through dead proxy must fail")
+	}
+	if time.Since(start) > socks5DialTimeout+10*time.Second {
+		t.Error("dead proxy dial exceeded its timeout budget")
+	}
+}
+
+// deadPort reserves then releases a loopback port, so nothing listens.
+func deadPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	_ = ln.Close()
+	return mustAtoi(t, port)
+}
+
+func mustAtoi(t *testing.T, s string) int {
+	t.Helper()
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

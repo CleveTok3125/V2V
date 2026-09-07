@@ -23,3 +23,19 @@ func TestBadgeColorWithPaletteFallback(t *testing.T) {
 		t.Fatalf("channels should be clamped, got %q", got)
 	}
 }
+
+// The same badge always maps to the same palette slot, and distinct
+// badges spread (no single-slot collapse over a sample).
+func TestBadgeColor_Deterministic(t *testing.T) {
+	a := BadgeColor("◆ deadbeef")
+	if a != BadgeColor("◆ deadbeef") {
+		t.Fatal("badge color not deterministic")
+	}
+	seen := map[string]bool{}
+	for i := 0; i < 50; i++ {
+		seen[BadgeColor("◆ badge"+string(rune('a'+i)))] = true
+	}
+	if len(seen) < 3 {
+		t.Fatalf("palette collapsed to %d colors over 50 badges", len(seen))
+	}
+}

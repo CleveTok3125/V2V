@@ -31,11 +31,16 @@ func LoadIdentityFile(path string) (*IdentityFile, error) {
 			if AssessPassphrase(pass, nil).Weak {
 				fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
 			}
-			pw := []byte(pass)
-			pass = ""
-			defer identity.ZeroBytes(pw)
-			return identity.LoadEncrypted(path, pw)
+		pw := []byte(pass)
+		pass = ""
+		defer identity.ZeroBytes(pw)
+		idf, err := identity.LoadEncrypted(path, pw)
+		if err != nil {
+			return nil, err
 		}
+		rememberLoadedPassphrase(pw)
+		return idf, nil
+	}
 		// Prompt for passphrase (hidden input). TTY sessions use the
 		// shared program; piped input keeps the legacy hidden reader.
 		var pass string
@@ -56,13 +61,36 @@ func LoadIdentityFile(path string) (*IdentityFile, error) {
 		pw := []byte(pass)
 		pass = ""
 		defer identity.ZeroBytes(pw)
-		return identity.LoadEncrypted(path, pw)
+		idf, err := identity.LoadEncrypted(path, pw)
+		if err != nil {
+			return nil, err
+		}
+		rememberLoadedPassphrase(pw)
+		return idf, nil
 	}
 	return identity.Load(path)
 }
 
 var loadedPassphrase []byte
 var loadedWasEncrypted bool
+
+// rememberLoadedPassphrase keeps a copy of the successful unlock secret
+// so session saves (passkey counters) re-encrypt instead of silently
+// dropping to plaintext. Wiped by ClearLoadedPassphrase at session end.
+func rememberLoadedPassphrase(pw []byte) {
+	ClearLoadedPassphrase()
+	loadedPassphrase = append([]byte(nil), pw...)
+	loadedWasEncrypted = true
+}
+
+// ClearLoadedPassphrase wipes the remembered unlock secret. Call at
+// session end (deferred next to term.Close, and on the conn-drop exit
+// path which skips defers).
+func ClearLoadedPassphrase() {
+	identity.ZeroBytes(loadedPassphrase)
+	loadedPassphrase = nil
+	loadedWasEncrypted = false
+}
 
 func readPassphrase() (string, error) {
 	// Use charmbracelet/x/term to hide input (same stack as v2vctl's huh)
