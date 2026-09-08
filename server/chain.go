@@ -72,8 +72,20 @@ func (s *ChatServer) initChainLocked() {
 	broken := false
 	for _, msgStr := range s.ChatHistory {
 		var wire WireMessage
-		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil || wire.ChainHash == "" {
+		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil {
 			// Legacy record: remember as anchor candidate, keep scanning.
+			anchor = msgStr
+			anchored = true
+			continue
+		}
+		if wire.Type == "system" && wire.ChainHash == "" {
+			// Unchained notification (join/leave/date): never chain,
+			// never anchor. Skipping here is what keeps a burst of
+			// visits from hijacking the resume anchor.
+			continue
+		}
+		if wire.ChainHash == "" {
+			// Legacy chat record: remember as anchor candidate.
 			anchor = msgStr
 			anchored = true
 			continue
