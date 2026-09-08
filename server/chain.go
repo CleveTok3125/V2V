@@ -22,14 +22,6 @@ import (
 // segment) verifies pre-reply records; new links always carry 2.
 const chainVersion = 2
 
-// tripSigOf extracts the trip signature bound into a wire for chaining.
-func tripSigOf(wire WireMessage) string {
-	if wire.Trip != nil {
-		return wire.Trip.Sig
-	}
-	return ""
-}
-
 // linkAndStore chains one wire message, stores it in memory + disk, and
 // returns the chained copy for broadcast. Callers must hold BroadcastMu;
 // this takes HistoryMu internally (leaf lock, never the reverse order).
@@ -41,7 +33,7 @@ func (s *ChatServer) linkAndStore(wire WireMessage) WireMessage {
 	}
 	s.chainHeight++
 	prev := s.chainTip
-	h := chain.Hash(prev, s.chainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire))
+	h := chain.Hash(prev, s.chainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, chain.TripSigOf(wire))
 	wire.ChainPrev = hex.EncodeToString(prev[:])
 	wire.ChainHash = hex.EncodeToString(h[:])
 	wire.ChainHeight = s.chainHeight
@@ -111,13 +103,7 @@ func (s *ChatServer) initChainLocked() {
 			tip, height = want, wire.ChainHeight
 			continue
 		}
-		var linked bool
-		if wire.ChainVer >= 2 {
-			linked = chain.VerifyLink(prev, wire.ChainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire), want)
-		} else {
-			linked = chain.VerifyLinkV1(prev, wire.ChainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, tripSigOf(wire), want)
-		}
-		if !linked {
+		if !chain.VerifyWire(prev, wire, want) {
 			broken = true
 			log.Printf("⛔ [CHAIN TAMPER] height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
 		}

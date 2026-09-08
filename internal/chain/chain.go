@@ -13,6 +13,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"strings"
+
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // Domain separators keep each use in its own hash domain.
@@ -103,6 +105,26 @@ func hashV1(prev [32]byte, height uint64, tmpID uint64, typ, tim, display, text,
 // encoding carries no replyTo segment. Old records keep verifying.
 func VerifyLinkV1(prev [32]byte, height uint64, tmpID uint64, typ, tim, display, text, tripSig string, want [32]byte) bool {
 	return hashV1(prev, height, tmpID, typ, tim, display, text, tripSig) == want
+}
+
+// TripSigOf extracts the trip signature bound into a wire for chaining.
+// Untriped wires contribute nothing.
+func TripSigOf(w wire.WireMessage) string {
+	if w.Trip != nil {
+		return w.Trip.Sig
+	}
+	return ""
+}
+
+// VerifyWire dispatches on the link encoding: v2 covers the reply
+// target, v1 (absent) is the pre-reply encoding that old records keep
+// verifying against. Single home for the branch both ends share, so a
+// future v3 cannot drift client vs server.
+func VerifyWire(prev [32]byte, w wire.WireMessage, want [32]byte) bool {
+	if w.ChainVer >= 2 {
+		return VerifyLink(prev, w.ChainHeight, w.TmpID, w.ReplyTo, w.Type, w.Time, w.DisplayName, w.Text, TripSigOf(w), want)
+	}
+	return VerifyLinkV1(prev, w.ChainHeight, w.TmpID, w.Type, w.Time, w.DisplayName, w.Text, TripSigOf(w), want)
 }
 
 // ParseHex64 decodes a 64-char lowercase hex hash; it reports false for
