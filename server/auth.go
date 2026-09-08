@@ -142,6 +142,9 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		// Candidate 2: real passkeys enrolled via the web ceremony. These
 		// live in the managed store with a persisted sign counter, enabling
 		// clone detection.
+		if s.WebAuthn == nil {
+			return perms, resp, fmt.Errorf("auth_error: verification_failed")
+		}
 		if cred, ok := s.WebAuthn.Credential(resp.Role, resp.PasskeyID); ok {
 			pub, err := base64.RawURLEncoding.DecodeString(cred.PublicKey)
 			if err != nil {
