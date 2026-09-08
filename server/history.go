@@ -167,6 +167,36 @@ func (s *ChatServer) sendWithRetry(conn *websocket.Conn, client *ClientSession, 
 // evidence, only display text. Stored for replay, broadcast live.
 // Management lines that must serve as evidence use BroadcastAudit;
 // unicast warnings stay raw strings (per-client, never chained).
+// fanout sends one marshaled wire to every client except sender.
+// isSystem selects the retry policy; echo returns a delivery
+// confirmation to the sender itself. Callers hold BroadcastMu when
+// ordering against chained records matters; the notice path skips it
+// (registerClient already holds it across replay+join, so taking it
+// here would self-deadlock). Callers must NOT hold ClientsMu.
+func (s *ChatServer) fanout(data []byte, sender *websocket.Conn, isSystem, echo bool) {
+	s.ClientsMu.RLock()
+	defer s.ClientsMu.RUnlock()
+
+	for conn, client := range s.Clients {
+		if conn != sender {
+			s.sendWithRetry(conn, client, data, isSystem)
+		}
+	}
+	if echo && sender != nil {
+		if sess, ok := s.Clients[sender]; ok {
+			select {
+			case sess.Send <- data:
+			default:
+			}
+		}
+	}
+}
+
+// BroadcastNotice sends a server-originated notification (join/leave/date)
+// that never enters the hash chain: it carries no authorship or ordering
+// evidence, only display text. Stored for replay, broadcast live.
+// Management lines that must serve as evidence use BroadcastAudit;
+// unicast warnings stay raw strings (per-client, never chained).
 func (s *ChatServer) BroadcastNotice(text, kind string, sender *websocket.Conn) {
 	now := time.Now().In(Cfg.Static.Timezone)
 	wire := WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: kind, Text: text}
@@ -175,15 +205,7 @@ func (s *ChatServer) BroadcastNotice(text, kind string, sender *websocket.Conn) 
 	if s.HistoryStore != nil {
 		s.HistoryStore.EnqueueWire(wire, now)
 	}
-
-	s.ClientsMu.RLock()
-	defer s.ClientsMu.RUnlock()
-
-	for conn, client := range s.Clients {
-		if conn != sender {
-			s.sendWithRetry(conn, client, data, true)
-		}
-	}
+	s.fanout(data, sender, true, false)
 }
 
 // BroadcastAudit chains a server-originated management line as evidence:
@@ -197,14 +219,7 @@ func (s *ChatServer) BroadcastAudit(text string, sender *websocket.Conn) {
 	wire := s.linkAndStore(WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: "audit", Text: text})
 	data, _ := json.Marshal(wire)
 
-	s.ClientsMu.RLock()
-	defer s.ClientsMu.RUnlock()
-
-	for conn, client := range s.Clients {
-		if conn != sender {
-			s.sendWithRetry(conn, client, data, true)
-		}
-	}
+	s.fanout(data, sender, true, false)
 }
 
 func (s *ChatServer) BroadcastWire(wire WireMessage, sender *websocket.Conn) {
@@ -212,23 +227,9 @@ func (s *ChatServer) BroadcastWire(wire WireMessage, sender *websocket.Conn) {
 	defer s.BroadcastMu.Unlock()
 	wire = s.linkAndStore(wire)
 	data, _ := json.Marshal(wire)
-	s.ClientsMu.RLock()
-	defer s.ClientsMu.RUnlock()
-	for conn, client := range s.Clients {
-		if conn != sender {
-			s.sendWithRetry(conn, client, data, false)
-		}
-	}
-	// Echo back to the sender as delivery confirmation so it can replace
-	// its grey placeholder with the confirmed rendering.
-	if sender != nil {
-		if sess, ok := s.Clients[sender]; ok {
-			select {
-			case sess.Send <- data:
-			default:
-			}
-		}
-	}
+	// Echo to the sender doubles as delivery confirmation so it can
+	// replace its grey placeholder with the confirmed rendering.
+	s.fanout(data, sender, false, true)
 }
 
 func (s *ChatServer) CheckAndBroadcastDate(now time.Time) {

@@ -133,8 +133,27 @@ func isDateBannerLine(line string) bool {
 	return strings.Contains(line, "--- Ngày ") && strings.Contains(line, " ---")
 }
 
+// isJoinLeave reports whether a system wire is a join/leave notice,
+// preferring the machine tag and falling back to text for legacy
+// untagged lines.
+func isJoinLeave(wire WireMessage) bool {
+	if wire.SysKind != "" {
+		return wire.SysKind == "join" || wire.SysKind == "leave"
+	}
+	return isJoinLeaveSystemLine(wire.Text)
+}
+
+// isDateBanner reports whether a system wire is a date banner, same
+// tag-first fallback scheme as isJoinLeave.
+func isDateBanner(wire WireMessage) bool {
+	if wire.SysKind != "" {
+		return wire.SysKind == "date"
+	}
+	return isDateBannerLine(wire.Text)
+}
+
 func isHistoryBoundaryLine(line string) bool {
-	return strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Kết thúc lịch sử ---")
+	return strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Kết thúc lịch sử")
 }
 
 // parseHistoryBoundary reports whether line opens (header) or closes
@@ -145,7 +164,8 @@ func parseHistoryBoundary(line string) (boundary bool, start bool) {
 	if strings.Contains(line, "--- Lịch sử chat gần đây ---") {
 		return true, true
 	}
-	if strings.Contains(line, "--- Kết thúc lịch sử ---") {
+	// No trailing " ---": counted footers read "(sent/total) ---".
+	if strings.Contains(line, "--- Kết thúc lịch sử") {
 		return true, false
 	}
 	return false, false
