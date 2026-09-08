@@ -132,7 +132,8 @@ Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `interna
 - Client → server always travels in a JSON envelope carrying the sender's per-session counter: signed `{text,pub,seq,prev,sig,display_name,tmp_id}` (`client/tripchain.go:TripMessage`) or unsigned `{tmp_id,text}` (`PlainMessage`).
 - Raw text is rejected (`server/clientHandler.go:ReadPump`); `tmp_id` must be nonzero.
 - `server/clientHandler.go` builds `WireMessage` and broadcasts via `BroadcastWire`. The server relays `tmp_id` verbatim into the wire and history but never assigns or alters it.
-- Three broadcast routes, separated by evidence needs. Chat goes through `BroadcastWire`, server management lines through `BroadcastAudit`; both chain via the single choke point `linkAndStore`, so every evidence record carries a chain link. Join/leave/date notifications go through `BroadcastNotice`: tagged `SysKind`, stored and broadcast, but never chained — they carry no authorship or ordering evidence. Per-client unicast warnings stay raw strings and are never chained.
+- Three broadcast routes, separated by evidence needs. Chat goes through `BroadcastWire`, server management lines through `BroadcastAudit`; both chain via the single choke point `linkAndStore`, so every evidence record carries a chain link. Join/leave/date notifications go through `BroadcastNotice`: tagged `SysKind` (`"join"`/`"leave"`/`"date"`, `"audit"` for audit lines), stored and broadcast, but never chained — they carry no authorship or ordering evidence. Per-client unicast warnings stay raw strings and are never chained.
+- `BroadcastAudit` currently has no producers: it is a reserved route so future management actions (ban/kick/mute/rolechange) chain as evidence instead of riding the notice path. When adding one, call `BroadcastAudit` (never `BroadcastNotice`) and assert the line verifies and replays in tests.
 - Client `client/client.go` receives `WireMessage` JSON (`chat`/`system`) or legacy raw lines; it tries `json.Unmarshal` and falls back to plain display.
 - Records without chain fields render without a meta line.
 
@@ -147,13 +148,13 @@ Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `interna
 ### In-memory history
 - `server/shared.go:ChatHistory []string` — deduped `WireMessage` JSON strings, evicted by `MaxHistoryBytes` (`10MB`), with `cap > 4*len` shrink to avoid 20MiB bloat.
 - `SendChatHistory` streams `MaxHistorySend` (`500`) messages without extra copy.
-- Join/leave lines carry `sys_kind` set at broadcast; catch-up replay filters them unless the session asked (`AuthPacket.history_joins`, wired to the client `-j` flag). Dates, audits and untagged lines always go. Live broadcasts always carry every line; only replay filters.
-- Each replay closes with a counted human footer plus a machine `history_sync` trailer (window bounds, sent/total) for the fork check. Filtered lines never held chain positions, so the replayed window has no gaps.
+- Join/leave lines carry `sys_kind` set at broadcast; catch-up replay filters them unless the session asked (`AuthPacket.history_joins`, wired to the client `-j` flag, which also seeds live join display — `/showjoin` only toggles live display afterwards). Dates, audits and untagged lines always go, including audits when joins are filtered. Live broadcasts always carry every line; only replay filters. The web client exposes the same knob as its show-join checkbox.
+- Each replay closes with a counted human footer (`--- Kết thúc lịch sử (sent/total) ---`, opened by `--- Lịch sử chat gần đây ---`) plus a machine `history_sync` trailer for the fork check: `{"type":"history_sync","min_height":H,"max_height":H,"sent":S,"total":T}`. Filtered lines never held chain positions, so the replayed window has no gaps. Notices carry `chain_height == 0` and never widen the trailer window.
 - System broadcasts (`join/leave/date`) retry once after `20ms` before dropping (`sendWithRetry`), so a chat burst filling the per-client `Send` queue (256) does not silently swallow system lines; chat itself stays best-effort.
 
 ## Message Chain
 
-Every broadcast message links to the previous one (`internal/chain`, `server/chain.go`) — altering any byte of any message breaks the link and every link after it, with no per-user signing required:
+Every chat and audit message links to the previous one (`internal/chain`, `server/chain.go`) — altering any byte of a linked message breaks the link and every link after it, with no per-user signing required. Join/leave/date notifications never link: they carry no authorship or ordering evidence.
 
 - **Link:** `chain_hash = sha256("V2V-chain-v1" ‖ len-prefixed(prev, height, tmp_id, reply_to, type, time, displayName, text, tripSig))`, versioned by `chain_ver`.
 - Version 1 = pre-reply encoding without the replyTo segment, always 2 on new links; old records keep verifying.
@@ -277,7 +278,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - Replies (`/reply <height>[:hash] <text>`) render a `| ↩ #height: <first line…>` quote above content in placeholder and echo alike (same builder, so erase math holds); quotes always resolve locally, so misattributed quotes expose the liar.
 - Evicted targets reject the reply before send.
 - Every chained chat message renders as content rows plus exactly one trailing meta line: `|   └─  #height:hash4`, with ` | ✍️ ◆ badge` (hyperlink kept) appended for trip messages.
-- Server notices (date, join/leave) stay chained and verified but render no meta line.
+- Server notices (date, join/leave) are never chained and never verified, and render no meta line. Audit lines chain like chat (evidence) but render as plain system rows.
 - The sender placeholder ends with `|   └─  ··· ⏳` until the echo (carrying the real position) replaces the whole block, so erase counts stay exact.
 - One `renderChatBlock` serves live, echo, history and placeholder paths; legacy lines without chain fields render content only, and pure-local lines (`[Local]`, date banners drawn client-side) carry no meta.
 - `codebg.Render` wraps inline `` `code` `` spans and ``` fenced blocks in a background SGR (`48;5;236`, closed with `49m` so ambient foreground survives), stripping the backtick delimiters markdown-style.
