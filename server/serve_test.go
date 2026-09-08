@@ -48,8 +48,10 @@ func TestServeAuthenticated_LargeHistoryNoDeadlock(t *testing.T) {
 	serverConn := <-serverConnCh
 
 	session := &ClientSession{
-		Conn:        serverConn,
-		Send:        make(chan []byte, 256),
+		Conn: serverConn,
+		// Oversized on purpose: replay sends are non-blocking, and a
+		// full buffer here would drop lines and flake the count below.
+		Send:        make(chan []byte, 2048),
 		DisplayName: "Tester#abcd",
 		Perms:       GetDefaultPermission(),
 	}

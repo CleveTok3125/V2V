@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/CleveTok3125/V2V/internal/config"
 )
 
 // tagLine builds one stored history line with chain fields and kind
@@ -151,5 +153,126 @@ func TestReplay_LiveShape142(t *testing.T) {
 	}
 	if trailer.MinHeight != firstChat || trailer.MaxHeight != lastChat || trailer.Sent != want || trailer.Total != 142 {
 		t.Fatalf("trailer wrong: %+v (want min=%d max=%d)", trailer, firstChat, lastChat)
+	}
+}
+
+// TestSendChatHistory_NeverBlocks: a dead peer (WritePump gone, channel
+// full, no reader) must not wedge the replay, which runs under
+// BroadcastMu — blocking here would stall every broadcast.
+func TestSendChatHistory_NeverBlocks(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	for i := 0; i < 50; i++ {
+		s.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "dead peer line"))
+	}
+	sess := &ClientSession{Send: make(chan []byte), DisplayName: "Ghost#0000", Perms: GetDefaultPermission()}
+	done := make(chan struct{})
+	go func() {
+		s.SendChatHistory(sess)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("SendChatHistory blocked on a dead peer")
+	}
+}
+
+// TestRegister_HoldsBroadcastMu: registerClient must hold BroadcastMu for
+// the whole replay, otherwise concurrent live chats interleave between
+// replay lines and the trailer and poison the fork window.
+func TestRegister_HoldsBroadcastMu(t *testing.T) {
+	testCfg(t)
+	cfg := config.DefaultDynamic()
+	cfg.MaxHistorySend = 50000
+	Cfg.Dynamic.Store(cfg)
+	s := NewChatServer()
+	for i := 0; i < 50000; i++ {
+		s.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "bulk line"))
+	}
+	sess := &ClientSession{Send: make(chan []byte, 1 << 20), DisplayName: "New#0000", Perms: GetDefaultPermission()}
+	regDone := make(chan struct{})
+	go func() {
+		s.registerClient(sess, "127.0.0.1")
+		close(regDone)
+	}()
+	lockedObserved := false
+	for {
+		select {
+		case <-regDone:
+			goto checked
+		default:
+		}
+		if s.BroadcastMu.TryLock() {
+			s.BroadcastMu.Unlock()
+		} else {
+			lockedObserved = true
+		}
+	}
+checked:
+	if !lockedObserved {
+		t.Fatal("registerClient never held BroadcastMu during replay")
+	}
+	close(sess.Send)
+	n := 0
+	for range sess.Send {
+		n++
+	}
+	if n == 0 {
+		t.Fatal("replay delivered nothing")
+	}
+}
+
+// TestRegister_NoLiveInterleave: live chats racing a replay must land
+// strictly after the trailer. The broadcaster starts only after the
+// replay header proves the lock is held.
+func TestRegister_NoLiveInterleave(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	const replayLines = 300
+	for i := 0; i < replayLines; i++ {
+		s.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "replay line"))
+	}
+	sess := &ClientSession{Conn: nil, Send: make(chan []byte, 16384), DisplayName: "New#0000", Perms: GetDefaultPermission()}
+	regDone := make(chan struct{})
+	go func() {
+		s.registerClient(sess, "127.0.0.1")
+		close(regDone)
+	}()
+	// Wait for the replay header: proves registerClient is inside the
+	// locked region before any live broadcast fires.
+	header := <-sess.Send
+	if !strings.Contains(string(header), "Lịch sử chat gần đây") {
+		t.Fatalf("first stream item is not the replay header: %q", header)
+	}
+	liveDone := make(chan struct{})
+	go func() {
+		defer close(liveDone)
+		for i := 0; i < 50; i++ {
+			s.BroadcastWire(WireMessage{Type: "chat", Text: "live line", DisplayName: "Other#1111"}, nil)
+		}
+	}()
+	<-regDone
+	<-liveDone
+	close(sess.Send)
+	stream := []string{string(header)}
+	for msg := range sess.Send {
+		stream = append(stream, string(msg))
+	}
+	trailerIdx, firstLiveIdx := -1, -1
+	for i, m := range stream {
+		var hs HistorySync
+		if err := json.Unmarshal([]byte(m), &hs); err == nil && hs.Type == "history_sync" {
+			trailerIdx = i
+		}
+		if strings.Contains(m, "live line") && firstLiveIdx < 0 {
+			firstLiveIdx = i
+		}
+	}
+	if trailerIdx < 0 {
+		t.Fatal("trailer missing from stream")
+	}
+	if firstLiveIdx >= 0 && firstLiveIdx < trailerIdx {
+		t.Fatalf("live message interleaved into replay at %d (trailer at %d)", firstLiveIdx, trailerIdx)
 	}
 }

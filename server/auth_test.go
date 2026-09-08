@@ -210,3 +210,32 @@ func TestBroadcastWire_SeqEnforced(t *testing.T) {
 		t.Fatalf("chain heights not sequential: %v", heights)
 	}
 }
+
+// TestActiveIdentities_Takeover: registering a second session on the
+// same identity transfers ownership to the newest; unregister releases
+// only for the owner, never for a stale session.
+func TestActiveIdentities_Takeover(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	mk := func(name string) *ClientSession {
+		_, serverConn := dialAuthPair(t, s)
+		return &ClientSession{Conn: serverConn, Send: make(chan []byte, 16), DisplayName: name, Perms: GetDefaultPermission(), IdentityPub: "abc123"}
+	}
+	s1, s2 := mk("One#0001"), mk("Two#0002")
+	s.registerClient(s1, "10.0.0.1")
+	if raw, ok := s.ActiveIdentities.Load("abc123"); !ok || raw.(*ClientSession) != s1 {
+		t.Fatal("first session must own the identity slot")
+	}
+	s.registerClient(s2, "10.0.0.2")
+	if raw, ok := s.ActiveIdentities.Load("abc123"); !ok || raw.(*ClientSession) != s2 {
+		t.Fatal("newest session must take over the identity slot")
+	}
+	s.unregisterClient(s1, "10.0.0.1")
+	if _, ok := s.ActiveIdentities.Load("abc123"); !ok {
+		t.Fatal("stale unregister must not release the new owner's slot")
+	}
+	s.unregisterClient(s2, "10.0.0.2")
+	if _, ok := s.ActiveIdentities.Load("abc123"); ok {
+		t.Fatal("owner unregister must release the slot")
+	}
+}

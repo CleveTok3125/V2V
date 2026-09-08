@@ -48,6 +48,26 @@ func (s *ChatServer) registerClient(session *ClientSession, clientIP string) {
 	s.Clients[session.Conn] = session
 	s.ClientsMu.Unlock()
 
+	// Track the live holder of each privileged identity so a parallel
+	// login elsewhere triggers the concurrent-use alert. Newest wins;
+	// unregisterClient releases only if it still owns the slot.
+	if session.IdentityPub != "" {
+		if prev, loaded := s.ActiveIdentities.LoadOrStore(session.IdentityPub, session); loaded {
+			if old, _ := prev.(*ClientSession); old != nil && old != session {
+				s.alertConcurrentIdentity(session.IdentityPub, clientIP)
+				s.ActiveIdentities.Store(session.IdentityPub, session)
+			}
+		}
+	}
+
+	// Hold BroadcastMu across replay + own-join: no live chat may
+	// interleave between replay lines and the trailer, otherwise the
+	// client collects foreign hashes into its fork window and jumps
+	// tips mid-sync. Notices (no BroadcastMu) can still slip in, but
+	// they carry no chain fields and never disturb tip accounting.
+	// Lock order stays BroadcastMu -> HistoryMu -> ClientsMu: the map
+	// insert above is sequential, never nested.
+	s.BroadcastMu.Lock()
 	s.SendChatHistory(session)
 
 	joinTime := time.Now().In(Cfg.Static.Timezone)
@@ -59,10 +79,13 @@ func (s *ChatServer) registerClient(session *ClientSession, clientIP string) {
 	// requires every client to see every link; display gating (!showJoin)
 	// still hides it locally.
 	s.BroadcastNotice(joinMsg, "join", nil)
+	s.BroadcastMu.Unlock()
 }
 
 func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
-	session.Conn.Close()
+	if session.Conn != nil {
+		session.Conn.Close()
+	}
 
 	s.ClientsMu.Lock()
 	if _, exists := s.Clients[session.Conn]; !exists {

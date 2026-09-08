@@ -24,6 +24,7 @@ import (
 	"github.com/CleveTok3125/V2V/internal/chain"
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
+	"github.com/CleveTok3125/V2V/internal/strutil"
 	"github.com/CleveTok3125/V2V/internal/trip"
 	"github.com/CleveTok3125/V2V/internal/tripcolor"
 	"github.com/CleveTok3125/V2V/internal/wire"
@@ -312,7 +313,7 @@ func main() {
 			// Server pubkey pinning: verify server's identity before sending auth
 			if challenge.ServerPubKey != "" {
 				if id.ServerPubKey != "" && !strings.EqualFold(id.ServerPubKey, challenge.ServerPubKey) {
-					fmt.Printf("🚨 Server identity mismatch! Pin %s != %s — abort.\n", id.ServerPubKey[:12], challenge.ServerPubKey[:12])
+					fmt.Printf("🚨 Server identity mismatch! Pin %s != %s — abort.\n", strutil.ShortN(id.ServerPubKey, 12), strutil.ShortN(challenge.ServerPubKey, 12))
 					notifyQuit()
 					return
 				}
@@ -329,7 +330,7 @@ func main() {
 					}
 				}
 				if id.ServerPubKey == "" && challenge.ServerPubKey != "" {
-					fmt.Printf("⚠️ Lần đầu kết nối tới server %s pin %s…\n", challenge.ServerHost, challenge.ServerPubKey[:16])
+					fmt.Printf("⚠️ Lần đầu kết nối tới server %s pin %s…\n", challenge.ServerHost, strutil.ShortN(challenge.ServerPubKey, 16))
 				}
 			}
 			// Use server's pubkey for anti-reuse (instead of host string)
@@ -1015,12 +1016,11 @@ func main() {
 				if !isShowingJoin && isJoinLeaveSystemLine(line) {
 					continue
 				}
-				if !isShowingJoin && isHistoryBoundaryLine(line) {
+				if boundary, start := parseHistoryBoundary(line); boundary {
 					displayMu.Lock()
-					if strings.Contains(line, "--- Lịch sử chat gần đây ---") {
+					if start {
 						inSync = true
-					}
-					if strings.Contains(line, "--- Kết thúc lịch sử ---") {
+					} else {
 						pendingDateBanner = ""
 						pendingDateBannerWire = nil
 						inSync = false

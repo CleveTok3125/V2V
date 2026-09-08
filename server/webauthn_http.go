@@ -104,7 +104,7 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 		PublicKey: creationOptionsPK{
 			Challenge: challenge,
 			RP:        rpEnt{ID: WAConfig.RPID, Name: "V2V"},
-			User:      userEnt{ID: userID, Name: role + ":" + code[:8]},
+			User:      userEnt{ID: userID, Name: role + ":" + strutil.ShortN(code, 8)},
 			PubKeyCredParams: []algEnt{
 				{Type: "public-key", Alg: -7},   // ES256
 				{Type: "public-key", Alg: -257}, // RS256
