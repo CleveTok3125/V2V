@@ -132,8 +132,7 @@ Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `interna
 - Client → server always travels in a JSON envelope carrying the sender's per-session counter: signed `{text,pub,seq,prev,sig,display_name,tmp_id}` (`client/tripchain.go:TripMessage`) or unsigned `{tmp_id,text}` (`PlainMessage`).
 - Raw text is rejected (`server/clientHandler.go:ReadPump`); `tmp_id` must be nonzero.
 - `server/clientHandler.go` builds `WireMessage` and broadcasts via `BroadcastWire`. The server relays `tmp_id` verbatim into the wire and history but never assigns or alters it.
-- System lines (join/leave/date) are `WireMessage{Type:"system"}` through `BroadcastSystem`, so every broadcast message carries a chain link.
-- Per-client unicast warnings stay raw strings and are never chained.
+- Three broadcast routes, separated by evidence needs. Chat goes through `BroadcastWire`, server management lines through `BroadcastAudit`; both chain via the single choke point `linkAndStore`, so every evidence record carries a chain link. Join/leave/date notifications go through `BroadcastNotice`: tagged `SysKind`, stored and broadcast, but never chained — they carry no authorship or ordering evidence. Per-client unicast warnings stay raw strings and are never chained.
 - Client `client/client.go` receives `WireMessage` JSON (`chat`/`system`) or legacy raw lines; it tries `json.Unmarshal` and falls back to plain display.
 - Records without chain fields render without a meta line.
 
@@ -148,8 +147,8 @@ Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `interna
 ### In-memory history
 - `server/shared.go:ChatHistory []string` — deduped `WireMessage` JSON strings, evicted by `MaxHistoryBytes` (`10MB`), with `cap > 4*len` shrink to avoid 20MiB bloat.
 - `SendChatHistory` streams `MaxHistorySend` (`500`) messages without extra copy.
-- Join/leave lines carry `sys_kind` set at broadcast; catch-up replay filters them unless the session asked (`AuthPacket.history_joins`, wired to the client `-j` flag). Live broadcasts always carry every line; only replay filters. Untagged lines always go.
-- Each replay closes with a counted human footer plus a machine `history_sync` trailer (window bounds, sent/total, omission hashes capped at 1000 with a truncated flag) for the fork check.
+- Join/leave lines carry `sys_kind` set at broadcast; catch-up replay filters them unless the session asked (`AuthPacket.history_joins`, wired to the client `-j` flag). Dates, audits and untagged lines always go. Live broadcasts always carry every line; only replay filters.
+- Each replay closes with a counted human footer plus a machine `history_sync` trailer (window bounds, sent/total) for the fork check. Filtered lines never held chain positions, so the replayed window has no gaps.
 - System broadcasts (`join/leave/date`) retry once after `20ms` before dropping (`sendWithRetry`), so a chat burst filling the per-client `Send` queue (256) does not silently swallow system lines; chat itself stays best-effort.
 
 ## Message Chain
@@ -161,9 +160,9 @@ Every broadcast message links to the previous one (`internal/chain`, `server/cha
 - Links compute at the single choke point `linkAndStore` under `BroadcastMu`, so send order always matches chain order and `prev`-continuity checks never false-positive on reorder.
 - **Numbering:** `chain_height` is a global ever-increasing counter (displayed as `#height:hash4`) and the mandatory message identifier; `hash4` stays a fixed auxiliary visual aid since short hashes collide by design.
 - `tmp_id` is the sender's per-session counter (server-originated system wires carry none). Both are covered by the link hash.
-- **Genesis/resume:** the seed derives from the server identity (`chain.Genesis`), so restarts resume the same chain; pre-chain legacy history anchors via `chain.LegacyAnchor` without being rewritten.
+- **Genesis/resume:** the seed derives from the server identity (`chain.Genesis`), so restarts resume the same chain; pre-chain legacy history anchors via `chain.LegacyAnchor` without being rewritten. Unchained system lines are skipped for anchor and verification alike, so notification bursts can never hijack the resume anchor.
 - A broken stored link logs `[CHAIN TAMPER]` and adopts the last record (availability); online clients holding older tips flag the fork.
-- **Client:** `client/chainmeta.go` + read loop verify content hash on every wire and prev continuity once a tip is adopted; the tip persists in `<cache>/chain_tip.json`. Filtered replays always have height gaps, so breaks during sync adopt silently; after the trailer a persisted tip inside the replayed window but absent from both replay and omission set warns about a fork (older tips, omitted tips and truncated omission sets adopt silently).
+- **Client:** `client/chainmeta.go` + read loop verify content hash on every wire and prev continuity once a tip is adopted; the tip persists in `<cache>/chain_tip.json`. After the trailer, a persisted tip inside the replayed window but absent from the received hashes warns about a fork; tips outside the window adopt silently.
 - Own echoes match placeholders by exact `tmp_id` (`matchPendingIndex`); echoes arriving before their placeholder are stashed and retried at track time, expiring with a warning after `10s` (how plain-path ID tampering surfaces).
 - `tmp_id` starts at a random 2³² base per connection and history replay never feeds the stash, so reconnects cannot collide with old sessions.
 - `trip.Verify` additionally binds `tmp_id` into the trip signature, so renumbering a signed message fails verification on both ends; `tmp_id 0` falls back to the legacy payload encoding so pre-upgrade history and old browser links verify read-only.

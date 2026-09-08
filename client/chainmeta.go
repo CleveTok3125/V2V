@@ -689,18 +689,15 @@ func parseHistorySync(raw []byte) (HistorySync, bool) {
 	return hs, true
 }
 
-// shouldWarnFork decides whether a persisted tip missing from a filtered
-// replay signals tampering. Filtered-out joins (in omitted) and tips
-// outside the replayed window are expected, never warnings. A truncated
-// omission set cannot prove anything, so it stays silent too. Only a tip
-// inside the window, absent from both the replay and the omission set,
-// means the log changed under us.
-func shouldWarnFork(persistedHeight, syncMin, syncMax uint64, tipHex string, omitted map[string]bool, truncated bool) bool {
-	if truncated {
-		return false
-	}
+// shouldWarnFork decides whether a persisted tip missing from a replay
+// signals tampering. The replayed window has no gaps by construction
+// (filtered lines never occupied chain positions), so a tip inside the
+// window but absent from the received hashes means the log changed
+// under us. Tips outside the window adopt silently: older ones predate
+// the replay, newer ones mean the log grew or shrank past it.
+func shouldWarnFork(persistedHeight, syncMin, syncMax uint64, tipHex string, received map[string]bool) bool {
 	if persistedHeight < syncMin || persistedHeight > syncMax {
 		return false
 	}
-	return !omitted[tipHex]
+	return !received[tipHex]
 }

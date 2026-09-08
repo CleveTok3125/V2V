@@ -561,11 +561,11 @@ func TestQuotable(t *testing.T) {
 }
 
 func TestParseHistorySync(t *testing.T) {
-	hs, ok := parseHistorySync([]byte(`{"type":"history_sync","min_height":101,"max_height":142,"sent":32,"total":42,"omitted_hashes":["aa"],"truncated":true}`))
+	hs, ok := parseHistorySync([]byte(`{"type":"history_sync","min_height":101,"max_height":142,"sent":32,"total":42}`))
 	if !ok {
 		t.Fatal("valid trailer rejected")
 	}
-	if hs.MinHeight != 101 || hs.MaxHeight != 142 || hs.Sent != 32 || hs.Total != 42 || len(hs.OmittedHashes) != 1 || !hs.Truncated {
+	if hs.MinHeight != 101 || hs.MaxHeight != 142 || hs.Sent != 32 || hs.Total != 42 {
 		t.Fatalf("trailer fields mangled: %+v", hs)
 	}
 	for _, raw := range []string{
@@ -582,29 +582,26 @@ func TestParseHistorySync(t *testing.T) {
 }
 
 func TestShouldWarnFork(t *testing.T) {
-	omitted := map[string]bool{"aa": true}
-	// Tip inside window, absent everywhere -> warn (real fork).
-	if !shouldWarnFork(120, 101, 142, "zz", omitted, false) {
+	received := map[string]bool{"aa": true}
+	// Tip inside window but unseen -> warn (real fork: the window has no
+	// gaps by construction, so absence means the log changed).
+	if !shouldWarnFork(120, 101, 142, "zz", received) {
 		t.Error("in-window missing tip must warn")
 	}
-	// Tip filtered out -> silent.
-	if shouldWarnFork(120, 101, 142, "aa", omitted, false) {
-		t.Error("omitted tip must not warn")
+	// Tip seen in replay -> silent.
+	if shouldWarnFork(120, 101, 142, "aa", received) {
+		t.Error("replayed tip must not warn")
 	}
 	// Tip older than window -> silent adopt.
-	if shouldWarnFork(50, 101, 142, "zz", omitted, false) {
+	if shouldWarnFork(50, 101, 142, "zz", received) {
 		t.Error("pre-window tip must not warn")
 	}
-	// Tip newer than window (log shrank) -> silent adopt.
-	if shouldWarnFork(200, 101, 142, "zz", omitted, false) {
+	// Tip newer than window (log shrank past it) -> silent adopt.
+	if shouldWarnFork(200, 101, 142, "zz", received) {
 		t.Error("post-window tip must not warn")
 	}
-	// Truncated omission set proves nothing -> silent.
-	if shouldWarnFork(120, 101, 142, "zz", omitted, true) {
-		t.Error("truncated omission must not warn")
-	}
-	// Empty window (no heights) -> silent.
-	if shouldWarnFork(5, 0, 0, "zz", map[string]bool{}, false) {
+	// Empty window (nothing chained replayed) -> silent.
+	if shouldWarnFork(5, 0, 0, "zz", map[string]bool{}) {
 		t.Error("empty window must not warn")
 	}
 }

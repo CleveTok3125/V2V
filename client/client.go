@@ -598,6 +598,7 @@ func main() {
 		persistedTip, persistedHeight, havePersistedTip = [32]byte{}, 0, false
 	}
 	inSync := false
+	syncHashes := map[string]bool{}
 
 	// noteChainTip advances the running tip, persisting it in batches:
 	// every tipBatchSaves links plus explicit flushes (quit, fork warn).
@@ -625,16 +626,18 @@ func main() {
 	// checkChainLink verifies one received wire against the running tip:
 	// content hash always, prev continuity once a tip is adopted. Legacy
 	// lines without chain fields pass silently. The first chained message
-	// adopts its own prev. A filtered replay always has height gaps, so
-	// during history sync a break adopts silently: the gap is filtering,
-	// not evidence of tampering. Live breaks still warn once and adopt
-	// (availability), so chat stays usable while tampering stays visible.
-	// During history sync every chained hash is collected for the fork
-	// check at the trailer. Caller must hold displayMu (warns via local
-	// feedback).
+	// adopts its own prev. Any break warns once and adopts (availability),
+	// so chat stays usable while tampering stays visible. A filtered
+	// replay cannot break continuity (filtered lines never held chain
+	// positions), so every break is genuine. During history sync every
+	// chained hash is collected for the fork check at the trailer.
+	// Caller must hold displayMu (warns via local feedback).
 	checkChainLink := func(wire WireMessage) {
 		if wire.ChainHash == "" {
 			return
+		}
+		if inSync {
+			syncHashes[strings.ToLower(wire.ChainHash)] = true
 		}
 		newTip, err := verifyWireLink(wire, chainTip)
 		if err != nil && !chainHaveTip {
@@ -650,14 +653,14 @@ func main() {
 			newTip, err = verifyWireLink(wire, prev)
 		}
 		if err != nil {
+			if !chainWarned {
+				chainWarned = true
+				emitLocalFeedback(fmt.Sprintf("| [Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", wire.ChainHeight, err))
+			}
 			if parsed, ok := chain.ParseHex64(wire.ChainHash); ok {
 				noteChainTip(parsed, wire.ChainHeight)
 			}
 			flushChainTip()
-			if !inSync && !chainWarned {
-				chainWarned = true
-				emitLocalFeedback(fmt.Sprintf("| [Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", wire.ChainHeight, err))
-			}
 			return
 		}
 		noteChainTip(newTip, wire.ChainHeight)
@@ -971,13 +974,9 @@ func main() {
 			if hs, ok := parseHistorySync(msg); ok {
 				displayMu.Lock()
 				inSync = false
-				if havePersistedTip {
+				if havePersistedTip && len(syncHashes) > 0 {
 					tipHex := strings.ToLower(hex.EncodeToString(persistedTip[:]))
-					omitted := make(map[string]bool, len(hs.OmittedHashes))
-					for _, h := range hs.OmittedHashes {
-						omitted[h] = true
-					}
-					if shouldWarnFork(persistedHeight, hs.MinHeight, hs.MaxHeight, tipHex, omitted, hs.Truncated) {
+					if shouldWarnFork(persistedHeight, hs.MinHeight, hs.MaxHeight, tipHex, syncHashes) {
 						emitLocalFeedback(fmt.Sprintf("| [Local]: Lịch sử server không chứa tip đã lưu #%d (replay #%d–#%d) — log có thể đã phân nhánh (fork).\n", persistedHeight, hs.MinHeight, hs.MaxHeight))
 						flushChainTip()
 					}
