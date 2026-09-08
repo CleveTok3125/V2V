@@ -79,6 +79,12 @@ func (l *RotatingLogger) rotate() error {
 	oldFile := l.Filename + ".old"
 	_ = os.Rename(l.Filename, oldFile)
 
+	if err := l.open(); err != nil {
+		return err
+	}
+	// Reset the size only on success: a failed open keeps l.file nil
+	// (stdout-only degrade) and must not zero the accounting, or every
+	// subsequent write would retry the doomed rotate.
 	l.size = 0
-	return l.open()
+	return nil
 }

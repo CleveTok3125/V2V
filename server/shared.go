@@ -128,9 +128,6 @@ type ChatServer struct {
 	TripChains   sync.Map // pub hex -> TripChain
 	TripChainsMu sync.Mutex
 
-	TripVerifyLast   map[string]time.Time
-	TripVerifyLastMu sync.Mutex
-
 	// Display identity salt per server session (ephemeral, not persisted)
 	DisplaySalt []byte
 
@@ -158,7 +155,6 @@ func NewChatServer() *ChatServer {
 		IpCounts:          make(map[string]int),
 		LastConnectTime:   make(map[string]time.Time),
 		AuthFails:         make(map[string]RateLimitRecord),
-		TripVerifyLast:    make(map[string]time.Time),
 		DisplaySalt:       salt,
 		DisplayNameCount:  make(map[string]int),
 		ChatHistory:       make([]string, 0),

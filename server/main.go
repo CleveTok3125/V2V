@@ -176,6 +176,11 @@ func loadDynamicConfig() (DynamicConfig, error) {
 	if err := loader.Err(); err != nil {
 		return DynamicConfig{}, err
 	}
+	// Fail-safe floor: a zero/negative replay window would silently send
+	// empty history on every connect. Mirror the client backfill default.
+	if cfg.MaxHistorySend <= 0 {
+		cfg.MaxHistorySend = 500
+	}
 
 	return cfg, nil
 }

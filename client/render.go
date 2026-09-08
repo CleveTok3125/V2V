@@ -160,7 +160,10 @@ func collectCodeblock(term inputTerminal, firstLine string) (string, bool) {
 
 	term.SetPrompt("| ... ")
 	defer term.SetPrompt("| > ")
-	for {
+	// Cap the collection: an unclosed fence on an endless stream must
+	// not grow the buffer without bound.
+	const maxCodeblockLines = 512
+	for len(rawLines) < maxCodeblockLines {
 		nextLine, err := term.ReadLine()
 		if err != nil {
 			return "", true

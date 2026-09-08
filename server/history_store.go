@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -204,11 +205,18 @@ func (h *HistoryStore) writeRecord(record historyRecord) error {
 			return err
 		}
 	}
+	if h.file == nil {
+		h.drops++
+		return errors.New("history store has no open file")
+	}
 
 	written, err := h.file.Write(line)
+	if err != nil {
+		return err
+	}
 	h.size += int64(written)
 	h.dirty = true
-	return err
+	return nil
 }
 
 func (h *HistoryStore) rotate() error {
@@ -227,8 +235,11 @@ func (h *HistoryStore) rotate() error {
 	if _, err := os.Stat(oldFile); err == nil {
 		if err := compressFileZstd(oldFile, oldFile+".zst"); err != nil {
 			log.Printf("⚠️ [HISTORY] Không thể nén history cũ: %v", err)
+		} else if err := os.Remove(oldFile); err != nil {
+			// A leftover .old next to a fresh .old.zst would double-load
+			// every record on restart: fail loudly instead.
+			return fmt.Errorf("cannot remove compressed-aside %s: %w", oldFile, err)
 		} else {
-			_ = os.Remove(oldFile)
 			// fsync dir for durability (like webauthn_store)
 			if dir, err := os.Open(filepath.Dir(h.Filename)); err == nil {
 				_ = dir.Sync()
@@ -243,7 +254,15 @@ func (h *HistoryStore) rotate() error {
 	}
 
 	h.size = 0
-	return h.open()
+	h.file = nil
+	if err := h.open(); err != nil {
+		// Stay fileless: writeRecord drops with a counter instead of
+		// writing into the closed pre-rotate handle. A later record
+		// retries the open via the same path.
+		log.Printf("⚠️ [HISTORY] Reopen after rotate failed: %v", err)
+		return err
+	}
+	return nil
 }
 
 func compressFileZstd(src, dst string) error {
@@ -252,29 +271,39 @@ func compressFileZstd(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	out, err := os.Create(dst)
+	// Write to a temp file and rename: a mid-copy failure must never
+	// leave a truncated dst behind for LoadRecords to choke on.
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".tmp-*.zst")
 	if err != nil {
 		return err
 	}
-	enc, err := zstd.NewWriter(out)
+	tmpName := tmp.Name()
+	failed := true
+	defer func() {
+		if failed {
+			_ = tmp.Close()
+			_ = os.Remove(tmpName)
+		}
+	}()
+	enc, err := zstd.NewWriter(tmp)
 	if err != nil {
-		_ = out.Close()
 		return err
 	}
 	if _, err := io.Copy(enc, in); err != nil {
 		_ = enc.Close()
-		_ = out.Close()
 		return err
 	}
 	if err := enc.Close(); err != nil {
-		_ = out.Close()
 		return err
 	}
-	if err := out.Sync(); err != nil {
-		_ = out.Close()
+	if err := tmp.Sync(); err != nil {
 		return err
 	}
-	return out.Close()
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	failed = false
+	return os.Rename(tmpName, dst)
 }
 
 func (h *HistoryStore) LoadMessages() ([]string, error) {
@@ -299,16 +328,23 @@ func (h *HistoryStore) LoadRecords() ([]historyRecord, error) {
 		return nil, nil
 	}
 	var records []historyRecord
-	// Prefer .old.zst (new), fallback .old (legacy raw) for one version
+	// Prefer .old.zst (new), fallback .old (legacy raw) for one version.
+	// When both exist the .old is a leftover of the same generation:
+	// skip it instead of double-loading every record.
+	zstOK := false
 	paths := []string{h.Filename + ".old.zst", h.Filename + ".old", h.Filename}
 	for _, path := range paths {
 		// Try zstd if suffix matches
 		if strings.HasSuffix(path, ".zst") {
 			if recs, err := h.loadZstdFile(path); err == nil {
 				records = append(records, recs...)
+				zstOK = true
 			} else if !os.IsNotExist(err) {
 				return nil, err
 			}
+			continue
+		}
+		if path == h.Filename+".old" && zstOK {
 			continue
 		}
 		if recs, err := h.loadJSONLFile(path); err == nil {

@@ -131,7 +131,9 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 			newPrev := h.Sum(nil)
 			// An older duplicate later in the file must not rewind a
 			// newer tip: keep the highest sequence per key.
-			if cur, ok := s.TripChains.Load(tripForChain.Pub); !ok || tripForChain.Seq > cur.(TripChain).Seq {
+			if cur, ok := s.TripChains.Load(tripForChain.Pub); !ok {
+				s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: newPrev})
+			} else if ch, ok := cur.(TripChain); ok && tripForChain.Seq > ch.Seq {
 				s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: newPrev})
 			}
 		}

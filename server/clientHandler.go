@@ -144,7 +144,9 @@ func (c *ClientSession) WritePump() {
 			}
 
 		case <-ticker.C:
-			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				return
+			}
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
@@ -232,11 +234,12 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			}
 			msgTmpID = tripMsg.TmpID
 			msgReplyTo = tripMsg.ReplyTo
-			// Cheap sanity: quotes must name a message that exists.
+			// Cheap sanity: quotes must name a message that exists
+			// (heights start at 1, so anything above the tip is future).
 			s.HistoryMu.RLock()
 			tipReady, tipHeight := s.chainReady, s.chainHeight
 			s.HistoryMu.RUnlock()
-			if msgReplyTo != 0 && tipReady && msgReplyTo > tipHeight+1 {
+			if msgReplyTo != 0 && tipReady && msgReplyTo > tipHeight {
 				select {
 				case session.Send <- []byte("[Hệ thống]: Tin reply dẫn tới ID chưa tồn tại."):
 				default:
