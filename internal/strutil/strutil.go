@@ -7,8 +7,15 @@ package strutil
 // the head plus an ellipsis. Short inputs pass through untouched, so
 // attacker-controlled or corrupt short strings never panic a slice.
 func Short(s string) string {
-	if len(s) > 12 {
-		return s[:12] + "…"
+	return ShortN(s, 12)
+}
+
+// ShortN is Short with an explicit width. Widths <= 0 return s as-is
+// (no truncation requested); short inputs still pass through, so the
+// result never overruns len(s).
+func ShortN(s string, n int) string {
+	if n <= 0 || len(s) <= n {
+		return s
 	}
-	return s
+	return s[:n] + "…"
 }

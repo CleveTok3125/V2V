@@ -271,8 +271,23 @@ func (s *ChatServer) SendChatHistory(session *ClientSession) {
 	var minHeight, maxHeight uint64
 	var haveHeight bool
 	sent := 0
+	dropped := 0
 
-	session.Send <- []byte("--- Lịch sử chat gần đây ---")
+	// Non-blocking sends: the peer may be slow or already dead (WritePump
+	// gone) and this runs under BroadcastMu, so blocking here would stall
+	// every broadcast. Drops are counted and logged; the trailer reports
+	// what was actually queued.
+	replaySend := func(b []byte) bool {
+		select {
+		case session.Send <- b:
+			return true
+		default:
+			dropped++
+			return false
+		}
+	}
+
+	replaySend([]byte("--- Lịch sử chat gần đây ---"))
 	for _, msgStr := range historyCopy {
 		// Keep history messages as stored (could be legacy ANSI string or WireMessage JSON)
 		// For WireMessage JSON, send as is; for legacy, clean and send
@@ -296,19 +311,27 @@ func (s *ChatServer) SendChatHistory(session *ClientSession) {
 		}
 		if wireErr == nil {
 			if wire.Type == "chat" {
-				session.Send <- []byte(msgStr)
+				if replaySend([]byte(msgStr)) {
+					sent++
+				}
 			} else {
 				cleaned := filter.CleanHistoryMessage(msgStr)
-				session.Send <- []byte(cleaned)
+				if replaySend([]byte(cleaned)) {
+					sent++
+				}
 			}
 		} else {
 			cleaned := filter.CleanHistoryMessage(msgStr)
-			session.Send <- []byte(cleaned)
+			if replaySend([]byte(cleaned)) {
+				sent++
+			}
 		}
-		sent++
 	}
-	session.Send <- []byte(fmt.Sprintf("--- Kết thúc lịch sử (%d/%d) ---", sent, len(historyCopy)))
+	replaySend([]byte(fmt.Sprintf("--- Kết thúc lịch sử (%d/%d) ---", sent, len(historyCopy))))
 	trailer, _ := json.Marshal(HistorySync{Type: "history_sync", MinHeight: minHeight, MaxHeight: maxHeight,
 		Sent: sent, Total: len(historyCopy)})
-	session.Send <- trailer
+	replaySend(trailer)
+	if dropped > 0 {
+		log.Printf("⚠️ [REPLAY] Dropped %d/%d lines for slow peer (buffer full)", dropped, len(historyCopy)+3)
+	}
 }

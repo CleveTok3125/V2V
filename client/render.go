@@ -137,6 +137,20 @@ func isHistoryBoundaryLine(line string) bool {
 	return strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Kết thúc lịch sử ---")
 }
 
+// parseHistoryBoundary reports whether line opens (header) or closes
+// (footer) a history replay. Sync tracking must run regardless of the
+// join-display toggle: gating it on showJoin leaves inSync unset, which
+// both disables the fork check and feeds replay lines to echo matching.
+func parseHistoryBoundary(line string) (boundary bool, start bool) {
+	if strings.Contains(line, "--- Lịch sử chat gần đây ---") {
+		return true, true
+	}
+	if strings.Contains(line, "--- Kết thúc lịch sử ---") {
+		return true, false
+	}
+	return false, false
+}
+
 // collectCodeblock gathers a fenced code block after its opening line.
 // It returns the joined text, or canceled=true when the user aborted with
 // Ctrl+C or the stream ended — in which case the caller must discard

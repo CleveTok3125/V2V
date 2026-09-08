@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 
@@ -257,4 +261,48 @@ func TestChainResumeSkipsNotices(t *testing.T) {
 	if tip != wantTip || height != 1 {
 		t.Fatalf("resume tip/height = %x/%d, want %s/1", tip, height, w1.ChainHash)
 	}
+}
+
+// A break after legacy history logs exactly once and adopts the tip:
+// the following valid record continues it instead of re-anchoring.
+func TestChainBreakAdoptsTipOnce(t *testing.T) {
+	defer testChainCfg()()
+	var buf bytes.Buffer
+	oldOut := log.Default().Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(oldOut)
+
+	s := NewChatServer()
+	s.ChatHistory = append(s.ChatHistory, "legacy raw line without chain")
+	badPrev := strings.Repeat("0", 64)
+	badHash := strings.Repeat("1", 64)
+	bad, _ := json.Marshal(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "bad",
+		ChainPrev: badPrev, ChainHash: badHash, ChainHeight: 5, ChainVer: 2, TmpID: 1})
+	s.ChatHistory = append(s.ChatHistory, string(bad))
+	// Valid continuation of the adopted bad tip.
+	goodHash := chain.Hash(mustHex(t, badHash), 6, 0, 0, "chat", "15:05", "B", "good", "")
+	good, _ := json.Marshal(WireMessage{Type: "chat", Time: "15:05", DisplayName: "B", Text: "good",
+		ChainPrev: badHash, ChainHash: hex.EncodeToString(goodHash[:]), ChainHeight: 6, ChainVer: 2})
+	s.ChatHistory = append(s.ChatHistory, string(good))
+
+	s.HistoryMu.Lock()
+	s.initChainLocked()
+	tip, height := s.chainTip, s.chainHeight
+	s.HistoryMu.Unlock()
+
+	if height != 6 || tip != goodHash {
+		t.Fatalf("tip/height = %x/%d, want good hash/6", tip, height)
+	}
+	if n := strings.Count(buf.String(), "link break, adopting tip"); n != 1 {
+		t.Fatalf("want exactly 1 TAMPER (the bad link), got %d:\n%s", n, buf.String())
+	}
+}
+
+func mustHex(t *testing.T, s string) [32]byte {
+	t.Helper()
+	b, ok := chain.ParseHex64(s)
+	if !ok {
+		t.Fatalf("bad test hex %q", s)
+	}
+	return b
 }
