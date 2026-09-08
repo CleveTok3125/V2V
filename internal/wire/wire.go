@@ -28,18 +28,22 @@ type TripMeta struct {
 }
 
 type WireMessage struct {
-	Type        string    `json:"type"`
-	Time        string    `json:"time,omitempty"`
-	DisplayName string    `json:"displayName,omitempty"`
-	Text        string    `json:"text,omitempty"`
-	Trip        *TripMeta `json:"trip,omitempty"`
+	Type        string `json:"type"`
+	Time        string `json:"time,omitempty"`
+	DisplayName string `json:"displayName,omitempty"`
+	// SysKind classifies system lines at the source: "join", "leave" or
+	// "date". History replay filters join/leave unless the client asked
+	// for them; untagged lines (old disk records) are always sent.
+	SysKind string    `json:"sys_kind,omitempty"`
+	Text    string    `json:"text,omitempty"`
+	Trip    *TripMeta `json:"trip,omitempty"`
 	// TmpID is the sender's per-session counter, relayed verbatim and
 	// never assigned by the server. ReplyTo quotes a chain height for
 	// replies, relayed verbatim and covered by the link (v2+).
 	TmpID       uint64 `json:"tmp_id,omitempty"`
 	ReplyTo     uint64 `json:"reply_to,omitempty"`
-	ChainPrev   string `json:"chain_prev,omitempty"`   // hex 64
-	ChainHash   string `json:"chain_hash,omitempty"`   // hex 64
+	ChainPrev   string `json:"chain_prev,omitempty"` // hex 64
+	ChainHash   string `json:"chain_hash,omitempty"` // hex 64
 	ChainHeight uint64 `json:"chain_height,omitempty"`
 	ChainVer    int    `json:"chain_ver,omitempty"` // link encoding, current 2
 }
@@ -85,4 +89,23 @@ type AuthPacket struct {
 	// Trip sync fields for hashchain reconnect
 	TripSeq  uint32 `json:"trip_seq,omitempty"`
 	TripPrev string `json:"trip_prev,omitempty"` // hex 64
+
+	// HistoryJoins asks the server to include join/leave lines in the
+	// catch-up replay. Absent means filtered: replay carries chats,
+	// date banners and other system lines only.
+	HistoryJoins bool `json:"history_joins,omitempty"`
+}
+
+// HistorySync is the machine-readable trailer closing a history
+// replay, sent after the human footer. Fork-check logic keys off it:
+// omitted_hashes lists replay-skipped chain hashes (join/leave), so a
+// persisted tip inside that set is filtered-out, not tampered.
+type HistorySync struct {
+	Type          string   `json:"type"` // "history_sync"
+	MinHeight     uint64   `json:"min_height,omitempty"`
+	MaxHeight     uint64   `json:"max_height,omitempty"`
+	Sent          int      `json:"sent,omitempty"`
+	Total         int      `json:"total,omitempty"`
+	OmittedHashes []string `json:"omitted_hashes,omitempty"`
+	Truncated     bool     `json:"truncated,omitempty"`
 }

@@ -487,6 +487,7 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 		TripBadge:   badge,
 		Host:        expectedHost,
 		Perms:       perms,
+		WantJoins:   authPacket.HistoryJoins,
 		Send:        make(chan []byte, 256),
 	}, nil
 }

@@ -58,7 +58,7 @@ func (s *ChatServer) registerClient(session *ClientSession, clientIP string) {
 	// The joiner receives its own join too (nil sender): chain continuity
 	// requires every client to see every link; display gating (!showJoin)
 	// still hides it locally.
-	s.BroadcastSystem(joinMsg, nil)
+	s.BroadcastSystem(joinMsg, "join", nil)
 }
 
 func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
@@ -94,7 +94,7 @@ func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
 
 	leaveMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã rời phòng chat.", leaveTime.Format("15:04"), session.DisplayName)
 	log.Printf("🔴 [LEAVE] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
-	s.BroadcastSystem(leaveMsg, nil)
+	s.BroadcastSystem(leaveMsg, "leave", nil)
 }
 
 func (c *ClientSession) WritePump() {

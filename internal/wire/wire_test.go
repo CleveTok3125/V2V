@@ -10,7 +10,7 @@ import (
 // must be a conscious protocol change reviewed here first.
 func TestWireJSONKeySet(t *testing.T) {
 	full := WireMessage{
-		Type: "chat", Time: "12:00", DisplayName: "Bob#1234", Text: "hi",
+		Type: "system", Time: "12:00", DisplayName: "Bob#1234", SysKind: "join", Text: "hi",
 		Trip:        &TripMeta{Pub: "p", Seq: 1, Prev: "q", Sig: "s", ServerPub: "sp", MsgHash: "m", DisplayName: "Bob#1234", TmpID: 2, ReplyTo: 3},
 		TmpID:       2,
 		ReplyTo:     3,
@@ -27,7 +27,7 @@ func TestWireJSONKeySet(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	wantTop := []string{"type", "time", "displayName", "text", "trip", "tmp_id", "reply_to", "chain_prev", "chain_hash", "chain_height", "chain_ver"}
+	wantTop := []string{"type", "time", "displayName", "sys_kind", "text", "trip", "tmp_id", "reply_to", "chain_prev", "chain_hash", "chain_height", "chain_ver"}
 	if len(got) != len(wantTop) {
 		t.Fatalf("top-level keys = %v, want %v", keysOf(got), wantTop)
 	}
@@ -66,6 +66,30 @@ func TestWireJSONKeySet(t *testing.T) {
 	_ = json.Unmarshal(raw, &amap)
 	if _, ok := amap["IdentityPub"]; ok {
 		t.Error("IdentityPub leaked onto the wire")
+	}
+
+	// HistoryJoins defaults off: absent means filtered replay.
+	var bare AuthPacket
+	if err := json.Unmarshal([]byte(`{"type":"auth"}`), &bare); err != nil || bare.HistoryJoins {
+		t.Fatalf("bare auth must decode with HistoryJoins=false: %+v %v", bare, err)
+	}
+
+	// HistorySync trailer pins its key set as well.
+	sync := HistorySync{Type: "history_sync", MinHeight: 1, MaxHeight: 142, Sent: 32, Total: 142,
+		OmittedHashes: []string{"aa", "bb"}, Truncated: true}
+	raw, _ = json.Marshal(sync)
+	var smap map[string]any
+	_ = json.Unmarshal(raw, &smap)
+	for _, k := range []string{"type", "min_height", "max_height", "sent", "total", "omitted_hashes", "truncated"} {
+		if _, ok := smap[k]; !ok {
+			t.Errorf("missing history_sync key %q in %s", k, raw)
+		}
+	}
+
+	// SysKind round-trips on system lines.
+	var sys WireMessage
+	if err := json.Unmarshal([]byte(`{"type":"system","sys_kind":"join","text":"x"}`), &sys); err != nil || sys.SysKind != "join" {
+		t.Fatalf("sys_kind lost: %+v %v", sys, err)
 	}
 }
 
