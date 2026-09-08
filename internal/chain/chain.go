@@ -120,13 +120,3 @@ func ParseHex64(s string) ([32]byte, bool) {
 	return out, true
 }
 
-// Short renders 8 hex chars for logs; Short4 renders 4 for the
-// "#height:hash" chat meta line.
-func Short(h [32]byte) string {
-	return hex.EncodeToString(h[:])[:8]
-}
-
-// Short4 renders 4 hex chars for the "#height:hash" chat meta line.
-func Short4(h [32]byte) string {
-	return hex.EncodeToString(h[:])[:4]
-}
