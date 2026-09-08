@@ -8,12 +8,22 @@ import (
 	"time"
 )
 
-// tagLine builds one stored history line with chain fields and kind.
+// tagLine builds one stored history line with chain fields and kind
+// (chat, audit, or pre-split system records).
 func tagLine(height uint64, typ, kind, text string) string {
 	raw, _ := json.Marshal(WireMessage{
 		Type: typ, Time: "12:00", SysKind: kind, Text: text,
 		ChainHash:   fmt.Sprintf("%064x", height),
 		ChainHeight: height, ChainVer: 2,
+	})
+	return string(raw)
+}
+
+// noticeLine builds a new-style unchained notification: tagged kind,
+// no chain fields, no height. The chain never advances over these.
+func noticeLine(kind, text string) string {
+	raw, _ := json.Marshal(WireMessage{
+		Type: "system", Time: "12:00", SysKind: kind, Text: text,
 	})
 	return string(raw)
 }
@@ -55,79 +65,81 @@ func drainReplay(t *testing.T, s *ChatServer, wantJoins bool) (contents []string
 
 func seedReplayHistory(s *ChatServer) {
 	lines := []string{
-		tagLine(1, "system", "date", "day 1"),
-		tagLine(2, "system", "join", "A joined"),
+		noticeLine("date", "day 1"),
+		noticeLine("join", "A joined"),
 		tagLine(3, "chat", "", "hello"),
-		tagLine(4, "system", "leave", "A left"),
+		noticeLine("leave", "A left"),
 		tagLine(5, "chat", "", "world"),
+		// Pre-split chained join: no tag, always replayed.
+		tagLine(6, "system", "", "old join"),
 	}
 	for _, l := range lines {
 		s.appendMessageToHistory(l)
 	}
 }
 
-// Filtered replay carries chats, dates and untagged lines only; joins
-// land in the trailer omission set with exact window bounds.
+// Filtered replay carries chats, dates, audits and untagged lines;
+// tagged joins/leaves are skipped without touching trailer bounds.
 func TestReplay_Filtered(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	seedReplayHistory(s)
 	contents, footer, trailer := drainReplay(t, s, false)
-	if len(contents) != 3 {
-		t.Fatalf("filtered replay = %d lines, want 3 (date+2 chats): %q", len(contents), contents)
+	if len(contents) != 4 {
+		t.Fatalf("filtered replay = %d lines, want 4 (date+2 chats+old join): %q", len(contents), contents)
 	}
-	if !strings.Contains(footer, "(3/5)") {
+	if !strings.Contains(footer, "(4/6)") {
 		t.Fatalf("footer missing counts: %q", footer)
 	}
-	if trailer.MinHeight != 1 || trailer.MaxHeight != 5 || trailer.Sent != 3 || trailer.Total != 5 {
+	if trailer.MinHeight != 3 || trailer.MaxHeight != 6 || trailer.Sent != 4 || trailer.Total != 6 {
 		t.Fatalf("trailer bounds/counts wrong: %+v", trailer)
-	}
-	if len(trailer.OmittedHashes) != 2 || trailer.Truncated {
-		t.Fatalf("omission set wrong: %+v", trailer)
 	}
 }
 
-// Requested replay carries everything, omission set stays empty.
+// Requested replay carries everything, including tagged joins.
 func TestReplay_WithJoins(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	seedReplayHistory(s)
 	contents, footer, trailer := drainReplay(t, s, true)
-	if len(contents) != 5 {
-		t.Fatalf("full replay = %d lines, want 5: %q", len(contents), contents)
+	if len(contents) != 6 {
+		t.Fatalf("full replay = %d lines, want 6: %q", len(contents), contents)
 	}
-	if !strings.Contains(footer, "(5/5)") {
+	if !strings.Contains(footer, "(6/6)") {
 		t.Fatalf("footer missing counts: %q", footer)
 	}
-	if len(trailer.OmittedHashes) != 0 {
-		t.Fatalf("omission set must be empty: %+v", trailer)
+	if trailer.MinHeight != 3 || trailer.MaxHeight != 6 {
+		t.Fatalf("trailer bounds wrong: %+v", trailer)
 	}
 }
 
 // The live 142-line shape: sparse chats buried in join/leave noise.
-// Filtered replay must yield exactly the meaningful lines with exact
-// trailer accounting.
+// New-style notices carry no chain fields; filtered replay yields
+// exactly the meaningful lines with exact trailer accounting.
 func TestReplay_LiveShape142(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
-	var chats, dates, joins int
-	for h := uint64(1); h <= 142; h++ {
-		var line string
+	var chats, dates int
+	var firstChat, lastChat uint64
+	var height uint64
+	for i := 1; i <= 142; i++ {
 		switch {
-		case h%30 == 1:
-			line = tagLine(h, "system", "date", "day marker")
+		case i%30 == 1:
+			s.appendMessageToHistory(noticeLine("date", "day marker"))
 			dates++
-		case h%10 == 0:
-			line = tagLine(h, "chat", "", "message")
+		case i%10 == 0:
+			height++
+			if firstChat == 0 {
+				firstChat = height
+			}
+			lastChat = height
+			s.appendMessageToHistory(tagLine(height, "chat", "", "message"))
 			chats++
-		case h%2 == 0:
-			line = tagLine(h, "system", "join", "visitor joined")
-			joins++
+		case i%2 == 0:
+			s.appendMessageToHistory(noticeLine("join", "visitor joined"))
 		default:
-			line = tagLine(h, "system", "leave", "visitor left")
-			joins++
+			s.appendMessageToHistory(noticeLine("leave", "visitor left"))
 		}
-		s.appendMessageToHistory(line)
 	}
 	contents, footer, trailer := drainReplay(t, s, false)
 	want := chats + dates
@@ -137,10 +149,7 @@ func TestReplay_LiveShape142(t *testing.T) {
 	if !strings.Contains(footer, fmt.Sprintf("(%d/142)", want)) {
 		t.Fatalf("footer missing counts: %q", footer)
 	}
-	if trailer.MinHeight != 1 || trailer.MaxHeight != 142 || trailer.Sent != want || trailer.Total != 142 {
-		t.Fatalf("trailer wrong: %+v", trailer)
-	}
-	if len(trailer.OmittedHashes) != joins {
-		t.Fatalf("omitted = %d, want %d joins", len(trailer.OmittedHashes), joins)
+	if trailer.MinHeight != firstChat || trailer.MaxHeight != lastChat || trailer.Sent != want || trailer.Total != 142 {
+		t.Fatalf("trailer wrong: %+v (want min=%d max=%d)", trailer, firstChat, lastChat)
 	}
 }

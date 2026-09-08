@@ -97,15 +97,15 @@ type AuthPacket struct {
 }
 
 // HistorySync is the machine-readable trailer closing a history
-// replay, sent after the human footer. Fork-check logic keys off it:
-// omitted_hashes lists replay-skipped chain hashes (join/leave), so a
-// persisted tip inside that set is filtered-out, not tampered.
+// replay, sent after the human footer. Fork-check logic keys off its
+// window bounds: a persisted tip inside the window but absent from the
+// replayed lines means the log changed. There is no omission set:
+// filtered lines (join/leave notices) never occupied chain positions,
+// so a replay window has no gaps by construction.
 type HistorySync struct {
-	Type          string   `json:"type"` // "history_sync"
-	MinHeight     uint64   `json:"min_height,omitempty"`
-	MaxHeight     uint64   `json:"max_height,omitempty"`
-	Sent          int      `json:"sent,omitempty"`
-	Total         int      `json:"total,omitempty"`
-	OmittedHashes []string `json:"omitted_hashes,omitempty"`
-	Truncated     bool     `json:"truncated,omitempty"`
+	Type      string `json:"type"` // "history_sync"
+	MinHeight uint64 `json:"min_height,omitempty"`
+	MaxHeight uint64 `json:"max_height,omitempty"`
+	Sent      int    `json:"sent,omitempty"`
+	Total     int    `json:"total,omitempty"`
 }

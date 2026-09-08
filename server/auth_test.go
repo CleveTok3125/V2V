@@ -170,7 +170,7 @@ func TestJoinBroadcast_IncludesJoiner(t *testing.T) {
 	sessB := &ClientSession{Conn: b, Send: make(chan []byte, 256), DisplayName: "B#1111", Perms: GetDefaultPermission()}
 	s.Clients[a] = sessA
 	s.Clients[b] = sessB
-	s.BroadcastSystem("X đã tham gia phòng chat!", "join", nil)
+	s.BroadcastNotice("X đã tham gia phòng chat!", "join", nil)
 	for _, sess := range []*ClientSession{sessA, sessB} {
 		select {
 		case msg := <-sess.Send:

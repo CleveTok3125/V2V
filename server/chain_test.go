@@ -35,7 +35,15 @@ func checkStoredChainFrom(s *ChatServer, prev [32]byte) error {
 	var wantHeight uint64
 	for i, msgStr := range s.ChatHistory {
 		var wire WireMessage
-		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil || wire.ChainHash == "" {
+		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil {
+			anchor, anchored = msgStr, true
+			continue
+		}
+		if wire.Type == "system" && wire.ChainHash == "" {
+			// Unchained notice: mirrors initChainLocked, never anchor.
+			continue
+		}
+		if wire.ChainHash == "" {
 			anchor, anchored = msgStr, true
 			continue
 		}
@@ -187,5 +195,66 @@ func TestChainConcurrentAppend(t *testing.T) {
 			t.Fatalf("height %d: broken link", wire.ChainHeight)
 		}
 		prev = want
+	}
+}
+
+// Notices never advance the chain; audits do. Heights and tips belong
+// to chained records (chat, audit) only.
+func TestNoticeAuditRoutes(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	w1 := s.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1})
+	if w1.ChainHeight != 1 {
+		t.Fatalf("first height = %d, want 1", w1.ChainHeight)
+	}
+	s.BroadcastNotice("A joined", "join", nil)
+	if s.chainHeight != 1 {
+		t.Fatalf("notice advanced height to %d", s.chainHeight)
+	}
+	tipAfterNotice := s.chainTip
+	w2 := s.linkAndStore(WireMessage{Type: "chat", Time: "15:05", DisplayName: "B", Text: "two", TmpID: 2})
+	if w2.ChainHeight != 2 {
+		t.Fatalf("chat after notice height = %d, want 2", w2.ChainHeight)
+	}
+	if w2.ChainPrev != w1.ChainHash {
+		t.Fatal("chat prev must skip the notice and link the previous chat")
+	}
+	audit := func() WireMessage {
+		s.BroadcastAudit("moderation note", nil)
+		var w WireMessage
+		last := s.ChatHistory[len(s.ChatHistory)-1]
+		if err := json.Unmarshal([]byte(last), &w); err != nil {
+			t.Fatal(err)
+		}
+		return w
+	}()
+	if audit.ChainHeight != 3 || audit.SysKind != "audit" {
+		t.Fatalf("audit not chained: %+v", audit)
+	}
+	_ = tipAfterNotice
+	verifyStoredChain(t, s)
+}
+
+// Resume over mixed history anchors on legacy chat, never on notices:
+// a burst of visits must not hijack the anchor.
+func TestChainResumeSkipsNotices(t *testing.T) {
+	defer testChainCfg()()
+	s := NewChatServer()
+	s.ChatHistory = append(s.ChatHistory, "legacy raw line without chain")
+	notice, _ := json.Marshal(WireMessage{Type: "system", Time: "15:04", SysKind: "join", Text: "A joined"})
+	s.ChatHistory = append(s.ChatHistory, string(notice))
+	w1 := s.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1})
+	if w1.ChainHeight != 1 {
+		t.Fatalf("first height = %d, want 1", w1.ChainHeight)
+	}
+	r := NewChatServer()
+	r.ChatHistory = append([]string{}, s.ChatHistory...)
+	r.HistoryMu.Lock()
+	r.initChainLocked()
+	tip, height := r.chainTip, r.chainHeight
+	r.HistoryMu.Unlock()
+	wantTip, _ := chain.ParseHex64(w1.ChainHash)
+	if tip != wantTip || height != 1 {
+		t.Fatalf("resume tip/height = %x/%d, want %s/1", tip, height, w1.ChainHash)
 	}
 }
