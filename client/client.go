@@ -890,10 +890,9 @@ func main() {
 		handleHistorySync := func(hs HistorySync) {
 			displayMu.Lock()
 			inSync = false
-			if havePersistedTip && len(syncHashes) > 0 {
-				tipHex := strings.ToLower(hex.EncodeToString(persistedTip[:]))
-				if shouldWarnFork(persistedHeight, hs.MinHeight, hs.MaxHeight, tipHex, syncHashes) {
-					emitLocalFeedback(fmt.Sprintf("| [Local]: Lịch sử server không chứa tip đã lưu #%d (replay #%d–#%d) — log có thể đã phân nhánh (fork).\n", persistedHeight, hs.MinHeight, hs.MaxHeight))
+			if warn, flush := forkWarning(hs, havePersistedTip, persistedTip, persistedHeight, syncHashes); warn != "" {
+				emitLocalFeedback(warn)
+				if flush {
 					flushChainTip()
 				}
 			}
