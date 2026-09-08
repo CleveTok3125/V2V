@@ -14,6 +14,20 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
+type Ed25519Keygen struct {
+	Role         string `help:"Role gắn với danh tính" default:"admin"`
+	Out          string `help:"Nơi ghi container" default:"key.json"`
+	ServerPubKey string `help:"Server public key hex (chống phishing, thay thế host pin)"`
+}
+
+type PasskeyKeygen struct {
+	Role   string `help:"Role gắn với passkey" default:"member"`
+	Out    string `help:"Nơi ghi container" default:"key.json"`
+	RPID   string `help:"RP ID; fallback env WEBAUTHN_RPID"`
+	Origin string `help:"Origin; fallback env WEBAUTHN_ORIGIN"`
+	Label  string `help:"Nhãn thiết bị/người"`
+}
+
 func (c *Ed25519Keygen) Run() error {
 	if tui.HasControllingTTY() {
 		if c.ServerPubKey == "" {
