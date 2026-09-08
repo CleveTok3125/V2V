@@ -294,3 +294,25 @@ func mustHex(t *testing.T, s string) [32]byte {
 	}
 	return b
 }
+
+// Resume over audit and date lines: chained audits resume like chats;
+// unchained dates never disturb the tip.
+func TestChainResumeAuditAndDate(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	s.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1})
+	s.BroadcastNotice("day marker", "date", nil)
+	s.BroadcastAudit("moderation note", nil)
+	if s.chainHeight != 2 {
+		t.Fatalf("height = %d, want 2 (chat+audit only)", s.chainHeight)
+	}
+	r := NewChatServer()
+	r.ChatHistory = append([]string{}, s.ChatHistory...)
+	r.HistoryMu.Lock()
+	r.initChainLocked()
+	tip, height := r.chainTip, r.chainHeight
+	r.HistoryMu.Unlock()
+	if height != 2 || tip != s.chainTip {
+		t.Fatalf("resume tip/height = %x/%d, want %x/2", tip, height, s.chainTip)
+	}
+}
