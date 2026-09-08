@@ -651,21 +651,11 @@ func verifyWireContent(wire WireMessage) error {
 	if !ok {
 		return errChainLink("malformed chain_hash")
 	}
-	var sig string
-	if wire.Trip != nil {
-		sig = wire.Trip.Sig
-	}
 	prev, ok := chain.ParseHex64(wire.ChainPrev)
 	if !ok {
 		return errChainLink("malformed chain_prev")
 	}
-	var linked bool
-	if wire.ChainVer >= 2 {
-		linked = chain.VerifyLink(prev, wire.ChainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, sig, want)
-	} else {
-		linked = chain.VerifyLinkV1(prev, wire.ChainHeight, wire.TmpID, wire.Type, wire.Time, wire.DisplayName, wire.Text, sig, want)
-	}
-	if !linked {
+	if !chain.VerifyWire(prev, wire, want) {
 		return errChainLink("hash does not match content")
 	}
 	return nil

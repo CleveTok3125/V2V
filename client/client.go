@@ -917,6 +917,21 @@ func main() {
 				pendingDateBannerWire = nil
 			}
 		}
+		// handleHistorySync consumes a replay trailer from either a whole
+		// frame or a coalesced per-line blob: never rendered, only the
+		// fork check runs. Caller refreshes after.
+		handleHistorySync := func(hs HistorySync) {
+			displayMu.Lock()
+			inSync = false
+			if havePersistedTip && len(syncHashes) > 0 {
+				tipHex := strings.ToLower(hex.EncodeToString(persistedTip[:]))
+				if shouldWarnFork(persistedHeight, hs.MinHeight, hs.MaxHeight, tipHex, syncHashes) {
+					emitLocalFeedback(fmt.Sprintf("| [Local]: Lịch sử server không chứa tip đã lưu #%d (replay #%d–#%d) — log có thể đã phân nhánh (fork).\n", persistedHeight, hs.MinHeight, hs.MaxHeight))
+					flushChainTip()
+				}
+			}
+			displayMu.Unlock()
+		}
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -954,13 +969,13 @@ func main() {
 			var sysWire WireMessage
 			if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {				displayMu.Lock()
 				checkChainLink(sysWire)
-				if !isShowingJoin && isDateBannerLine(sysWire.Text) {
+				if !isShowingJoin && isDateBanner(sysWire) {
 					pendingDateBannerWire = &sysWire
 					displayMu.Unlock()
 					refreshCoalesced()
 					continue
 				}
-				if !isShowingJoin && isJoinLeaveSystemLine(sysWire.Text) {
+				if !isShowingJoin && isJoinLeave(sysWire) {
 					displayMu.Unlock()
 					refreshCoalesced()
 					continue
@@ -974,34 +989,29 @@ func main() {
 			// Machine-readable replay trailer: never rendered, only the
 			// fork check below consumes it.
 			if hs, ok := parseHistorySync(msg); ok {
-				displayMu.Lock()
-				inSync = false
-				if havePersistedTip && len(syncHashes) > 0 {
-					tipHex := strings.ToLower(hex.EncodeToString(persistedTip[:]))
-					if shouldWarnFork(persistedHeight, hs.MinHeight, hs.MaxHeight, tipHex, syncHashes) {
-						emitLocalFeedback(fmt.Sprintf("| [Local]: Lịch sử server không chứa tip đã lưu #%d (replay #%d–#%d) — log có thể đã phân nhánh (fork).\n", persistedHeight, hs.MinHeight, hs.MaxHeight))
-						flushChainTip()
-					}
-				}
-				displayMu.Unlock()
+				handleHistorySync(hs)
 				refreshCoalesced()
 				continue
 			}
 			for _, line := range strings.Split(string(msg), "\n") {
 				// Also try per-line JSON (for history blob where each line is a WireMessage JSON)
 				var wl WireMessage
+				if hs, ok := parseHistorySync([]byte(line)); ok {
+					handleHistorySync(hs)
+					continue
+				}
 				if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
 					displayMu.Lock()
 					if wl.Type == "chat" {
 						consumeEchoLocked(wl, !inSync)
 					}
 					checkChainLink(wl)
-					if wl.Type == "system" && !isShowingJoin && isDateBannerLine(wl.Text) {
+					if wl.Type == "system" && !isShowingJoin && isDateBanner(wl) {
 						pendingDateBannerWire = &wl
 						displayMu.Unlock()
 						continue
 					}
-					if wl.Type == "system" && !isShowingJoin && isJoinLeaveSystemLine(wl.Text) {
+					if wl.Type == "system" && !isShowingJoin && isJoinLeave(wl) {
 						displayMu.Unlock()
 						continue
 					}
