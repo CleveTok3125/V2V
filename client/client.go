@@ -440,6 +440,7 @@ func main() {
 
 	verifyCh := make(chan verifyJob, 128)
 	var verifyMu sync.Mutex
+	var verifyCloseOnce sync.Once
 	autoVerify := true
 	var autoVerifyMu sync.RWMutex
 	// showMeta toggles the trailing "#height:hash" line (/meta, default
@@ -1063,6 +1064,7 @@ func main() {
 	gracefulQuit := func() {
 		quitting <- true
 		flushChainTip()
+		verifyCloseOnce.Do(func() { close(verifyCh) })
 		conn.WriteMessage(wsCloseMessage, []byte{})
 		// Zero trip private key
 		if tripPriv != nil {

@@ -65,7 +65,10 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		return GetDefaultPermission(), AuthPacket{}, err
 	}
 
-	conn.SetReadDeadline(time.Now().Add(authResponseTimeout))
+	if err := conn.SetReadDeadline(time.Now().Add(authResponseTimeout)); err != nil {
+		conn.Close()
+		return GetDefaultPermission(), AuthPacket{}, err
+	}
 	// Cap the pre-auth response size. Without a limit here the server would
 	// buffer an arbitrarily large auth packet (the chat-phase ReadLimit is only
 	// set later, in ReadPump) and could be memory-exhausted pre-authentication.
