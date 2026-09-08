@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/CleveTok3125/V2V/internal/config"
 )
 
@@ -276,3 +278,43 @@ func TestRegister_NoLiveInterleave(t *testing.T) {
 		t.Fatalf("live message interleaved into replay at %d (trailer at %d)", firstLiveIdx, trailerIdx)
 	}
 }
+
+// BroadcastAudit is chained, verifiable, delivered live, and always
+// replayed: moderation evidence must survive filtering.
+func TestAudit_LiveAndReplay(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	peer := &ClientSession{Send: make(chan []byte, 64), DisplayName: "P#0000", Perms: GetDefaultPermission()}
+	s.ClientsMu.Lock()
+	s.Clients[peerConn()] = peer
+	s.ClientsMu.Unlock()
+	s.BroadcastAudit("moderation note", nil)
+	select {
+	case m := <-peer.Send:
+		var w WireMessage
+		if err := json.Unmarshal(m, &w); err != nil || w.SysKind != "audit" || w.ChainHeight != 1 {
+			t.Fatalf("live audit mangled: %q", m)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("audit not delivered live")
+	}
+	if s.chainHeight != 1 {
+		t.Fatalf("audit must advance the chain, height=%d", s.chainHeight)
+	}
+	s.appendMessageToHistory(tagLine(2, "chat", "", "after audit"))
+	filtered, _, trailer := drainReplay(t, s, false)
+	found := false
+	for _, m := range filtered {
+		if strings.Contains(m, "moderation note") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("audit missing from filtered replay: %q", filtered)
+	}
+	if trailer.MinHeight != 1 || trailer.MaxHeight != 2 {
+		t.Fatalf("trailer bounds wrong with audit: %+v", trailer)
+	}
+}
+
+func peerConn() *websocket.Conn { return &websocket.Conn{} }

@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/CleveTok3125/V2V/identity"
 )
 
 // helper to run in temp dir with chdir
@@ -289,6 +292,66 @@ func TestAtomicWriteFileAdmin_Permissions(t *testing.T) {
 		leftovers, _ := filepath.Glob(".tmp-*")
 		if len(leftovers) != 0 {
 			t.Fatalf("temp files leaked: %v", leftovers)
+		}
+	})
+}
+
+// TestEnrollCreatesTicket: flag-driven enroll writes a pending ticket
+// without a TTY.
+func TestEnrollCreatesTicket(t *testing.T) {
+	withTempDir(t, func() {
+		store := filepath.Join(".", "webauthn.json")
+		if err := (&EnrollCmd{Role: "member", Label: "t", Store: store, TTL: time.Minute}).Run(); err != nil {
+			t.Fatalf("enroll: %v", err)
+		}
+		f, err := loadStore(store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(f.Pending) != 1 || f.Pending[0].Role != "member" {
+			t.Fatalf("pending ticket missing: %+v", f)
+		}
+	})
+}
+
+// TestMigratePlaintextToNative: migrate a plaintext key file to the
+// native encrypted preset using the env passphrase (no TTY).
+func TestMigratePlaintextToNative(t *testing.T) {
+	withTempDir(t, func() {
+		src := filepath.Join(".", "key.json")
+		f := &identity.IdentityFile{Ed25519: &identity.Ed25519Identity{Role: "admin", PrivateKey: "aa", HmacShield: "bb"}}
+		if err := f.Save(src); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("V2V_PASSPHRASE", "migrate-secret")
+		if err := (&MigrateCmd{In: src, Out: src, Preset: "native", Force: true}).Run(); err != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+		enc, _ := identity.IsEncrypted(src)
+		if !enc {
+			t.Fatal("migrated file must be encrypted")
+		}
+		if _, err := os.Stat(src + ".old"); err != nil {
+			t.Fatalf("backup .old missing: %v", err)
+		}
+	})
+}
+
+// TestEd25519KeygenRoundtrip: flag-driven keygen writes a loadable,
+// encrypted container without a TTY.
+func TestEd25519KeygenRoundtrip(t *testing.T) {
+	withTempDir(t, func() {
+		out := filepath.Join(".", "key.json")
+		t.Setenv("V2V_PASSPHRASE", "keygen-secret")
+		if err := (&Ed25519Keygen{Role: "admin", Out: out}).Run(); err != nil {
+			t.Fatalf("keygen: %v", err)
+		}
+		idf, err := identity.LoadEncrypted(out, []byte("keygen-secret"))
+		if err != nil {
+			t.Fatalf("generated file must open: %v", err)
+		}
+		if idf.Ed25519 == nil || idf.Ed25519.Role != "admin" {
+			t.Fatalf("ed25519 slot missing: %+v", idf.Ed25519)
 		}
 	})
 }

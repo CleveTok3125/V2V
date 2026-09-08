@@ -690,3 +690,17 @@ func shouldWarnFork(persistedHeight, syncMin, syncMax uint64, tipHex string, rec
 	}
 	return !received[tipHex]
 }
+
+// forkWarning evaluates the trailer fork check outside the read loop so
+// tests pin it without a TTY. It returns the warning line (or "") and
+// whether the caller should flush the tip afterwards.
+func forkWarning(hs HistorySync, havePersistedTip bool, persistedTip [32]byte, persistedHeight uint64, syncHashes map[string]bool) (string, bool) {
+	if !havePersistedTip || len(syncHashes) == 0 {
+		return "", false
+	}
+	tipHex := strings.ToLower(hex.EncodeToString(persistedTip[:]))
+	if !shouldWarnFork(persistedHeight, hs.MinHeight, hs.MaxHeight, tipHex, syncHashes) {
+		return "", false
+	}
+	return fmt.Sprintf("| [Local]: Lịch sử server không chứa tip đã lưu #%d (replay #%d–#%d) — log có thể đã phân nhánh (fork).\n", persistedHeight, hs.MinHeight, hs.MaxHeight), true
+}

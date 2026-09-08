@@ -248,16 +248,6 @@ func TestFindMentions(t *testing.T) {
 	if len(ms) != 2 || ms[0].height != 1234 || ms[1].height != 56 || ms[1].suffix != "abcd" {
 		t.Fatalf("got %+v", ms)
 	}
-	for _, s := range []string{
-		"mail a@#1234x",   // trailing ident char
-		"x@#1234",         // Wait: @ preceded by ident char -> skip
-		"@#0",             // zero height
-		"@#12:xyz",        // non-hex tail voids
-		"name#123 ok",     // no @ prefix
-		"@#12#34",         // trailing # voids
-	} {
-		_ = s
-	}
 	if got := findMentions("mail a@#1234x"); len(got) != 0 {
 		t.Fatalf("trailing ident must void: %+v", got)
 	}
@@ -272,6 +262,9 @@ func TestFindMentions(t *testing.T) {
 	}
 	if got := findMentions("name#123 ok"); len(got) != 0 {
 		t.Fatalf("missing @ must void: %+v", got)
+	}
+	if got := findMentions("@#12#34"); len(got) != 0 {
+		t.Fatalf("trailing # must void: %+v", got)
 	}
 }
 
@@ -603,5 +596,36 @@ func TestShouldWarnFork(t *testing.T) {
 	// Empty window (nothing chained replayed) -> silent.
 	if shouldWarnFork(5, 0, 0, "zz", map[string]bool{}) {
 		t.Error("empty window must not warn")
+	}
+}
+
+func TestForkWarning(t *testing.T) {
+	hs := HistorySync{Type: "history_sync", MinHeight: 101, MaxHeight: 142, Sent: 40, Total: 42}
+	full := map[string]bool{"aa": true, "bb": true}
+	// No persisted tip: silent, no flush.
+	if w, f := forkWarning(hs, false, [32]byte{}, 120, full); w != "" || f {
+		t.Errorf("no persisted tip must stay silent, got %q flush=%v", w, f)
+	}
+	// Empty hash set: silent, no flush.
+	if w, f := forkWarning(hs, true, [32]byte{1}, 120, map[string]bool{}); w != "" || f {
+		t.Errorf("empty hashes must stay silent, got %q flush=%v", w, f)
+	}
+	// Missing in-window tip: warns and flushes.
+	w, f := forkWarning(hs, true, [32]byte{9}, 120, full)
+	if w == "" || !f {
+		t.Errorf("missing tip must warn+flush, got %q flush=%v", w, f)
+	}
+	if !strings.Contains(w, "#120") || !strings.Contains(w, "101") {
+		t.Errorf("warning must name heights, got %q", w)
+	}
+	// Present tip: silent.
+	var present [32]byte
+	present[0] = 0xaa
+	if w, f := forkWarning(hs, true, present, 120, map[string]bool{hex.EncodeToString(present[:]): true}); w != "" || f {
+		t.Errorf("present tip must stay silent, got %q flush=%v", w, f)
+	}
+	// Pre-window tip: silent.
+	if w, f := forkWarning(hs, true, [32]byte{1}, 50, full); w != "" || f {
+		t.Errorf("pre-window tip must stay silent, got %q flush=%v", w, f)
 	}
 }

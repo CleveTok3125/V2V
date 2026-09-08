@@ -239,3 +239,97 @@ func TestActiveIdentities_Takeover(t *testing.T) {
 		t.Fatal("owner unregister must release the slot")
 	}
 }
+
+// TestWantJoinsEndToEnd: HistoryJoins travels from the auth packet into
+// the session and controls replay filtering, through the real handshake.
+func TestWantJoinsEndToEnd(t *testing.T) {
+	for _, want := range []bool{false, true} {
+		t.Run(map[bool]string{false: "filtered", true: "joins"}[want], func(t *testing.T) {
+			testCfg(t)
+			s := NewChatServer()
+			s.appendMessageToHistory(`{"type":"system","sys_kind":"join","text":"old join"}`)
+			s.appendMessageToHistory(`{"type":"chat","text":"hello"}`)
+			client, serverConn := dialAuthPair(t, s)
+			sessDone := make(chan *ClientSession, 1)
+			go func() {
+				sess, err := s.authenticateClient(serverConn, "127.0.0.1", "localhost")
+				if err != nil {
+					t.Errorf("authenticate: %v", err)
+					sessDone <- nil
+					return
+				}
+				sessDone <- sess
+			}()
+			ch := readChallenge(t, client)
+			resp := AuthPacket{Type: "auth", Username: "E2E", Nonce: ch.Nonce, HistoryJoins: want}
+			if err := client.WriteJSON(resp); err != nil {
+				t.Fatal(err)
+			}
+			// Consume auth_success so the server pump never blocks.
+			client.SetReadDeadline(time.Now().Add(10 * time.Second))
+			var ok AuthPacket
+			if err := client.ReadJSON(&ok); err != nil || ok.Type != "auth_success" {
+				t.Fatalf("auth_success = %+v, %v", ok, err)
+			}
+			sess := <-sessDone
+			if sess == nil {
+				t.Fatal("no session")
+			}
+			if sess.WantJoins != want {
+				t.Fatalf("WantJoins = %v, want %v", sess.WantJoins, want)
+			}
+			sess.Send = make(chan []byte, 64)
+			s.registerClient(sess, "127.0.0.1")
+			var got []string
+			timeout := time.After(5 * time.Second)
+		drain:
+			for {
+				select {
+				case m := <-sess.Send:
+					var hs HistorySync
+					if err := json.Unmarshal(m, &hs); err == nil && hs.Type == "history_sync" {
+						break drain
+					}
+					got = append(got, string(m))
+				case <-timeout:
+					t.Fatal("replay stalled")
+				}
+			}
+			joins := 0
+			for _, m := range got {
+				if strings.Contains(m, "old join") {
+					joins++
+				}
+			}
+			if want && joins != 1 {
+				t.Fatalf("want=1 join line, got %d in %q", joins, got)
+			}
+			if !want && joins != 0 {
+				t.Fatalf("filtered replay leaked %d join lines: %q", joins, got)
+			}
+		})
+	}
+}
+
+// TestRegister_CleansDisplayName verifies unregister releases the
+// display serial slot and the Clients entry.
+func TestRegister_CleansDisplayName(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	_, serverConn := dialAuthPair(t, s)
+	sess := &ClientSession{Conn: serverConn, Send: make(chan []byte, 16), DisplayName: "Temp#0001", Perms: GetDefaultPermission()}
+	s.registerClient(sess, "10.0.0.9")
+	if _, ok := s.Clients[serverConn]; !ok {
+		t.Fatal("registered session missing from Clients")
+	}
+	s.unregisterClient(sess, "10.0.0.9")
+	if _, ok := s.Clients[serverConn]; ok {
+		t.Fatal("unregistered session still in Clients")
+	}
+	s.DisplayNameCountMu.Lock()
+	_, kept := s.DisplayNameCount["Temp#0001"]
+	s.DisplayNameCountMu.Unlock()
+	if kept {
+		t.Fatal("display serial slot not released")
+	}
+}

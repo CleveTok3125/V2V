@@ -1,6 +1,7 @@
 package guard
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -115,4 +116,30 @@ func TestValidateMessageForSend(t *testing.T) {
 	if err := ValidateMessageForSend("hi", time.Now(), nil, false); err != nil {
 		t.Fatalf("nil cfg must not gate: %v", err)
 	}
+}
+
+func TestCooldownMapEvictsStale(t *testing.T) {
+	c := NewCooldownMap()
+	// Fill past the cap with stale entries plus one fresh.
+	for i := 0; i < 1005; i++ {
+		c.last[ipForIndex(i)] = time.Now().Add(-time.Hour)
+	}
+	c.last["fresh"] = time.Now()
+	if !c.Allow("newcomer", time.Minute) {
+		t.Fatal("newcomer must pass")
+	}
+	c.mu.Lock()
+	n := len(c.last)
+	_, freshKept := c.last["fresh"]
+	c.mu.Unlock()
+	if !freshKept {
+		t.Fatal("fresh entry must survive eviction")
+	}
+	if n > 1006 {
+		t.Fatalf("map grew unbounded: %d", n)
+	}
+}
+
+func ipForIndex(i int) string {
+	return "10.9.0." + strconv.Itoa(i)
 }
