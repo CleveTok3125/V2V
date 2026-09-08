@@ -31,9 +31,10 @@ type WireMessage struct {
 	Type        string `json:"type"`
 	Time        string `json:"time,omitempty"`
 	DisplayName string `json:"displayName,omitempty"`
-	// SysKind classifies system lines at the source: "join", "leave" or
-	// "date". History replay filters join/leave unless the client asked
-	// for them; untagged lines (old disk records) are always sent.
+	// SysKind classifies system lines at the source: "join", "leave",
+	// "date", or "audit". History replay filters join/leave unless the
+	// client asked for them; dates, audits and untagged lines (old disk
+	// records) are always sent. Only "audit" lines chain like chat.
 	SysKind string    `json:"sys_kind,omitempty"`
 	Text    string    `json:"text,omitempty"`
 	Trip    *TripMeta `json:"trip,omitempty"`
