@@ -30,6 +30,11 @@ type wsFrame struct {
 }
 
 func dialWS(wsURL string) (wsConn, *http.Response, error) {
+	// The browser owns proxying: CLI proxy flags have no effect here.
+	// Say so out loud instead of silently ignoring them.
+	if CLI.Proxy != "" || CLI.AskProxy {
+		js.Global().Get("console").Call("warn", "V2V: --proxy/--ask-proxy ignored on web; the browser handles proxying")
+	}
 	wsObj := js.Global().Get("WebSocket")
 	if !wsObj.Truthy() {
 		return nil, nil, errors.New("WebSocket API không khả dụng trong trình duyệt này")
