@@ -6,7 +6,7 @@ COPY go.mod go.sum ./
 COPY vendor ./vendor
 COPY . .
 # Version is stamped on the host where .git lives and passed in as a build
-# arg (see docker-compose.yml); build_web.sh falls back to a unique dev
+# arg (see docker-compose.yml); the web target falls back to a unique dev
 # stamp when it is empty, so the bundle never silently reports a stale hash.
 ARG GIT_HASH=""
 ENV GIT_HASH=${GIT_HASH}

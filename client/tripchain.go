@@ -11,14 +11,6 @@ import (
 	"github.com/CleveTok3125/V2V/internal/tripcolor"
 )
 
-type TripState struct {
-	Priv ed25519.PrivateKey
-	Pub  ed25519.PublicKey
-	Seq  uint32
-	Prev []byte // 32 bytes
-	Badge string
-}
-
 // deriveTripKey derives an ed25519 keypair from passphrase + serverPub hex.
 // Salt is sha256(serverPubHex)[:16] to bind per-server. If serverPub empty, uses fixed salt.
 func deriveTripKey(passphrase string, serverPubHex string) (ed25519.PrivateKey, ed25519.PublicKey, string) {
@@ -85,9 +77,3 @@ type PlainMessage struct {
 	ReplyTo uint64 `json:"reply_to,omitempty"`
 }
 
-func (m *TripMessage) GetText() string {
-	if m.Text != "" {
-		return m.Text
-	}
-	return m.Msg
-}

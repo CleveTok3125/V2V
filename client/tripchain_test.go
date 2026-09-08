@@ -133,17 +133,6 @@ func TestTripHashChain(t *testing.T) {
 	}
 }
 
-func TestTripMessageJSON(t *testing.T) {
-	m := TripMessage{Text: "hello", Pub: "ab12", Seq: 5, Prev: "00", Sig: "ff"}
-	if m.GetText() != "hello" {
-		t.Fatalf("GetText failed")
-	}
-	m2 := TripMessage{Msg: "fallback", Pub: "ab12"}
-	if m2.GetText() != "fallback" {
-		t.Fatalf("GetText fallback failed")
-	}
-}
-
 // BenchmarkDeriveTripKey calibrates the passphrase threshold math: one
 // offline guess costs roughly this long (native argon2id t=3/m=64MB),
 // so score<=1 (<1e6 guesses) means days of single-CPU work.

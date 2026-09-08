@@ -183,7 +183,6 @@ var mentionRe = regexp.MustCompile(`@#(\d+)(?::([0-9a-fA-F]{1,16}))?`)
 // so surrounding colors resume. Mentions only render in incoming/history
 // content (default foreground), never in placeholders or meta lines.
 const (
-	sgrMentionOpen  = "\x1b[1;96m"
 	sgrMentionClose = "\x1b[22;39m"
 )
 

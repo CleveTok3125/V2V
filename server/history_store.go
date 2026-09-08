@@ -306,23 +306,6 @@ func compressFileZstd(src, dst string) error {
 	return os.Rename(tmpName, dst)
 }
 
-func (h *HistoryStore) LoadMessages() ([]string, error) {
-	if h == nil {
-		return nil, nil
-	}
-
-	paths := []string{h.Filename + ".old", h.Filename}
-	messages := make([]string, 0)
-
-	for _, path := range paths {
-		if err := h.loadFile(path, &messages); err != nil {
-			return nil, err
-		}
-	}
-
-	return messages, nil
-}
-
 func (h *HistoryStore) LoadRecords() ([]historyRecord, error) {
 	if h == nil {
 		return nil, nil
@@ -387,76 +370,3 @@ func (h *HistoryStore) loadJSONLFile(path string) ([]historyRecord, error) {
 	return out, nil
 }
 
-func (h *HistoryStore) loadFile(path string, messages *[]string) error {
-	// Support both raw and zstd-compressed .old files
-	tryPaths := []string{path}
-	if strings.HasSuffix(path, ".old") {
-		tryPaths = []string{path + ".zst", path}
-	}
-	for _, p := range tryPaths {
-		file, err := os.Open(p)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return err
-		}
-		var reader *bufio.Reader
-		var closeFn func()
-		if strings.HasSuffix(p, ".zst") {
-			// zstd decompress on the fly
-			// Use helper to read zstd file line by line
-			recs, err := h.loadZstdFile(p)
-			file.Close()
-			if err != nil {
-				if os.IsNotExist(err) {
-					continue
-				}
-				return err
-			}
-			for _, rec := range recs {
-				if rec.Message != "" {
-					*messages = append(*messages, rec.Message)
-				} else if rec.Wire != nil {
-					// Convert wire to legacy string for LoadMessages callers (history date/join)
-					data, _ := json.Marshal(rec.Wire)
-					*messages = append(*messages, string(data))
-				}
-			}
-			return nil
-		}
-		reader = bufio.NewReader(file)
-		closeFn = func() { file.Close() }
-		// Read line-by-line with a Reader instead of a Scanner: a Scanner aborts
-		// with "token too long" (and bricks startup) on any line >64KB, e.g. a
-		// leftover oversized record. ReadBytes has no token cap, and the file is
-		// bounded by rotation, so a single bad line can never prevent startup.
-		for {
-			line, readErr := reader.ReadBytes('\n')
-			if len(line) > 0 {
-				line = bytes.TrimSuffix(line, []byte{'\n'})
-				if len(line) > 0 {
-					var record historyRecord
-					if err := json.Unmarshal(line, &record); err != nil {
-						log.Printf("⚠️ [HISTORY] Bỏ qua record lỗi trong %s: %v", p, err)
-					} else if record.Message != "" {
-						*messages = append(*messages, record.Message)
-					} else if record.Wire != nil {
-						data, _ := json.Marshal(record.Wire)
-						*messages = append(*messages, string(data))
-					}
-				}
-			}
-			if readErr != nil {
-				if readErr == io.EOF {
-					break
-				}
-				closeFn()
-				return readErr
-			}
-		}
-		closeFn()
-		return nil
-	}
-	return nil
-}

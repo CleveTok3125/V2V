@@ -13,7 +13,7 @@ import (
 // webFilesHandler serves the static asset directory with transparent support
 // for precompressed variants: when the client advertises br/gzip support and
 // a matching "<name>.br" / "<name>.gz" exists next to the original (both are
-// produced once by build_web.sh), the variant is streamed instead with the
+// produced once by `make web`), the variant is streamed instead with the
 // proper Content-Encoding. This shrinks big assets such as app.wasm to a
 // fraction of their size without spending any CPU compressing per request.
 func webFilesHandler(dir string) http.Handler {
