@@ -50,6 +50,9 @@ type ClientSession struct {
 	TripPub     string
 	TripBadge   string
 	Host        string // Host header at handshake, for https trip link generation
+	// WantJoins asks for join/leave lines in the catch-up replay.
+	// Live broadcasts always carry them; only replay filters.
+	WantJoins bool
 }
 
 type TripChain struct {
@@ -65,6 +68,7 @@ type (
 	TripMeta    = wire.TripMeta
 	WireMessage = wire.WireMessage
 	AuthPacket  = wire.AuthPacket
+	HistorySync = wire.HistorySync
 )
 
 type ServerIdentity struct {
