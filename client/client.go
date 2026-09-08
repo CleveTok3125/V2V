@@ -72,6 +72,7 @@ type (
 	WireMessage = wire.WireMessage
 	TripMeta    = wire.TripMeta
 	Permission  = wire.Permission
+	HistorySync = wire.HistorySync
 )
 
 // WebSocket message type constants (RFC 6455) so the shared chat logic does
@@ -258,6 +259,9 @@ func main() {
 		Username: username,
 		Nonce:    challenge.Nonce,
 	}
+	// Replay filtering follows the same knob as live display: -j asks
+	// for join/leave lines in catch-up history too.
+	respPacket.HistoryJoins = CLI.ShowJoin
 	if tripPub != nil {
 		respPacket.TripPub = hex.EncodeToString(tripPub)
 		// Legacy Tripcode field not needed when TripPub is sent; keep empty
@@ -594,8 +598,6 @@ func main() {
 		persistedTip, persistedHeight, havePersistedTip = [32]byte{}, 0, false
 	}
 	inSync := false
-	syncHashes := map[string]bool{}
-	var syncFirstHeight uint64
 
 	// noteChainTip advances the running tip, persisting it in batches:
 	// every tipBatchSaves links plus explicit flushes (quit, fork warn).
@@ -623,19 +625,16 @@ func main() {
 	// checkChainLink verifies one received wire against the running tip:
 	// content hash always, prev continuity once a tip is adopted. Legacy
 	// lines without chain fields pass silently. The first chained message
-	// adopts its own prev. Any break warns once and adopts (availability),
-	// so chat stays usable while tampering stays visible. During history
-	// sync every chained hash is collected for the fork check at the end
-	// marker. Caller must hold displayMu (warns via local feedback).
+	// adopts its own prev. A filtered replay always has height gaps, so
+	// during history sync a break adopts silently: the gap is filtering,
+	// not evidence of tampering. Live breaks still warn once and adopt
+	// (availability), so chat stays usable while tampering stays visible.
+	// During history sync every chained hash is collected for the fork
+	// check at the trailer. Caller must hold displayMu (warns via local
+	// feedback).
 	checkChainLink := func(wire WireMessage) {
 		if wire.ChainHash == "" {
 			return
-		}
-		if inSync {
-			syncHashes[strings.ToLower(wire.ChainHash)] = true
-			if syncFirstHeight == 0 {
-				syncFirstHeight = wire.ChainHeight
-			}
 		}
 		newTip, err := verifyWireLink(wire, chainTip)
 		if err != nil && !chainHaveTip {
@@ -651,14 +650,14 @@ func main() {
 			newTip, err = verifyWireLink(wire, prev)
 		}
 		if err != nil {
-			if !chainWarned {
-				chainWarned = true
-				emitLocalFeedback(fmt.Sprintf("| [Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", wire.ChainHeight, err))
-			}
 			if parsed, ok := chain.ParseHex64(wire.ChainHash); ok {
 				noteChainTip(parsed, wire.ChainHeight)
 			}
 			flushChainTip()
+			if !inSync && !chainWarned {
+				chainWarned = true
+				emitLocalFeedback(fmt.Sprintf("| [Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", wire.ChainHeight, err))
+			}
 			return
 		}
 		noteChainTip(newTip, wire.ChainHeight)
@@ -948,8 +947,7 @@ func main() {
 				continue
 			}
 			var sysWire WireMessage
-			if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {
-				displayMu.Lock()
+			if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {				displayMu.Lock()
 				checkChainLink(sysWire)
 				if !isShowingJoin && isDateBannerLine(sysWire.Text) {
 					pendingDateBannerWire = &sysWire
@@ -968,8 +966,27 @@ func main() {
 				refreshCoalesced()
 				continue
 			}
-			lines := strings.Split(string(msg), "\n")
-			for _, line := range lines {
+			// Machine-readable replay trailer: never rendered, only the
+			// fork check below consumes it.
+			if hs, ok := parseHistorySync(msg); ok {
+				displayMu.Lock()
+				inSync = false
+				if havePersistedTip {
+					tipHex := strings.ToLower(hex.EncodeToString(persistedTip[:]))
+					omitted := make(map[string]bool, len(hs.OmittedHashes))
+					for _, h := range hs.OmittedHashes {
+						omitted[h] = true
+					}
+					if shouldWarnFork(persistedHeight, hs.MinHeight, hs.MaxHeight, tipHex, omitted, hs.Truncated) {
+						emitLocalFeedback(fmt.Sprintf("| [Local]: Lịch sử server không chứa tip đã lưu #%d (replay #%d–#%d) — log có thể đã phân nhánh (fork).\n", persistedHeight, hs.MinHeight, hs.MaxHeight))
+						flushChainTip()
+					}
+				}
+				displayMu.Unlock()
+				refreshCoalesced()
+				continue
+			}
+			for _, line := range strings.Split(string(msg), "\n") {
 				// Also try per-line JSON (for history blob where each line is a WireMessage JSON)
 				var wl WireMessage
 				if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
@@ -1003,20 +1020,11 @@ func main() {
 					displayMu.Lock()
 					if strings.Contains(line, "--- Lịch sử chat gần đây ---") {
 						inSync = true
-						syncHashes = map[string]bool{}
-						syncFirstHeight = 0
 					}
 					if strings.Contains(line, "--- Kết thúc lịch sử ---") {
 						pendingDateBanner = ""
 						pendingDateBannerWire = nil
 						inSync = false
-						if havePersistedTip && len(syncHashes) > 0 {
-							tipHex := strings.ToLower(hex.EncodeToString(persistedTip[:]))
-							if !syncHashes[tipHex] && persistedHeight >= syncFirstHeight && syncFirstHeight > 0 {
-								emitLocalFeedback(fmt.Sprintf("| [Local]: Lịch sử server không chứa tip đã lưu #%d (replay từ #%d) — log có thể đã phân nhánh (fork).\n", persistedHeight, syncFirstHeight))
-								flushChainTip()
-							}
-						}
 					}
 					emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 					displayMu.Unlock()

@@ -677,3 +677,30 @@ type chainLinkError struct{ msg string }
 func (e *chainLinkError) Error() string { return "chain link broken: " + e.msg }
 
 func errChainLink(msg string) error { return &chainLinkError{msg} }
+
+// parseHistorySync decodes the machine-readable replay trailer. Anything
+// else (chat, system, legacy text) reports false so the caller falls
+// through to normal rendering.
+func parseHistorySync(raw []byte) (HistorySync, bool) {
+	var hs HistorySync
+	if err := json.Unmarshal(raw, &hs); err != nil || hs.Type != "history_sync" {
+		return HistorySync{}, false
+	}
+	return hs, true
+}
+
+// shouldWarnFork decides whether a persisted tip missing from a filtered
+// replay signals tampering. Filtered-out joins (in omitted) and tips
+// outside the replayed window are expected, never warnings. A truncated
+// omission set cannot prove anything, so it stays silent too. Only a tip
+// inside the window, absent from both the replay and the omission set,
+// means the log changed under us.
+func shouldWarnFork(persistedHeight, syncMin, syncMax uint64, tipHex string, omitted map[string]bool, truncated bool) bool {
+	if truncated {
+		return false
+	}
+	if persistedHeight < syncMin || persistedHeight > syncMax {
+		return false
+	}
+	return !omitted[tipHex]
+}
