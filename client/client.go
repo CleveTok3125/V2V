@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -177,46 +176,14 @@ func main() {
 		CLI.Tripcode = tc
 	}
 
-	conn, resp, err := dialWS(wsURL)
+	conn, wsURL, err := dialWithUpgrade(wsURL)
 	if err != nil {
-		// Auto-upgrade ws:// -> wss:// when server requires TLS (426)
-		if resp != nil && resp.StatusCode == http.StatusUpgradeRequired && strings.HasPrefix(wsURL, "ws://") {
-			wssURL := "wss://" + strings.TrimPrefix(wsURL, "ws://")
-			fmt.Printf("🔒 Server yêu cầu wss://, đang thử lại với %s…\n", wssURL)
-			if bodyBytes, _ := io.ReadAll(resp.Body); len(bodyBytes) > 0 {
-				fmt.Printf("📦 Server: %s\n", strings.TrimSpace(string(bodyBytes)))
-			}
-			conn2, resp2, err2 := dialWS(wssURL)
-			if err2 == nil {
-				conn = conn2
-				resp = resp2
-				wsURL = wssURL
-				err = nil
-			} else {
-				fmt.Printf("❌ Thử lại wss cũng thất bại: %v\n", err2)
-				if resp2 != nil {
-					fmt.Printf("👉 HTTP Status Code: %d\n", resp2.StatusCode)
-				}
-			}
-		}
-		if err != nil {
-			fmt.Println("❌ Không thể kết nối:", err)
-			if resp != nil {
-				fmt.Printf("👉 HTTP Status Code: %d\n", resp.StatusCode)
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				if len(bodyBytes) > 0 {
-					fmt.Printf("📦 Nội dung phản hồi: %s\n", strings.TrimSpace(string(bodyBytes)))
-				}
-			}
-			return
-		}
+		return
 	}
 	defer conn.Close()
 
-	var challenge AuthPacket
-	err = conn.ReadJSON(&challenge)
-	if err != nil || challenge.Type != "auth_challenge" {
-		fmt.Println("❌ Lỗi: Server không gửi Auth Challenge hợp lệ.")
+	challenge, err := readChallenge(conn)
+	if err != nil {
 		return
 	}
 
