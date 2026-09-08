@@ -8,6 +8,7 @@ import (
 	"log"
 
 	"github.com/CleveTok3125/V2V/internal/strutil"
+	"strings"
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/filter"
@@ -162,12 +163,13 @@ func (s *ChatServer) sendWithRetry(conn *websocket.Conn, client *ClientSession, 
 
 // BroadcastSystem chains a server-originated line (join/leave/date) as a
 // Type system wire so every message in the log carries a chain link.
+// kind tags the line ("join", "leave", "date") for replay filtering.
 // Unicast warnings stay raw strings: they are per-client, never chained.
-func (s *ChatServer) BroadcastSystem(text string, sender *websocket.Conn) {
+func (s *ChatServer) BroadcastSystem(text, kind string, sender *websocket.Conn) {
 	now := time.Now().In(Cfg.Static.Timezone)
 	s.BroadcastMu.Lock()
 	defer s.BroadcastMu.Unlock()
-	wire := s.linkAndStore(WireMessage{Type: "system", Time: now.Format("15:04"), Text: text})
+	wire := s.linkAndStore(WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: kind, Text: text})
 	data, _ := json.Marshal(wire)
 
 	s.ClientsMu.RLock()
@@ -215,7 +217,7 @@ func (s *ChatServer) CheckAndBroadcastDate(now time.Time) {
 
 		dateMsg := fmt.Sprintf("\x1b[36m--- Ngày %s ---\x1b[0m", currentDate)
 
-		s.BroadcastSystem(dateMsg, nil)
+		s.BroadcastSystem(dateMsg, "date", nil)
 	}
 }
 
@@ -240,17 +242,55 @@ func (s *ChatServer) SendChatHistory(session *ClientSession) {
 	copy(historyCopy, s.ChatHistory[startIndex:])
 	s.HistoryMu.RUnlock()
 
+	// Replay filters join/leave unless the session asked for them.
+	// Untagged lines (old disk records) always go: without a tag the
+	// kind is unknown, and dropping unknown content loses data.
+	const maxOmitted = 1000
+	var omitted []string
+	var truncated bool
+	var minHeight, maxHeight uint64
+	var haveHeight bool
+	sent := 0
+
 	session.Send <- []byte("--- Lịch sử chat gần đây ---")
 	for _, msgStr := range historyCopy {
 		// Keep history messages as stored (could be legacy ANSI string or WireMessage JSON)
 		// For WireMessage JSON, send as is; for legacy, clean and send
 		var wire WireMessage
-		if err := json.Unmarshal([]byte(msgStr), &wire); err == nil && wire.Type == "chat" {
-			session.Send <- []byte(msgStr)
+		wireErr := json.Unmarshal([]byte(msgStr), &wire)
+		if wireErr == nil {
+			if !haveHeight || wire.ChainHeight < minHeight {
+				minHeight = wire.ChainHeight
+			}
+			if !haveHeight || wire.ChainHeight > maxHeight {
+				maxHeight = wire.ChainHeight
+			}
+			haveHeight = true
+		}
+		if wireErr == nil && wire.Type == "system" &&
+			(wire.SysKind == "join" || wire.SysKind == "leave") && !session.WantJoins {
+			if len(omitted) < maxOmitted {
+				omitted = append(omitted, strings.ToLower(wire.ChainHash))
+			} else {
+				truncated = true
+			}
+			continue
+		}
+		if wireErr == nil {
+			if wire.Type == "chat" {
+				session.Send <- []byte(msgStr)
+			} else {
+				cleaned := filter.CleanHistoryMessage(msgStr)
+				session.Send <- []byte(cleaned)
+			}
 		} else {
 			cleaned := filter.CleanHistoryMessage(msgStr)
 			session.Send <- []byte(cleaned)
 		}
+		sent++
 	}
-	session.Send <- []byte("--- Kết thúc lịch sử ---")
+	session.Send <- []byte(fmt.Sprintf("--- Kết thúc lịch sử (%d/%d) ---", sent, len(historyCopy)))
+	trailer, _ := json.Marshal(HistorySync{Type: "history_sync", MinHeight: minHeight, MaxHeight: maxHeight,
+		Sent: sent, Total: len(historyCopy), OmittedHashes: omitted, Truncated: truncated})
+	session.Send <- trailer
 }
