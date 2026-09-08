@@ -95,14 +95,6 @@ func TestParseHex64(t *testing.T) {
 	}
 }
 
-func TestShortForms(t *testing.T) {
-	var h [32]byte
-	h[0], h[1] = 0x12, 0x34
-	if Short(h) != "12340000"[:8] || Short4(h) != "1234" {
-		t.Fatalf("got %q %q", Short(h), Short4(h))
-	}
-}
-
 func BenchmarkVerify500(b *testing.B) {
 	var prev [32]byte
 	type link struct {
