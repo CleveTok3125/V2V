@@ -12,6 +12,14 @@ Chat without accounts. The server never asks for email, phone numbers, or any re
 - **Transparent history** — every message links into a single server-wide hash chain. If a message is edited or reordered, every client can detect the break.
 - **Passwordless admin login** — moderators use Ed25519 key files or WebAuthn passkeys. No personal identifying information required.
 
+## Why V2V Exists
+
+Most chat platforms are built around accounts, profiles, and permanent identities. V2V explores a different model: **the conversation itself matters more than who is speaking**.
+
+It fits situations where people don't need an account — joining with just a name — but the discussion still benefits from continuity: messages stay referenceable, and anyone can independently check that the history hasn't been altered.
+
+That works for casual communities and for teams alike: any group that needs attributable, verifiable discussion without running account infrastructure.
+
 ## Quick Start
 
 **1. Get a binary**
