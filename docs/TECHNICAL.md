@@ -16,6 +16,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 - [Tripcode](#tripcode)
 - [Storage & Persistence](#storage--persistence)
 - [Security Model](#security-model)
+- [Roadmap](#roadmap)
 
 ## Project Structure
 
@@ -313,3 +314,16 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - `--ask-proxy` runs an interactive wizard (huh scheme select, host, port, optional user, hidden password) that overrides all static config.
 - HTTP(S) proxies use a dedicated gorilla `Dialer`; SOCKS5 handshakes by hand on stdlib (`client/proxy.go`, no new dependency) with the target always sent as a domain name so no local DNS leaks, plus TLS for `wss`.
 - The proxy password is the proxy's secret: no meter, no weak gate. It lives as `[]byte`, wipes after dial, and logs show `user:***@host`; prompt/URL strings at the stdlib boundary await GC as documented for all secrets.
+
+## Roadmap
+
+Planned future work, in no particular order. Each item is self-contained: it can land without the others.
+
+- **Paged history** — fetch older segments on demand (`/history`); the connect-time replay (`MAX_HISTORY_SEND`) stays a join burst for fast startup.
+- **Session surgery** — extract main-loop session state (`term/out/displayMu/tabs/chain/verify`) and split `ChatServer` fields (`chain.Service`/`history.Store`/`hub`); the client tip-state mutex depends on this refactor.
+- **First audit producer** — the `BroadcastAudit` route has tests but no callers; wire the first management action (ban/kick/mute/rolechange) through it, with verify and replay tests proving the line chains and replays.
+- **Env/log/error unification** — one typed getenv helper replacing scattered `os.Getenv`, leveled logging replacing bare `log.Printf`, and a documented rule for when errors wrap with `%w`.
+- **Dependency arrows** — use the `markup` facade instead of importing `codebg`/`linkify` directly; `strength` returns its own report type instead of `passprompt.Assessment`; `guard` takes a plain limits struct instead of `*config.DynamicConfig`.
+- **Wasm and timing tests** — coverage for the terminal emulator and proxy paths on wasm; bounded waits instead of fixed sleeps in timing-sensitive tests.
+- **Client config encryption** — guard limits (`MaxMessageLength`, cooldowns) currently load from plaintext `config.json`, so editing the local file weakens client-side guards. Encrypt the client config with the tripcode v3-envelope pattern (argon2id + XChaCha20, passphrase-opened), reusing the existing prompt and unlock flows; no new secrets, server `.env` out of scope.
+- **Relay mesh** — a lightweight distribution network outside the server: each relay connects to one server plus many relays, and each client connects to one server plus many relays (CDN-style reads). Writes go to the server only (relays are read-only); relays share one wire protocol subset, alert each other with the client as the consumer, and serve as backup sources the client verifies against known chain tips. Not a federation: no cross-server identity or routing, one server's content only.
