@@ -12,6 +12,14 @@ Trò chuyện không cần tài khoản. Máy chủ không bao giờ yêu cầu 
 - **Lịch sử minh bạch** — mọi tin nhắn đều được liên kết vào một chuỗi băm (hash chain) duy nhất trên toàn hệ thống máy chủ. Nếu tin nhắn bị chỉnh sửa hoặc thay đổi thứ tự, mọi ứng dụng khách (client) đều có thể phát hiện sự đứt gãy của chuỗi này.
 - **Đăng nhập cho quản trị viên không cần mật khẩu** — người điều hành sử dụng tệp khóa Ed25519 hoặc khóa truy cập WebAuthn (passkey). Không yêu cầu thông tin định danh cá nhân.
 
+## Vì sao có V2V
+
+Hầu hết các nền tảng trò chuyện đều được xây dựng dựa trên hệ thống tài khoản, hồ sơ cá nhân và danh tính cố định. V2V khai thác một mô hình khác: **bản thân cuộc trò chuyện quan trọng hơn danh tính người nói**.
+
+Mô hình này phù hợp với những tình huống mà người dùng không cần tạo tài khoản — chỉ cần tham gia với một cái tên — nhưng cuộc thảo luận vẫn duy trì được tính liên tục: các tin nhắn được lưu lại để có thể tra cứu, và bất kỳ ai cũng có thể tự mình xác minh rằng lịch sử trò chuyện không bị chỉnh sửa.
+
+Cách tiếp cận này hiệu quả cho cả các cộng đồng giao lưu lẫn các nhóm làm việc: bất kỳ nhóm nào cần các cuộc thảo luận có thể xác định nguồn gốc và kiểm chứng được, mà không muốn phải vận hành hệ thống quản lý tài khoản phức tạp.
+
 ## Bắt đầu nhanh
 
 **1. Lấy binary**
