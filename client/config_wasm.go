@@ -95,6 +95,12 @@ func showWasmStatus(msg string, isError bool) bool {
 // runtime instead of a dead one.
 func parkForever() { select {} }
 
+// encryptConfigFile is desktop-only: the web build has no config file
+// access, so --encrypt-config is a no-op that reports back.
+func encryptConfigFile() {
+	setWasmStatus("--encrypt-config không dùng được trên web", true)
+}
+
 // applyWebPasskey runs the browser ceremony when the page requested a
 // passkey login. Returns false only on failure — the caller treats that as
 // fatal (no silent guest fallback) but will show the error in the status

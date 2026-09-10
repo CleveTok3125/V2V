@@ -2,11 +2,17 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/CleveTok3125/V2V/identity"
 )
+
+// ErrEncrypted signals a passphrase-sealed config. Callers obtain the
+// passphrase (env or prompt) and retry with LoadEncrypted.
+var ErrEncrypted = errors.New("config file is encrypted")
 
 // DynamicConfig mirrors server DynamicConfig for reuse on client.
 type DynamicConfig struct {
@@ -348,9 +354,9 @@ func (c *ClientConfig) ClipboardClearAfterSec() int {
 	return *c.UI.Clipboard.ClearAfterSec
 }
 
-// Load reads a client config file. The config is immutable state: read
-// freely, replaced only by explicit actions. A missing file yields
-// in-memory defaults; mutable state lives in separate cache files.
+// Load reads a client config file. The config is read-only input: a
+// missing file yields in-memory defaults and nothing is ever written
+// back. Mutable state lives in separate cache files.
 func Load(path string) (*ClientConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -359,7 +365,25 @@ func Load(path string) (*ClientConfig, error) {
 		}
 		return nil, err
 	}
+	if identity.IsEncryptedData(data) {
+		return nil, ErrEncrypted
+	}
 	return parse(data)
+}
+
+// LoadEncrypted opens a passphrase-sealed config file. Wrong passphrase
+// and corrupt files both fail closed.
+func LoadEncrypted(path string, passphrase []byte) (*ClientConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	plain, err := identity.DecryptData(data, passphrase)
+	if err != nil {
+		return nil, err
+	}
+	defer identity.ZeroBytes(plain)
+	return parse(plain)
 }
 
 // ReplaceFile atomically swaps the whole file at path with data. Config

@@ -2,10 +2,12 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/CleveTok3125/V2V/identity"
 )
 
 func TestMetaShowDefault(t *testing.T) {
@@ -152,6 +154,32 @@ func TestLoadMissingUsesDefaultsWithoutCreating(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("Load must never create the config file")
+	}
+}
+
+func TestLoadEncryptedRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.jsonc")
+	raw := `{"defaults": {"username": "Sealed"}} // sealed config`
+	sealed, err := identity.EncryptData([]byte(raw), []byte("correct-horse"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, sealed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); !errors.Is(err, ErrEncrypted) {
+		t.Fatalf("plain Load of sealed file must return ErrEncrypted, got %v", err)
+	}
+	c, err := LoadEncrypted(path, []byte("correct-horse"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Defaults.Username != "Sealed" {
+		t.Fatalf("decrypted username = %q, want Sealed", c.Defaults.Username)
+	}
+	if _, err := LoadEncrypted(path, []byte("wrong")); err == nil {
+		t.Fatal("wrong passphrase must fail closed")
 	}
 }
 

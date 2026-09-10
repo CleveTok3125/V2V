@@ -41,7 +41,6 @@ var Version = "dev"
 // strikethrough, links, quotes) renders through markup, which delegates
 // code to codebg.
 
-
 // Session-wide config, protocol aliases and shared terminal/socket
 // surfaces. The render/parse helpers live in render.go; the session
 // loop is main() below.
@@ -58,10 +57,12 @@ var CLI struct {
 
 	UseKey    bool   `help:"Dùng key mặc định trong config-dir" short:"k"`
 	KeyFile   string `help:"Đường dẫn file chứa khóa xác thực" short:"K" name:"key-file"`
-	Proxy     string `help:"Proxy http/https/socks5 (VD: socks5://127.0.0.1:1080). Thắng V2V_PROXY và proxy hệ thống" env:"V2V_PROXY"`
-	AskProxy  bool   `help:"Hỏi thông tin proxy bằng prompt (thắng mọi cấu hình proxy khác)" name:"ask-proxy"`
+	Proxy     string `help:"Proxy http/https/socks5"`
+	AskProxy  bool   `help:"Hỏi thông tin proxy bằng prompt" name:"ask-proxy"`
 	ConfigDir string `help:"Thư mục config" short:"c" env:"V2V_CONFIG_DIR"`
 	CacheDir  string `help:"Thư mục cache/history" short:"C" env:"V2V_CACHE_DIR"`
+
+	EncryptConfig bool `help:"Mã hóa config bằng passphrase" name:"encrypt-config"`
 }
 
 // Protocol schema lives in internal/wire (single source). Aliases keep
@@ -147,6 +148,11 @@ func emitWhoami(mu *sync.Mutex, emit func(string), username, authType, role stri
 
 func main() {
 	parseFlags()
+
+	if CLI.EncryptConfig {
+		encryptConfigFile()
+		return
+	}
 
 	if CLI.Info {
 		checkServerInfo(CLI.Server)
@@ -933,7 +939,8 @@ func main() {
 				continue
 			}
 			var sysWire WireMessage
-			if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {				displayMu.Lock()
+			if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {
+				displayMu.Lock()
 				checkChainLink(sysWire)
 				if !isShowingJoin && isDateBanner(sysWire) {
 					pendingDateBannerWire = &sysWire
