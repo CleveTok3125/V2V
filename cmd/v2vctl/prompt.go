@@ -12,6 +12,12 @@ import (
 	"github.com/CleveTok3125/V2V/internal/tui"
 )
 
+// toPromptAssessment adapts the policy Report to the prompt meter.
+// The adapter lives caller-side so strength never imports UI packages.
+func toPromptAssessment(r strength.Report) passprompt.Assessment {
+	return passprompt.Assessment{Bits: r.Bits, Score: r.Score, Capped: r.Capped, Label: r.Label, Weak: r.Weak}
+}
+
 func nonEmpty(s string) error {
 	if strings.TrimSpace(s) == "" {
 		return errors.New("bắt buộc")
@@ -26,7 +32,7 @@ func promptPassphrase() (string, error) {
 		Title:      "Passphrase (Enter = không mã hóa)",
 		AllowEmpty: true,
 		MaxRounds:  passprompt.DefaultMaxRounds,
-		Assess:     func(s string) passprompt.Assessment { return strength.Assess(s, nil) },
+		Assess:     func(s string) passprompt.Assessment { return toPromptAssessment(strength.Assess(s, nil)) },
 	})
 	if err != nil || strings.TrimSpace(pass) == "" {
 		return pass, err

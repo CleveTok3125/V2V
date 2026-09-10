@@ -1,16 +1,15 @@
 // Package strength owns the passphrase-strength policy for the repo:
-// zxcvbn scoring mapped to the shared prompt meter. Both the chat
-// client (with personal userInputs context) and v2vctl (context-free)
+// zxcvbn scoring reported as a plain Report. Both the chat client
+// (with personal userInputs context) and v2vctl (context-free)
 // assess through here, so label bands, the weak threshold and the
-// display cap stay identical in both binaries.
+// display cap stay identical in both binaries. Callers adapt Report
+// to their own display types; strength never imports UI packages.
 package strength
 
 import (
 	"math"
 
 	"github.com/ccojocar/zxcvbn-go"
-
-	"github.com/CleveTok3125/V2V/internal/passprompt"
 )
 
 // weakMaxScore gates the warn+confirm prompt. Scores above pass silent.
@@ -33,10 +32,22 @@ func label(score int) string {
 	}
 }
 
-// Assess maps a passphrase to the shared meter. userInputs carries
-// public personal context (username, server host); nil when none
-// exists (v2vctl). Pure: safe to call per keystroke.
-func Assess(passphrase string, userInputs []string) passprompt.Assessment {
+// Report is the policy-owned meter snapshot for one input value.
+// Bits is capped display entropy (reference only), Score the 0-4 band,
+// Label the band name, Weak whether callers must warn + confirm,
+// Capped whether raw entropy exceeded the cap.
+type Report struct {
+	Bits   float64
+	Score  int
+	Capped bool
+	Label  string
+	Weak   bool
+}
+
+// Assess maps a passphrase to a Report. userInputs carries public
+// personal context (username, server host); nil when none exists
+// (v2vctl). Pure: safe to call per keystroke.
+func Assess(passphrase string, userInputs []string) Report {
 	r := zxcvbn.PasswordStrength(passphrase, userInputs)
 	e := r.Entropy
 	capped := !math.IsNaN(e) && e > displayEntropyCap
@@ -46,7 +57,7 @@ func Assess(passphrase string, userInputs []string) passprompt.Assessment {
 	if e > displayEntropyCap {
 		e = displayEntropyCap
 	}
-	return passprompt.Assessment{
+	return Report{
 		Bits:   e,
 		Score:  r.Score,
 		Capped: capped,
