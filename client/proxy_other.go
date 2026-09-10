@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/gorilla/websocket"
 
+	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/identity"
 
 	"github.com/CleveTok3125/V2V/internal/passprompt"
@@ -119,8 +120,8 @@ func resolveProxy(r io.Reader) (*proxyConfig, error) {
 	if strings.TrimSpace(CLI.Proxy) != "" {
 		return parseProxyURL(CLI.Proxy)
 	}
-	if env := strings.TrimSpace(os.Getenv("V2V_PROXY")); env != "" {
-		return parseProxyURL(env)
+	if proxyEnv := strings.TrimSpace(env.Proxy()); proxyEnv != "" {
+		return parseProxyURL(proxyEnv)
 	}
 	return nil, nil
 }

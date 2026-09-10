@@ -4,13 +4,13 @@ import (
 	"crypto/rand"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/wire"
 )
@@ -159,7 +159,7 @@ func NewChatServer() *ChatServer {
 		DisplayNameCount:  make(map[string]int),
 		ChatHistory:       make([]string, 0),
 		RoleRegistry:      make(map[string]RoleDefinition),
-		WebAuthn:         NewWebAuthnStore(os.Getenv("WEBAUTHN_STORE")),
+		WebAuthn:         NewWebAuthnStore(env.WebauthnStore()),
 		Upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,

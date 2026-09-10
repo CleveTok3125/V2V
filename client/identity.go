@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/identity"
 
 	"github.com/CleveTok3125/V2V/internal/passprompt"
@@ -24,7 +25,7 @@ type (
 // LoadIdentityFile reads key.json, handling encrypted files (version 3).
 func LoadIdentityFile(path string) (*IdentityFile, error) {
 	if enc, _ := identity.IsEncrypted(path); enc {
-		if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
+		if pass := env.Passphrase(); pass != "" {
 			// Env unlock only warns when weak: refusing here would
 			// lock out legitimate files. No personal context feeds
 			// this check; it still catches trivial secrets.

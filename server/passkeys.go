@@ -22,12 +22,12 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 
+	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/strutil"
 )
 
@@ -51,8 +51,8 @@ var WAConfig webauthnConfig
 var WebAuth *webauthn.WebAuthn
 
 func LoadWebauthnEnv() {
-	WAConfig.RPID = os.Getenv("WEBAUTHN_RPID")
-	WAConfig.Origin = os.Getenv("WEBAUTHN_ORIGIN")
+	WAConfig.RPID = env.WebauthnRPID()
+	WAConfig.Origin = env.WebauthnOrigin()
 	WAConfig.Enabled = WAConfig.RPID != "" && WAConfig.Origin != ""
 	if !WAConfig.Enabled {
 		fmt.Println("ℹ️ WEBAUTHN_RPID/WEBAUTHN_ORIGIN chưa đặt — đăng nhập bằng passkey đang TẮT")
