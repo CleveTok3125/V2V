@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 
+	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/strength"
 	"github.com/CleveTok3125/V2V/internal/tui"
@@ -91,7 +92,7 @@ func (m *MigrateCmd) Run() error {
 	var idf *identity.IdentityFile
 	var oldPass string
 	if enc {
-		if p := os.Getenv("V2V_PASSPHRASE"); p != "" {
+		if p := env.Passphrase(); p != "" {
 			oldPass = p
 		} else if tui.HasControllingTTY() {
 			fmt.Println("🔒 File đã mã hóa, nhập passphrase hiện tại để mở...")
@@ -168,7 +169,7 @@ func (m *MigrateCmd) Run() error {
 		if err != nil {
 			return err
 		}
-	} else if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
+	} else if pass := env.Passphrase(); pass != "" {
 		if strength.Assess(pass, nil).Weak {
 			fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
 		}

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/passprompt"
 	"github.com/CleveTok3125/V2V/internal/tui"
@@ -43,7 +44,7 @@ func resolveTripcode(useFlag bool, configDir, username, serverHost string) (stri
 		return "", nil
 	}
 	ctx := userInputs(username, serverHost)
-	if v := os.Getenv("V2V_TRIPCODE"); v != "" {
+	if v := env.Tripcode(); v != "" {
 		if rep := AssessPassphrase(v, ctx); rep.Weak {
 			fmt.Printf("⚠️ Tripcode trong env yếu, cân nhắc đổi.\n")
 		}
@@ -180,7 +181,7 @@ func loadTripcodeFile(path string) (tc string, found bool, err error) {
 	if !identity.IsEncryptedData(data) {
 		return "", false, errors.New("tripcode.json không được mã hóa — xóa file hoặc nhập tay để lưu lại bản mã hóa")
 	}
-	unlock := os.Getenv("V2V_PASSPHRASE")
+	unlock := env.Passphrase()
 	if unlock == "" {
 		if tui.Interactive() {
 			unlock, err = passprompt.Password(passprompt.PasswordOpts{
@@ -195,7 +196,7 @@ func loadTripcodeFile(path string) (tc string, found bool, err error) {
 			return "", false, err
 		}
 	}
-	if os.Getenv("V2V_PASSPHRASE") != "" && AssessPassphrase(unlock, nil).Weak {
+	if env.Passphrase() != "" && AssessPassphrase(unlock, nil).Weak {
 		fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
 	}
 	unlockPw := []byte(unlock)

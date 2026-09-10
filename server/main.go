@@ -13,6 +13,7 @@ import (
 	"time"
 	_ "time/tzdata"
 
+	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/joho/godotenv"
 )
 
@@ -138,7 +139,7 @@ func loadStaticConfig() (StaticConfig, error) {
 	}
 
 	cfg := StaticConfig{
-		AllowedOrigins:       strings.Split(os.Getenv("ALLOWED_ORIGINS"), ","),
+		AllowedOrigins:       strings.Split(env.AllowedOrigins(), ","),
 		RequireTLS:           getEnvAsBoolOptional("REQUIRE_TLS", false),
 		Port:                 loader.Smart("PORT"),
 		InstanceID:           instanceID,

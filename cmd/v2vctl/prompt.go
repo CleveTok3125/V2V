@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/passprompt"
 	"github.com/CleveTok3125/V2V/internal/strength"
@@ -61,7 +62,7 @@ func loadContainer(path string) (*identity.IdentityFile, error) {
 	// Check if file is encrypted and need passphrase
 	if enc, _ := identity.IsEncrypted(path); enc {
 		// Try env first
-		if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
+		if pass := env.Passphrase(); pass != "" {
 			pw := []byte(pass)
 			pass = ""
 			idf, err := identity.LoadEncrypted(path, pw)
@@ -125,7 +126,7 @@ func saveContainer(idf *identity.IdentityFile, path string) error {
 		}
 	}
 	// Check env for non-interactive
-	if pass := os.Getenv("V2V_PASSPHRASE"); pass != "" {
+	if pass := env.Passphrase(); pass != "" {
 		if strength.Assess(pass, nil).Weak {
 			fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
 		}

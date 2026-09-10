@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
+	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/tui"
 	"github.com/charmbracelet/huh"
@@ -95,10 +96,10 @@ func (c *Ed25519Keygen) Run() error {
 func (c *PasskeyKeygen) Run() error {
 	if tui.HasControllingTTY() {
 		if c.RPID == "" {
-			c.RPID = os.Getenv("WEBAUTHN_RPID")
+			c.RPID = env.WebauthnRPID()
 		}
 		if c.Origin == "" {
-			c.Origin = os.Getenv("WEBAUTHN_ORIGIN")
+			c.Origin = env.WebauthnOrigin()
 		}
 		form := huh.NewForm(huh.NewGroup(
 			huh.NewInput().Title("Role").Value(&c.Role).Validate(nonEmpty),
@@ -113,11 +114,11 @@ func (c *PasskeyKeygen) Run() error {
 	}
 	rpid := c.RPID
 	if rpid == "" {
-		rpid = os.Getenv("WEBAUTHN_RPID")
+		rpid = env.WebauthnRPID()
 	}
 	origin := c.Origin
 	if origin == "" {
-		origin = os.Getenv("WEBAUTHN_ORIGIN")
+		origin = env.WebauthnOrigin()
 	}
 	if rpid == "" || origin == "" {
 		return errors.New("passkey cần --rpid và --origin (hoặc env WEBAUTHN_RPID/WEBAUTHN_ORIGIN)")

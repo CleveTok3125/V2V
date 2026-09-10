@@ -13,6 +13,7 @@ import (
 	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/config"
 	"github.com/CleveTok3125/V2V/internal/configdir"
+	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/passprompt"
 	"github.com/CleveTok3125/V2V/internal/tui"
 )
@@ -80,7 +81,7 @@ func encryptConfigFile() {
 		fmt.Println("❌ File đã mã hóa rồi")
 		os.Exit(1)
 	}
-	pass := os.Getenv("V2V_PASSPHRASE")
+	pass := env.Passphrase()
 	if pass == "" {
 		if !tui.Interactive() {
 			fmt.Println("❌ set V2V_PASSPHRASE or run in TTY to encrypt")
@@ -122,7 +123,7 @@ func encryptConfigFile() {
 // loadEncryptedConfig mirrors the tripcode unlock: V2V_PASSPHRASE first,
 // interactive prompt second, hard error without a TTY.
 func loadEncryptedConfig(path string) (*config.ClientConfig, error) {
-	unlock := os.Getenv("V2V_PASSPHRASE")
+	unlock := env.Passphrase()
 	if unlock == "" {
 		if !tui.Interactive() {
 			return nil, errors.New("config is encrypted — set V2V_PASSPHRASE or run in TTY to unlock")

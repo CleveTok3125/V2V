@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
+	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/tui"
 	"github.com/charmbracelet/huh"
 )
@@ -56,7 +57,7 @@ func (e *EnrollCmd) Run() error {
 	if err := saveStore(e.Store, f); err != nil {
 		return err
 	}
-	origin := os.Getenv("WEBAUTHN_ORIGIN")
+	origin := env.WebauthnOrigin()
 	fmt.Println("✅ Ticket đã tạo (single-use, TTL " + e.TTL.String() + ").")
 	fmt.Printf("Gửi link sau cho người được cấp:\n\n  %s/web/#enroll=%s\n\n", origin, code)
 	return nil
