@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/CleveTok3125/V2V/internal/strutil"
 	"time"
@@ -104,24 +103,24 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 				ReplyTo:     tripForChain.ReplyTo,
 			})
 			if err != nil {
-				log.Printf("⚠️ [HISTORY TAMPER] %s seq %d: %v", strutil.Short(tripForChain.Pub), tripForChain.Seq, err)
+				logWarnf("⚠️ [HISTORY TAMPER] %s seq %d: %v", strutil.Short(tripForChain.Pub), tripForChain.Seq, err)
 				continue
 			}
 			// Success: derive newPrev via result. Malformed hex aborts
 			// the record instead of chaining zeros.
 			prevBytes, err := hex.DecodeString(tripForChain.Prev)
 			if err != nil {
-				log.Printf("⚠️ [HISTORY TAMPER] %s: bad prev hex: %v", strutil.Short(tripForChain.Pub), err)
+				logWarnf("⚠️ [HISTORY TAMPER] %s: bad prev hex: %v", strutil.Short(tripForChain.Pub), err)
 				continue
 			}
 			sigBytes, err := hex.DecodeString(tripForChain.Sig)
 			if err != nil {
-				log.Printf("⚠️ [HISTORY TAMPER] %s: bad sig hex: %v", strutil.Short(tripForChain.Pub), err)
+				logWarnf("⚠️ [HISTORY TAMPER] %s: bad sig hex: %v", strutil.Short(tripForChain.Pub), err)
 				continue
 			}
 			hashBytes, err := hex.DecodeString(tripForChain.MsgHash)
 			if err != nil {
-				log.Printf("⚠️ [HISTORY TAMPER] %s: bad msg_hash hex: %v", strutil.Short(tripForChain.Pub), err)
+				logWarnf("⚠️ [HISTORY TAMPER] %s: bad msg_hash hex: %v", strutil.Short(tripForChain.Pub), err)
 				continue
 			}
 			h := sha256.New()
@@ -141,7 +140,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 
 	loggedCount := len(s.ChatHistory)
 	if loggedCount > 0 {
-		log.Printf("📚 Đã phục hồi %d tin nhắn history từ disk", loggedCount)
+		logInfof("📚 Đã phục hồi %d tin nhắn history từ disk", loggedCount)
 	}
 
 	return nil
@@ -335,6 +334,6 @@ func (s *ChatServer) SendChatHistory(session *ClientSession) {
 		Sent: sent, Total: len(historyCopy)})
 	replaySend(trailer)
 	if dropped > 0 {
-		log.Printf("⚠️ [REPLAY] Dropped %d/%d lines for slow peer (buffer full)", dropped, len(historyCopy)+3)
+		logWarnf("⚠️ [REPLAY] Dropped %d/%d lines for slow peer (buffer full)", dropped, len(historyCopy)+3)
 	}
 }

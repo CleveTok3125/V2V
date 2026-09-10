@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -25,7 +24,7 @@ func (s *ChatServer) acquireIPConnection(w http.ResponseWriter, clientIP string)
 	dynCfg := Cfg.Dynamic.Load()
 
 	if s.IpCounts[clientIP] >= dynCfg.MaxConnectionsPerIP {
-		log.Printf("⛔ Từ chối: %s đã vượt quá giới hạn %d kết nối.\n", clientIP, dynCfg.MaxConnectionsPerIP)
+		logWarnf("⛔ Từ chối: %s đã vượt quá giới hạn %d kết nối.\n", clientIP, dynCfg.MaxConnectionsPerIP)
 		http.Error(w, "Bạn đã mở quá nhiều kết nối từ địa chỉ IP này.", http.StatusTooManyRequests)
 		return false
 	}
@@ -74,7 +73,7 @@ func (s *ChatServer) registerClient(session *ClientSession, clientIP string) {
 	s.CheckAndBroadcastDate(joinTime)
 
 	joinMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã tham gia phòng chat!", joinTime.Format("15:04"), session.DisplayName)
-	log.Printf("🟢 [JOIN] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
+	logInfof("🟢 [JOIN] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
 	// The joiner receives its own join too (nil sender): chain continuity
 	// requires every client to see every link; display gating (!showJoin)
 	// still hides it locally.
@@ -116,7 +115,7 @@ func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
 	s.CheckAndBroadcastDate(leaveTime)
 
 	leaveMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã rời phòng chat.", leaveTime.Format("15:04"), session.DisplayName)
-	log.Printf("🔴 [LEAVE] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
+	logInfof("🔴 [LEAVE] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
 	s.BroadcastNotice(leaveMsg, "leave", nil)
 }
 
@@ -192,7 +191,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				dynCfg := Cfg.Dynamic.Load()
 				if dynCfg.IdleChatTimeout > 0 && time.Since(lastChatActivity) >= dynCfg.IdleChatTimeout {
-					log.Printf("⏱️ [IDLE TIMEOUT] %s %s (IP: %s) bị ngắt do không chat trong %v.\n", session.DisplayName, session.Tripcode, clientIP, dynCfg.IdleChatTimeout)
+					logInfof("⏱️ [IDLE TIMEOUT] %s %s (IP: %s) bị ngắt do không chat trong %v.\n", session.DisplayName, session.Tripcode, clientIP, dynCfg.IdleChatTimeout)
 				}
 			}
 			break
@@ -267,7 +266,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 					case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
 					default:
 					}
-					log.Printf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
+					logWarnf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
 					updateReadDeadline()
 					continue
 				}
@@ -304,7 +303,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
 				default:
 				}
-				log.Printf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
+				logWarnf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
 				updateReadDeadline()
 				continue
 			}
@@ -422,7 +421,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
 				default:
 				}
-				log.Printf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
+				logWarnf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
 				updateReadDeadline()
 				continue
 			}
@@ -472,7 +471,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			TmpID:       msgTmpID,
 			ReplyTo:     msgReplyTo,
 		}
-		log.Printf("💬 [MSG từ %s] %s (%s): %s\n", clientIP, session.DisplayName, session.Tripcode, strings.ReplaceAll(text, "\n", "\\n"))
+		logInfof("💬 [MSG từ %s] %s (%s): %s\n", clientIP, session.DisplayName, session.Tripcode, strings.ReplaceAll(text, "\n", "\\n"))
 		s.BroadcastWire(wire, session.Conn)
 	}
 }

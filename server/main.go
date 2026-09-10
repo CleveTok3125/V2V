@@ -19,7 +19,7 @@ import (
 
 func IsSecuredConnect(w http.ResponseWriter, r *http.Request, clientIP string) bool {
 	if !Cfg.Static.RequireTLS {
-		log.Printf("⚠️ Server đang không buộc sử dụng kết nối mã hoá")
+		logWarnf("⚠️ Server đang không buộc sử dụng kết nối mã hoá")
 		return true
 	}
 
@@ -31,7 +31,7 @@ func IsSecuredConnect(w http.ResponseWriter, r *http.Request, clientIP string) b
 		return true
 	}
 
-	log.Printf("⚠️ Khóa kết nối không an toàn từ %s (Policy: RequireTLS)", clientIP)
+	logWarnf("⚠️ Khóa kết nối không an toàn từ %s (Policy: RequireTLS)", clientIP)
 	http.Error(w, "Server bắt buộc sử dụng kết nối mã hóa (wss://).", http.StatusUpgradeRequired)
 	return false
 }
@@ -53,11 +53,11 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 	defer s.releaseIPConnection(clientIP)
 
-	log.Printf("🔌 New request | Client IP: %s | Proxy IP: %s | Upgrade: %s\n", clientIP, r.RemoteAddr, r.Header.Get("Upgrade"))
+	logInfof("🔌 New request | Client IP: %s | Proxy IP: %s | Upgrade: %s\n", clientIP, r.RemoteAddr, r.Header.Get("Upgrade"))
 
 	conn, err := s.Upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println("❌ Upgrade error:", err)
+		logErrorf("❌ Upgrade error: %v", err)
 		return
 	}
 	defer conn.Close()
@@ -196,12 +196,12 @@ func ReloadDynamicConfig() {
 
 	newDynamic, err := loadDynamicConfig()
 	if err != nil {
-		log.Printf("❌ [HOT-RELOAD] Không thể nạp lại dynamic config: %v", err)
+		logErrorf("❌ [HOT-RELOAD] Không thể nạp lại dynamic config: %v", err)
 		return
 	}
 
 	Cfg.Dynamic.Store(&newDynamic)
-	log.Println("🔄 [HOT-RELOAD] Đã cập nhật thành công các thông số logic!")
+	logInfo("🔄 [HOT-RELOAD] Đã cập nhật thành công các thông số logic!")
 }
 
 func (s *ChatServer) WatchEnvFile() {
@@ -221,7 +221,7 @@ func (s *ChatServer) WatchEnvFile() {
 						lastModTime = info.ModTime()
 
 						ReloadDynamicConfig()
-						log.Printf("⚠️ Lưu ý: File %s vừa đổi. Nếu bạn sửa Static Config, vui lòng RESTART server!", p)
+						logWarnf("⚠️ Lưu ý: File %s vừa đổi. Nếu bạn sửa Static Config, vui lòng RESTART server!", p)
 					}
 					break
 				}
@@ -246,7 +246,7 @@ func (s *ChatServer) WatchRolesFile() {
 
 					if info.ModTime().After(lastModTime) {
 						lastModTime = info.ModTime()
-						log.Printf("🔄 [HOT-RELOAD] Phát hiện thay đổi trong %s, đang nạp lại roles...", p)
+						logInfof("🔄 [HOT-RELOAD] Phát hiện thay đổi trong %s, đang nạp lại roles...", p)
 
 						s.LoadRoles()
 					}
@@ -260,7 +260,7 @@ func (s *ChatServer) WatchRolesFile() {
 func main() {
 	for _, p := range EnvFilePaths {
 		if err := godotenv.Load(p); err == nil {
-			log.Printf("✅ Đã nạp cấu hình môi trường từ: %s", p)
+			logInfof("✅ Đã nạp cấu hình môi trường từ: %s", p)
 			break
 		}
 	}
@@ -351,7 +351,7 @@ func main() {
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 		<-ch
-		log.Println("🛑 Nhận tín hiệu dừng, đang flush history...")
+		logInfo("🛑 Nhận tín hiệu dừng, đang flush history...")
 		if chatApp.HistoryStore != nil {
 			_ = chatApp.HistoryStore.Close()
 		}
@@ -364,6 +364,6 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Println("🚀 Server đang chạy tại port", Cfg.Static.Port)
+	logInfof("🚀 Server đang chạy tại port %v", Cfg.Static.Port)
 	log.Fatal(server.ListenAndServe())
 }

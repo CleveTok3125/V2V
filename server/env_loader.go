@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -68,7 +67,7 @@ func getEnvAsLocationOptional(key string, fallback string) *time.Location {
 	}
 	loc, err := time.LoadLocation(val)
 	if err != nil {
-		log.Printf("⚠️ Cảnh báo: Múi giờ '%s' không hợp lệ. Đang dùng mặc định (Local).", val)
+		logWarnf("⚠️ Cảnh báo: Múi giờ '%s' không hợp lệ. Đang dùng mặc định (Local).", val)
 		return time.Local
 	}
 	return loc
@@ -106,7 +105,7 @@ func getEnvAsIntOptional(key string, fallback int) int {
 	}
 	parsed, err := strconv.Atoi(val)
 	if err != nil {
-		log.Printf("⚠️ Lỗi định dạng số ở biến %s. Dùng mặc định: %d", key, fallback)
+		logWarnf("⚠️ Lỗi định dạng số ở biến %s. Dùng mặc định: %d", key, fallback)
 		return fallback
 	}
 	return parsed
@@ -146,7 +145,7 @@ func getEnvAsBoolOptional(key string, fallback bool) bool {
 	}
 	parsed, err := strconv.ParseBool(val)
 	if err != nil {
-		log.Printf("⚠️ Lỗi định dạng boolean ở biến %s. Dùng mặc định: %v", key, fallback)
+		logWarnf("⚠️ Lỗi định dạng boolean ở biến %s. Dùng mặc định: %v", key, fallback)
 		return fallback
 	}
 	return parsed

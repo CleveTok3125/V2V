@@ -9,7 +9,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"log"
 
 	"github.com/CleveTok3125/V2V/internal/strutil"
 	"net/http"
@@ -82,21 +81,21 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.WebAuthn.PruneExpired()
-	log.Printf("🔐 [ENROLL BEGIN] ticket=%s… from=%s", strutil.Short(code), r.RemoteAddr)
+	logInfof("🔐 [ENROLL BEGIN] ticket=%s… from=%s", strutil.Short(code), r.RemoteAddr)
 
 	challenge, err := randomB64url(32)
 	if err != nil {
-		log.Printf("❌ [ENROLL BEGIN] ticket=%s… entropy error: %v", strutil.Short(code), err)
+		logErrorf("❌ [ENROLL BEGIN] ticket=%s… entropy error: %v", strutil.Short(code), err)
 		http.Error(w, "entropy error", http.StatusInternalServerError)
 		return
 	}
 	role, err := s.WebAuthn.BindChallenge(code, challenge)
 	if err != nil {
-		log.Printf("❌ [ENROLL BEGIN] ticket=%s… bind failed: %v", strutil.Short(code), err)
+		logErrorf("❌ [ENROLL BEGIN] ticket=%s… bind failed: %v", strutil.Short(code), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	log.Printf("✅ [ENROLL BEGIN] ticket=%s… role=%s challenge=%s…", strutil.Short(code), role, strutil.Short(challenge))
+	logInfof("✅ [ENROLL BEGIN] ticket=%s… role=%s challenge=%s…", strutil.Short(code), role, strutil.Short(challenge))
 	userID, _ := randomB64url(16)
 
 	requireResidentKey := true
@@ -145,31 +144,31 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 	}
 	var req finishRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&req); err != nil {
-		log.Printf("❌ [ENROLL FINISH] bad payload from %s: %v", r.RemoteAddr, err)
+		logErrorf("❌ [ENROLL FINISH] bad payload from %s: %v", r.RemoteAddr, err)
 		http.Error(w, "bad payload", http.StatusBadRequest)
 		return
 	}
 	if req.Ticket == "" || req.ID == "" || req.ClientDataJSON == "" || req.AttestationObject == "" {
-		log.Printf("❌ [ENROLL FINISH] ticket=%s… missing fields (id=%q)", strutil.Short(req.Ticket), req.ID)
+		logErrorf("❌ [ENROLL FINISH] ticket=%s… missing fields (id=%q)", strutil.Short(req.Ticket), req.ID)
 		http.Error(w, "missing fields", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("🔐 [ENROLL FINISH] ticket=%s… id=%s… from=%s", strutil.Short(req.Ticket), strutil.Short(req.ID), r.RemoteAddr)
+	logInfof("🔐 [ENROLL FINISH] ticket=%s… id=%s… from=%s", strutil.Short(req.Ticket), strutil.Short(req.ID), r.RemoteAddr)
 	_, boundChallenge, err := s.WebAuthn.PendingInfo(req.Ticket)
 	if err != nil {
-		log.Printf("❌ [ENROLL FINISH] ticket=%s… pending lookup failed: %v", strutil.Short(req.Ticket), err)
+		logErrorf("❌ [ENROLL FINISH] ticket=%s… pending lookup failed: %v", strutil.Short(req.Ticket), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	log.Printf("🔍 [ENROLL FINISH] ticket=%s… boundChallenge=%s…", strutil.Short(req.Ticket), strutil.Short(boundChallenge))
+	logInfof("🔍 [ENROLL FINISH] ticket=%s… boundChallenge=%s…", strutil.Short(req.Ticket), strutil.Short(boundChallenge))
 	parsed, err := parseCreationForImport(req.ClientDataJSON, req.AttestationObject, boundChallenge)
 	if err != nil {
-		log.Printf("❌ [ENROLL FINISH] ticket=%s… parse failed: %v", strutil.Short(req.Ticket), err)
+		logErrorf("❌ [ENROLL FINISH] ticket=%s… parse failed: %v", strutil.Short(req.Ticket), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	log.Printf("✅ [ENROLL FINISH] parsed credential_id=%s… counter=%d", strutil.Short(parsed.CredentialID), parsed.Counter)
+	logInfof("✅ [ENROLL FINISH] parsed credential_id=%s… counter=%d", strutil.Short(parsed.CredentialID), parsed.Counter)
 
 	err = s.WebAuthn.CompleteEnrollment(req.Ticket, &WAStoredCred{
 		CredentialID: parsed.CredentialID,
@@ -177,11 +176,11 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 		SignCount:    parsed.Counter,
 	})
 	if err != nil {
-		log.Printf("❌ [ENROLL FINISH] ticket=%s… store failed: %v", strutil.Short(req.Ticket), err)
+		logErrorf("❌ [ENROLL FINISH] ticket=%s… store failed: %v", strutil.Short(req.Ticket), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	log.Printf("✅ [ENROLL FINISH] ticket=%s… stored credential_id=%s…", strutil.Short(req.Ticket), strutil.Short(parsed.CredentialID))
+	logInfof("✅ [ENROLL FINISH] ticket=%s… stored credential_id=%s…", strutil.Short(req.Ticket), strutil.Short(parsed.CredentialID))
 	writeJSON(w, map[string]any{"ok": true, "credential_id": parsed.CredentialID})
 }
 
