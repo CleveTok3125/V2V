@@ -78,7 +78,7 @@ func TestStripCommentDelimitersAloneSurvive(t *testing.T) {
 }
 
 func TestTemplateParsesAsJSONC(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "template", "config.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "template", "config.jsonc"))
 	if err != nil {
 		t.Fatal(err)
 	}

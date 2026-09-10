@@ -39,7 +39,7 @@ func parseFlags() {
 	historyFile = filepath.Join(CLI.CacheDir, "history.tmp")
 	// Client config is immutable state: read freely, replaced only by
 	// explicit actions. A missing file means in-memory defaults; copy
-	// template/config.json to config.jsonc to customize.
+	// template/config.jsonc to the config dir to customize.
 	cfgPath := resolveCfgPath()
 	if cfg, err := config.Load(cfgPath); err == nil {
 		ClientCfg = cfg
@@ -55,15 +55,13 @@ func parseFlags() {
 	}
 }
 
-// resolveCfgPath prefers config.jsonc, falls back to config.json.
+// resolveCfgPath returns the single canonical config path: config.jsonc.
+// Plain .json is not read; JSONC (comments allowed, no trailing commas)
+// is the only config format.
 func resolveCfgPath() string {
 	cfgPath := configdir.DefaultConfigFile(CLI.ConfigDir)
-	jsoncPath := cfgPath[:len(cfgPath)-len(".json")] + ".jsonc"
-	if _, err := os.Stat(jsoncPath); err == nil {
-		return jsoncPath
-	}
 	if _, err := os.Stat(cfgPath); err != nil {
-		fmt.Printf("config %s not found, using defaults (see template/config.json)\n", cfgPath)
+		fmt.Printf("config %s not found, using defaults (see template/config.jsonc)\n", cfgPath)
 	}
 	return cfgPath
 }

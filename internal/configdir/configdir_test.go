@@ -25,7 +25,7 @@ func TestDefaultDirs_Shape(t *testing.T) {
 	if got := DefaultCacheDir(); got != filepath.Join("/tmp/xdg-cache", "V2V") {
 		t.Fatalf("XDG cache not honored: %q", got)
 	}
-	if f := DefaultConfigFile(""); !strings.HasSuffix(f, ".json") {
+	if f := DefaultConfigFile(""); !strings.HasSuffix(f, ".jsonc") {
 		t.Fatalf("config file shape: %q", f)
 	}
 }

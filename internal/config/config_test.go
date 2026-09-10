@@ -26,7 +26,7 @@ func TestMetaShowBackfill(t *testing.T) {
 	// Old config without the meta section backfills to shown.
 	old := map[string]any{"defaults": map[string]any{"username": "A"}}
 	data, _ := json.Marshal(old)
-	path := filepath.Join(dir, "config.json")
+	path := filepath.Join(dir, "config.jsonc")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestMetaShowBackfill(t *testing.T) {
 func TestLimitsBackfill(t *testing.T) {
 	dir := t.TempDir()
 	raw, _ := json.Marshal(map[string]any{"ui": map[string]any{"meta": map[string]any{"show": false}}})
-	path := filepath.Join(dir, "config.json")
+	path := filepath.Join(dir, "config.jsonc")
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestMentionReplyDefaults(t *testing.T) {
 
 func TestMentionReplyBackfillAndClamp(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
+	path := filepath.Join(dir, "config.jsonc")
 	raw, _ := json.Marshal(map[string]any{"ui": map[string]any{
 		"mention": map[string]any{"enabled": false, "color": []int{300, -5, 128}},
 		"reply":   map[string]any{"quoteMaxRunes": 5000},
@@ -143,7 +143,7 @@ func TestClipboardClearAfterSec(t *testing.T) {
 
 func TestLoadMissingUsesDefaultsWithoutCreating(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
+	path := filepath.Join(dir, "config.jsonc")
 	c, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +205,7 @@ func TestClipboardBackfill(t *testing.T) {
 	dir := t.TempDir()
 	old := map[string]any{"defaults": map[string]any{"username": "A"}}
 	data, _ := json.Marshal(old)
-	path := filepath.Join(dir, "config.json")
+	path := filepath.Join(dir, "config.jsonc")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}

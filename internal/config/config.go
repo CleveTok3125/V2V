@@ -51,7 +51,7 @@ func DefaultDynamic() *DynamicConfig {
 	}
 }
 
-// ClientConfig is the full client config.json structure.
+// ClientConfig is the full client config.jsonc structure.
 type ClientConfig struct {
 	Defaults struct {
 		Username   string `json:"username"`
@@ -397,7 +397,7 @@ func ReplaceFile(path string, data []byte) error {
 			return err
 		}
 	}
-	tmp := filepath.Join(dir, ".tmp-config.json")
+	tmp := filepath.Join(dir, ".tmp-config.jsonc")
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
