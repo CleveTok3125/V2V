@@ -35,10 +35,10 @@ func DefaultCacheDir() string {
 }
 
 
-// DefaultConfigFile returns the default config.json path (for future use).
+// DefaultConfigFile returns the default config.jsonc path.
 func DefaultConfigFile(configDir string) string {
 	if configDir == "" {
 		configDir = DefaultConfigDir()
 	}
-	return filepath.Join(configDir, "config.json")
+	return filepath.Join(configDir, "config.jsonc")
 }

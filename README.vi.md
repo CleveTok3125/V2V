@@ -59,7 +59,7 @@ Tin nhắn của bạn hiện xám kèm `⏳` trước, rồi được thay bằ
 
 Chat và system nằm ở 2 tab riêng: `/tab` chuyển giữa Tab 1 (chat) và Tab 2 (local & system). Thanh tab hiện `[1:chat] 2:system`, tab đang xem nằm trong ngoặc.
 
-Key và cấu hình nằm trong thư mục config của hệ điều hành (`~/.config/V2V/` trên Linux, `%AppData%\V2V` trên Windows, `~/Library/Application Support/V2V` trên macOS): `key.json` cho danh tính, `config.jsonc`/`config.json` chỉ đọc cho cài đặt (cho comment JSONC, copy `template/config.json` để tùy biến, `v2v --encrypt-config` để mã hóa). Ghi đè bằng `-c/--config-dir` (`V2V_CONFIG_DIR`) và `-C/--cache-dir` (`V2V_CACHE_DIR`). Flag phụ: `-v` phiên bản, `-a` user-agent, `-i` thông tin server, `-j` hiện ra/vào (cả trực tiếp lẫn lịch sử catch-up; replay mặc định lọc join).
+Key và cấu hình nằm trong thư mục config của hệ điều hành (`~/.config/V2V/` trên Linux, `%AppData%\V2V` trên Windows, `~/Library/Application Support/V2V` trên macOS): `key.json` cho danh tính, `config.jsonc` chỉ đọc cho cài đặt (cho comment JSONC, copy `template/config.jsonc` để tùy biến, `v2v --encrypt-config` để mã hóa). Ghi đè bằng `-c/--config-dir` (`V2V_CONFIG_DIR`) và `-C/--cache-dir` (`V2V_CACHE_DIR`). Flag phụ: `-v` phiên bản, `-a` user-agent, `-i` thông tin server, `-j` hiện ra/vào (cả trực tiếp lẫn lịch sử catch-up; replay mặc định lọc join).
 
 ## Dành cho Admin
 
