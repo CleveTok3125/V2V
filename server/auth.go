@@ -9,7 +9,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -31,7 +30,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 	nonceBytes := make([]byte, 64)
 
 	if _, err := rand.Read(nonceBytes); err != nil {
-		return GetDefaultPermission(), AuthPacket{}, fmt.Errorf("auth_error: entropy_exhaustion")
+		return GetDefaultPermission(), AuthPacket{}, fmt.Errorf("%w", ErrEntropyExhaustion)
 	}
 	nonceHex := hex.EncodeToString(nonceBytes)
 
@@ -81,11 +80,11 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 	perms := GetDefaultPermission()
 
 	if utf8.RuneCountInString(resp.Username) > Cfg.Dynamic.Load().MaxUsernameLength {
-		return perms, resp, fmt.Errorf("auth_error: payload_too_large")
+		return perms, resp, fmt.Errorf("%w", ErrPayloadTooLarge)
 	}
 
 	if len(resp.Role) > 64 {
-		return perms, resp, fmt.Errorf("auth_error: invalid_role_length")
+		return perms, resp, fmt.Errorf("%w", ErrInvalidRoleLength)
 	}
 
 	// Validate the nonce for every client (guest or role) so replayed, expired
@@ -93,18 +92,18 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 	metaRaw, exists := s.ActiveNonces.LoadAndDelete(resp.Nonce)
 	if !exists {
 		logWarnf("⚠️ [AUTH ALERT] %s: Nonce không tồn tại hoặc đã bị sử dụng (Dấu hiệu Replay Attack).", clientIP)
-		return perms, resp, fmt.Errorf("auth_error: invalid_nonce")
+		return perms, resp, fmt.Errorf("%w", ErrInvalidNonce)
 	}
 
 	meta := metaRaw.(NonceMeta)
 
 	if time.Now().After(meta.ExpiresAt) {
 		logWarnf("⚠️ [AUTH FAIL] %s: Nonce đã hết hạn.", clientIP)
-		return perms, resp, fmt.Errorf("auth_error: expired_nonce")
+		return perms, resp, fmt.Errorf("%w", ErrExpiredNonce)
 	}
 	if meta.IP != clientIP {
 		logErrorf("🚨 [SECURITY BREACH] %s đang cố sử dụng Nonce được cấp cho IP %s! (Dấu hiệu cướp Token/MITM).", clientIP, meta.IP)
-		return perms, resp, fmt.Errorf("auth_error: ip_mismatch")
+		return perms, resp, fmt.Errorf("%w", ErrIPMismatch)
 	}
 
 	// WebAuthn passkey branch: an assertion in the packet is verified against
@@ -114,13 +113,13 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		var lastErr error
 		if !WAConfig.Enabled {
 			logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt (thiếu WEBAUTHN_RPID/ORIGIN).", clientIP)
-			return perms, resp, fmt.Errorf("auth_error: passkey_disabled")
+			return perms, resp, fmt.Errorf("%w", ErrPasskeyDisabled)
 		}
 		s.RoleRegistryMu.RLock()
 		roleDef, exists := s.RoleRegistry[resp.Role]
 		s.RoleRegistryMu.RUnlock()
 		if !exists {
-			return perms, resp, fmt.Errorf("auth_error: invalid_role")
+			return perms, resp, fmt.Errorf("%w", ErrInvalidRole)
 		}
 		// Candidate 1: hand-imported identities in roles.json (software
 		// passkey from a desktop key.json). No server-side counter.
@@ -145,12 +144,12 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		// live in the managed store with a persisted sign counter, enabling
 		// clone detection.
 		if s.WebAuthn == nil {
-			return perms, resp, fmt.Errorf("auth_error: verification_failed")
+			return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
 		}
 		if cred, ok := s.WebAuthn.Credential(resp.Role, resp.PasskeyID); ok {
 			pub, err := base64.RawURLEncoding.DecodeString(cred.PublicKey)
 			if err != nil {
-				return perms, resp, fmt.Errorf("auth_error: verification_failed")
+				return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
 			}
 			counter, verr := verifyAssertion(pub, resp.Nonce, resp.PasskeyAuthData, resp.PasskeyClientData, resp.PasskeySig)
 			switch {
@@ -162,7 +161,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 				logInfof("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey thật, role: [%s]", clientIP, resp.Role)
 				return roleDef.Permission, resp, nil
 			case verr == nil:
-				lastErr = errors.New("counter_not_increasing")
+				lastErr = ErrCounterNotIncreasing
 			default:
 				lastErr = verr
 			}
@@ -172,7 +171,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 			logErrorf("🚨 [PASSKEY FAIL] %s: %v", clientIP, lastErr)
 		}
 		logErrorf("🚨 [BRUTE-FORCE ALERT] %s: assertion passkey không khớp credential nào của role [%s]!", clientIP, resp.Role)
-		return perms, resp, fmt.Errorf("auth_error: verification_failed")
+		return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
 	}
 
 	if resp.Role == "" {
@@ -185,13 +184,13 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 
 	if !exists {
 		logWarnf("⚠️ [AUTH FAIL] %s: Yêu cầu Role không tồn tại [%s]", clientIP, resp.Role)
-		return perms, resp, fmt.Errorf("auth_error: invalid_role")
+		return perms, resp, fmt.Errorf("%w", ErrInvalidRole)
 	}
 
 	sig, err := hex.DecodeString(resp.Signature)
 	if err != nil || len(sig) != ed25519.SignatureSize {
 		logErrorf("🚨 [AUTH FAIL] %s: Signature sai định dạng cho role [%s]", clientIP, resp.Role)
-		return perms, resp, fmt.Errorf("auth_error: invalid_signature")
+		return perms, resp, fmt.Errorf("%w", ErrInvalidSignature)
 	}
 
 	// Server pubkey pinning: the server's public key is part of the signed payload
@@ -239,7 +238,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 	}
 
 	logErrorf("🚨 [BRUTE-FORCE ALERT] %s: Sai Key/HMAC khi cố lấy quyền [%s]!", clientIP, resp.Role)
-	return perms, resp, fmt.Errorf("auth_error: verification_failed")
+	return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
 }
 
 // To prevent IP spoofing, only accept IPs sent from Cloudflare
@@ -429,7 +428,7 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 		conn.WriteMessage(websocket.TextMessage, []byte(errMsg))
 		conn.Close()
 		logWarnf("⚠️ [AUTH FAIL] %s: Tripcode secret quá dài (%d bytes) - Từ chối để chống trùng lặp.", clientIP, len(authPacket.Tripcode))
-		return nil, fmt.Errorf("auth_error: tripcode_too_long")
+		return nil, fmt.Errorf("%w", ErrTripcodeTooLong)
 	}
 
 	if authPacket.Role != "" {
