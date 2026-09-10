@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -48,7 +47,7 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(data)
 			return
 		}
-		log.Printf("⚠️ [TRIP VERIFY PAGE] %s missing, falling back to JSON", verifyPage)
+		logWarnf("⚠️ [TRIP VERIFY PAGE] %s missing, falling back to JSON", verifyPage)
 	}
 
 	// Abuse mitigation: cap query size and rate-limit per IP (ed25519 verify is cheap but still CPU)
@@ -59,7 +58,7 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIP(r)
 	// Use shared CooldownMap via guard logic (200ms)
 	if !guardTripCooldown.Allow(clientIP, 200*time.Millisecond) {
-		log.Printf("⛔ [TRIP VERIFY RATE] %s bị hạn chế", clientIP)
+		logWarnf("⛔ [TRIP VERIFY RATE] %s bị hạn chế", clientIP)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]any{"valid": false, "error": "rate limited, slow down"})

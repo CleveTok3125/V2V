@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"sync"
 	"time"
@@ -162,9 +161,9 @@ func (s *WebAuthnStore) CreatePendingTicket(role, label string, ttl time.Duratio
 		return nil
 	})
 	if err == nil {
-		log.Printf("🎫 [TICKET CREATED] code=%s… role=%s label=%q expires=%s", strutil.Short(code), role, label, time.Now().Add(ttl).Format(time.RFC3339))
+		logInfof("🎫 [TICKET CREATED] code=%s… role=%s label=%q expires=%s", strutil.Short(code), role, label, time.Now().Add(ttl).Format(time.RFC3339))
 	} else {
-		log.Printf("❌ [TICKET CREATE FAILED] role=%s: %v", role, err)
+		logErrorf("❌ [TICKET CREATE FAILED] role=%s: %v", role, err)
 	}
 	return code, err
 }
@@ -183,9 +182,9 @@ func (s *WebAuthnStore) BindChallenge(code, challengeB64 string) (role string, e
 		return nil
 	})
 	if err != nil {
-		log.Printf("❌ [TICKET BIND] code=%s… failed: %v", strutil.Short(code), err)
+		logErrorf("❌ [TICKET BIND] code=%s… failed: %v", strutil.Short(code), err)
 	} else {
-		log.Printf("🔗 [TICKET BIND] code=%s… role=%s challenge=%s…", strutil.Short(code), role, strutil.Short(challengeB64))
+		logInfof("🔗 [TICKET BIND] code=%s… role=%s challenge=%s…", strutil.Short(code), role, strutil.Short(challengeB64))
 	}
 	return role, err
 }
@@ -211,9 +210,9 @@ func (s *WebAuthnStore) CompleteEnrollment(code string, cred *WAStoredCred) erro
 		return nil
 	})
 	if err != nil {
-		log.Printf("❌ [ENROLL STORE] CompleteEnrollment code=%s… failed: %v", strutil.Short(code), err)
+		logErrorf("❌ [ENROLL STORE] CompleteEnrollment code=%s… failed: %v", strutil.Short(code), err)
 	} else {
-		log.Printf("✅ [ENROLL STORE] CompleteEnrollment code=%s… credential_id=%s… stored", strutil.Short(code), strutil.Short(cred.CredentialID))
+		logInfof("✅ [ENROLL STORE] CompleteEnrollment code=%s… credential_id=%s… stored", strutil.Short(code), strutil.Short(cred.CredentialID))
 	}
 	return err
 }

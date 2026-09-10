@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/hex"
 	"encoding/json"
-	"log"
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/chain"
@@ -89,7 +88,7 @@ func (s *ChatServer) initChainLocked() {
 			// Drop the anchor: a malformed line between the legacy tail
 			// and this record makes the cached anchor stale.
 			anchored = false
-			log.Printf("⛔ [CHAIN TAMPER] height %d: malformed link fields", wire.ChainHeight)
+			logWarnf("⛔ [CHAIN TAMPER] height %d: malformed link fields", wire.ChainHeight)
 			continue
 		}
 		expectPrev := tip
@@ -99,18 +98,18 @@ func (s *ChatServer) initChainLocked() {
 		}
 		if prev != expectPrev || wire.ChainHeight != height+1 {
 			broken = true
-			log.Printf("⛔ [CHAIN TAMPER] height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
+			logWarnf("⛔ [CHAIN TAMPER] height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
 			tip, height = want, wire.ChainHeight
 			continue
 		}
 		if !chain.VerifyWire(prev, wire, want) {
 			broken = true
-			log.Printf("⛔ [CHAIN TAMPER] height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
+			logWarnf("⛔ [CHAIN TAMPER] height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
 		}
 		tip, height = want, wire.ChainHeight
 	}
 	if broken {
-		log.Printf("⛔ [CHAIN TAMPER] history failed verification on load; tip adopted, online clients detect forks via persisted tips")
+		logWarnf("⛔ [CHAIN TAMPER] history failed verification on load; tip adopted, online clients detect forks via persisted tips")
 	}
 	if anchored && height == 0 {
 		// Legacy-only log: the next message anchors to the last legacy

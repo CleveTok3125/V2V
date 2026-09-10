@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/rand"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -176,7 +175,7 @@ func NewChatServer() *ChatServer {
 					}
 				}
 
-				log.Printf("⛔ [SECURITY] Chặn kết nối từ Origin không hợp lệ: %s", origin)
+				logWarnf("⛔ [SECURITY] Chặn kết nối từ Origin không hợp lệ: %s", origin)
 				return false
 			},
 		},

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,14 +90,14 @@ func (h *HistoryStore) writeLoop() {
 				return
 			}
 			if err := h.writeRecord(record); err != nil {
-				log.Printf("⚠️ [HISTORY] Không thể ghi history: %v", err)
+				logWarnf("⚠️ [HISTORY] Không thể ghi history: %v", err)
 			}
 		case <-ticker.C:
 			h.mu.Lock()
 			if h.file != nil && h.dirty {
 				// Keep dirty on failure so the next tick retries.
 				if err := h.file.Sync(); err != nil {
-					log.Printf("⚠️ [HISTORY] Sync thất bại, thử lại tick sau: %v", err)
+					logWarnf("⚠️ [HISTORY] Sync thất bại, thử lại tick sau: %v", err)
 				} else {
 					h.dirty = false
 				}
@@ -119,7 +118,7 @@ func (h *HistoryStore) Close() error {
 	if h.file != nil {
 		if h.dirty {
 			if err := h.file.Sync(); err != nil {
-				log.Printf("⚠️ [HISTORY] Sync cuối thất bại: %v", err)
+				logWarnf("⚠️ [HISTORY] Sync cuối thất bại: %v", err)
 			} else {
 				h.dirty = false
 			}
@@ -152,7 +151,7 @@ func (h *HistoryStore) loadZstdFile(path string) ([]historyRecord, error) {
 			if len(line) > 0 {
 				var rec historyRecord
 				if err := json.Unmarshal(line, &rec); err != nil {
-					log.Printf("⚠️ [HISTORY] Bỏ qua record lỗi trong %s: %v", path, err)
+					logWarnf("⚠️ [HISTORY] Bỏ qua record lỗi trong %s: %v", path, err)
 				} else if rec.Wire != nil || rec.Message != "" {
 					out = append(out, rec)
 				}
@@ -186,7 +185,7 @@ func (h *HistoryStore) EnqueueWire(wire WireMessage, now time.Time) {
 	}:
 	default:
 		h.drops++
-		log.Printf("⚠️ [HISTORY] write queue full, dropping record (total drops=%d)", h.drops)
+		logWarnf("⚠️ [HISTORY] write queue full, dropping record (total drops=%d)", h.drops)
 	}
 }
 
@@ -234,7 +233,7 @@ func (h *HistoryStore) rotate() error {
 	// Compress old file to .old.zst (best effort)
 	if _, err := os.Stat(oldFile); err == nil {
 		if err := compressFileZstd(oldFile, oldFile+".zst"); err != nil {
-			log.Printf("⚠️ [HISTORY] Không thể nén history cũ: %v", err)
+			logWarnf("⚠️ [HISTORY] Không thể nén history cũ: %v", err)
 		} else if err := os.Remove(oldFile); err != nil {
 			// A leftover .old next to a fresh .old.zst would double-load
 			// every record on restart: fail loudly instead.
@@ -259,7 +258,7 @@ func (h *HistoryStore) rotate() error {
 		// Stay fileless: writeRecord drops with a counter instead of
 		// writing into the closed pre-rotate handle. A later record
 		// retries the open via the same path.
-		log.Printf("⚠️ [HISTORY] Reopen after rotate failed: %v", err)
+		logWarnf("⚠️ [HISTORY] Reopen after rotate failed: %v", err)
 		return err
 	}
 	return nil
@@ -354,7 +353,7 @@ func (h *HistoryStore) loadJSONLFile(path string) ([]historyRecord, error) {
 			if len(line) > 0 {
 				var rec historyRecord
 				if err := json.Unmarshal(line, &rec); err != nil {
-					log.Printf("⚠️ [HISTORY] Bỏ qua record lỗi trong %s: %v", path, err)
+					logWarnf("⚠️ [HISTORY] Bỏ qua record lỗi trong %s: %v", path, err)
 				} else if rec.Message != "" || rec.Wire != nil {
 					out = append(out, rec)
 				}
