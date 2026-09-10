@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
 )
 
 // DynamicConfig mirrors server DynamicConfig for reuse on client.
@@ -347,22 +348,39 @@ func (c *ClientConfig) ClipboardClearAfterSec() int {
 	return *c.UI.Clipboard.ClearAfterSec
 }
 
-// LoadOrCreate loads config from path, creates default if missing when autoCreate is true.
-func LoadOrCreate(path string, autoCreate bool) (*ClientConfig, error) {
+// Load reads a client config file. The config is immutable state: read
+// freely, replaced only by explicit actions. A missing file yields
+// in-memory defaults; mutable state lives in separate cache files.
+func Load(path string) (*ClientConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) && autoCreate {
-			c := DefaultClientConfig()
-			if err := Save(path, c); err != nil {
-				return nil, err
-			}
-			return c, nil
-		}
 		if os.IsNotExist(err) {
 			return DefaultClientConfig(), nil
 		}
 		return nil, err
 	}
+	return parse(data)
+}
+
+// ReplaceFile atomically swaps the whole file at path with data. Config
+// is immutable state: readers never mutate it in place, explicit
+// replacements like this are the only write path. Owner-only
+// permissions, like every other secret-adjacent file.
+func ReplaceFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+	}
+	tmp := filepath.Join(dir, ".tmp-config.json")
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func parse(data []byte) (*ClientConfig, error) {
 	var c ClientConfig
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, err
@@ -461,23 +479,4 @@ func LoadOrCreate(path string, autoCreate bool) (*ClientConfig, error) {
 		c.UI.CodeStyle.Operator = def.UI.CodeStyle.Operator
 	}
 	return &c, nil
-}
-
-// Save writes config atomically.
-func Save(path string, c *ClientConfig) error {
-	data, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	if dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err
-		}
-	}
-	tmp := filepath.Join(dir, ".tmp-config.json")
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }

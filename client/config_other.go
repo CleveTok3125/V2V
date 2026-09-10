@@ -3,6 +3,8 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/alecthomas/kong"
@@ -31,9 +33,13 @@ func parseFlags() {
 		CLI.KeyFile = ""
 	}
 	historyFile = filepath.Join(CLI.CacheDir, "history.tmp")
-	// Load or auto-create client config.json
+	// Client config is immutable state: read freely, replaced only by
+	// explicit actions. A missing file means in-memory defaults.
 	cfgPath := configdir.DefaultConfigFile(CLI.ConfigDir)
-	if cfg, err := config.LoadOrCreate(cfgPath, true); err == nil {
+	if _, err := os.Stat(cfgPath); err != nil {
+		fmt.Printf("config %s not found, using defaults (see template/config.json)\n", cfgPath)
+	}
+	if cfg, err := config.Load(cfgPath); err == nil {
 		ClientCfg = cfg
 	} else {
 		ClientCfg = config.DefaultClientConfig()

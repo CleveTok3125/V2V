@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
 )
 
 func TestMetaShowDefault(t *testing.T) {
@@ -27,7 +28,7 @@ func TestMetaShowBackfill(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c, err := LoadOrCreate(path, false)
+	c, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +40,7 @@ func TestMetaShowBackfill(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c, err = LoadOrCreate(path, false)
+	c, err = Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +56,7 @@ func TestLimitsBackfill(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c, err := LoadOrCreate(path, false)
+	c, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +95,7 @@ func TestMentionReplyBackfillAndClamp(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c, err := LoadOrCreate(path, false)
+	c, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,6 +139,40 @@ func TestClipboardClearAfterSec(t *testing.T) {
 	}
 }
 
+func TestLoadMissingUsesDefaultsWithoutCreating(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := DefaultClientConfig()
+	if c.Limits.MaxMessageLength != def.Limits.MaxMessageLength {
+		t.Fatal("missing file must yield defaults")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("Load must never create the config file")
+	}
+}
+
+func TestReplaceFileSwapsAtomically(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.jsonc")
+	if err := ReplaceFile(path, []byte(`{"a": 1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceFile(path, []byte(`{"a": 2}`)); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != `{"a": 2}` {
+		t.Fatalf("replace must swap whole content, got %q, %v", data, err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("replace must keep owner-only perms: %v", err)
+	}
+}
+
 func TestClipboardBackfill(t *testing.T) {
 	dir := t.TempDir()
 	old := map[string]any{"defaults": map[string]any{"username": "A"}}
@@ -146,7 +181,7 @@ func TestClipboardBackfill(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c, err := LoadOrCreate(path, false)
+	c, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +192,7 @@ func TestClipboardBackfill(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c, err = LoadOrCreate(path, false)
+	c, err = Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
