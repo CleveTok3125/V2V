@@ -34,16 +34,27 @@ func parseFlags() {
 	}
 	historyFile = filepath.Join(CLI.CacheDir, "history.tmp")
 	// Client config is immutable state: read freely, replaced only by
-	// explicit actions. A missing file means in-memory defaults.
-	cfgPath := configdir.DefaultConfigFile(CLI.ConfigDir)
-	if _, err := os.Stat(cfgPath); err != nil {
-		fmt.Printf("config %s not found, using defaults (see template/config.json)\n", cfgPath)
-	}
+	// explicit actions. A missing file means in-memory defaults; copy
+	// template/config.json to config.jsonc to customize.
+	cfgPath := resolveCfgPath()
 	if cfg, err := config.Load(cfgPath); err == nil {
 		ClientCfg = cfg
 	} else {
 		ClientCfg = config.DefaultClientConfig()
 	}
+}
+
+// resolveCfgPath prefers config.jsonc, falls back to config.json.
+func resolveCfgPath() string {
+	cfgPath := configdir.DefaultConfigFile(CLI.ConfigDir)
+	jsoncPath := cfgPath[:len(cfgPath)-len(".json")] + ".jsonc"
+	if _, err := os.Stat(jsoncPath); err == nil {
+		return jsoncPath
+	}
+	if _, err := os.Stat(cfgPath); err != nil {
+		fmt.Printf("config %s not found, using defaults (see template/config.json)\n", cfgPath)
+	}
+	return cfgPath
 }
 
 // applyWebPasskey is web-only: the desktop signs assertions natively from
