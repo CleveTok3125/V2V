@@ -150,7 +150,7 @@ type ClientConfig struct {
 			Error      string `json:"error"`
 		} `json:"theme"`
 		Web struct {
-			CharAspect int `json:"charAspect"`
+			CharAspect float64 `json:"charAspect"`
 			Scrollback int `json:"scrollback"`
 		} `json:"web"`
 	} `json:"ui"`
@@ -235,7 +235,7 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.Theme.Background = "#101014"
 	c.UI.Theme.Accent = "#4f7dff"
 	c.UI.Theme.Error = "#ff6b6b"
-	c.UI.Web.CharAspect = 0
+	c.UI.Web.CharAspect = 0.6
 	c.UI.Web.Scrollback = 10000
 	c.Commands = map[string][]string{
 		"quit":         {"/quit", "/q"},
@@ -382,7 +382,11 @@ func ReplaceFile(path string, data []byte) error {
 
 func parse(data []byte) (*ClientConfig, error) {
 	var c ClientConfig
-	if err := json.Unmarshal(data, &c); err != nil {
+	stripped, err := StripComments(data)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(stripped, &c); err != nil {
 		return nil, err
 	}
 	// Backfill tab caps for config files written before the tabs section existed.
