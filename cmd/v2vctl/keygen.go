@@ -9,7 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	"github.com/CleveTok3125/V2V/identity"
+	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/tui"
 	"github.com/charmbracelet/huh"
 )

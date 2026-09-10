@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CleveTok3125/V2V/codebg"
+	"github.com/CleveTok3125/V2V/internal/codebg"
 	"github.com/CleveTok3125/V2V/internal/chain"
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
@@ -27,8 +27,8 @@ import (
 	"github.com/CleveTok3125/V2V/internal/trip"
 	"github.com/CleveTok3125/V2V/internal/tripcolor"
 	"github.com/CleveTok3125/V2V/internal/wire"
-	"github.com/CleveTok3125/V2V/linkify"
-	"github.com/CleveTok3125/V2V/markup"
+	"github.com/CleveTok3125/V2V/internal/linkify"
+	"github.com/CleveTok3125/V2V/internal/markup"
 
 	"github.com/alecthomas/kong"
 )

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/CleveTok3125/V2V/identity"
+	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/passprompt"
 	"github.com/CleveTok3125/V2V/internal/strength"
 	"github.com/CleveTok3125/V2V/internal/tui"

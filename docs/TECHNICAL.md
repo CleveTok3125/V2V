@@ -24,8 +24,8 @@ For a friendly getting-started guide, see [README.md](../README.md).
 .
 ├── client/           # CLI and WASM client (shared Go code, platform-specific shims; render.go holds display helpers, client.go the session loop)
 ├── server/           # WebSocket server, history, auth, WebAuthn
-├── identity/         # Shared key file logic (Load/Save, encryption)
 ├── internal/
+│   ├── identity/     # Shared key file logic (Load/Save, encryption)
 │   ├── filter/       # Injection filter (ValidateMessage / SanitizeForDisplay)
 │   ├── trip/         # Trip verification (Verify)
 │   ├── tripcolor/    # Badge color palette + CanonicalPayload
@@ -38,8 +38,9 @@ For a friendly getting-started guide, see [README.md](../README.md).
 │   ├── config/       # Client/server config schema + defaults
 │   └── configdir/    # XDG-aware default dirs
 │   └── tui/          # General huh confirms/selects + piped fallbacks
-├── linkify/          # URL → OSC8 hyperlink
-├── codebg/           # inline `code` + ``` blocks → background SGR + chroma highlight (display only)
+│   ├── markup/       # Forum markdown facade over codebg + linkify
+│   ├── linkify/      # URL → OSC8 hyperlink
+│   └── codebg/       # inline `code` + ``` blocks → background SGR + chroma highlight (display only)
 ├── webterm/          # Browser terminal (xterm.js + WASM glue)
 ├── cmd/v2vctl/       # Management tool, one file per concern (main, role, keygen, enroll, migrate, list, prompt)
 ├── template/         # Example .env / key.json / roles.json

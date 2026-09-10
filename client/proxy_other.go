@@ -24,7 +24,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/gorilla/websocket"
 
-	"github.com/CleveTok3125/V2V/identity"
+	"github.com/CleveTok3125/V2V/internal/identity"
 
 	"github.com/CleveTok3125/V2V/internal/passprompt"
 	"github.com/CleveTok3125/V2V/internal/tui"

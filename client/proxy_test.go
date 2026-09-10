@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/identity"
+	"github.com/CleveTok3125/V2V/internal/identity"
 )
 
 func TestParseProxyURL(t *testing.T) {
