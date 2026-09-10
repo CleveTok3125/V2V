@@ -59,7 +59,7 @@ Your message first appears grey with `⏳` and is replaced by the confirmed line
 
 Chat and system messages live on separate tabs: `/tab` switches between Tab 1 (chat) and Tab 2 (local & system). The bar shows `[1:chat] 2:system` with the active tab in brackets.
 
-Keys and settings live in your OS config dir (`~/.config/V2V/` on Linux, `%AppData%\V2V` on Windows, `~/Library/Application Support/V2V` on macOS): `key.json` for identities, auto-created `config.json` for settings. Override with `-c/--config-dir` (`V2V_CONFIG_DIR`) and `-C/--cache-dir` (`V2V_CACHE_DIR`). Extra flags: `-v` version, `-a` user-agent, `-i` server info, `-j` show join/leave (live display and catch-up history; replays filter joins by default).
+Keys and settings live in your OS config dir (`~/.config/V2V/` on Linux, `%AppData%\V2V` on Windows, `~/Library/Application Support/V2V` on macOS): `key.json` for identities, read-only `config.jsonc`/`config.json` for settings (JSONC comments allowed, copy `template/config.json` to customize, `v2v --encrypt-config` to seal it). Override with `-c/--config-dir` (`V2V_CONFIG_DIR`) and `-C/--cache-dir` (`V2V_CACHE_DIR`). Extra flags: `-v` version, `-a` user-agent, `-i` server info, `-j` show join/leave (live display and catch-up history; replays filter joins by default).
 
 ## For Admins
 
