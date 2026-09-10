@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CleveTok3125/V2V/codebg"
+	"github.com/CleveTok3125/V2V/internal/codebg"
 )
 
 func TestTrio(t *testing.T) {

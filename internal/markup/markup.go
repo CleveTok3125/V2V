@@ -23,8 +23,8 @@ import (
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
 
-	"github.com/CleveTok3125/V2V/codebg"
-	"github.com/CleveTok3125/V2V/linkify"
+	"github.com/CleveTok3125/V2V/internal/codebg"
+	"github.com/CleveTok3125/V2V/internal/linkify"
 )
 
 const (

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/CleveTok3125/V2V/identity"
+	"github.com/CleveTok3125/V2V/internal/identity"
 )
 
 // ErrEncrypted signals a passphrase-sealed config. Callers obtain the

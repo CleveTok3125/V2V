@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/CleveTok3125/V2V/identity"
+	"github.com/CleveTok3125/V2V/internal/identity"
 )
 
 // proxyConfig is a parsed, validated proxy endpoint. Pass lives as

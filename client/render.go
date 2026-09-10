@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CleveTok3125/V2V/codebg"
+	"github.com/CleveTok3125/V2V/internal/codebg"
 	"github.com/CleveTok3125/V2V/internal/filter"
-	"github.com/CleveTok3125/V2V/markup"
+	"github.com/CleveTok3125/V2V/internal/markup"
 )
 
 func renderChatText(text string) string {

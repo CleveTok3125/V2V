@@ -7,7 +7,7 @@ import (
 	"runtime"
 
 	"golang.org/x/crypto/argon2"
-	"github.com/CleveTok3125/V2V/identity"
+	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/tripcolor"
 )
 

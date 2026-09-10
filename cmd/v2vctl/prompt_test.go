@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/CleveTok3125/V2V/identity"
+	"github.com/CleveTok3125/V2V/internal/identity"
 )
 
 // Strength policy itself is pinned in internal/strength/strength_test.go;
