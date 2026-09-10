@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
-
-	"github.com/CleveTok3125/V2V/internal/config"
 )
 
 func TestGenerateTripcode(t *testing.T) {
@@ -91,7 +89,7 @@ func TestCooldownMap(t *testing.T) {
 }
 
 func TestValidateMessageForSend(t *testing.T) {
-	cfg := config.DefaultDynamic()
+	cfg := &Limits{MaxMessageLength: 5000, MaxMessageLine: 50, MessageCooldown: 200 * time.Millisecond}
 	if err := ValidateMessageForSend("hello", time.Now().Add(-time.Hour), cfg, false); err != nil {
 		t.Fatalf("good message rejected: %v", err)
 	}

@@ -431,7 +431,11 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		lastChatActivity = time.Now()
 		updateReadDeadline()
 
-		if err := guard.ValidateMessageForSend(text, lastMessageTime, dynCfg, session.Perms.CanMessageUnlimited); err != nil {
+		if err := guard.ValidateMessageForSend(text, lastMessageTime, &guard.Limits{
+			MaxMessageLength: dynCfg.MaxMessageLength,
+			MaxMessageLine:   dynCfg.MaxMessageLine,
+			MessageCooldown:  dynCfg.MessageCooldown,
+		}, session.Perms.CanMessageUnlimited); err != nil {
 			// Unicast warnings must never block ReadPump: if WritePump is
 			// wedged and Send is full, drop the warning instead of leaking
 			// the goroutine and pinning the IP slot.

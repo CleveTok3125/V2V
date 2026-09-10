@@ -1456,7 +1456,11 @@ func main() {
 
 		// Guard: client-side MessageCooldown (mirror server, zero-trust)
 		if ClientCfg != nil {
-			if err := guard.ValidateMessageForSend(text, lastMessageTime, &ClientCfg.Limits, false); err != nil {
+			if err := guard.ValidateMessageForSend(text, lastMessageTime, &guard.Limits{
+				MaxMessageLength: ClientCfg.Limits.MaxMessageLength,
+				MaxMessageLine:   ClientCfg.Limits.MaxMessageLine,
+				MessageCooldown:  ClientCfg.Limits.MessageCooldown,
+			}, false); err != nil {
 				if err == guard.ErrTooFast {
 					displayMu.Lock()
 					emitLocalFeedback(fmt.Sprintf("| [Local]: Bạn đang chat quá nhanh! Vui lòng đợi %v.\n", ClientCfg.Limits.MessageCooldown))
