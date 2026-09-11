@@ -1,4 +1,7 @@
 # 🚀 V2V — Verifiable Anonymous Chat
+
+> [!WARNING]
+> **Pre-1.0: đang phát triển mạnh, không đảm bảo tương thích ngược.** Thay đổi lớn (giao thức wire, định dạng lưu trữ, CLI, v.v) có thể xuất hiện bất cứ lúc nào. Luôn cập nhật client và server cùng nhau.
 <p align="left">
 🌐
 <a href="README.md">English</a> · <a href="docs/TECHNICAL.md">Tài liệu kỹ thuật</a>
@@ -51,6 +54,7 @@ make help            # xem tất cả target
 # bạn sẽ hiện: TênBạn#ab12
 #               └─ ✍️ ◆ ab12cd34  (màu, bấm để verify)
 ```
+
 Biến môi trường `V2V_TRIPCODE` cũng dùng được (chỉ cho CI — nên dùng file mã hóa).
 
 Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/clearhistory`, `/whoami`, `/status`, `/showjoin`, `/autoverify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`, `/copy`).
