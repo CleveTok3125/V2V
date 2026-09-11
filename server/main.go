@@ -316,6 +316,7 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/trip/verify", chatApp.handleTripVerify)
+	mux.HandleFunc("/api/version", handleAPIVersion)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
@@ -332,6 +333,7 @@ func main() {
 		fmt.Fprint(w, "WebSocket server is running...\n\n")
 		fmt.Fprintln(w, "Mô tả      : Hệ thống chat ẩn danh")
 		fmt.Fprintln(w, "Giao thức  : WebSocket")
+		fmt.Fprintf(w, "Phiên bản  : %s\n", Version)
 		fmt.Fprintf(w, "Instance ID: %s\n", Cfg.Static.InstanceID)
 		fmt.Fprintf(w, "Uptime     : %s\n", uptime.String())
 		fmt.Fprintf(w, "Múi giờ    : %s\n", Cfg.Static.Timezone)
@@ -364,6 +366,6 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	logInfof("🚀 Server đang chạy tại port %v", Cfg.Static.Port)
+	logInfof("🚀 Server đang chạy tại port %v (version %s)", Cfg.Static.Port, Version)
 	log.Fatal(server.ListenAndServe())
 }

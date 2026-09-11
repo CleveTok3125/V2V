@@ -23,7 +23,7 @@ dev: dev-server dev-client dev-v2vctl dev-web
 
 dev-server:
 	mkdir -p bin
-	GOCACHE=$(GOCACHE) CGO_ENABLED=0 go build -tags netgo -trimpath -o bin/v2v-server ./server
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 go build -tags netgo -trimpath -ldflags "$(DEV_LDFLAGS)" -o bin/v2v-server ./server
 	@echo "Done! -> bin/v2v-server ($(DEV_VERSION))"
 
 dev-client:
@@ -47,7 +47,7 @@ dev-web:
 
 server:
 	mkdir -p public
-	GOCACHE=$(GOCACHE) CGO_ENABLED=0 go build -tags netgo -trimpath -ldflags '-s -w' -o public/server.bin ./server
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 go build -tags netgo -trimpath -ldflags '-s -w -X main.Version=$(APP_VERSION)' -o public/server.bin ./server
 
 web:
 	@if [ -n "$(GIT_HASH)" ] && [ "$$(git rev-parse --short HEAD 2>/dev/null)" != "$(GIT_HASH)" ]; then echo "WARNING: GIT_HASH=$(GIT_HASH) differs from HEAD; browser may cache a stale app.wasm. Unset GIT_HASH or use 'make dev-web' for dev."; fi
