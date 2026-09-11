@@ -7,13 +7,6 @@
                 "server_pubkey": "64 hex of server pubkey (from data/server_identity.json)"
             }
         ],
-        "passkeys": [
-            {
-                "credential_id": "base64url credential ID",
-                "public_key": "base64url COSE public key",
-                "added_at": "2026-08-27T00:00:00Z"
-            }
-        ],
         "can_message_unlimited": true,
         "custom_prefix": "\u001b[31m[Admin]\u001b[0m "
     }

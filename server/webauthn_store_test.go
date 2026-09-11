@@ -7,7 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -136,12 +138,26 @@ func TestAtomicWriteAndEnrollMerge(t *testing.T) {
 	if _, err := s.CreatePendingTicket("member", "test", time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.saveFile(&webauthnFile{Version: 1, Credentials: map[string][]*WAStoredCred{}}); err != nil {
+	if err := s.saveFile(&webauthnFile{Version: 2, Credentials: map[string][]*WAStoredCred{}}); err != nil {
 		t.Fatal(err)
 	}
 	files, _ := filepath.Glob(dir + "/.tmp-*")
 	if len(files) != 0 {
 		t.Errorf("tmp files not cleaned: %v", files)
+	}
+}
+
+func TestV1StoreRefused(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "webauthn.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"credentials":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := NewWebAuthnStore(path)
+	if err := s.view(func(f *webauthnFile) error { return nil }); err == nil {
+		t.Fatal("v1 store must be refused")
+	} else if !strings.Contains(err.Error(), "re-enroll") && !strings.Contains(err.Error(), "enroll lại") {
+		t.Fatalf("refusal must tell admin to re-enroll, got: %v", err)
 	}
 }
 

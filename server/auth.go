@@ -121,28 +121,10 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		if !exists {
 			return perms, resp, fmt.Errorf("%w", ErrInvalidRole)
 		}
-		// Candidate 1: hand-imported identities in roles.json (software
-		// passkey from a desktop key.json). No server-side counter.
-		for _, pk := range roleDef.Passkeys {
-			if pk.CredentialID != resp.PasskeyID {
-				continue
-			}
-			pub, err := base64.RawURLEncoding.DecodeString(pk.PublicKey)
-			if err != nil {
-				continue
-			}
-			if _, verr := verifyAssertion(pub, resp.Nonce, resp.PasskeyAuthData, resp.PasskeyClientData, resp.PasskeySig); verr == nil {
-				resp.AuthType = "passkey_soft"
-				logInfof("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey mềm, role: [%s]", clientIP, resp.Role)
-				return roleDef.Permission, resp, nil
-			} else {
-				lastErr = verr
-			}
-		}
-
-		// Candidate 2: real passkeys enrolled via the web ceremony. These
-		// live in the managed store with a persisted sign counter, enabling
-		// clone detection.
+		// Passkeys only come from the managed store (web ceremony
+		// enrollment). Hand-imported roles.json credentials no longer
+		// exist: every credential here carries a persisted sign
+		// counter for clone detection.
 		if s.WebAuthn == nil {
 			return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
 		}

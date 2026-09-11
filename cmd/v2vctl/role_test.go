@@ -116,38 +116,6 @@ func TestRoleAddIdentityManualAndPaste(t *testing.T) {
 	})
 }
 
-func TestRoleAddPasskeyPasteWithComment(t *testing.T) {
-	withTempDir(t, func() {
-		if err := (&RoleCreateCmd{Role: "tester"}).Run(); err != nil {
-			t.Fatal(err)
-		}
-		// Simulate RolesSnippet output with // comment line
-		snippet := "// roles.json → \"tester\".passkeys\n[{\"credential_id\":\"cid123\",\"public_key\":\"cose123\",\"added_at\":\"2026-08-31T00:00:00Z\"}]"
-		f := filepath.Join(".", "snip.json")
-		os.WriteFile(f, []byte(snippet), 0600)
-		c := &RoleAddPasskeyCmd{Role: "tester", File: f}
-		if err := c.Run(); err != nil {
-			t.Fatalf("add-passkey comment: %v", err)
-		}
-		m := readRoles(t)
-		pks := m["tester"].(map[string]any)["passkeys"].([]any)
-		if len(pks) != 1 {
-			t.Fatalf("expected 1 passkey, got %d", len(pks))
-		}
-		if pks[0].(map[string]any)["credential_id"] != "cid123" {
-			t.Fatalf("cid mismatch")
-		}
-		// duplicate should overwrite, not append
-		if err := c.Run(); err != nil {
-			t.Fatalf("duplicate: %v", err)
-		}
-		m = readRoles(t)
-		pks = m["tester"].(map[string]any)["passkeys"].([]any)
-		if len(pks) != 1 {
-			t.Fatalf("dedupe failed, got %d", len(pks))
-		}
-	})
-}
 
 func TestRoleImportAndEnrollWarn(t *testing.T) {
 	withTempDir(t, func() {

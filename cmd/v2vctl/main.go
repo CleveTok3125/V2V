@@ -28,7 +28,6 @@ type CLI struct {
 
 type KeygenCmd struct {
 	Ed25519 Ed25519Keygen `cmd:"" name:"ed25519" help:"Danh tính ed25519 key-file"`
-	Passkey PasskeyKeygen `cmd:"" help:"Danh tính passkey mềm (WebAuthn wire format)"`
 }
 
 var cli CLI

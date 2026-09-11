@@ -1,11 +1,6 @@
 package identity
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -17,8 +12,6 @@ func TestIdentityRoundtrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "key.json")
 	f := &IdentityFile{
 		Ed25519: &Ed25519Identity{Role: "admin", PrivateKey: "aa", HmacShield: "bb"},
-		Passkey: &PasskeyIdentity{Role: "member", CredentialID: "cid", PrivateKey: "pk",
-			PublicKey: "cose", SignCount: 7},
 	}
 	if err := f.Save(path); err != nil {
 		t.Fatal(err)
@@ -27,8 +20,7 @@ func TestIdentityRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Ed25519 == nil || got.Ed25519.Role != "admin" ||
-		got.Passkey == nil || got.Passkey.SignCount != 7 || got.Version != Version {
+	if got.Ed25519 == nil || got.Ed25519.Role != "admin" || got.Version != Version {
 		t.Fatalf("roundtrip mismatch: %+v", got)
 	}
 }
@@ -43,26 +35,8 @@ func TestLegacyFlatKeyJSONLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Ed25519 == nil || got.Ed25519.Role != "admin" || got.Passkey != nil {
+	if got.Ed25519 == nil || got.Ed25519.Role != "admin" {
 		t.Fatalf("legacy wrap mismatch: %+v", got)
-	}
-}
-
-func TestGeneratePreservesSiblingSlot(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "key.json")
-	f := &IdentityFile{Version: Version,
-		Passkey: &PasskeyIdentity{Role: "member", CredentialID: "keep-me"}}
-	if err := f.Save(path); err != nil {
-		t.Fatal(err)
-	}
-	reloaded, _ := Load(path)
-	reloaded.Ed25519 = &Ed25519Identity{Role: "admin", PrivateKey: "xx", HmacShield: "yy"}
-	if err := reloaded.Save(path); err != nil {
-		t.Fatal(err)
-	}
-	final, _ := Load(path)
-	if final.Passkey == nil || final.Passkey.CredentialID != "keep-me" || final.Ed25519 == nil {
-		t.Fatal("sibling slot destroyed")
 	}
 }
 
@@ -181,7 +155,6 @@ func TestEncryptedRoundtrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enc.json")
 	f := &IdentityFile{
 		Ed25519: &Ed25519Identity{Role: "admin", PrivateKey: "aa", HmacShield: "bb", ServerPubKey: "deadbeef"},
-		Passkey: &PasskeyIdentity{Role: "member", CredentialID: "cid123", PrivateKey: "pk", PublicKey: "cose", RPID: "example.com", Origin: "https://example.com"},
 	}
 	// Use fast params for test
 	p := Params{Time: 1, Memory: 8 * 1024, Threads: 1}
@@ -200,48 +173,11 @@ func TestEncryptedRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Ed25519 == nil || got.Ed25519.Role != "admin" || got.Passkey == nil || got.Passkey.CredentialID != "cid123" {
+	if got.Ed25519 == nil || got.Ed25519.Role != "admin" {
 		t.Fatalf("decrypted mismatch: %+v", got)
 	}
 	// Plaintext load should refuse encrypted file
 	if _, err := Load(path); err == nil || !contains(err.Error(), "encrypted") {
 		t.Fatalf("Load should refuse encrypted file, got %v", err)
-	}
-}
-
-func TestBuildAssertionCounterIncreases(t *testing.T) {
-	// authData[33:37] must carry the real counter: a zero counter
-	// disables server clone-detection.
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	der, err := x509MarshalPKCS8(priv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pk := &PasskeyIdentity{
-		Role: "member", CredentialID: "cid",
-		PrivateKey: base64.RawURLEncoding.EncodeToString(der),
-		RPID:       "example.com", Origin: "https://example.com",
-	}
-	var last uint32
-	for want := uint32(1); want <= 2; want++ {
-		_, adB64, _, _, err := pk.BuildAssertion("cafebabe")
-		if err != nil {
-			t.Fatal(err)
-		}
-		ad, err := base64.RawURLEncoding.DecodeString(adB64)
-		if err != nil || len(ad) != 37 {
-			t.Fatalf("bad authData: len=%d err=%v", len(ad), err)
-		}
-		got := binary.BigEndian.Uint32(ad[33:37])
-		if got != want {
-			t.Fatalf("counter = %d, want %d", got, want)
-		}
-		last = got
-	}
-	if last != 2 {
-		t.Fatalf("counter did not advance, last=%d", last)
 	}
 }
