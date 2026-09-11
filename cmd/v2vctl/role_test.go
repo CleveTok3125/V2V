@@ -323,3 +323,25 @@ func TestEd25519KeygenRoundtrip(t *testing.T) {
 		}
 	})
 }
+
+func TestEnrollWritesV2Store(t *testing.T) {
+	withTempDir(t, func() {
+		c := &EnrollCmd{Role: "member", Store: "webauthn.json", TTL: time.Minute}
+		if err := c.Run(); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile("webauthn.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var f map[string]any
+		if err := json.Unmarshal(data, &f); err != nil {
+			t.Fatal(err)
+		}
+		// Must track server/webauthn_store.go webauthnFileVersion or the
+		// server refuses the ticket file at boot.
+		if v, _ := f["version"].(float64); int(v) != 2 {
+			t.Fatalf("store version = %v, want 2", f["version"])
+		}
+	})
+}

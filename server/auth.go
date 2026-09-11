@@ -133,7 +133,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 			if err != nil {
 				return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
 			}
-			counter, verr := verifyAssertion(pub, resp.Nonce, resp.PasskeyAuthData, resp.PasskeyClientData, resp.PasskeySig)
+			counter, verr := verifyAssertionLib(pub, resp.Nonce, resp.PasskeyAuthData, resp.PasskeyClientData, resp.PasskeySig, resp.PasskeyID, resp.Role)
 			switch {
 			case verr == nil && (counter == 0 || cred.SignCount == 0 || counter > cred.SignCount):
 				if counter != 0 {

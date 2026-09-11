@@ -110,24 +110,25 @@ func buildAttestation(t *testing.T, priv *ecdsa.PrivateKey, challengeB64 string,
 		credID
 }
 
-func TestParseCreationForImport(t *testing.T) {
+func TestParseCreationLibRejects(t *testing.T) {
 	setupWA(t)
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	wantChal := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
 	cdB64, attB64, _ := buildAttestation(t, priv, wantChal, testRPID, testOrigin)
+	wantID := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
 
-	parsed, err := parseCreationForImport(cdB64, attB64, wantChal)
-	if err != nil {
-		t.Fatalf("parse failed: %v", err)
+	// legacy fmt "none" without UV is rejected by hard policy
+	if _, err := parseCreationLib(cdB64, attB64, wantChal, wantID); err == nil {
+		t.Error("fmt none without UV accepted")
 	}
-	if parsed.CredentialID == "" || len(parsed.PublicKey) == 0 {
-		t.Fatal("empty parsed fields")
-	}
-
 	// wrong challenge rejected
-	if _, err := parseCreationForImport(cdB64, attB64,
-		base64.RawURLEncoding.EncodeToString([]byte("other-challenge-32-bytes!!!!!!"))); err == nil {
+	if _, err := parseCreationLib(cdB64, attB64,
+		base64.RawURLEncoding.EncodeToString([]byte("other-challenge-32-bytes!!!!!!")), wantID); err == nil {
 		t.Error("wrong challenge accepted")
+	}
+	// malformed inputs fail closed
+	if _, err := parseCreationLib("!!!", attB64, wantChal, wantID); err == nil {
+		t.Error("malformed clientData accepted")
 	}
 }
 
