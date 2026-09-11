@@ -122,11 +122,23 @@ func loginArgs(t *testing.T, priv *ecdsa.PrivateKey, flags byte, counter uint32,
 		base64.RawURLEncoding.EncodeToString(sig)
 }
 
+const flagUPUVBEBS = 0x01 | 0x04 | 0x08 | 0x10
+
+func storedCred(t *testing.T, priv *ecdsa.PrivateKey, be, bs bool) *WAStoredCred {
+	t.Helper()
+	return &WAStoredCred{
+		CredentialID:   testCredID,
+		PublicKey:      base64.RawURLEncoding.EncodeToString(coseEC2(t, &priv.PublicKey)),
+		BackupEligible: be,
+		BackupState:    bs,
+	}
+}
+
 func TestLibLoginHappyPath(t *testing.T) {
 	setupWA(t)
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	ad, cd, sig := loginArgs(t, priv, flagUPUV, 7, testNonce, testOrigin)
-	got, err := verifyAssertionLib(coseEC2(t, &priv.PublicKey), testNonce, ad, cd, sig, testCredID, testRole)
+	ad, cd, sig := loginArgs(t, priv, flagUPUVBEBS, 7, testNonce, testOrigin)
+	got, err := verifyAssertionLib(storedCred(t, priv, true, true), testNonce, ad, cd, sig, testRole)
 	if err != nil {
 		t.Fatalf("happy path failed: %v", err)
 	}
@@ -135,18 +147,30 @@ func TestLibLoginHappyPath(t *testing.T) {
 	}
 }
 
+func TestLibLoginBackupMismatch(t *testing.T) {
+	setupWA(t)
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ad, cd, sig := loginArgs(t, priv, flagUPUVBEBS, 1, testNonce, testOrigin)
+	// Stored flags say non-backupable but the authenticator reports
+	// backup-eligible: the exact production failure (synced provider
+	// against zeroed stored flags) must reject, never silently pass.
+	if _, err := verifyAssertionLib(storedCred(t, priv, false, false), testNonce, ad, cd, sig, testRole); err == nil {
+		t.Fatal("backup-eligibility mismatch accepted")
+	}
+}
+
 func TestLibLoginRejections(t *testing.T) {
 	setupWA(t)
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	pubCOSE := coseEC2(t, &priv.PublicKey)
-	ad, cd, sig := loginArgs(t, priv, flagUPUV, 1, testNonce, testOrigin)
+	stored := storedCred(t, priv, true, true)
+	ad, cd, sig := loginArgs(t, priv, flagUPUVBEBS, 1, testNonce, testOrigin)
 
-	if _, err := verifyAssertionLib(pubCOSE, "ffffff"+testNonce[6:], ad, cd, sig, testCredID, testRole); err == nil {
+	if _, err := verifyAssertionLib(stored, "ffffff"+testNonce[6:], ad, cd, sig, testRole); err == nil {
 		t.Error("challenge mismatch accepted")
 	}
 	badCD := buildClientData(t, "webauthn.get", testNonce, "https://evil.example.com")
-	if _, err := verifyAssertionLib(pubCOSE, testNonce, ad,
-		base64.RawURLEncoding.EncodeToString(badCD), sig, testCredID, testRole); err == nil {
+	if _, err := verifyAssertionLib(stored, testNonce, ad,
+		base64.RawURLEncoding.EncodeToString(badCD), sig, testRole); err == nil {
 		t.Error("origin mismatch accepted")
 	}
 	sigBytes := []byte(sig)
@@ -155,29 +179,29 @@ func TestLibLoginRejections(t *testing.T) {
 	} else {
 		sigBytes[10] = 'A'
 	}
-	if _, err := verifyAssertionLib(pubCOSE, testNonce, ad, cd, string(sigBytes), testCredID, testRole); err == nil {
+	if _, err := verifyAssertionLib(stored, testNonce, ad, cd, string(sigBytes), testRole); err == nil {
 		t.Error("tampered signature accepted")
 	}
-	noUP, _, _ := loginArgs(t, priv, 0x04, 1, testNonce, testOrigin)
-	if _, err := verifyAssertionLib(pubCOSE, testNonce, noUP, cd, sig, testCredID, testRole); err == nil {
+	noUP, _, _ := loginArgs(t, priv, 0x04|0x08|0x10, 1, testNonce, testOrigin)
+	if _, err := verifyAssertionLib(stored, testNonce, noUP, cd, sig, testRole); err == nil {
 		t.Error("missing UP flag accepted")
 	}
-	noUV, _, _ := loginArgs(t, priv, 0x01, 1, testNonce, testOrigin)
-	if _, err := verifyAssertionLib(pubCOSE, testNonce, noUV, cd, sig, testCredID, testRole); err == nil {
+	noUV, _, _ := loginArgs(t, priv, 0x01|0x08|0x10, 1, testNonce, testOrigin)
+	if _, err := verifyAssertionLib(stored, testNonce, noUV, cd, sig, testRole); err == nil {
 		t.Error("missing UV flag accepted")
 	}
 	// Unknown credential IDs never reach the adapter: auth.go only calls
 	// it with the stored pubkey of a looked-up credential (store miss =
 	// reject, covered by TestCredential_UnknownReturnsFalse). The
 	// session allow-list binds this verification to the presented ID.
-	if _, err := verifyAssertionLib(pubCOSE, testNonce, "!!!", cd, sig, testCredID, testRole); err == nil {
+	if _, err := verifyAssertionLib(stored, testNonce, "!!!", cd, sig, testRole); err == nil {
 		t.Error("malformed authData accepted")
 	}
 }
 
 // buildCreationSelfAttested assembles a packed self-attested registration:
 // fmt + attStmt signed by the credential key itself, UV per withUV.
-func buildCreationSelfAttested(t *testing.T, priv *ecdsa.PrivateKey, challengeB64, rpid, origin string, withUV bool) (cdB64, attB64, credID string) {
+func buildCreationSelfAttested(t *testing.T, priv *ecdsa.PrivateKey, challengeB64, rpid, origin string, flags byte) (cdB64, attB64, credID string) {
 	t.Helper()
 	cdJSON, _ := json.Marshal(map[string]any{
 		"type":      "webauthn.create",
@@ -188,10 +212,6 @@ func buildCreationSelfAttested(t *testing.T, priv *ecdsa.PrivateKey, challengeB6
 	idBytes := make([]byte, 32)
 	if _, err := rand.Read(idBytes); err != nil {
 		t.Fatal(err)
-	}
-	flags := byte(0x01 | 0x40) // UP | AT
-	if withUV {
-		flags |= 0x04
 	}
 	authData := append([]byte{}, rpHash[:]...)
 	authData = append(authData, flags, 0, 0, 0, 0)
@@ -222,7 +242,7 @@ func TestLibCreationHappyPath(t *testing.T) {
 	setupWA(t)
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	wantChal := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
-	cdB64, attB64, credID := buildCreationSelfAttested(t, priv, wantChal, testRPID, testOrigin, true)
+	cdB64, attB64, credID := buildCreationSelfAttested(t, priv, wantChal, testRPID, testOrigin, 0x01|0x40|0x04)
 	got, err := parseCreationLib(cdB64, attB64, wantChal, credID)
 	if err != nil {
 		t.Fatalf("creation happy path failed: %v", err)
@@ -235,11 +255,39 @@ func TestLibCreationHappyPath(t *testing.T) {
 	}
 }
 
+func TestLibCreationRecordsBackupFlags(t *testing.T) {
+	setupWA(t)
+	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	wantChal := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	// Synced-provider shape: BE|BS set. These flags must survive into
+	// the stored credential or every later login fails closed.
+	cdB64, attB64, credID := buildCreationSelfAttested(t, priv, wantChal, testRPID, testOrigin, 0x01|0x40|0x04|0x08|0x10)
+	got, err := parseCreationLib(cdB64, attB64, wantChal, credID)
+	if err != nil {
+		t.Fatalf("BE/BS creation failed: %v", err)
+	}
+	if !got.BackupEligible || !got.BackupState {
+		t.Fatalf("backup flags not recorded: %+v", got)
+	}
+	// And a login against the recorded flags must pass (the production
+	// failure was zeroed stored flags vs BE-presented assertion).
+	ad, cd, sig := loginArgs(t, priv, flagUPUVBEBS, 1, testNonce, testOrigin)
+	stored := &WAStoredCred{
+		CredentialID:   credID,
+		PublicKey:      base64.RawURLEncoding.EncodeToString(coseEC2(t, &priv.PublicKey)),
+		BackupEligible: got.BackupEligible,
+		BackupState:    got.BackupState,
+	}
+	if _, err := verifyAssertionLib(stored, testNonce, ad, cd, sig, testRole); err != nil {
+		t.Fatalf("login with recorded flags failed: %v", err)
+	}
+}
+
 func TestLibCreationRejections(t *testing.T) {
 	setupWA(t)
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	wantChal := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
-	cdB64, attB64, credID := buildCreationSelfAttested(t, priv, wantChal, testRPID, testOrigin, true)
+	cdB64, attB64, credID := buildCreationSelfAttested(t, priv, wantChal, testRPID, testOrigin, 0x01|0x40|0x04)
 
 	if _, err := parseCreationLib(cdB64, attB64,
 		base64.RawURLEncoding.EncodeToString([]byte("other-challenge-32-bytes!!!!!!")), credID); err == nil {
@@ -248,7 +296,7 @@ func TestLibCreationRejections(t *testing.T) {
 	if _, err := parseCreationLib(cdB64, attB64, wantChal, "bm90LWV4aXN0aW5n"); err == nil {
 		t.Error("claimed ID mismatch accepted")
 	}
-	noUVcd, noUVatt, noUVid := buildCreationSelfAttested(t, priv, wantChal, testRPID, testOrigin, false)
+	noUVcd, noUVatt, noUVid := buildCreationSelfAttested(t, priv, wantChal, testRPID, testOrigin, 0x01|0x40)
 	if _, err := parseCreationLib(noUVcd, noUVatt, wantChal, noUVid); err == nil {
 		t.Error("missing UV accepted")
 	}

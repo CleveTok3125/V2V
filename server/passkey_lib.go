@@ -60,15 +60,23 @@ func es256Only() []protocol.CredentialParameter {
 }
 
 // verifyAssertionLib validates one login assertion through the library
-// and returns the authenticator counter for clone detection.
-func verifyAssertionLib(pubKeyCOSE []byte, nonceHex, authDataB64, clientDataB64, sigB64, credIDB64, role string) (uint32, error) {
+// and returns the authenticator counter for clone detection. The
+// stored backup flags ride along: the library rejects a backup-state
+// mismatch, so they must be the values recorded at enrollment, never
+// zeroed defaults.
+func verifyAssertionLib(stored *WAStoredCred, nonceHex, authDataB64, clientDataB64, sigB64, role string) (uint32, error) {
 	if WebAuth == nil {
 		return 0, perr("passkey_disabled")
 	}
-	rawID, err := base64.RawURLEncoding.DecodeString(credIDB64)
+	pubKeyCOSE, err := base64.RawURLEncoding.DecodeString(stored.PublicKey)
+	if err != nil {
+		return 0, perr("stored_key_malformed")
+	}
+	rawID, err := base64.RawURLEncoding.DecodeString(stored.CredentialID)
 	if err != nil || len(rawID) == 0 || len(rawID) > maxCredentialIDLen {
 		return 0, perr("credential_id_malformed")
 	}
+	credIDB64 := stored.CredentialID
 	doc := fmt.Sprintf(`{"id":%q,"rawId":%q,"type":"public-key","response":{"authenticatorData":%q,"clientDataJSON":%q,"signature":%q}}`,
 		credIDB64, credIDB64, authDataB64, clientDataB64, sigB64)
 	parsed, err := protocol.ParseCredentialRequestResponseBytes([]byte(doc))
@@ -79,7 +87,14 @@ func verifyAssertionLib(pubKeyCOSE []byte, nonceHex, authDataB64, clientDataB64,
 	chalSum := ChallengeFromNonce(nonceHex)
 	session := libSession(base64.RawURLEncoding.EncodeToString(chalSum), uidSum[:])
 	session.AllowedCredentialIDs = [][]byte{rawID}
-	user := waUser{id: uidSum[:], name: role, cred: webauthn.Credential{ID: rawID, PublicKey: pubKeyCOSE}}
+	user := waUser{id: uidSum[:], name: role, cred: webauthn.Credential{
+		ID:        rawID,
+		PublicKey: pubKeyCOSE,
+		Flags: webauthn.CredentialFlags{
+			BackupEligible: stored.BackupEligible,
+			BackupState:    stored.BackupState,
+		},
+	}}
 	cred, err := WebAuth.ValidateLogin(user, session, parsed)
 	if err != nil {
 		return 0, fmt.Errorf("%w: login_rejected", errPasskey)
@@ -92,10 +107,12 @@ func verifyAssertionLib(pubKeyCOSE []byte, nonceHex, authDataB64, clientDataB64,
 
 // LibCreation is a library-validated registration result.
 type LibCreation struct {
-	CredentialID string
-	PublicKey    []byte // COSE_Key CBOR
-	Counter      uint32
-	AttFormat    string
+	CredentialID   string
+	PublicKey      []byte // COSE_Key CBOR
+	Counter        uint32
+	AttFormat      string
+	BackupEligible bool
+	BackupState    bool
 }
 
 // parseCreationLib validates a registration ceremony through the
@@ -129,9 +146,11 @@ func parseCreationLib(clientDataB64, attObjB64, wantChallengeB64, claimedID stri
 		return nil, perr("user_verification_required")
 	}
 	return &LibCreation{
-		CredentialID: gotID,
-		PublicKey:    cred.PublicKey,
-		Counter:      cred.Authenticator.SignCount,
-		AttFormat:    string(cred.AttestationFormat),
+		CredentialID:   gotID,
+		PublicKey:      cred.PublicKey,
+		Counter:        cred.Authenticator.SignCount,
+		AttFormat:      string(cred.AttestationFormat),
+		BackupEligible: cred.Flags.BackupEligible,
+		BackupState:    cred.Flags.BackupState,
 	}, nil
 }

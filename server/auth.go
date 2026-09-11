@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -129,11 +128,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 			return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
 		}
 		if cred, ok := s.WebAuthn.Credential(resp.Role, resp.PasskeyID); ok {
-			pub, err := base64.RawURLEncoding.DecodeString(cred.PublicKey)
-			if err != nil {
-				return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
-			}
-			counter, verr := verifyAssertionLib(pub, resp.Nonce, resp.PasskeyAuthData, resp.PasskeyClientData, resp.PasskeySig, resp.PasskeyID, resp.Role)
+			counter, verr := verifyAssertionLib(cred, resp.Nonce, resp.PasskeyAuthData, resp.PasskeyClientData, resp.PasskeySig, resp.Role)
 			switch {
 			case verr == nil && (counter == 0 || cred.SignCount == 0 || counter > cred.SignCount):
 				if counter != 0 {

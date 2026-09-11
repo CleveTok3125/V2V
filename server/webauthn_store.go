@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	webauthnFileVersion  = 2
+	webauthnFileVersion  = 3
 	defaultWebauthnStore = "data/webauthn.json"
 )
 
@@ -34,6 +34,8 @@ type WAStoredCred struct {
 	CredentialID string `json:"credential_id"`
 	PublicKey    string `json:"public_key"` // COSE_Key CBOR, base64url
 	SignCount    uint32 `json:"sign_count"`
+	BackupEligible bool `json:"backup_eligible"`
+	BackupState    bool `json:"backup_state"`
 	Label        string `json:"label,omitempty"`
 	AddedAt      string `json:"added_at,omitempty"`
 	AttFormat    string `json:"att_format"`
@@ -92,7 +94,7 @@ func (s *WebAuthnStore) loadFile() (*webauthnFile, error) {
 		return nil, fmt.Errorf("webauthn store hỏng (%w)", err)
 	}
 	if v, _ := probe["version"].(float64); int(v) != webauthnFileVersion {
-		return nil, errors.New("webauthn store v1 (hoặc không version) không còn hỗ trợ — xóa file và enroll lại toàn bộ passkey qua ticket ceremony")
+		return nil, errors.New("webauthn store cũ (v2 trở xuống) không còn hỗ trợ — thiếu authenticator flags: xóa file và enroll lại toàn bộ passkey qua ticket ceremony")
 	}
 	if f.Credentials == nil {
 		f.Credentials = map[string][]*WAStoredCred{}
