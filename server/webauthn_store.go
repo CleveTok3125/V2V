@@ -27,6 +27,7 @@ const (
 var (
 	errTicketUnknown = errors.New("ticket không tồn tại hoặc đã hết hạn")
 	errTicketUsed    = errors.New("ticket đã được sử dụng")
+	errTicketBound   = errors.New("ticket đã bind challenge — ceremony thất bại thì lấy ticket mới")
 )
 
 type WAStoredCred struct {
@@ -35,6 +36,7 @@ type WAStoredCred struct {
 	SignCount    uint32 `json:"sign_count"`
 	Label        string `json:"label,omitempty"`
 	AddedAt      string `json:"added_at,omitempty"`
+	AttFormat    string `json:"att_format"`
 }
 
 type WAPending struct {
@@ -177,14 +179,19 @@ func (s *WebAuthnStore) CreatePendingTicket(role, label string, ttl time.Duratio
 	return code, err
 }
 
-// BindChallenge validates the ticket for ceremony start and binds a fresh
-// challenge (returned as base64url) to it. Kept for manual challenge flow
-// (e.g., synthetic tests) and for backward compat.
+// BindChallenge validates the ticket for ceremony start and binds a
+// challenge (returned as base64url) to it. Single-bind: the first begin
+// wins for the ticket's lifetime, so a stolen ticket cannot be used to
+// rotate the challenge under a legitimate ceremony in flight. A failed
+// ceremony needs a reissued ticket.
 func (s *WebAuthnStore) BindChallenge(code, challengeB64 string) (role string, err error) {
 	err = s.mutate(func(f *webauthnFile) error {
 		p, perr := findPending(f, code)
 		if perr != nil {
 			return perr
+		}
+		if p.Challenge != "" {
+			return errTicketBound
 		}
 		p.Challenge = challengeB64
 		role = p.Role

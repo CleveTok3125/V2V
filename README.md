@@ -73,9 +73,6 @@ Create identities with `v2vctl` (build with `make v2vctl` / `make v2vctl ALL=1` 
 ./public/V2Vctl-linux-amd64 keygen ed25519 --role admin
 # paste the printed snippet via: role add-identity admin --paste
 
-# 3) Software passkey (WebAuthn wire format, for testing)
-./public/V2Vctl-linux-amd64 keygen passkey --role admin --rpid chat.example.com --origin https://chat.example.com
-
 # Login with a key file (-K path, or -k for the default key in the config dir)
 ./public/V2V-linux-amd64 -s wss://chat.example.com -u "Admin" -K key.json
 ```
@@ -109,6 +106,6 @@ Open `http://localhost:10000/web/` for the browser client.
 
 - **How it works:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — architecture, wire protocol, tripcode crypto, storage, and security model.
 - **Configuration:** `template/.env` has all env vars with comments (`PORT`, `MAX_MESSAGE_LENGTH`, `HISTORY_FILE_PATH`, `WEBAUTHN_*`, etc.).
-- **Management tool:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/add-passkey/import`, `keygen ed25519|passkey`, `enroll`, `migrate --preset native|wasm|custom`, `list`).
+- **Management tool:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`).
 
 Issues and PRs are welcome.

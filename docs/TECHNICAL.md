@@ -175,17 +175,20 @@ Every chat and audit message links to the previous one (`internal/chain`, `serve
 ## Authentication
 
 ### Ed25519 (key file)
-- Key file `key.json` (`identity/identity.go`) is a versioned container (`version:3`) with one `ed25519` slot and one `passkey` slot.
+- Key file `key.json` (`internal/identity/identity.go`) is a versioned container (`version:3`) with one `ed25519` slot.
 - `Ed25519Identity` stores `role`, `private_key` (hex 128), `hmac_shield` (hex 32), `server_pubkey` (hex 64, from `data/server_identity.json`).
 - Handshake: server sends `auth_challenge {nonce, serverPubkey, serverSig}` where `serverSig = ed25519.Sign(serverPriv, "V2V-SERVER-v1\x00"+nonce+"\x00"+host)`.
 - Client verifies `serverSig` against `serverPubkey` pin (or `server_pubkey` in `key.json`), warns on mismatch, then signs `dataToSign = nonce|role|username|serverPub` with its private key.
 - Client sends `signature` + `hmac = HMAC-SHA512(signature + nonce, hmac_shield)`. Server verifies `ed25519` and `hmac.Equal`, checks `ServerPubKey` pin, and enforces `TripChains` for trip users.
 - `HMAC` with `bytes(signature)` prevents replay without the shield even if private key is exposed.
 
-### Passkey (WebAuthn)
-- `PasskeyIdentity` stores `credential_id`, `private_key` (PKCS8), `public_key` (COSE CBOR), `rpid`, `origin`, `signCount`.
-- Web enrollment: `v2vctl enroll --role member` creates a one-time ticket (`/webauthn/enroll/begin` → `navigator.credentials.create` → `/webauthn/enroll/finish`), stored in `data/webauthn.json` (`WebAuthnStore`).
-- Login verifies `authenticatorData`, `clientDataJSON`, `rpIdHash`, `origin`, and `counter` (clone detection).
+### Passkey (WebAuthn, ceremony-only)
+- Software self-minted passkeys and paste import are deleted: credentials enter only via ticket ceremony (`v2vctl enroll --role member` → `/webauthn/enroll/begin` → `navigator.credentials.create` → `/webauthn/enroll/finish`), stored in `data/webauthn.json` v2 (`WebAuthnStore`; v1 refused at boot with a re-enroll message).
+- Verification runs 100% through go-webauthn (`ValidateLogin`/`CreateCredential`): challenge, origin, RP ID, flags, signature, counter, ES256-only credential params. Hand-rolled verification and the manual COSE parser are deleted.
+- Hard policy: user verification required, attestation `direct` (format `none` rejected, format recorded per credential), credential IDs clamped to 1023 bytes, claimed ID must match the parsed credential.
+- Enrollment hardening: per-IP begin cooldown, single-bind challenge per ticket (failed ceremony needs a reissued ticket), duplicate credential IDs rejected. Enrollment must run over TLS (`REQUIRE_TLS`); tickets are single-use with short TTL.
+- Login verifies the counter against the managed store (clone detection); soft-key counter exemptions no longer exist because soft keys no longer exist.
+- Breaking change: all pre-rebuild credentials (soft key.json slots, roles.json `passkeys[]`, v1 store) are rejected — re-enroll every passkey.
 
 ### Display name — uniform hash, serial, dynamic length, per-session salt
 `server/auth.go:generateDisplayName` validates `username` via `filter.ValidateDisplayName`, trims and caps to `MaxUsernameLength`, then **always** appends a hash suffix — even for roles with `CustomPrefix` (`roles.json`). No role is exempt:

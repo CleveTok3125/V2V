@@ -10,10 +10,15 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
+	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/strutil"
 	"net/http"
 	"time"
 )
+
+const enrollBeginCooldown = 30 * time.Second
+
+var enrollBeginCooldowns = guard.NewCooldownMap()
 
 const enrollChallengeTTL = 5 * time.Minute
 
@@ -80,6 +85,10 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing ticket", http.StatusBadRequest)
 		return
 	}
+	if !enrollBeginCooldowns.Allow(r.RemoteAddr, enrollBeginCooldown) {
+		http.Error(w, "too many enroll attempts", http.StatusTooManyRequests)
+		return
+	}
 	s.WebAuthn.PruneExpired()
 	logInfof("🔐 [ENROLL BEGIN] ticket=%s… from=%s", strutil.Short(code), r.RemoteAddr)
 
@@ -105,16 +114,15 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 			RP:        rpEnt{ID: WAConfig.RPID, Name: "V2V"},
 			User:      userEnt{ID: userID, Name: role + ":" + strutil.ShortN(code, 8)},
 			PubKeyCredParams: []algEnt{
-				{Type: "public-key", Alg: -7},   // ES256
-				{Type: "public-key", Alg: -257}, // RS256
+				{Type: "public-key", Alg: -7}, // ES256 only
 			},
 			AuthenticatorSelection: authSel{
 				RequireResidentKey: &requireResidentKey,
 				ResidentKey:        "required",
-				UserVerification:   "preferred",
+				UserVerification:   "required",
 			},
 			Timeout:     int64(enrollChallengeTTL.Seconds() * 1000),
-			Attestation: "none",
+			Attestation: "direct",
 		},
 	})
 	_ = role // role is already bound server-side via the ticket
@@ -162,26 +170,27 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	logInfof("🔍 [ENROLL FINISH] ticket=%s… boundChallenge=%s…", strutil.Short(req.Ticket), strutil.Short(boundChallenge))
-	parsed, err := parseCreationForImport(req.ClientDataJSON, req.AttestationObject, boundChallenge)
+	created, err := parseCreationLib(req.ClientDataJSON, req.AttestationObject, boundChallenge, req.ID)
 	if err != nil {
 		logErrorf("❌ [ENROLL FINISH] ticket=%s… parse failed: %v", strutil.Short(req.Ticket), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	logInfof("✅ [ENROLL FINISH] parsed credential_id=%s… counter=%d", strutil.Short(parsed.CredentialID), parsed.Counter)
+	logInfof("✅ [ENROLL FINISH] parsed credential_id=%s… counter=%d fmt=%s", strutil.Short(created.CredentialID), created.Counter, created.AttFormat)
 
 	err = s.WebAuthn.CompleteEnrollment(req.Ticket, &WAStoredCred{
-		CredentialID: parsed.CredentialID,
-		PublicKey:    base64.RawURLEncoding.EncodeToString(parsed.PublicKey),
-		SignCount:    parsed.Counter,
+		CredentialID: created.CredentialID,
+		PublicKey:    base64.RawURLEncoding.EncodeToString(created.PublicKey),
+		SignCount:    created.Counter,
+		AttFormat:    created.AttFormat,
 	})
 	if err != nil {
 		logErrorf("❌ [ENROLL FINISH] ticket=%s… store failed: %v", strutil.Short(req.Ticket), err)
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
-	logInfof("✅ [ENROLL FINISH] ticket=%s… stored credential_id=%s…", strutil.Short(req.Ticket), strutil.Short(parsed.CredentialID))
-	writeJSON(w, map[string]any{"ok": true, "credential_id": parsed.CredentialID})
+	logInfof("✅ [ENROLL FINISH] ticket=%s… stored credential_id=%s…", strutil.Short(req.Ticket), strutil.Short(created.CredentialID))
+	writeJSON(w, map[string]any{"ok": true, "credential_id": created.CredentialID})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

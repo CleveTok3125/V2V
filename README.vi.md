@@ -73,9 +73,6 @@ Tạo danh tính bằng `v2vctl` (`make v2vctl` / `make v2vctl ALL=1` cho full m
 ./public/V2Vctl-linux-amd64 keygen ed25519 --role admin
 # dán snippet in ra bằng: role add-identity admin --paste
 
-# Passkey mềm (dev)
-./public/V2Vctl-linux-amd64 keygen passkey --role admin --rpid chat.example.com --origin https://chat.example.com
-
 # Đăng nhập bằng key (-K đường dẫn, hoặc -k để dùng key mặc định trong config dir)
 ./public/V2V-linux-amd64 -s wss://chat.example.com -u "Admin" -K key.json
 ```
@@ -109,6 +106,6 @@ Mở `http://localhost:10000/web/` cho bản web.
 
 - **Chi tiết kỹ thuật:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — kiến trúc, giao thức wire, tripcode, lưu trữ, bảo mật.
 - **Cấu hình:** `template/.env` có đủ biến môi trường với comment.
-- **Công cụ quản trị:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/add-passkey/import`, `keygen ed25519|passkey`, `enroll`, `migrate --preset native|wasm|custom`, `list`).
+- **Công cụ quản trị:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`).
 
 Báo lỗi và PR luôn được chào đón.

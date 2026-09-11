@@ -27,7 +27,7 @@ type waStoreFile struct {
 }
 
 func loadStore(path string) (*waStoreFile, error) {
-	f := &waStoreFile{Version: 1, Credentials: map[string][]map[string]any{}}
+	f := &waStoreFile{Version: 2, Credentials: map[string][]map[string]any{}}
 	data, err := os.ReadFile(path)
 	switch {
 	case os.IsNotExist(err):
