@@ -21,6 +21,12 @@ func TestDecideVersionCheck(t *testing.T) {
 		{"enforce", "", "v1", versionUnknown},
 		{"warn", "fork-2024.1-custom", "fork-2024.1-custom", versionMatch},
 		{"warn", "dev-a1b2c3", "v0.9.0", versionMismatch},
+		{"warn", "v0.9.0-18-g4be8087", "dev-4be8087", versionMatch},
+		{"enforce", "v0.9.0-18-g4be8087", "dev-4be8087", versionMatch},
+		{"warn", "dev-4be8087-dirty", "v0.9.0-18-g4be8087", versionMismatch},
+		{"warn", "v0.9.0-18-g4be8087", "dev-4be8087-dirty", versionMismatch},
+		{"warn", "dev-a1b2c3", "dev-a1b2c3-dirty", versionMismatch},
+		{"warn", "v1.0.0", "v2.0.0", versionMismatch},
 	}
 	for _, c := range cases {
 		if got := decideVersionCheck(c.mode, c.server, c.expected); got != c.want {

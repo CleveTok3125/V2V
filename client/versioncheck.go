@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -23,13 +24,39 @@ const (
 	versionUnknown
 )
 
+// versionCore strips a stamp down to the commit it was built from so
+// different schemes for the same commit compare equal: release tags
+// ("v0.9.0-18-g4be8087" -> "4be8087"), dev stamps ("dev-4be8087" ->
+// "4be8087"), anything else compares verbatim. The second return
+// reports a "-dirty" working tree, whose content genuinely differs.
+func versionCore(v string) (core string, dirty bool) {
+	dirty = strings.HasSuffix(v, "-dirty")
+	core = strings.TrimSuffix(v, "-dirty")
+	if i := strings.LastIndex(core, "-g"); i >= 0 {
+		core = core[i+2:]
+	} else {
+		core = strings.TrimPrefix(core, "dev-")
+	}
+	return core, dirty
+}
+
 // decideVersionCheck maps mode + versions to a verdict. Pure: the whole
 // policy matrix is unit-tested here, I/O stays in checkServerVersion.
+// Same commit on both sides matches; a dirty tree on either side still
+// warns (enforce aborts) because the content may genuinely differ.
 func decideVersionCheck(mode, server, expected string) versionVerdict {
 	if server == "" {
 		return versionUnknown
 	}
 	if server == expected {
+		return versionMatch
+	}
+	serverCore, serverDirty := versionCore(server)
+	expectedCore, expectedDirty := versionCore(expected)
+	if serverCore != "" && serverCore == expectedCore {
+		if serverDirty || expectedDirty {
+			return versionMismatch
+		}
 		return versionMatch
 	}
 	return versionMismatch
