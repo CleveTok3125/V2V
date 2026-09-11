@@ -1,4 +1,7 @@
 # 🚀 V2V — Verifiable Anonymous Chat
+
+> [!WARNING]
+> **Pre-1.0: active development, no backward-compat guarantee.** Significant changes (wire protocol, storage formats, CLI, etc) can land at any time. Always update client and server together.
 <p align="left">
 🇻🇳
 <a href="README.vi.md">Tiếng Việt</a> · <a href="docs/TECHNICAL.md">Technical Docs</a>
@@ -51,6 +54,7 @@ make help            # see all targets
 # you will appear as: YourName#ab12
 #                      └─ ✍️ ◆ ab12cd34  (colored, clickable to verify)
 ```
+
 `V2V_TRIPCODE` env also works (CI only — prefer the encrypted file).
 
 Type `/help` inside the chat for commands (`/quit`, `/clear`, `/clearhistory`, `/whoami`, `/status`, `/showjoin`, `/autoverify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`, `/copy`).
