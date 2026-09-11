@@ -125,9 +125,6 @@ func parseCreationLib(clientDataB64, attObjB64, wantChallengeB64, claimedID stri
 	if len(cred.ID) == 0 || len(cred.ID) > maxCredentialIDLen {
 		return nil, perr("credential_id_out_of_range")
 	}
-	if string(cred.AttestationFormat) == "none" || cred.AttestationFormat == "" {
-		return nil, perr("attestation_required")
-	}
 	if !parsed.Response.AttestationObject.AuthData.Flags.UserVerified() {
 		return nil, perr("user_verification_required")
 	}
