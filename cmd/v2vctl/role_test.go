@@ -340,7 +340,7 @@ func TestEnrollWritesV2Store(t *testing.T) {
 		}
 		// Must track server/webauthn_store.go webauthnFileVersion or the
 		// server refuses the ticket file at boot.
-		if v, _ := f["version"].(float64); int(v) != 2 {
+		if v, _ := f["version"].(float64); int(v) != 3 {
 			t.Fatalf("store version = %v, want 2", f["version"])
 		}
 	})

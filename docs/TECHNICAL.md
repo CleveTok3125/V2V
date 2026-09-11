@@ -191,6 +191,7 @@ Every chat and audit message links to the previous one (`internal/chain`, `serve
 - Attestation chains are intentionally not verified: many software and synced passkey providers do not provide a vendor attestation chain usable for RP provenance checks, and V2V policy does not require provenance — so chain-of-trust would lock out common authenticators without adding anything over ceremony binding + UV + ES256 + counter. MDS is out of scope by design, not by omission.
 - Enrollment hardening: per-IP begin cooldown, single-bind challenge per ticket (failed ceremony needs a reissued ticket), duplicate credential IDs rejected. Enrollment must run over TLS (`REQUIRE_TLS`); tickets are single-use with short TTL.
 - Login verifies the counter against the managed store (clone detection); soft-key counter exemptions no longer exist because soft keys no longer exist.
+- Authenticator backup flags (BE/BS) are recorded at enrollment and replayed into login verification: the library rejects a backup-state mismatch, so zeroed stored flags would fail every synced-provider login. Store is v3; older stores are refused with a re-enroll message.
 - Breaking change: all pre-rebuild credentials (soft key.json slots, roles.json `passkeys[]`, v1 store) are rejected — re-enroll every passkey.
 
 ### Display name — uniform hash, serial, dynamic length, per-session salt

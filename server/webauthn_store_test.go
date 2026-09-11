@@ -154,17 +154,19 @@ func TestAtomicWriteAndEnrollMerge(t *testing.T) {
 	}
 }
 
-func TestV1StoreRefused(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "webauthn.json")
-	if err := os.WriteFile(path, []byte(`{"version":1,"credentials":{}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	s := NewWebAuthnStore(path)
-	if err := s.view(func(f *webauthnFile) error { return nil }); err == nil {
-		t.Fatal("v1 store must be refused")
-	} else if !strings.Contains(err.Error(), "re-enroll") && !strings.Contains(err.Error(), "enroll lại") {
-		t.Fatalf("refusal must tell admin to re-enroll, got: %v", err)
+func TestOldStoreRefused(t *testing.T) {
+	for _, v := range []string{`{"version":1,"credentials":{}}`, `{"version":2,"credentials":{}}`} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "webauthn.json")
+		if err := os.WriteFile(path, []byte(v), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s := NewWebAuthnStore(path)
+		if err := s.view(func(f *webauthnFile) error { return nil }); err == nil {
+			t.Fatalf("store %s must be refused", v[:14])
+		} else if !strings.Contains(err.Error(), "enroll lại") {
+			t.Fatalf("refusal must tell admin to re-enroll, got: %v", err)
+		}
 	}
 }
 

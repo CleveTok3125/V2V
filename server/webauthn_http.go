@@ -179,10 +179,12 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 	logInfof("✅ [ENROLL FINISH] parsed credential_id=%s… counter=%d fmt=%s", strutil.Short(created.CredentialID), created.Counter, created.AttFormat)
 
 	err = s.WebAuthn.CompleteEnrollment(req.Ticket, &WAStoredCred{
-		CredentialID: created.CredentialID,
-		PublicKey:    base64.RawURLEncoding.EncodeToString(created.PublicKey),
-		SignCount:    created.Counter,
-		AttFormat:    created.AttFormat,
+		CredentialID:   created.CredentialID,
+		PublicKey:      base64.RawURLEncoding.EncodeToString(created.PublicKey),
+		SignCount:      created.Counter,
+		AttFormat:      created.AttFormat,
+		BackupEligible: created.BackupEligible,
+		BackupState:    created.BackupState,
 	})
 	if err != nil {
 		logErrorf("❌ [ENROLL FINISH] ticket=%s… store failed: %v", strutil.Short(req.Ticket), err)
