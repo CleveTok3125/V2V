@@ -19,7 +19,6 @@ type RoleCmd struct {
 	Update     RoleUpdateCmd     `cmd:"" help:"Cập nhật prefix/quyền của role"`
 	Delete     RoleDeleteCmd     `cmd:"" help:"Xóa role"`
 	AddIdentity RoleAddIdentityCmd `cmd:"" name:"add-identity" help:"Thêm identity ed25519 vào role"`
-	AddPasskey  RoleAddPasskeyCmd  `cmd:"" name:"add-passkey" help:"Thêm passkey vào role"`
 	Import     RoleImportCmd     `cmd:"" help:"Import roles từ file hoặc paste JSON"`
 }
 
@@ -147,9 +146,6 @@ func (c *RoleCreateCmd) Run() error {
 		if _, ok := e["identities"]; !ok {
 			e["identities"] = []map[string]string{}
 		}
-		if _, ok := e["passkeys"]; !ok {
-			e["passkeys"] = []any{}
-		}
 	}); err != nil {
 		return err
 	}
@@ -176,15 +172,11 @@ func (c *RoleListCmd) Run() error {
 		m, _ := v.(map[string]any)
 		unlimited, _ := m["can_message_unlimited"].(bool)
 		prefix, _ := m["custom_prefix"].(string)
-		// Count identities/passkeys
-		var idCount, pkCount int
+		var idCount int
 		if arr, ok := m["identities"].([]any); ok {
 			idCount = len(arr)
 		}
-		if arr, ok := m["passkeys"].([]any); ok {
-			pkCount = len(arr)
-		}
-		fmt.Printf("%-20s %-10v %q (id:%d pk:%d)\n", role, unlimited, prefix, idCount, pkCount)
+		fmt.Printf("%-20s %-10v %q (id:%d)\n", role, unlimited, prefix, idCount)
 	}
 	return nil
 }

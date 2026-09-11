@@ -1,11 +1,10 @@
 package main
 
-// Login-side glue over the shared identity package: the interactive picker
-// used when key.json holds both flavors.
+// Login-side glue over the shared identity package: encrypted key.json
+// unlock with hidden prompt and deep-link TTY fallback.
 
 import (
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/CleveTok3125/V2V/internal/env"
@@ -18,7 +17,6 @@ import (
 
 type (
 	Ed25519Identity = identity.Ed25519Identity
-	PasskeyIdentity = identity.PasskeyIdentity
 	IdentityFile    = identity.IdentityFile
 )
 
@@ -32,16 +30,16 @@ func LoadIdentityFile(path string) (*IdentityFile, error) {
 			if AssessPassphrase(pass, nil).Weak {
 				fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
 			}
-		pw := []byte(pass)
-		pass = ""
-		defer identity.ZeroBytes(pw)
-		idf, err := identity.LoadEncrypted(path, pw)
-		if err != nil {
-			return nil, err
+			pw := []byte(pass)
+			pass = ""
+			defer identity.ZeroBytes(pw)
+			idf, err := identity.LoadEncrypted(path, pw)
+			if err != nil {
+				return nil, err
+			}
+			rememberLoadedPassphrase(pw)
+			return idf, nil
 		}
-		rememberLoadedPassphrase(pw)
-		return idf, nil
-	}
 		// Prompt for passphrase (hidden input). TTY sessions use the
 		// shared program; piped input keeps the legacy hidden reader.
 		var pass string
@@ -112,42 +110,4 @@ func SaveIdentityFileEncrypted(path string, idf *IdentityFile) error {
 		return idf.SaveEncrypted(path, loadedPassphrase, nil)
 	}
 	return idf.Save(path)
-}
-
-// pickIdentity resolves which slot to use when key.json holds both flavors.
-func pickIdentity(f *IdentityFile) (useEd, usePk bool) {
-	return pickIdentityFrom(os.Stdin, f)
-}
-
-// pickIdentityFrom is the injectable core of pickIdentity. Both slots
-// filled asks via the shared tui select: huh form defaulting to
-// passkey on TTY, numbered menu with the same default on pipes. r
-// feeds the piped path so tests stay headless; a single filled slot
-// returns without prompting.
-func pickIdentityFrom(r io.Reader, f *IdentityFile) (useEd, usePk bool) {
-	hasEd, hasPk := f.Ed25519 != nil, f.Passkey != nil
-	switch {
-	case hasEd && hasPk:
-	default:
-		return hasEd, hasPk // only one slot filled
-	}
-	title := "key.json chứa 2 danh tính — chọn loại đăng nhập:"
-	options := []string{
-		"ed25519 key-file  role: " + f.Ed25519.Role,
-		"passkey           role: " + f.Passkey.Role,
-	}
-	var idx int
-	if tui.Interactive() {
-		var err error
-		idx, err = tui.Select(title, options, 1)
-		if err != nil {
-			return false, true // aborted: deterministic default
-		}
-	} else {
-		idx, _ = tui.SelectPiped(r, title, options, 1)
-	}
-	if idx == 0 {
-		return true, false
-	}
-	return false, true
 }

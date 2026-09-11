@@ -19,16 +19,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/codebg"
 	"github.com/CleveTok3125/V2V/internal/chain"
+	"github.com/CleveTok3125/V2V/internal/codebg"
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
+	"github.com/CleveTok3125/V2V/internal/linkify"
+	"github.com/CleveTok3125/V2V/internal/markup"
 	"github.com/CleveTok3125/V2V/internal/strutil"
 	"github.com/CleveTok3125/V2V/internal/trip"
 	"github.com/CleveTok3125/V2V/internal/tripcolor"
 	"github.com/CleveTok3125/V2V/internal/wire"
-	"github.com/CleveTok3125/V2V/internal/linkify"
-	"github.com/CleveTok3125/V2V/internal/markup"
 
 	"github.com/alecthomas/kong"
 )
@@ -250,88 +250,66 @@ func main() {
 			notifyQuit()
 			return
 		}
-		useEd25519, usePasskey := pickIdentity(idf)
-		switch {
-		case usePasskey:
-			pk := idf.Passkey
-			respPacket.Role = pk.Role
-			credID, ad, cd, sig, aerr := pk.BuildAssertion(challenge.Nonce)
-			if aerr != nil {
-				fmt.Printf("❌ Passkey lỗi: %v\n", aerr)
-				notifyQuit()
-				return
-			}
-			respPacket.PasskeyID = credID
-			respPacket.PasskeyAuthData = ad
-			respPacket.PasskeyClientData = cd
-			respPacket.PasskeySig = sig
-			// Persist the incremented counter: losing it replays an old
-			// counter next login and the server flags a false clone.
-			if serr := SaveIdentityFileEncrypted(CLI.KeyFile, idf); serr != nil {
-				fmt.Printf("⚠️ Không lưu được sign-count (%v) — lần đăng nhập sau có thể bị báo clone giả.\n", serr)
-			}
-			fmt.Printf("🔑 Đang yêu cầu cấp quyền bằng passkey: [%s]...\n", pk.Role)
-		case useEd25519:
-			id := idf.Ed25519
-			respPacket.Role = id.Role
-			privBytes, err := hex.DecodeString(id.PrivateKey)
-			if err != nil || len(privBytes) != ed25519.PrivateKeySize {
-				fmt.Println("❌ Private Key trong file không hợp lệ (Phải là chuỗi Hex 128 ký tự).")
-				notifyQuit()
-				return
-			}
-
-			priv := ed25519.PrivateKey(privBytes)
-
-			// Server pubkey pinning: verify server's identity before sending auth
-			if challenge.ServerPubKey != "" {
-				if id.ServerPubKey != "" && !strings.EqualFold(id.ServerPubKey, challenge.ServerPubKey) {
-					fmt.Printf("🚨 Server identity mismatch! Pin %s != %s — abort.\n", strutil.ShortN(id.ServerPubKey, 12), strutil.ShortN(challenge.ServerPubKey, 12))
-					notifyQuit()
-					return
-				}
-				if challenge.ServerSig != "" {
-					srvPub, _ := hex.DecodeString(challenge.ServerPubKey)
-					srvSig, _ := hex.DecodeString(challenge.ServerSig)
-					msg := []byte("V2V-SERVER-v1\x00" + challenge.Nonce + "\x00" + challenge.ServerHost)
-					if len(srvPub) == ed25519.PublicKeySize && len(srvSig) == ed25519.SignatureSize {
-						if !ed25519.Verify(srvPub, msg, srvSig) {
-							fmt.Println("❌ Server không chứng minh được private key — dừng.")
-							notifyQuit()
-							return
-						}
-					}
-				}
-				if id.ServerPubKey == "" && challenge.ServerPubKey != "" {
-					fmt.Printf("⚠️ Lần đầu kết nối tới server %s pin %s…\n", challenge.ServerHost, strutil.ShortN(challenge.ServerPubKey, 16))
-				}
-			}
-			// Use server's pubkey for anti-reuse (instead of host string)
-			bindValue := ""
-			if challenge.ServerPubKey != "" {
-				bindValue = challenge.ServerPubKey
-			} else if id.ServerPubKey != "" {
-				bindValue = id.ServerPubKey
-			} else {
-				if u, perr := url.Parse(wsURL); perr == nil {
-					bindValue = strings.ToLower(u.Hostname())
-				}
-			}
-			dataToSign := challenge.Nonce + "|" + id.Role + "|" + respPacket.Username + "|" + bindValue
-			sig := ed25519.Sign(priv, []byte(dataToSign))
-			respPacket.Signature = hex.EncodeToString(sig)
-
-			h := hmac.New(sha512.New, []byte(id.HmacShield))
-			h.Write(sig)
-			h.Write([]byte(challenge.Nonce))
-			respPacket.Hmac = hex.EncodeToString(h.Sum(nil))
-
-			fmt.Printf("🔑 Đang yêu cầu cấp quyền: [%s]...\n", id.Role)
-		default:
-			fmt.Println("❌ key.json không chứa danh tính nào.")
+		id := idf.Ed25519
+		if id == nil {
+			fmt.Println("❌ key.json không có danh tính ed25519.")
 			notifyQuit()
 			return
 		}
+		respPacket.Role = id.Role
+		privBytes, err := hex.DecodeString(id.PrivateKey)
+		if err != nil || len(privBytes) != ed25519.PrivateKeySize {
+			fmt.Println("❌ Private Key trong file không hợp lệ (Phải là chuỗi Hex 128 ký tự).")
+			notifyQuit()
+			return
+		}
+
+		priv := ed25519.PrivateKey(privBytes)
+
+		// Server pubkey pinning: verify server's identity before sending auth
+		if challenge.ServerPubKey != "" {
+			if id.ServerPubKey != "" && !strings.EqualFold(id.ServerPubKey, challenge.ServerPubKey) {
+				fmt.Printf("🚨 Server identity mismatch! Pin %s != %s — abort.\n", strutil.ShortN(id.ServerPubKey, 12), strutil.ShortN(challenge.ServerPubKey, 12))
+				notifyQuit()
+				return
+			}
+			if challenge.ServerSig != "" {
+				srvPub, _ := hex.DecodeString(challenge.ServerPubKey)
+				srvSig, _ := hex.DecodeString(challenge.ServerSig)
+				msg := []byte("V2V-SERVER-v1\x00" + challenge.Nonce + "\x00" + challenge.ServerHost)
+				if len(srvPub) == ed25519.PublicKeySize && len(srvSig) == ed25519.SignatureSize {
+					if !ed25519.Verify(srvPub, msg, srvSig) {
+						fmt.Println("❌ Server không chứng minh được private key — dừng.")
+						notifyQuit()
+						return
+					}
+				}
+			}
+			if id.ServerPubKey == "" && challenge.ServerPubKey != "" {
+				fmt.Printf("⚠️ Lần đầu kết nối tới server %s pin %s…\n", challenge.ServerHost, strutil.ShortN(challenge.ServerPubKey, 16))
+			}
+		}
+		// Use server's pubkey for anti-reuse (instead of host string)
+		bindValue := ""
+		if challenge.ServerPubKey != "" {
+			bindValue = challenge.ServerPubKey
+		} else if id.ServerPubKey != "" {
+			bindValue = id.ServerPubKey
+		} else {
+			if u, perr := url.Parse(wsURL); perr == nil {
+				bindValue = strings.ToLower(u.Hostname())
+			}
+		}
+		dataToSign := challenge.Nonce + "|" + id.Role + "|" + respPacket.Username + "|" + bindValue
+		sig := ed25519.Sign(priv, []byte(dataToSign))
+		respPacket.Signature = hex.EncodeToString(sig)
+
+		h := hmac.New(sha512.New, []byte(id.HmacShield))
+		h.Write(sig)
+		h.Write([]byte(challenge.Nonce))
+		respPacket.Hmac = hex.EncodeToString(h.Sum(nil))
+
+		fmt.Printf("🔑 Đang yêu cầu cấp quyền: [%s]...\n", id.Role)
 	} else {
 		// WebAuthn passkey login (web build only): failure already shown
 		// via setWasmStatus; keep the runtime alive so late browser

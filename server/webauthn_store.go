@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	webauthnFileVersion  = 1
+	webauthnFileVersion  = 2
 	defaultWebauthnStore = "data/webauthn.json"
 )
 
@@ -82,6 +82,15 @@ func (s *WebAuthnStore) loadFile() (*webauthnFile, error) {
 	}
 	if err := json.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("webauthn store hỏng (%w)", err)
+	}
+	// The init preset above masks versionless files, so check the raw
+	// bytes too: anything that is not explicitly v2 is refused.
+	var probe map[string]any
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, fmt.Errorf("webauthn store hỏng (%w)", err)
+	}
+	if v, _ := probe["version"].(float64); int(v) != webauthnFileVersion {
+		return nil, errors.New("webauthn store v1 (hoặc không version) không còn hỗ trợ — xóa file và enroll lại toàn bộ passkey qua ticket ceremony")
 	}
 	if f.Credentials == nil {
 		f.Credentials = map[string][]*WAStoredCred{}

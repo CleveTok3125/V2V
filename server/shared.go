@@ -20,20 +20,10 @@ type Identity struct {
 	ServerPubKey string `json:"server_pubkey,omitempty"`
 }
 
-// PasskeyIdentity is a WebAuthn credential accepted for a role. Only public
-// material lives here: the private key never leaves the user's authenticator,
-// mirroring how Identity holds just a public key.
-type PasskeyIdentity struct {
-	CredentialID string `json:"credential_id"` // base64url of the credential ID
-	PublicKey    string `json:"public_key"`    // COSE_Key CBOR, base64url
-	AddedAt      string `json:"added_at,omitempty"`
-}
-
 type Permission = wire.Permission
 
 type RoleDefinition struct {
-	Identities []Identity        `json:"identities"`
-	Passkeys   []PasskeyIdentity `json:"passkeys,omitempty"`
+	Identities []Identity `json:"identities"`
 	Permission
 }
 

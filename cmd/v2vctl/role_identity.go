@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/huh"
 
@@ -24,13 +23,6 @@ type RoleAddIdentityCmd struct {
 	Force        bool   `help:"Ghi đè nếu identity đã tồn tại"`
 }
 
-type RoleAddPasskeyCmd struct {
-	Role         string `arg:"" help:"Tên role"`
-	CredentialID string `help:"Credential ID base64url"`
-	PublicKey    string `help:"Public key COSE base64url"`
-	Paste        bool   `help:"Đọc JSON snippet từ stdin (paste)"`
-	File         string `help:"Đọc JSON từ file"`
-}
 
 type RoleImportCmd struct {
 	File  string `help:"File JSON roles để import" short:"f"`
@@ -154,124 +146,6 @@ func (c *RoleAddIdentityCmd) Run() error {
 			e["custom_prefix"] = ""
 		}
 		fmt.Printf("✅ Đã thêm identity vào role \"%s\"\n", c.Role)
-	})
-}
-
-func (c *RoleAddPasskeyCmd) Run() error {
-	if tui.HasControllingTTY() && c.Role == "" {
-		form := huh.NewForm(huh.NewGroup(
-			huh.NewInput().Title("Role").Value(&c.Role).Validate(nonEmpty),
-		))
-		if err := form.Run(); err != nil {
-			return err
-		}
-	}
-	if strings.TrimSpace(c.Role) == "" {
-		return errors.New("role là bắt buộc")
-	}
-	if c.Paste || c.File != "" {
-		var data []byte
-		var err error
-		if c.File != "" {
-			data, err = os.ReadFile(c.File)
-			if err != nil {
-				return err
-			}
-		} else {
-			data, err = readPasteJSON()
-			if err != nil {
-				return err
-			}
-		}
-		// Strip // comment lines from RolesSnippet()
-		lines := strings.Split(string(data), "\n")
-		var cleaned []string
-		for _, l := range lines {
-			if strings.HasPrefix(strings.TrimSpace(l), "//") {
-				continue
-			}
-			cleaned = append(cleaned, l)
-		}
-		data = []byte(strings.Join(cleaned, "\n"))
-		data = []byte(strings.TrimSpace(string(data)))
-		var raw map[string]any
-		if err := json.Unmarshal(data, &raw); err == nil {
-			if cid, ok := raw["credential_id"].(string); ok {
-				c.CredentialID = cid
-				if pk, ok := raw["public_key"].(string); ok {
-					c.PublicKey = pk
-				}
-			} else {
-				// Look for passkeys array in role wrapper (full roles.json)
-				for _, v := range raw {
-					if m, ok := v.(map[string]any); ok {
-						if pks, ok := m["passkeys"].([]any); ok && len(pks) > 0 {
-							if pk0, ok := pks[0].(map[string]any); ok {
-								c.CredentialID, _ = pk0["credential_id"].(string)
-								c.PublicKey, _ = pk0["public_key"].(string)
-								break
-							}
-						}
-					}
-				}
-			}
-		} else {
-			// Try array form: RolesSnippet returns []map
-			var arr []map[string]any
-			if err2 := json.Unmarshal(data, &arr); err2 == nil && len(arr) > 0 {
-				c.CredentialID, _ = arr[0]["credential_id"].(string)
-				c.PublicKey, _ = arr[0]["public_key"].(string)
-			} else {
-				return fmt.Errorf("JSON không hợp lệ: %w", err)
-			}
-		}
-	}
-	if tui.HasControllingTTY() && (c.CredentialID == "" || c.PublicKey == "") {
-		form := huh.NewForm(huh.NewGroup(
-			huh.NewInput().Title("Credential ID base64url").Value(&c.CredentialID).Validate(nonEmpty),
-			huh.NewInput().Title("Public key COSE base64url").Value(&c.PublicKey).Validate(nonEmpty),
-		))
-		if err := form.Run(); err != nil {
-			return err
-		}
-	}
-	if c.CredentialID == "" || c.PublicKey == "" {
-		return errors.New("credential_id và public_key là bắt buộc (hoặc dùng --paste)")
-	}
-	root, _ := loadRolesMap()
-	if _, exists := root[c.Role]; !exists {
-		fmt.Printf("⚠️  Role \"%s\" chưa tồn tại — sẽ tạo mới\n", c.Role)
-	}
-	return identity.MergeRolesFile(rolesPath(), c.Role, func(e map[string]any) {
-		list, _ := e["passkeys"].([]any)
-		newEntry := map[string]any{
-			"credential_id": c.CredentialID,
-			"public_key":    c.PublicKey,
-			"added_at":      time.Now().Format(time.RFC3339),
-		}
-		for i, raw := range list {
-			if m, ok := raw.(map[string]any); ok && m["credential_id"] == c.CredentialID {
-				list[i] = newEntry
-				e["passkeys"] = list
-				short := c.CredentialID
-				if len(short) > 8 {
-					short = short[:8]
-				}
-				fmt.Printf("⚠️  Đã ghi đè passkey %s trong role \"%s\"\n", short, c.Role)
-				return
-			}
-		}
-		e["passkeys"] = append(list, newEntry)
-		if _, ok := e["identities"]; !ok {
-			e["identities"] = []any{}
-		}
-		if _, ok := e["can_message_unlimited"]; !ok {
-			e["can_message_unlimited"] = false
-		}
-		if _, ok := e["custom_prefix"]; !ok {
-			e["custom_prefix"] = ""
-		}
-		fmt.Printf("✅ Đã thêm passkey vào role \"%s\"\n", c.Role)
 	})
 }
 
