@@ -122,7 +122,7 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 				UserVerification:   "required",
 			},
 			Timeout:     int64(enrollChallengeTTL.Seconds() * 1000),
-			Attestation: "direct",
+			Attestation: "none",
 		},
 	})
 	_ = role // role is already bound server-side via the ticket

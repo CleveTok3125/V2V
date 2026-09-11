@@ -80,7 +80,7 @@ func buildAttestation(t *testing.T, priv *ecdsa.PrivateKey, challengeB64 string,
 
 	authData := make([]byte, 0, 37+16+2+len(credID)+200)
 	authData = append(authData, rpHash[:]...)
-	authData = append(authData, 0x41|0x40) // UP | AT
+	authData = append(authData, 0x41|0x40|0x04) // UP | AT | UV
 	authData = append(authData, 0, 0, 0, 0)
 	authData = append(authData, make([]byte, 16)...) // aaguid zeros
 	l := len(credID)
@@ -97,10 +97,10 @@ func buildAttestation(t *testing.T, priv *ecdsa.PrivateKey, challengeB64 string,
 	}
 	authData = append(authData, cose...)
 
-	attObj, cerr := cbor.Marshal(map[int]any{
-		1: "none",
-		2: authData,
-		3: map[int]any{},
+	attObj, cerr := cbor.Marshal(map[string]any{
+		"fmt":      "none",
+		"authData": authData,
+		"attStmt":  map[string]any{},
 	})
 	if cerr != nil {
 		t.Fatal(cerr)
@@ -114,12 +114,18 @@ func TestParseCreationLibRejects(t *testing.T) {
 	setupWA(t)
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	wantChal := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
-	cdB64, attB64, _ := buildAttestation(t, priv, wantChal, testRPID, testOrigin)
-	wantID := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	cdB64, attB64, credID := buildAttestation(t, priv, wantChal, testRPID, testOrigin)
+	wantID := base64.RawURLEncoding.EncodeToString(credID)
 
-	// legacy fmt "none" without UV is rejected by hard policy
-	if _, err := parseCreationLib(cdB64, attB64, wantChal, wantID); err == nil {
-		t.Error("fmt none without UV accepted")
+	// fmt "none" with UV is accepted (attestation not required,
+	// format recorded as-is); reject path is covered by the UV and
+	// challenge cases in passkeys_test.go
+	created, err := parseCreationLib(cdB64, attB64, wantChal, wantID)
+	if err != nil {
+		t.Fatalf("fmt none with UV rejected: %v", err)
+	}
+	if created.AttFormat != "none" {
+		t.Fatalf("att format = %q, want none recorded", created.AttFormat)
 	}
 	// wrong challenge rejected
 	if _, err := parseCreationLib(cdB64, attB64,
