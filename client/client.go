@@ -167,6 +167,11 @@ func main() {
 	wsURL := normalizeURL(CLI.Server)
 	username := strings.TrimSpace(CLI.Username)
 
+	// Fail fast on version policy before prompting for secrets.
+	if !checkServerVersion(wsURL) {
+		os.Exit(1)
+	}
+
 	// Tripcode is a secret: -t takes no value. Resolve it here, before
 	// dialing: the prompts (secret, save offer, unlock) are interactive
 	// and would blow the server's 12s auth-response deadline if they ran

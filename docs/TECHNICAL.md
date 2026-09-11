@@ -72,6 +72,8 @@ make clean
 - CI: `.github/workflows/ci.yml` runs `make vet test` on push to `main/master` and PRs (Go 1.25, cache); `release.yml` runs `make -j4 client v2vctl ALL=1` on tag `v*` and publishes `public/*`.
 - Docker: `Dockerfile` runs `make server web` (requires `make` in builder).
 - Dev version stamp is always `dev-<HEAD>[-dirty]` from the working tree, never from a possibly stale `GIT_HASH` env; `make web` warns when `GIT_HASH` differs from `HEAD` (stale browser cache risk).
+- Version stamps ride `-X main.Version` for all three binaries (server included); server prints its stamp at boot, on `/` info and on `/api/version` (`{"version": ...}`, no-store).
+- Pre-dial version check is client-side policy (`ui.versionCheck {enabled, mode, expect}`): exact string match against our stamp or a pinned fork version, modes `disabled|warn|enforce` (default warn; unknown warns, enforce aborts non-zero), WASM skipped (paired with its server).
 
 ## Client Configuration
 

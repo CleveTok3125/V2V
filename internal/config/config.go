@@ -159,6 +159,14 @@ type ClientConfig struct {
 			CharAspect float64 `json:"charAspect"`
 			Scrollback int `json:"scrollback"`
 		} `json:"web"`
+		// VersionCheck controls the pre-dial server version check.
+		// Mode is disabled|warn|enforce (default warn); Expect pins a
+		// fork version, empty compares against this client's own stamp.
+		VersionCheck struct {
+			Enabled *bool  `json:"enabled"`
+			Mode    string `json:"mode"`
+			Expect  string `json:"expect"`
+		} `json:"versionCheck"`
 	} `json:"ui"`
 	Commands map[string][]string `json:"commands"`
 	Tabs struct {
@@ -243,6 +251,9 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.Theme.Error = "#ff6b6b"
 	c.UI.Web.CharAspect = 0.6
 	c.UI.Web.Scrollback = 10000
+	c.UI.VersionCheck.Enabled = boolPtr(true)
+	c.UI.VersionCheck.Mode = "warn"
+	c.UI.VersionCheck.Expect = ""
 	c.Commands = map[string][]string{
 		"quit":         {"/quit", "/q"},
 		"clear":        {"/clear", "/c"},
@@ -287,6 +298,39 @@ func (c *ClientConfig) ShowMeta() bool {
 		return true
 	}
 	return *c.UI.Meta.Show
+}
+
+// VersionCheckEnabled reports whether the pre-dial server version
+// check runs at all.
+func (c *ClientConfig) VersionCheckEnabled() bool {
+	if c == nil || c.UI.VersionCheck.Enabled == nil {
+		return true
+	}
+	return *c.UI.VersionCheck.Enabled
+}
+
+// VersionCheckMode returns the normalized mode: disabled, warn or
+// enforce. Unknown values fail toward warn (noisy, never silent).
+func (c *ClientConfig) VersionCheckMode() string {
+	m := ""
+	if c != nil {
+		m = c.UI.VersionCheck.Mode
+	}
+	switch m {
+	case "disabled", "warn", "enforce":
+		return m
+	default:
+		return "warn"
+	}
+}
+
+// VersionCheckExpect returns the pinned fork version, or "" to compare
+// against this client's own stamp.
+func (c *ClientConfig) VersionCheckExpect() string {
+	if c == nil {
+		return ""
+	}
+	return c.UI.VersionCheck.Expect
 }
 
 // MentionEnabled reports whether @#height mentions highlight.
@@ -450,6 +494,13 @@ func parse(data []byte) (*ClientConfig, error) {
 	// Backfill meta visibility (absent section means default: shown).
 	if c.UI.Meta.Show == nil {
 		c.UI.Meta.Show = def.UI.Meta.Show
+	}
+	// Backfill version-check knobs (absent means default: enabled warn).
+	if c.UI.VersionCheck.Enabled == nil {
+		c.UI.VersionCheck.Enabled = def.UI.VersionCheck.Enabled
+	}
+	if c.UI.VersionCheck.Mode == "" {
+		c.UI.VersionCheck.Mode = def.UI.VersionCheck.Mode
 	}
 	// Backfill mention/reply knobs the same way.
 	if c.UI.Mention.Enabled == nil {
