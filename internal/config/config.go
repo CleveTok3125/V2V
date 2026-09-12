@@ -32,7 +32,7 @@ type DynamicConfig struct {
 	ConnectionCooldown  time.Duration `json:"connectionCooldown"`
 }
 
-// DefaultDynamic returns defaults matching server template/server/config/.env.
+// DefaultDynamic returns defaults matching server template/.env.
 func DefaultDynamic() *DynamicConfig {
 	return &DynamicConfig{
 		StatusURL:           "https://example.com/status",

@@ -90,14 +90,14 @@ Cấp passkey web (link dùng 1 lần, 10 phút):
 # → https://chat.example.com/web/#enroll=...
 ```
 
-Xem `template/server/config/` để cấu hình server.
+Xem `template/server/config/roles.json` và `template/.env` để cấu hình server.
 
 ## Chạy Server
 
 **Từ mã nguồn:**
 
 ```bash
-cp template/server/config/.env config/.env          # sửa PORT, ALLOWED_ORIGINS, ...
+cp template/.env .env          # sửa PORT, ALLOWED_ORIGINS, ...
 make server web                # -> public/server.bin + webterm/app.wasm
 ./public/server.bin
 # hoặc: docker compose up -d --build   (lưu ./data và ./logs)
@@ -109,7 +109,7 @@ Mở `http://localhost:10000/web/` cho bản web.
 ## Tìm hiểu thêm
 
 - **Chi tiết kỹ thuật:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — kiến trúc, giao thức wire, tripcode, lưu trữ, bảo mật.
-- **Cấu hình:** `template/server/config/.env` có đủ biến môi trường với comment.
+- **Cấu hình:** `template/.env` có đủ biến môi trường với comment.
 - **Công cụ quản trị:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`).
 
 Báo lỗi và PR luôn được chào đón.
