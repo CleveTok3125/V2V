@@ -44,7 +44,8 @@ For a friendly getting-started guide, see [README.md](../README.md).
 ├── webterm/          # Browser terminal (xterm.js + WASM glue)
 ├── cmd/v2vctl/       # Management tool, one file per concern (main, role, keygen, enroll, migrate, list, prompt)
 ├── template/         # Samples mirroring real locations
-│   ├── server/config/  # .env + roles.json → copy to ./config/
+│   ├── .env            # → copy to ./.env (project root)
+│   ├── server/config/  # roles.json → copy to ./config/
 │   └── client/         # config.jsonc + key.json → copy to OS config dir
 └── docs/             # This file
 ```
@@ -147,7 +148,7 @@ Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `interna
 ### History persistence
 - File: `data/history.jsonl` — one JSON record per line: `{"ts":"RFC3339Nano","wire":{...}}` for chat, `{"ts","msg":"..."}` for system messages.
 - The top-level `trip` field was removed (dedup); only `wire.trip` is kept.
-- Rotation: when `size > MAX_HISTORY_FILE_SIZE_MB` (`50MB` in `template/server/config/.env`), current file is renamed to `.old` and compressed to `.old.zst` via `klauspost/compress/zstd` (`50MB → ~3MB`).
+- Rotation: when `size > MAX_HISTORY_FILE_SIZE_MB` (`50MB` in `template/.env`), current file is renamed to `.old` and compressed to `.old.zst` via `klauspost/compress/zstd` (`50MB → ~3MB`).
 - At most 2 generations are kept (`~53MB` max). `LoadRecords` tries `.old.zst`, then `.old`, then current.
 - Durability: `HistoryStore.writeLoop` batches `Sync` every `1s` **only when dirty** (`dirty` flag set on `Write`, cleared on `Sync`), plus `SIGTERM` drain via `HistoryStore.Close()` in `server/main.go`.
 - Directory `fsync` after rotate (like `webauthn_store.go`).

@@ -90,14 +90,14 @@ Web passkey enrollment (one-time link, 10 min):
 # → https://chat.example.com/web/#enroll=...
 ```
 
-See `template/server/config/` for server configuration.
+See `template/server/config/roles.json` and `template/.env` for server configuration.
 
 ## Running the Server
 
 **From source:**
 
 ```bash
-cp template/server/config/.env config/.env          # edit PORT, ALLOWED_ORIGINS, etc.
+cp template/.env .env          # edit PORT, ALLOWED_ORIGINS, etc.
 make server web                # -> public/server.bin + webterm/app.wasm
 ./public/server.bin
 # or: docker compose up -d --build   (persists ./data and ./logs)
@@ -109,7 +109,7 @@ Open `http://localhost:10000/web/` for the browser client.
 ## Learn More
 
 - **How it works:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — architecture, wire protocol, tripcode crypto, storage, and security model.
-- **Configuration:** `template/server/config/.env` has all env vars with comments (`PORT`, `MAX_MESSAGE_LENGTH`, `HISTORY_FILE_PATH`, `WEBAUTHN_*`, etc.).
+- **Configuration:** `template/.env` has all env vars with comments (`PORT`, `MAX_MESSAGE_LENGTH`, `HISTORY_FILE_PATH`, `WEBAUTHN_*`, etc.).
 - **Management tool:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`).
 
 Issues and PRs are welcome.

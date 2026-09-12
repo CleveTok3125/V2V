@@ -17,7 +17,7 @@ func TestDataPathLayout(t *testing.T) {
 }
 
 func TestConfigPathFirstEntries(t *testing.T) {
-	if EnvFilePaths[0] != "config/.env" {
+	if EnvFilePaths[0] != ".env" {
 		t.Fatalf("env first = %q", EnvFilePaths[0])
 	}
 	if RolesFilePaths[0] != "config/roles.json" {

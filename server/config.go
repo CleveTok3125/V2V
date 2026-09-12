@@ -34,7 +34,7 @@ var (
 	// Live admin config lives in config/. No fallbacks: an unmigrated
 	// deploy fails closed on required vars instead of booting on
 	// defaults.
-	EnvFilePaths   = []string{"config/.env"}
+	EnvFilePaths   = []string{".env"}
 	RolesFilePaths = []string{"config/roles.json"}
 )
 
