@@ -8,7 +8,6 @@ import (
 	"crypto/sha512"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -201,34 +200,23 @@ func main() {
 	}
 
 	// Derive trip key after challenge so serverPub is known for salt binding
-	var tripPriv ed25519.PrivateKey
-	var tripPub ed25519.PublicKey
-	var tripBadge string
-	var tripSeq uint32
-	var tripPrev []byte = make([]byte, 32)
-	// tmpSeq numbers every outgoing message in this session (trip and
+	// sess.TmpSeq numbers every outgoing message in this session (trip and
 	// plain alike). The server relays it verbatim but never assigns it.
 	// The base is random per connection (upper 32 bits) so a reconnect
 	// never reuses another session's IDs in stash/pending matching.
 	// CSPRNG: a predictable base would let an observer pre-compute
 	// placeholder collisions.
-	var tmpSeq uint64 = (uint64(rand.Uint32()) + 1) << 32
+	sess.TmpSeq = (uint64(rand.Uint32()) + 1) << 32
 	var seed [4]byte
 	if _, rerr := cryptorand.Read(seed[:]); rerr == nil {
-		tmpSeq = (uint64(binary.BigEndian.Uint32(seed[:])) + 1) << 32
+		sess.TmpSeq = (uint64(binary.BigEndian.Uint32(seed[:])) + 1) << 32
 	}
-	// pendingReplyTo quotes a chain height on the next outgoing message
-	// only (/reply sets it, the send path consumes and clears it).
-	var pendingReplyTo uint64
-	// replyDraft holds a quote target awaiting its body on the next line
-	// (bare "/reply H" form). Any slash command or empty-line ^C aborts it.
-	var replyDraft uint64
 	passphraseBytes := []byte(CLI.Tripcode)
 	if len(passphraseBytes) > 0 {
 		priv, pub, badge := deriveTripKey(CLI.Tripcode, challenge.ServerPubKey)
-		tripPriv = priv
-		tripPub = pub
-		tripBadge = badge
+		sess.TripPriv = priv
+		sess.TripPub = pub
+		sess.TripBadge = badge
 		// Zero passphrase copy
 		for i := range passphraseBytes {
 			passphraseBytes[i] = 0
@@ -243,8 +231,8 @@ func main() {
 	// Replay filtering follows the same knob as live display: -j asks
 	// for join/leave lines in catch-up history too.
 	respPacket.HistoryJoins = CLI.ShowJoin
-	if tripPub != nil {
-		respPacket.TripPub = hex.EncodeToString(tripPub)
+	if sess.TripPub != nil {
+		respPacket.TripPub = hex.EncodeToString(sess.TripPub)
 		// Legacy Tripcode field not needed when TripPub is sent; keep empty
 	} else {
 		respPacket.Tripcode = CLI.Tripcode
@@ -341,26 +329,23 @@ func main() {
 		notifyQuit()
 		return
 	}
-	var (
-		sessAuthType  = orDefault(authSuccess.AuthType, "guest")
-		sessRole      = authSuccess.Role
-		sessUnlimited = authSuccess.Perms != nil && authSuccess.Perms.CanMessageUnlimited
-		sessPrefix    string
-		sessConnected = time.Now()
-	)
+	sess.AuthType = orDefault(authSuccess.AuthType, "guest")
+	sess.Role = authSuccess.Role
+	sess.Unlimited = authSuccess.Perms != nil && authSuccess.Perms.CanMessageUnlimited
+	sess.Connected = time.Now()
 	if authSuccess.Perms != nil {
-		sessPrefix = authSuccess.Perms.CustomPrefix
+		sess.Prefix = authSuccess.Perms.CustomPrefix
 	}
 	// Sync trip chain state from server's last known seq/prev for this pub
-	if tripPub != nil && authSuccess.TripPub != "" {
-		tripSeq = authSuccess.TripSeq
+	if sess.TripPub != nil && authSuccess.TripPub != "" {
+		sess.TripSeq = authSuccess.TripSeq
 		if authSuccess.TripPrev != "" {
 			if b, err := hex.DecodeString(authSuccess.TripPrev); err == nil && len(b) == 32 {
-				tripPrev = b
+				sess.TripPrev = b
 			}
 		}
-		if tripPrev == nil {
-			tripPrev = make([]byte, 32)
+		if sess.TripPrev == nil {
+			sess.TripPrev = make([]byte, 32)
 		}
 	}
 
@@ -394,7 +379,7 @@ func main() {
 	// from ui.meta.show in config). The session command overrides
 	// in-memory only; the chain still verifies when hidden.
 	sess.ShowMeta = ClientCfg.ShowMeta()
-	lastMessageTime := time.Now().Add(-10 * time.Second)
+	sess.LastMessageTime = time.Now().Add(-10 * time.Second)
 
 	sess.ActiveTab = TabChat
 	cl, cb, sl, sb := tabCaps()
@@ -414,443 +399,25 @@ func main() {
 
 	greeting(sess.Out, sess.Username)
 
-	// gracefulQuit closes the connection cleanly like /quit does, so both
-	// an explicit quit command and an EOF (Ctrl+D) leave no dangling state.
-	gracefulQuit := func() {
-		sess.Quitting <- true
-		sess.flushChainTip()
-		sess.VerifyCloseOnce.Do(func() { close(sess.VerifyCh) })
-		sess.Conn.WriteMessage(wsCloseMessage, []byte{})
-		// Zero trip private key
-		if tripPriv != nil {
-			for i := range tripPriv {
-				tripPriv[i] = 0
-			}
-		}
-		fmt.Fprintf(sess.Out, "👋 Đang ngắt kết nối... Tạm biệt!\n")
-		time.Sleep(500 * time.Millisecond)
-		notifyQuit()
-	}
-
 	for {
 		text, err := sess.Term.ReadLine()
 		if err != nil {
-			if errors.Is(err, ErrInputCancel) {
-				// Reply targets attach to the next send only; reset first so a
-				// rejected message never leaks its quote into a later one. The
-				// draft/inline /reply handlers below re-arm it when due.
-				pendingReplyTo = 0
-				if replyDraft > 0 {
-					replyDraft = 0
-					sess.Term.SetPrompt("| > ")
-					sess.DisplayMu.Lock()
-					sess.emitLocalFeedback("| [Local]: Đã hủy reply nháp.\n")
-					sess.DisplayMu.Unlock()
-					sess.Term.Refresh()
-					continue
-				}
-				sess.Term.SetPrompt("| > ")
-				sess.DisplayMu.Lock()
-				sess.emitLocalFeedback("| [Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.\n")
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
+			if sess.handleReadErr(err) == cmdQuit {
+				break
 			}
-			gracefulQuit()
-			break
+			continue
 		}
 
 		text = strings.TrimSpace(text)
 		if text == "" {
 			continue
 		}
-		if replyDraft > 0 {
-			if strings.HasPrefix(text, "/") {
-				// Any slash command aborts the draft, then runs normally
-				// through the dispatch below (a "/" body could never send
-				// anyway: the unknown-slash guard rejects it).
-				replyDraft = 0
-				sess.Term.SetPrompt("| > ")
-			} else {
-				// Draft body (codeblock fences included): attach and send.
-				pendingReplyTo = replyDraft
-				replyDraft = 0
-				sess.Term.SetPrompt("| > ")
-			}
-		}
-		if text == "/quit" || text == "/q" {
-			gracefulQuit()
+		sess.handleDraftGate(text)
+		act := sess.dispatch(text)
+		if act == cmdQuit {
 			break
 		}
-
-		if text == "/whoami" || text == "/w" {
-			emitWhoami(&sess.DisplayMu, sess.emitLocalFeedback, sess.Username, sessAuthType, sessRole, sessUnlimited, sessPrefix)
-			continue
-		}
-
-		if text == "/status" {
-			sess.ShowJoinMu.RLock()
-			sj := "TẮT"
-			if sess.ShowJoinLeave {
-				sj = "BẬT"
-			}
-			sess.ShowJoinMu.RUnlock()
-			sess.DisplayMu.Lock()
-			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Server: %s | Đã kết nối: %s | Phiên bản: %s | Show-join: %s\n",
-				sess.WSURL, time.Since(sessConnected).Round(time.Second), Version, sj))
-			sess.DisplayMu.Unlock()
-			continue
-		}
-
-		if text == "/help" || text == "/h" {
-			sess.DisplayMu.Lock()
-			sess.emitLocalFeedback("  [Trợ giúp]: Danh sách các lệnh có thể sử dụng:\n")
-			sess.emitLocalFeedback("    - /help, /h      : Hiển thị bảng trợ giúp này\n")
-			sess.emitLocalFeedback("    - /clear, /c     : Xóa sạch màn hình chat\n")
-			sess.emitLocalFeedback("    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy\n")
-			sess.emitLocalFeedback("    - /quit, /q      : Rời phòng chat và tắt ứng dụng\n")
-			sess.emitLocalFeedback("    - /showjoin, /sj : Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp\n")
-			sess.emitLocalFeedback("    - /whoami, /w    : Thông tin danh tính và quyền hiện tại\n")
-			sess.emitLocalFeedback("    - /status        : Trạng thái kết nối và phiên bản client\n")
-			sess.emitLocalFeedback("    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
-			sess.emitLocalFeedback("    - /info <n>[:hash]: Xem đầy đủ metadata tin nhắn (verify lại tại local)\n")
-			sess.emitLocalFeedback("    - /expand <n>, /xpan  : Mở đầy đủ tin bị thu gọn (vd /expand 1234)\n")
-			sess.emitLocalFeedback("    - /copy <n>[:hash]: Copy nội dung thô tin nhắn vào clipboard\n")
-			sess.emitLocalFeedback("    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
-			sess.emitLocalFeedback("    - /meta, /m [on|off]: Hiện/ẩn dòng meta #height:hash (mặc định hiện, chain vẫn verify)\n")
-			sess.emitLocalFeedback("    - /find, /f <n>[:hash]: Tìm tin theo số height trong bộ nhớ (vd /find 1234)\n")
-			sess.emitLocalFeedback("    - /reply <n>[:hash] text: Trả lời tin #n kèm quote (vd /reply 1234 đồng ý)\n")
-			sess.emitLocalFeedback("    - /reply <n>          : Soạn reply nháp, dòng tiếp theo là nội dung\n")
-			sess.emitLocalFeedback("    - Gõ @#n (vd @#1234) trong tin để nhắc tới tin khác (sáng lên khi còn trong bộ nhớ)\n")
-			sess.emitLocalFeedback("    - Lệnh lạ bắt đầu bằng / bị chặn, không gửi đi (muốn gửi chữ / đầu dòng thì dùng codeblock)\n")
-			sess.emitLocalFeedback("    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng (^C hủy nhập)\n")
-			sess.emitLocalFeedback("    - Bọc chữ trong `dấu backtick` để hiện nền riêng (inline code một dòng)\n")
-			sess.DisplayMu.Unlock()
-			continue
-		}
-
-		if text == "/showjoin" || text == "/sj" {
-			sess.ShowJoinMu.Lock()
-			sess.ShowJoinLeave = !sess.ShowJoinLeave
-			status := "ĐÃ TẮT"
-			if sess.ShowJoinLeave {
-				status = "ĐÃ BẬT"
-			}
-			sess.ShowJoinMu.Unlock()
-			sess.DisplayMu.Lock()
-			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: %s hiển thị thông báo người dùng ra/vào phòng cho các tin kế tiếp.\n", status))
-			sess.DisplayMu.Unlock()
-			continue
-		}
-
-		if text == "/autoverify" || text == "/av" {
-			sess.AutoVerifyMu.Lock()
-			sess.AutoVerify = !sess.AutoVerify
-			status := "BẬT"
-			if !sess.AutoVerify {
-				status = "TẮT"
-			}
-			sess.AutoVerifyMu.Unlock()
-			sess.DisplayMu.Lock()
-			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Auto-verify đã %s (mặc định BẬT, verify song song qua channel FIFO).\n", status))
-			sess.DisplayMu.Unlock()
-			continue
-		}
-
-		if text == "/tab" || text == "/t" || strings.HasPrefix(text, "/tab ") || strings.HasPrefix(text, "/t ") {
-			n := sess.ActiveTab
-			if text == "/tab" || text == "/t" {
-				if sess.ActiveTab == TabChat {
-					n = TabSystem
-				} else {
-					n = TabChat
-				}
-			} else {
-				rest := ""
-				if strings.HasPrefix(text, "/tab ") {
-					rest = strings.TrimSpace(strings.TrimPrefix(text, "/tab"))
-				} else {
-					rest = strings.TrimSpace(strings.TrimPrefix(text, "/t"))
-				}
-				if rest == "1" {
-					n = TabChat
-				} else if rest == "2" {
-					n = TabSystem
-				}
-			}
-			sess.switchTab(n)
-			sess.DisplayMu.Lock()
-			sess.emitLocalFeedback(tabBarLine(sess.ActiveTab))
-			sess.PrintGen++
-			sess.DisplayMu.Unlock()
-			continue
-		}
-
-		if text == "/clear" || text == "/c" {
-			fmt.Fprint(sess.Out, "\033[H\033[2J")
-			greeting(sess.Out, sess.Username)
-			continue
-		}
-
-		if text == "/reply" || strings.HasPrefix(text, "/reply ") {
-			if !ClientCfg.ReplyEnabled() {
-				sess.DisplayMu.Lock()
-				sess.emitLocalFeedback("| [Local]: Reply đã tắt trong config (ui.reply.enabled).\n")
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			rest := strings.TrimSpace(strings.TrimPrefix(text, "/reply"))
-			fields := strings.Fields(rest)
-			var target, body string
-			if len(fields) > 0 {
-				target = fields[0]
-				body = strings.TrimSpace(rest[len(target):])
-			}
-			height, suffix, err := parseFindArg(target)
-			if err != nil {
-				sess.DisplayMu.Lock()
-				sess.emitLocalFeedback("| [Local]: Dùng /reply <height>[:hash] [tin nhắn] (vd /reply 1234 đồng ý; /reply 1234 để soạn nháp).\n")
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			sess.DisplayMu.Lock()
-			found := len(findMetaMatches(sess.TabChat.lines, height, suffix)) > 0 ||
-				len(findMetaMatches(sess.TabSys.lines, height, suffix)) > 0
-			sess.DisplayMu.Unlock()
-			if !found {
-				sess.DisplayMu.Lock()
-				sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ, không reply được.\n", height))
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			if body == "" {
-				// Draft mode: quote now, body on the next line. Any slash
-				// command or empty-line ^C aborts it (see loop top).
-				replyDraft = height
-				sess.Term.SetPrompt(fmt.Sprintf("| ↩ #%d > ", height))
-				sess.DisplayMu.Lock()
-				for _, q := range sess.quoteLinesFor(height, false) {
-					fmt.Fprint(sess.Out, q+"\n")
-					sess.PrintGen++
-				}
-				sess.emitLocalFeedback("| [Local]: Gõ nội dung reply (Enter gửi, ^C ở dòng trống hủy, lệnh / khác hủy draft).\n")
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			// Quote validated: the body flows through the normal dispatch
-			// below (codeblock collection, guards, send) with the target
-			// attached one-shot.
-			pendingReplyTo = height
-			text = body
-		}
-
-		if text == "/meta" || text == "/m" || strings.HasPrefix(text, "/meta ") || strings.HasPrefix(text, "/m ") {
-			rest := ""
-			if strings.HasPrefix(text, "/meta") {
-				rest = strings.TrimSpace(strings.TrimPrefix(text, "/meta"))
-			} else {
-				rest = strings.TrimSpace(strings.TrimPrefix(text, "/m"))
-			}
-			sess.ShowMetaMu.Lock()
-			switch rest {
-			case "on":
-				sess.ShowMeta = true
-			case "off":
-				sess.ShowMeta = false
-			case "":
-				sess.ShowMeta = !sess.ShowMeta
-			default:
-				sess.ShowMetaMu.Unlock()
-				sess.DisplayMu.Lock()
-				sess.emitLocalFeedback("| [Local]: Dùng /meta, /meta on hoặc /meta off.\n")
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			state := "HIỆN"
-			if !sess.ShowMeta {
-				state = "ẨN"
-			}
-			sess.ShowMetaMu.Unlock()
-			sess.DisplayMu.Lock()
-			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Dòng meta (#height:hash) %s (chain vẫn verify ngầm).\n", state))
-			sess.DisplayMu.Unlock()
-			sess.Term.Refresh()
-			continue
-		}
-
-		if text == "/find" || text == "/f" || strings.HasPrefix(text, "/find ") || strings.HasPrefix(text, "/f ") {
-			rest := ""
-			if strings.HasPrefix(text, "/find") {
-				rest = strings.TrimSpace(strings.TrimPrefix(text, "/find"))
-			} else {
-				rest = strings.TrimSpace(strings.TrimPrefix(text, "/f"))
-			}
-			height, suffix, err := parseFindArg(rest)
-			if err != nil {
-				sess.DisplayMu.Lock()
-				sess.emitLocalFeedback(fmt.Sprintf("| [Local]: %v.\n", err))
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			sess.DisplayMu.Lock()
-			shown := 0
-			header := fmt.Sprintf("| [Local]: Tìm #%d", height)
-			if suffix != "" {
-				header += ":" + suffix
-			}
-			sess.emitLocalFeedback(header + " trong bộ nhớ:\n")
-			// Snapshot matches before emitting: emitting appends to
-			// sess.TabSys, whose eviction could shift indices mid-scan.
-			var hits []string
-			for _, buf := range []*tabBuffer{sess.TabChat, sess.TabSys} {
-				matches := findMetaMatches(buf.lines, height, suffix)
-				for _, idx := range matches {
-					if idx > 0 {
-						hits = append(hits, buf.lines[idx-1])
-					}
-					hits = append(hits, buf.lines[idx])
-				}
-				shown += len(matches)
-			}
-			for _, h := range hits {
-				sess.emitLocalFeedback(h)
-			}
-			if shown == 0 {
-				sess.emitLocalFeedback("| [Local]: Không thấy (tin cũ đã bị evict khỏi bộ nhớ hoặc chưa sync).\n")
-			}
-			sess.DisplayMu.Unlock()
-			sess.Term.Refresh()
-			continue
-		}
-
-		if text == "/expand" || text == "/xpan" || strings.HasPrefix(text, "/expand ") || strings.HasPrefix(text, "/xpan ") {
-			rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "/expand"), "/xpan"))
-			height, _, err := parseFindArg(rest)
-			if err != nil {
-				sess.DisplayMu.Lock()
-				sess.emitLocalFeedback("| [Local]: Dùng /expand #height (vd /expand 1234).\n")
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			sess.DisplayMu.Lock()
-			wire, ok := sess.WireIdx.get(height)
-			if !ok {
-				sess.emitLocalFeedback("| [Local]: Tin đã trôi khỏi bộ nhớ hoặc chưa sync.\n")
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			if findCollapsed(sess.TabChat.lines, height) < 0 {
-				sess.emitLocalFeedback("| [Local]: Tin này không thu gọn.\n")
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			// Re-render full and replay it inside a dim heredoc frame
-			// (like shell <<EOF): the delimiters mark history replay
-			// without touching the verbatim content. No buffer surgery.
-			sess.AutoVerifyMu.RLock()
-			av := sess.AutoVerify
-			sess.AutoVerifyMu.RUnlock()
-			sess.ShowMetaMu.RLock()
-			withMeta := sess.ShowMeta
-			sess.ShowMetaMu.RUnlock()
-			_, full, _, _, _ := sess.buildChatBlock(wire, av, withMeta)
-			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m\n", height))
-			for _, line := range strings.Split(strings.TrimSuffix(full, "\n"), "\n") {
-				sess.emitLocalFeedback(line + "\n")
-			}
-			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m\n", height))
-			sess.DisplayMu.Unlock()
-			sess.Term.Refresh()
-			continue
-		}
-
-		if text == "/info" || strings.HasPrefix(text, "/info ") {
-			rest := strings.TrimSpace(strings.TrimPrefix(text, "/info"))
-			height, suffix, err := parseFindArg(rest)
-			if err != nil {
-				sess.DisplayMu.Lock()
-				sess.emitLocalFeedback("| [Local]: Dùng /info <height>[:hash] (vd /info 1234).\n")
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			sess.DisplayMu.Lock()
-			wire, ok := sess.WireIdx.get(height)
-			if !ok {
-				sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height))
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			if suffix != "" && !strings.HasPrefix(strings.ToLower(wire.ChainHash), suffix) {
-				sess.emitLocalFeedback("| [Local]: Height đúng nhưng hash khác — kiểm tra lại số.\n")
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			for _, line := range formatInfoBlock(wire) {
-				sess.emitLocalFeedback(line)
-			}
-			sess.DisplayMu.Unlock()
-			sess.Term.Refresh()
-			continue
-		}
-
-		if text == "/copy" || strings.HasPrefix(text, "/copy ") {
-			rest := strings.TrimSpace(strings.TrimPrefix(text, "/copy"))
-			height, _, err := parseFindArg(rest)
-			if err != nil {
-				sess.DisplayMu.Lock()
-				sess.emitLocalFeedback("| [Local]: Dùng /copy <height>[:hash] (vd /copy 1234).\n")
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			sess.DisplayMu.Lock()
-			wire, ok := sess.WireIdx.get(height)
-			if !ok {
-				sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height))
-				sess.DisplayMu.Unlock()
-				sess.Term.Refresh()
-				continue
-			}
-			if err := copyToClipboard(wire.Text); err != nil {
-				sess.emitLocalFeedback(fmt.Sprintf("| [Local]: %v.\n", err))
-			} else {
-				sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Đã copy nội dung tin #%d.\n", height))
-				scheduleClipboardClear(wire.Text, ClientCfg.ClipboardClearAfterSec())
-			}
-			sess.DisplayMu.Unlock()
-			sess.Term.Refresh()
-			continue
-		}
-
-		if text == "/clearhistory" || text == "/ch" {
-			os.Remove(historyFile)
-			sess.DisplayMu.Lock()
-			sess.emitLocalFeedback(fmt.Sprintf("🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile))
-			sess.DisplayMu.Unlock()
-			continue
-		}
-
-		// Unknown slash input: every built-in command was already matched
-		// above, so anything still starting with "/" is a mistyped command
-		// rejected locally and never broadcast. Known commands above
-		// already continued.
-		if isUnknownSlashCommand(text) {
-			sess.DisplayMu.Lock()
-			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Lệnh không tồn tại: %s. Gõ /help để xem danh sách.\n", text))
-			sess.DisplayMu.Unlock()
-			sess.Term.Refresh()
+		if act == cmdDone {
 			continue
 		}
 
@@ -880,7 +447,7 @@ func main() {
 
 		// Guard: client-side MessageCooldown (mirror server, zero-trust)
 		if ClientCfg != nil {
-			if err := guard.ValidateMessageForSend(text, lastMessageTime, &guard.Limits{
+			if err := guard.ValidateMessageForSend(text, sess.LastMessageTime, &guard.Limits{
 				MaxMessageLength: ClientCfg.Limits.MaxMessageLength,
 				MaxMessageLine:   ClientCfg.Limits.MaxMessageLine,
 				MessageCooldown:  ClientCfg.Limits.MessageCooldown,
@@ -923,8 +490,8 @@ func main() {
 		// Quoted target previews first (same helper as the echo path, so
 		// both blocks share the shape; pending quotes carry ⏳ so the
 		// erase region check keeps passing).
-		if pendingReplyTo > 0 {
-			for _, q := range sess.quoteLinesFor(pendingReplyTo, true) {
+		if sess.PendingReplyTo > 0 {
+			for _, q := range sess.quoteLinesFor(sess.PendingReplyTo, true) {
 				sess.emitTab(TabChat, q+"\n")
 				phRows++
 			}
@@ -938,8 +505,8 @@ func main() {
 			}
 		}
 		// Trip placeholder (grey ◆ …) — real badge will come from server echo
-		if tripPriv != nil || CLI.Tripcode != "" {
-			badgePlaceholder := tripBadge
+		if sess.TripPriv != nil || CLI.Tripcode != "" {
+			badgePlaceholder := sess.TripBadge
 			if badgePlaceholder == "" && CLI.Tripcode != "" {
 				h := sha256.Sum256([]byte(CLI.Tripcode))
 				badgePlaceholder = hex.EncodeToString(h[:])[:8]
@@ -965,35 +532,35 @@ func main() {
 		sess.Term.Refresh()
 		sess.DisplayMu.Unlock()
 
-		tmpSeq++
-		if tripPriv != nil {
+		sess.TmpSeq++
+		if sess.TripPriv != nil {
 			// Sign message with trip chain — bind displayName for anti-spoof
-			tripSeq++
+			sess.TripSeq++
 			msgHash := sha256.Sum256([]byte(text))
-			prevCopy := make([]byte, len(tripPrev))
-			copy(prevCopy, tripPrev)
-			payload := tripcolor.CanonicalPayload(strings.ToLower(challenge.ServerPubKey), tripSeq, prevCopy, msgHash[:], []byte(tripPub), sess.Username, tmpSeq, pendingReplyTo)
-			sig := ed25519.Sign(tripPriv, payload)
+			prevCopy := make([]byte, len(sess.TripPrev))
+			copy(prevCopy, sess.TripPrev)
+			payload := tripcolor.CanonicalPayload(strings.ToLower(challenge.ServerPubKey), sess.TripSeq, prevCopy, msgHash[:], []byte(sess.TripPub), sess.Username, sess.TmpSeq, sess.PendingReplyTo)
+			sig := ed25519.Sign(sess.TripPriv, payload)
 			h := sha256.New()
 			h.Write(prevCopy)
 			h.Write(sig)
 			h.Write(msgHash[:])
 			newPrev := h.Sum(nil)
-			copy(tripPrev, newPrev)
-			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: sess.Username, TmpID: tmpSeq, ReplyTo: pendingReplyTo}
+			copy(sess.TripPrev, newPrev)
+			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(sess.TripPub)), Seq: sess.TripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: sess.Username, TmpID: sess.TmpSeq, ReplyTo: sess.PendingReplyTo}
 			err = sess.Conn.WriteJSON(tripMsg)
 			if err != nil {
 				// Rollback seq/prev on send failure to avoid permanent fork
-				tripSeq--
-				copy(tripPrev, prevCopy)
-				tmpSeq--
+				sess.TripSeq--
+				copy(sess.TripPrev, prevCopy)
+				sess.TmpSeq--
 			}
 		} else {
 			// Unsigned chat always travels in an envelope carrying the
 			// session counter; raw text is rejected by the server.
-			err = sess.Conn.WriteJSON(PlainMessage{TmpID: tmpSeq, Text: text, ReplyTo: pendingReplyTo})
+			err = sess.Conn.WriteJSON(PlainMessage{TmpID: sess.TmpSeq, Text: text, ReplyTo: sess.PendingReplyTo})
 			if err != nil {
-				tmpSeq--
+				sess.TmpSeq--
 			}
 		}
 		// Reply targets are one-shot: consumed by the send above whether
@@ -1002,16 +569,16 @@ func main() {
 		// the target for echo matching.
 		if err != nil {
 			// Mark placeholder as failed (red) is handled by server unicast; keep placeholder grey until then
-			lastMessageTime = time.Now()
+			sess.LastMessageTime = time.Now()
 		} else {
-			lastMessageTime = time.Now()
+			sess.LastMessageTime = time.Now()
 			// Track placeholder so the server echo can replace it.
 			sess.DisplayMu.Lock()
-			pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: sess.PrintGen, bufEnd: phBufEnd, sentAt: time.Now(), tmpID: tmpSeq, replyTo: pendingReplyTo}
-			if tripPriv != nil {
+			pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: sess.PrintGen, bufEnd: phBufEnd, sentAt: time.Now(), tmpID: sess.TmpSeq, replyTo: sess.PendingReplyTo}
+			if sess.TripPriv != nil {
 				pm.hasTrip = true
-				pm.seq = tripSeq
-				pm.pub = hex.EncodeToString([]byte(tripPub))
+				pm.seq = sess.TripSeq
+				pm.pub = hex.EncodeToString([]byte(sess.TripPub))
 			}
 			sess.PendingPlaceholders = append(sess.PendingPlaceholders, pm)
 			// Bound the queue: echoes that never arrive (dead server, old
@@ -1040,7 +607,7 @@ func main() {
 		}
 		// Reply targets are one-shot, cleared after tracking above (the
 		// pending entry already captured the target for echo matching).
-		pendingReplyTo = 0
+		sess.PendingReplyTo = 0
 		if err != nil {
 			fmt.Println("❌ Lỗi gửi tin nhắn:", err)
 			break
