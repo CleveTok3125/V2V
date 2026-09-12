@@ -704,3 +704,141 @@ func forkWarning(hs HistorySync, havePersistedTip bool, persistedTip [32]byte, p
 	}
 	return fmt.Sprintf("| [Local]: Lịch sử server không chứa tip đã lưu #%d (replay #%d–#%d) — log có thể đã phân nhánh (fork).\n", persistedHeight, hs.MinHeight, hs.MaxHeight), true
 }
+
+// Session echo tracking and chain verification (moved from main).
+const tipBatchSaves = 50
+
+// initChainState loads the persisted tip (namespaced by server identity)
+// after setup. Called once from main before the pump.
+func (s *Session) initChainState() {
+	s.ServerPubHex = strings.ToLower(strings.TrimSpace(s.Challenge.ServerPubKey))
+	s.TipPath = chainTipFile(historyFile)
+	s.PersistedTip, s.PersistedHeight, s.PersistedServer, s.HavePersistedTip = loadChainTip(s.TipPath)
+	if s.HavePersistedTip && !strings.EqualFold(s.PersistedServer, s.ServerPubHex) {
+		s.PersistedTip, s.PersistedHeight, s.HavePersistedTip = [32]byte{}, 0, false
+	}
+	s.InSync = false
+}
+
+func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
+	if !pm.shown || s.ActiveTab != TabChat || pm.rows <= 0 {
+		return
+	}
+	start := pm.bufEnd - pm.rows
+	if start < 0 || pm.bufEnd > len(s.TabChat.lines) {
+		return
+	}
+	// Verify the region still holds our placeholder (eviction or
+	// concurrent appends may have shifted it); otherwise leave the
+	// screen alone and render the echo normally.
+	for _, l := range s.TabChat.lines[start:pm.bufEnd] {
+		if !strings.Contains(l, "⏳") {
+			return
+		}
+	}
+	intervening := append([]string{}, s.TabChat.lines[pm.bufEnd:]...)
+	s.TabChat.spliceOut(start, pm.bufEnd)
+	// Rows on screen: placeholder block plus intervening lines printed after it.
+	fmt.Fprintf(s.Out, "\x1b[%dA", pm.rows+len(intervening))
+	fmt.Fprint(s.Out, "\x1b[J")
+	for _, l := range intervening {
+		fmt.Fprint(s.Out, l)
+	}
+	s.PrintGen++
+}
+
+func (s *Session) consumeEchoLocked(wire WireMessage, allowStash bool) {
+	var stale []WireMessage
+	s.PendingEchoes, stale = reapStaleEchoes(s.PendingEchoes, 10*time.Second)
+	for _, w := range stale {
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Echo không khớp tin đang chờ (tmp_id=%d) — ID có thể đã bị sửa.\n", w.TmpID))
+	}
+	if wire.DisplayName != s.Username || len(s.PendingPlaceholders) == 0 {
+		if allowStash && wire.DisplayName == s.Username && wire.TmpID != 0 {
+			s.PendingEchoes = stashEcho(s.PendingEchoes, wire, 16)
+		}
+		return
+	}
+	idx := matchPendingIndex(s.PendingPlaceholders, wire.TmpID, wire.ReplyTo, wire.Text, s.Username, wire.DisplayName)
+	if idx == -1 {
+		if allowStash && wire.TmpID != 0 {
+			s.PendingEchoes = stashEcho(s.PendingEchoes, wire, 16)
+		}
+		return
+	}
+	pm := s.PendingPlaceholders[idx]
+	s.PendingPlaceholders = append(s.PendingPlaceholders[:idx], s.PendingPlaceholders[idx+1:]...)
+	s.erasePlaceholderLocked(pm)
+}
+
+func (s *Session) noteChainTip(tip [32]byte, height uint64) {
+	s.ChainTip, s.ChainHeight, s.ChainHaveTip = tip, height, true
+	s.TipSinceSave++
+	if s.TipSinceSave >= tipBatchSaves {
+		if saveChainTip(s.TipPath, tip, height, s.ServerPubHex) == nil {
+			s.TipSinceSave = 0
+		}
+	}
+}
+
+func (s *Session) flushChainTip() {
+	if s.ChainHaveTip {
+		if saveChainTip(s.TipPath, s.ChainTip, s.ChainHeight, s.ServerPubHex) == nil {
+			s.TipSinceSave = 0
+		}
+	}
+}
+
+func (s *Session) checkChainLink(wire WireMessage) {
+	if wire.ChainHash == "" {
+		return
+	}
+	if s.InSync {
+		s.SyncHashes[strings.ToLower(wire.ChainHash)] = true
+	}
+	newTip, err := verifyWireLink(wire, s.ChainTip)
+	if err != nil && !s.ChainHaveTip {
+		// No tip yet: adopt the message's own prev, content-check only.
+		prev, ok := chain.ParseHex64(wire.ChainPrev)
+		if !ok {
+			if !s.ChainWarned {
+				s.ChainWarned = true
+				s.emitLocalFeedback("| [Local]: Chain link đầu tiên sai định dạng — bỏ qua kiểm tra.\n")
+			}
+			return
+		}
+		newTip, err = verifyWireLink(wire, prev)
+	}
+	if err != nil {
+		if !s.ChainWarned {
+			s.ChainWarned = true
+			s.emitLocalFeedback(fmt.Sprintf("| [Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", wire.ChainHeight, err))
+		}
+		if parsed, ok := chain.ParseHex64(wire.ChainHash); ok {
+			s.noteChainTip(parsed, wire.ChainHeight)
+		}
+		s.flushChainTip()
+		return
+	}
+	s.noteChainTip(newTip, wire.ChainHeight)
+}
+
+func (s *Session) enqueueVerify(job verifyJob) {
+	s.VerifyMu.Lock()
+	defer s.VerifyMu.Unlock()
+	select {
+	case s.VerifyCh <- job:
+	default:
+		// Drop oldest (FIFO) — dropped is considered verify fail (red ✗)
+		select {
+		case <-s.VerifyCh:
+		default:
+		}
+		// Now space is guaranteed (or channel was emptied)
+		select {
+		case s.VerifyCh <- job:
+		default:
+			// Extremely unlikely: channel filled again between drop and send
+		}
+	}
+}

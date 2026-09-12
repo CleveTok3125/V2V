@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/chain"
 	"github.com/CleveTok3125/V2V/internal/codebg"
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
@@ -137,10 +136,10 @@ type verifyJob struct {
 // emitWhoami prints the /whoami identity lines under the session DisplayMu. The mutex
 // is released on every path via defer: guests (empty role) take no early
 // return that could skip the unlock and freeze the terminal.
-func emitWhoami(mu *sync.Mutex, emit func(string), username, authType, role string, unlimited bool, prefix string) {
+func emitWhoami(mu *sync.Mutex, emit func(string), uname, authType, role string, unlimited bool, prefix string) {
 	mu.Lock()
 	defer mu.Unlock()
-	emit(fmt.Sprintf("| [Local]: Người dùng: %s | Xác thực: %s\n", username, authType))
+	emit(fmt.Sprintf("| [Local]: Người dùng: %s | Xác thực: %s\n", uname, authType))
 	if role != "" {
 		emit(fmt.Sprintf("| [Local]: Role: %s | Unlimited: %v | Prefix: %q\n", role, unlimited, prefix))
 	}
@@ -167,7 +166,7 @@ func main() {
 	sess := NewSession()
 
 	wsURL := normalizeURL(CLI.Server)
-	username := strings.TrimSpace(CLI.Username)
+	sess.Username = strings.TrimSpace(CLI.Username)
 
 	// Fail fast on version policy before prompting for secrets.
 	if !checkServerVersion(wsURL) {
@@ -180,7 +179,7 @@ func main() {
 	// after the challenge. Key derivation still happens after the
 	// challenge so serverPub stays salt-bound.
 	if CLI.UseTripcode && CLI.Tripcode == "" {
-		tc, terr := resolveTripcode(true, CLI.ConfigDir, username, CLI.Server)
+		tc, terr := resolveTripcode(true, CLI.ConfigDir, sess.Username, CLI.Server)
 		if terr != nil {
 			fmt.Printf("❌ Tripcode: %v\n", terr)
 			notifyQuit()
@@ -237,7 +236,7 @@ func main() {
 	}
 
 	respPacket := AuthPacket{
-		Username: username,
+		Username: sess.Username,
 		Nonce:    challenge.Nonce,
 	}
 	// Replay filtering follows the same knob as live display: -j asks
@@ -375,7 +374,7 @@ func main() {
 		notifyQuit()
 		return
 	case "auth_success":
-		username = authSuccess.Username
+		sess.Username = authSuccess.Username
 	}
 
 	term, err := newInputTerminal()
@@ -397,7 +396,6 @@ func main() {
 	}
 
 	verifyCh := make(chan verifyJob, 128)
-	var verifyMu sync.Mutex
 	var verifyCloseOnce sync.Once
 	autoVerify := true
 	var autoVerifyMu sync.RWMutex
@@ -441,43 +439,9 @@ func main() {
 		refreshMu.Unlock()
 	}
 
-	// pendingPlaceholders tracks grey placeholders awaiting server echo
-	// (pendingMsg lives at package level in chainmeta.go for tests).
-	pendingPlaceholders := []pendingMsg{}
-	// pendingEchoes buffers our echoes that arrived before their
-	// placeholder was tracked (sub-millisecond local echo race).
-	var pendingEchoes []pendingEcho
-
 	// erasePlaceholderLocked splices a placeholder block out of the tab
 	// buffer and rewrites the screen region, reprinting any lines that
 	// intervened after it. Caller must hold sess.DisplayMu.
-	erasePlaceholderLocked := func(pm pendingMsg) {
-		if !pm.shown || sess.ActiveTab != TabChat || pm.rows <= 0 {
-			return
-		}
-		start := pm.bufEnd - pm.rows
-		if start < 0 || pm.bufEnd > len(sess.TabChat.lines) {
-			return
-		}
-		// Verify the region still holds our placeholder (eviction or
-		// concurrent appends may have shifted it); otherwise leave the
-		// screen alone and render the echo normally.
-		for _, l := range sess.TabChat.lines[start:pm.bufEnd] {
-			if !strings.Contains(l, "⏳") {
-				return
-			}
-		}
-		intervening := append([]string{}, sess.TabChat.lines[pm.bufEnd:]...)
-		sess.TabChat.spliceOut(start, pm.bufEnd)
-		// Rows on screen: placeholder block plus intervening lines printed after it.
-		fmt.Fprintf(sess.Out, "\x1b[%dA", pm.rows+len(intervening))
-		fmt.Fprint(sess.Out, "\x1b[J")
-		for _, l := range intervening {
-			fmt.Fprint(sess.Out, l)
-		}
-		sess.PrintGen++
-	}
-
 	// consumeEchoLocked matches a server echo of our own message against
 	// pending placeholders by exact tmp_id (duplicate texts stay
 	// unambiguous), with the legacy oldest-text match as fallback. A match
@@ -488,113 +452,7 @@ func main() {
 	// server-side ID tampering surfaces. allowStash is false for history
 	// replay: our own old messages must never pollute the stash (their
 	// tmpIDs belong to previous sessions). Caller must hold sess.DisplayMu.
-	consumeEchoLocked := func(wire WireMessage, allowStash bool) {
-		var stale []WireMessage
-		pendingEchoes, stale = reapStaleEchoes(pendingEchoes, 10*time.Second)
-		for _, w := range stale {
-			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Echo không khớp tin đang chờ (tmp_id=%d) — ID có thể đã bị sửa.\n", w.TmpID))
-		}
-		if wire.DisplayName != username || len(pendingPlaceholders) == 0 {
-			if allowStash && wire.DisplayName == username && wire.TmpID != 0 {
-				pendingEchoes = stashEcho(pendingEchoes, wire, 16)
-			}
-			return
-		}
-		idx := matchPendingIndex(pendingPlaceholders, wire.TmpID, wire.ReplyTo, wire.Text, username, wire.DisplayName)
-		if idx == -1 {
-			if allowStash && wire.TmpID != 0 {
-				pendingEchoes = stashEcho(pendingEchoes, wire, 16)
-			}
-			return
-		}
-		pm := pendingPlaceholders[idx]
-		pendingPlaceholders = append(pendingPlaceholders[:idx], pendingPlaceholders[idx+1:]...)
-		erasePlaceholderLocked(pm)
-	}
-
-	// Chain verification state: running tip adopted from the first
-	// chained message seen, persisted tip for fork detection after sync.
-	// The persisted tip is namespaced by server identity: a tip from
-	// another server is silently ignored (switching servers is a first
-	// run, never a fork).
-	var chainTip [32]byte
-	var chainHeight uint64
-	var chainHaveTip bool
-	var chainWarned bool
-	serverPubHex := strings.ToLower(strings.TrimSpace(challenge.ServerPubKey))
-	tipPath := chainTipFile(historyFile)
-	persistedTip, persistedHeight, persistedServer, havePersistedTip := loadChainTip(tipPath)
-	if havePersistedTip && !strings.EqualFold(persistedServer, serverPubHex) {
-		persistedTip, persistedHeight, havePersistedTip = [32]byte{}, 0, false
-	}
-	inSync := false
-	syncHashes := map[string]bool{}
-
-	// noteChainTip advances the running tip, persisting it in batches:
-	// every tipBatchSaves links plus explicit flushes (quit, fork warn).
-	// A crash between batches only degrades the next sync to first-run
-	// (no fork check), never to a false warning.
-	const tipBatchSaves = 50
-	var tipSinceSave uint64
-	noteChainTip := func(tip [32]byte, height uint64) {
-		chainTip, chainHeight, chainHaveTip = tip, height, true
-		tipSinceSave++
-		if tipSinceSave >= tipBatchSaves {
-			if saveChainTip(tipPath, tip, height, serverPubHex) == nil {
-				tipSinceSave = 0
-			}
-		}
-	}
-	flushChainTip := func() {
-		if chainHaveTip {
-			if saveChainTip(tipPath, chainTip, chainHeight, serverPubHex) == nil {
-				tipSinceSave = 0
-			}
-		}
-	}
-
-	// checkChainLink verifies one received wire against the running tip:
-	// content hash always, prev continuity once a tip is adopted. Legacy
-	// lines without chain fields pass silently. The first chained message
-	// adopts its own prev. Any break warns once and adopts (availability),
-	// so chat stays usable while tampering stays visible. A filtered
-	// replay cannot break continuity (filtered lines never held chain
-	// positions), so every break is genuine. During history sync every
-	// chained hash is collected for the fork check at the trailer.
-	// Caller must hold sess.DisplayMu (warns via local feedback).
-	checkChainLink := func(wire WireMessage) {
-		if wire.ChainHash == "" {
-			return
-		}
-		if inSync {
-			syncHashes[strings.ToLower(wire.ChainHash)] = true
-		}
-		newTip, err := verifyWireLink(wire, chainTip)
-		if err != nil && !chainHaveTip {
-			// No tip yet: adopt the message's own prev, content-check only.
-			prev, ok := chain.ParseHex64(wire.ChainPrev)
-			if !ok {
-				if !chainWarned {
-					chainWarned = true
-					sess.emitLocalFeedback("| [Local]: Chain link đầu tiên sai định dạng — bỏ qua kiểm tra.\n")
-				}
-				return
-			}
-			newTip, err = verifyWireLink(wire, prev)
-		}
-		if err != nil {
-			if !chainWarned {
-				chainWarned = true
-				sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", wire.ChainHeight, err))
-			}
-			if parsed, ok := chain.ParseHex64(wire.ChainHash); ok {
-				noteChainTip(parsed, wire.ChainHeight)
-			}
-			flushChainTip()
-			return
-		}
-		noteChainTip(newTip, wire.ChainHeight)
-	}
+	sess.initChainState()
 
 	// badgeForWire verifies a trip badge and builds its colored display
 	// plus the manual-verify hyperlink (kept, opens the stateless API).
@@ -770,26 +628,6 @@ func main() {
 		term.Refresh()
 	}
 
-	enqueueVerify := func(job verifyJob) {
-		verifyMu.Lock()
-		defer verifyMu.Unlock()
-		select {
-		case verifyCh <- job:
-		default:
-			// Drop oldest (FIFO) — dropped is considered verify fail (red ✗)
-			select {
-			case <-verifyCh:
-			default:
-			}
-			// Now space is guaranteed (or channel was emptied)
-			select {
-			case verifyCh <- job:
-			default:
-				// Extremely unlikely: channel filled again between drop and send
-			}
-		}
-	}
-
 	go func() {
 		for job := range verifyCh {
 			// Use shared trip verification (same as server) — serverPub is enforced to server's own key
@@ -852,11 +690,11 @@ func main() {
 		// fork check runs. Caller refreshes after.
 		handleHistorySync := func(hs HistorySync) {
 			sess.DisplayMu.Lock()
-			inSync = false
-			if warn, flush := forkWarning(hs, havePersistedTip, persistedTip, persistedHeight, syncHashes); warn != "" {
+			sess.InSync = false
+			if warn, flush := forkWarning(hs, sess.HavePersistedTip, sess.PersistedTip, sess.PersistedHeight, sess.SyncHashes); warn != "" {
 				sess.emitLocalFeedback(warn)
 				if flush {
-					flushChainTip()
+					sess.flushChainTip()
 				}
 			}
 			sess.DisplayMu.Unlock()
@@ -872,7 +710,7 @@ func main() {
 					// Flush before exit: os.Exit skips deferred
 					// term.Close/flushChainTip, losing the newest tip and
 					// leaving the terminal raw.
-					flushChainTip()
+					sess.flushChainTip()
 					term.Close()
 					ClearLoadedPassphrase()
 					os.Exit(1)
@@ -887,8 +725,8 @@ func main() {
 			var wire WireMessage
 			if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
 				sess.DisplayMu.Lock()
-				consumeEchoLocked(wire, true)
-				checkChainLink(wire)
+				sess.consumeEchoLocked(wire, true)
+				sess.checkChainLink(wire)
 				flushDateBannerLocked()
 				renderChatBlock(wire)
 				sess.DisplayMu.Unlock()
@@ -898,7 +736,7 @@ func main() {
 			var sysWire WireMessage
 			if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {
 				sess.DisplayMu.Lock()
-				checkChainLink(sysWire)
+				sess.checkChainLink(sysWire)
 				if !isShowingJoin && isDateBanner(sysWire) {
 					pendingDateBannerWire = &sysWire
 					sess.DisplayMu.Unlock()
@@ -933,9 +771,9 @@ func main() {
 				if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
 					sess.DisplayMu.Lock()
 					if wl.Type == "chat" {
-						consumeEchoLocked(wl, !inSync)
+						sess.consumeEchoLocked(wl, !sess.InSync)
 					}
-					checkChainLink(wl)
+					sess.checkChainLink(wl)
 					if wl.Type == "system" && !isShowingJoin && isDateBanner(wl) {
 						pendingDateBannerWire = &wl
 						sess.DisplayMu.Unlock()
@@ -960,11 +798,11 @@ func main() {
 				if boundary, start := parseHistoryBoundary(line); boundary {
 					sess.DisplayMu.Lock()
 					if start {
-						inSync = true
+						sess.InSync = true
 					} else {
 						pendingDateBanner = ""
 						pendingDateBannerWire = nil
-						inSync = false
+						sess.InSync = false
 					}
 					sess.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 					sess.DisplayMu.Unlock()
@@ -984,7 +822,7 @@ func main() {
 							// Drop-oldest on full: dropped is treated as verify fail (deterministic)
 							// Show the line immediately as pending-plain then queue newest for real verify
 							// If queue was full, oldest was dropped and will stay uncolored (fail)
-							enqueueVerify(job)
+							sess.enqueueVerify(job)
 							continue
 						}
 					}
@@ -997,13 +835,13 @@ func main() {
 		}
 	}()
 
-	greeting(sess.Out, username)
+	greeting(sess.Out, sess.Username)
 
 	// gracefulQuit closes the connection cleanly like /quit does, so both
 	// an explicit quit command and an EOF (Ctrl+D) leave no dangling state.
 	gracefulQuit := func() {
 		quitting <- true
-		flushChainTip()
+		sess.flushChainTip()
 		verifyCloseOnce.Do(func() { close(verifyCh) })
 		conn.WriteMessage(wsCloseMessage, []byte{})
 		// Zero trip private key
@@ -1069,7 +907,7 @@ func main() {
 		}
 
 		if text == "/whoami" || text == "/w" {
-			emitWhoami(&sess.DisplayMu, sess.emitLocalFeedback, username, sessAuthType, sessRole, sessUnlimited, sessPrefix)
+			emitWhoami(&sess.DisplayMu, sess.emitLocalFeedback, sess.Username, sessAuthType, sessRole, sessUnlimited, sessPrefix)
 			continue
 		}
 
@@ -1173,7 +1011,7 @@ func main() {
 
 		if text == "/clear" || text == "/c" {
 			fmt.Fprint(sess.Out, "\033[H\033[2J")
-			greeting(sess.Out, username)
+			greeting(sess.Out, sess.Username)
 			continue
 		}
 
@@ -1557,7 +1395,7 @@ func main() {
 			msgHash := sha256.Sum256([]byte(text))
 			prevCopy := make([]byte, len(tripPrev))
 			copy(prevCopy, tripPrev)
-			payload := tripcolor.CanonicalPayload(strings.ToLower(challenge.ServerPubKey), tripSeq, prevCopy, msgHash[:], []byte(tripPub), username, tmpSeq, pendingReplyTo)
+			payload := tripcolor.CanonicalPayload(strings.ToLower(challenge.ServerPubKey), tripSeq, prevCopy, msgHash[:], []byte(tripPub), sess.Username, tmpSeq, pendingReplyTo)
 			sig := ed25519.Sign(tripPriv, payload)
 			h := sha256.New()
 			h.Write(prevCopy)
@@ -1565,7 +1403,7 @@ func main() {
 			h.Write(msgHash[:])
 			newPrev := h.Sum(nil)
 			copy(tripPrev, newPrev)
-			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: username, TmpID: tmpSeq, ReplyTo: pendingReplyTo}
+			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: sess.Username, TmpID: tmpSeq, ReplyTo: pendingReplyTo}
 			err = conn.WriteJSON(tripMsg)
 			if err != nil {
 				// Rollback seq/prev on send failure to avoid permanent fork
@@ -1598,28 +1436,28 @@ func main() {
 				pm.seq = tripSeq
 				pm.pub = hex.EncodeToString([]byte(tripPub))
 			}
-			pendingPlaceholders = append(pendingPlaceholders, pm)
+			sess.PendingPlaceholders = append(sess.PendingPlaceholders, pm)
 			// Bound the queue: echoes that never arrive (dead server, old
 			// build) must not grow memory or turn matching quadratic.
 			// Evicted entries stay grey on screen: honestly unconfirmed.
 			// Linear scan stays trivial at this bound, so no index map.
 			const maxPendingPlaceholders = 128
-			for len(pendingPlaceholders) > maxPendingPlaceholders {
-				pendingPlaceholders = pendingPlaceholders[1:]
+			for len(sess.PendingPlaceholders) > maxPendingPlaceholders {
+				sess.PendingPlaceholders = sess.PendingPlaceholders[1:]
 			}
 			// The echo may have beaten us here (local echo race): if a
 			// stashed echo matches, erase the placeholder at once. The
 			// echo itself was already rendered when it arrived.
 			var haveStashed bool
-			pendingEchoes, _, haveStashed = takeStashedEcho(pendingEchoes, pm.tmpID)
+			sess.PendingEchoes, _, haveStashed = takeStashedEcho(sess.PendingEchoes, pm.tmpID)
 			if haveStashed {
-				for i, p := range pendingPlaceholders {
+				for i, p := range sess.PendingPlaceholders {
 					if p.tmpID == pm.tmpID {
-						pendingPlaceholders = append(pendingPlaceholders[:i], pendingPlaceholders[i+1:]...)
+						sess.PendingPlaceholders = append(sess.PendingPlaceholders[:i], sess.PendingPlaceholders[i+1:]...)
 						break
 					}
 				}
-				erasePlaceholderLocked(pm)
+				sess.erasePlaceholderLocked(pm)
 			}
 			sess.DisplayMu.Unlock()
 		}
