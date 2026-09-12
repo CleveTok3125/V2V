@@ -159,6 +159,15 @@ type ClientConfig struct {
 			CharAspect float64 `json:"charAspect"`
 			Scrollback int `json:"scrollback"`
 		} `json:"web"`
+		// Collapse folds long blocks (head rows + expand trailer).
+		// Rows is the collapse threshold in screen rows, PreviewRows
+		// how many head rows survive. Enabled is a pointer so absent
+		// sections backfill to enabled instead of silently disabling.
+		Collapse struct {
+			Enabled     *bool `json:"enabled"`
+			Rows        int   `json:"rows"`
+			PreviewRows int   `json:"previewRows"`
+		} `json:"collapse"`
 		// VersionCheck controls the pre-dial server version check.
 		// Mode is disabled|warn|enforce (default warn); Expect pins a
 		// fork version, empty compares against this client's own stamp.
@@ -251,6 +260,12 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.Theme.Error = "#ff6b6b"
 	c.UI.Web.CharAspect = 0.6
 	c.UI.Web.Scrollback = 10000
+	c.UI.Collapse.Enabled = boolPtr(true)
+	c.UI.Collapse.Rows = 10
+	c.UI.Collapse.PreviewRows = 5
+	c.UI.Collapse.Enabled = boolPtr(true)
+	c.UI.Collapse.Rows = 10
+	c.UI.Collapse.PreviewRows = 5
 	c.UI.VersionCheck.Enabled = boolPtr(true)
 	c.UI.VersionCheck.Mode = "warn"
 	c.UI.VersionCheck.Expect = ""
@@ -331,6 +346,34 @@ func (c *ClientConfig) VersionCheckExpect() string {
 		return ""
 	}
 	return c.UI.VersionCheck.Expect
+}
+
+// CollapseEnabled reports whether long blocks fold.
+func (c *ClientConfig) CollapseEnabled() bool {
+	if c == nil || c.UI.Collapse.Enabled == nil {
+		return true
+	}
+	return *c.UI.Collapse.Enabled
+}
+
+// CollapseRows returns the collapse threshold in screen rows (>= 3).
+func (c *ClientConfig) CollapseRows() int {
+	if c == nil || c.UI.Collapse.Rows < 3 {
+		return 10
+	}
+	return c.UI.Collapse.Rows
+}
+
+// CollapsePreviewRows returns surviving head rows, clamped below Rows.
+func (c *ClientConfig) CollapsePreviewRows() int {
+	rows := c.CollapseRows()
+	if c == nil || c.UI.Collapse.PreviewRows <= 0 {
+		return 5
+	}
+	if c.UI.Collapse.PreviewRows >= rows {
+		return rows - 1
+	}
+	return c.UI.Collapse.PreviewRows
 }
 
 // MentionEnabled reports whether @#height mentions highlight.
@@ -501,6 +544,16 @@ func parse(data []byte) (*ClientConfig, error) {
 	}
 	if c.UI.VersionCheck.Mode == "" {
 		c.UI.VersionCheck.Mode = def.UI.VersionCheck.Mode
+	}
+	// Backfill collapse knobs (absent means default: enabled 10/5).
+	if c.UI.Collapse.Enabled == nil {
+		c.UI.Collapse.Enabled = def.UI.Collapse.Enabled
+	}
+	if c.UI.Collapse.Rows <= 0 {
+		c.UI.Collapse.Rows = def.UI.Collapse.Rows
+	}
+	if c.UI.Collapse.PreviewRows <= 0 {
+		c.UI.Collapse.PreviewRows = def.UI.Collapse.PreviewRows
 	}
 	// Backfill mention/reply knobs the same way.
 	if c.UI.Mention.Enabled == nil {

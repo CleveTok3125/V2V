@@ -752,6 +752,7 @@ func main() {
 				return
 			}
 			_, head, meta, tab, hasMeta := buildChatBlock(wire, av, withMeta)
+			head = maybeCollapse(head, wire, tab)
 			renderCache.put(key, renderedBlock{tab: tab, head: head, meta: meta, hasMeta: hasMeta})
 			emitTab(tab, head)
 			if hasMeta {
@@ -760,6 +761,7 @@ func main() {
 			return
 		}
 		quote, head, meta, tab, hasMeta := buildChatBlock(wire, av, withMeta)
+		head = maybeCollapse(head, wire, tab)
 		for _, q := range quote {
 			emitTab(tab, q+"\n")
 		}
