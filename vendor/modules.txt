@@ -1,7 +1,9 @@
 # github.com/alecthomas/chroma/v2 v2.27.0
 ## explicit; go 1.25
 github.com/alecthomas/chroma/v2
+github.com/alecthomas/chroma/v2/formatters/html
 github.com/alecthomas/chroma/v2/lexers
+github.com/alecthomas/chroma/v2/styles
 # github.com/alecthomas/kong v1.14.0
 ## explicit; go 1.20
 github.com/alecthomas/kong
@@ -177,6 +179,9 @@ github.com/yuin/goldmark/renderer
 github.com/yuin/goldmark/renderer/html
 github.com/yuin/goldmark/text
 github.com/yuin/goldmark/util
+# github.com/yuin/goldmark-highlighting/v2 v2.0.0-20230729083705-37449abec8cc
+## explicit; go 1.13
+github.com/yuin/goldmark-highlighting/v2
 # golang.org/x/crypto v0.52.0
 ## explicit; go 1.25.0
 golang.org/x/crypto/argon2
