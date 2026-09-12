@@ -165,11 +165,11 @@ func main() {
 
 	sess := NewSession()
 
-	wsURL := normalizeURL(CLI.Server)
+	sess.WSURL = normalizeURL(CLI.Server)
 	sess.Username = strings.TrimSpace(CLI.Username)
 
 	// Fail fast on version policy before prompting for secrets.
-	if !checkServerVersion(wsURL) {
+	if !checkServerVersion(sess.WSURL) {
 		os.Exit(1)
 	}
 
@@ -188,13 +188,16 @@ func main() {
 		CLI.Tripcode = tc
 	}
 
-	conn, wsURL, err := dialWithUpgrade(wsURL)
+	var err error
+	dialConn, dialURL, err := dialWithUpgrade(sess.WSURL)
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	sess.Conn = dialConn
+	sess.WSURL = dialURL
+	defer sess.Conn.Close()
 
-	challenge, err := readChallenge(conn)
+	challenge, err := readChallenge(sess.Conn)
 	if err != nil {
 		return
 	}
@@ -302,7 +305,7 @@ func main() {
 		} else if id.ServerPubKey != "" {
 			bindValue = id.ServerPubKey
 		} else {
-			if u, perr := url.Parse(wsURL); perr == nil {
+			if u, perr := url.Parse(sess.WSURL); perr == nil {
 				bindValue = strings.ToLower(u.Hostname())
 			}
 		}
@@ -321,20 +324,20 @@ func main() {
 		// via setWasmStatus; keep the runtime alive so late browser
 		// callbacks (dialog dismissal, timers) don't hit a dead runtime.
 		if !applyWebPasskey(&respPacket, challenge.Nonce) {
-			conn.Close()
+			sess.Conn.Close()
 			parkForever()
 			return
 		}
 	}
 
-	err = conn.WriteJSON(respPacket)
+	err = sess.Conn.WriteJSON(respPacket)
 	if err != nil {
 		fmt.Println("❌ Lỗi gửi dữ liệu xác thực:", err)
 		return
 	}
 
 	var authSuccess AuthPacket
-	err = conn.ReadJSON(&authSuccess)
+	err = sess.Conn.ReadJSON(&authSuccess)
 	if err != nil {
 		fmt.Println("❌ Lỗi đọc phản hồi xác thực:", err)
 		notifyQuit()
@@ -368,7 +371,7 @@ func main() {
 		msg := "❌ Xác thực bị từ chối: " + authSuccess.Error
 		fmt.Println(msg)
 		if showWasmStatus(msg, true) {
-			conn.Close()
+			sess.Conn.Close()
 			parkForever()
 		}
 		notifyQuit()
@@ -377,23 +380,18 @@ func main() {
 		sess.Username = authSuccess.Username
 	}
 
-	term, err := newInputTerminal()
+	sess.Term, err = newInputTerminal()
 	if err != nil {
 		fmt.Println("❌ Lỗi khởi tạo terminal:", err)
 		return
 	}
-	defer term.Close()
+	defer sess.Term.Close()
 	defer ClearLoadedPassphrase()
-	sess.Out = term.Writer()
+	sess.Out = sess.Term.Writer()
 
 	quitting := make(chan bool, 1)
 	showJoinLeave := CLI.ShowJoin
 	var showJoinMu sync.RWMutex
-
-	greeting := func(w io.Writer, uname string) {
-		fmt.Fprintln(w, "Đã kết nối với username:", uname)
-		fmt.Fprint(w, "Gõ tin nhắn để chat, /help để hiện trợ giúp\n\n")
-	}
 
 	verifyCh := make(chan verifyJob, 128)
 	var verifyCloseOnce sync.Once
@@ -412,222 +410,13 @@ func main() {
 	sess.TabChat = newTabBuffer(cl, cb)
 	sess.TabSys = newTabBuffer(sl, sb)
 
-	// refreshCoalesced repaints at most every 100ms under burst; a
-	// trailing timer guarantees the last update is never swallowed, so
-	// single messages still appear instantly.
-	var refreshMu sync.Mutex
-	var lastRefresh time.Time
-	var refreshPending bool
-	refreshCoalesced := func() {
-		refreshMu.Lock()
-		if time.Since(lastRefresh) >= 100*time.Millisecond {
-			lastRefresh = time.Now()
-			refreshMu.Unlock()
-			term.Refresh()
-			return
-		}
-		if !refreshPending {
-			refreshPending = true
-			time.AfterFunc(100*time.Millisecond, func() {
-				refreshMu.Lock()
-				refreshPending = false
-				lastRefresh = time.Now()
-				refreshMu.Unlock()
-				term.Refresh()
-			})
-		}
-		refreshMu.Unlock()
-	}
-
-	// erasePlaceholderLocked splices a placeholder block out of the tab
-	// buffer and rewrites the screen region, reprinting any lines that
-	// intervened after it. Caller must hold sess.DisplayMu.
-	// consumeEchoLocked matches a server echo of our own message against
-	// pending placeholders by exact tmp_id (duplicate texts stay
-	// unambiguous), with the legacy oldest-text match as fallback. A match
-	// drops the entry and erases the placeholder. An echo from us that
-	// matches nothing is stashed: it may have beaten its placeholder
-	// (local echo race) and is retried when placeholders are tracked;
-	// entries never matched expire with a warning, which is how
-	// server-side ID tampering surfaces. allowStash is false for history
-	// replay: our own old messages must never pollute the stash (their
-	// tmpIDs belong to previous sessions). Caller must hold sess.DisplayMu.
 	sess.initChainState()
 
-	// badgeForWire verifies a trip badge and builds its colored display
-	// plus the manual-verify hyperlink (kept, opens the stateless API).
-	// av selects verified vs plain rendering; it is part of the render
-	// cache key, so toggling /autoverify never serves stale colors.
-	badgeForWire := func(wire WireMessage, av bool) (colored, urlStr string) {
-		h := sha256.Sum256([]byte(wire.Trip.Pub))
-		plain := "◆ " + hex.EncodeToString(h[:])[:8]
-		if av {
-			res, err := trip.Verify(trip.VerifyParams{
-				Text:        wire.Text,
-				DisplayName: wire.DisplayName,
-				ServerPub:   wire.Trip.ServerPub,
-				PubHex:      wire.Trip.Pub,
-				Seq:         wire.Trip.Seq,
-				PrevHex:     wire.Trip.Prev,
-				SigHex:      wire.Trip.Sig,
-				MsgHashHex:  wire.Trip.MsgHash,
-				TmpID:       wire.Trip.TmpID,
-				ReplyTo:     wire.Trip.ReplyTo,
-			})
-			if err == nil && res != nil {
-				colored = badgeColor(res.Badge) + res.Badge + "\x1b[0m"
-			} else {
-				colored = "\x1b[91m" + plain + " ✗\x1b[0m"
-			}
-		} else {
-			colored = plain
-		}
-		if u, err := url.Parse(wsURL); err == nil && u.Host != "" {
-			// No text= param: msg_hash suffices for verification, keeping
-			// links bounded and content out of URLs/history. Old links
-			// carrying text keep working (server checks it when present).
-			urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&tmp_id=%d&reply_to=%d", u.Host, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub, url.QueryEscape(wire.DisplayName), wire.Trip.TmpID, wire.Trip.ReplyTo)
-		}
-		return colored, urlStr
-	}
-
-	// renderChatBlock renders one wire message as content rows plus exactly
-	// one trailing meta line ("  └─  #height:hash | ✍️ badge"). Legacy
-	// lines without chain fields render content only. System wires render
-	// sanitized text to their classified tab. Caller must hold sess.DisplayMu.
-	// resolveMentionLocked reports whether @#height names a buffered
-	// message (suffix checksum when given). Unresolved mentions render
-	// plain so evicted targets never mislead. Caller must hold sess.DisplayMu.
-	resolveMentionLocked := func(height uint64, suffix string) bool {
-		return len(findMetaMatches(sess.TabChat.lines, height, suffix)) > 0
-	}
-
-	// quoteLinesFor resolves a reply target to quote preview lines from
-	// either tab buffer (chat first). Nil when evicted. The preview shows
-	// the target's head line, so liars quoting strangers expose themselves
-	// to every receiver resolving locally. Caller must hold sess.DisplayMu.
-	// wireIdx keeps full wires by height for /info lookups and rich
+	// sess.WireIdx keeps full wires by height for /info lookups and rich
 	// quotes. Populated on every render (sess.DisplayMu held by all callers).
-	wireIdx := newWireIndex(1000)
+	sess.WireIdx = newWireIndex(1000)
 
-	quoteLinesFor := func(replyTo uint64, pending bool) []string {
-		// Rich path first: the struct carries clean time/author plus a
-		// content verdict. System wires are never quotable (date/join
-		// markers), only chat. Buffer fallback keeps legacy heads quotable.
-		if wire, ok := wireIdx.get(replyTo); ok && quotable(wire) {
-			return []string{formatQuoteRich(wire, pending, ClientCfg.QuoteMaxRunes())}
-		}
-		for _, buf := range []*tabBuffer{sess.TabChat, sess.TabSys} {
-			for _, idx := range findMetaMatches(buf.lines, replyTo, "") {
-				if idx == 0 {
-					continue
-				}
-				return []string{formatQuote(replyTo, buf.lines[idx-1], pending, ClientCfg.QuoteMaxRunes())}
-			}
-		}
-		return nil
-	}
-
-	// buildChatBlock renders one wire into head + trailing meta strings
-	// without emitting. Pure given (wire, av, withMeta); cached by renderChatBlock.
-	buildChatBlock := func(wire WireMessage, av, withMeta bool) (quote []string, head, meta string, tab int, hasMeta bool) {
-		tab = TabChat
-		if wire.Type == "system" {
-			head = fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(wire.Text))
-			return quote, head, "", classifyTab(wire.Text), wantsMeta(wire, withMeta)
-		}
-		mentionOpen, mentionClose := mentionSGR(ClientCfg.MentionColor())
-		head = fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderMentions(renderChatText(wire.Text), resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose))
-		if wire.ReplyTo > 0 {
-			quote = quoteLinesFor(wire.ReplyTo, false)
-		}
-		if !wantsMeta(wire, withMeta) {
-			return quote, head, "", tab, false
-		}
-		meta = metaLineFor(wire.ChainHeight, wire.ChainHash, "")
-		if wire.Trip != nil {
-			colored, urlStr := badgeForWire(wire, av)
-			badge := colored
-			if urlStr != "" {
-				badge = fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", urlStr, colored)
-			}
-			meta = metaLineFor(wire.ChainHeight, wire.ChainHash, badge)
-		}
-		return quote, head, fmt.Sprintf("| %s\n", meta), tab, true
-	}
-
-	renderCache := newRenderCache(200)
-	renderChatBlock := func(wire WireMessage) {
-		wireIdx.put(wire)
-		autoVerifyMu.RLock()
-		av := autoVerify
-		autoVerifyMu.RUnlock()
-		showMetaMu.RLock()
-		withMeta := showMeta
-		showMetaMu.RUnlock()
-		// Replay and tab switches re-render the same immutable wires;
-		// the chain hash covers the content, so it is a safe cache key
-		// (verify mode and meta visibility are folded in). Messages with
-		// mentions or quotes bypass the cache: highlight and quote targets
-		// depend on buffer state (eviction), which the key cannot see.
-		if wire.ChainHash != "" && !strings.Contains(wire.Text, "@#") && wire.ReplyTo == 0 {
-			key := strings.ToLower(wire.ChainHash) + "\x00" + wire.Type +
-				"\x00" + map[bool]string{true: "v", false: "p"}[av] +
-				"\x00" + map[bool]string{true: "m", false: "n"}[withMeta]
-			if hit, ok := renderCache.get(key); ok {
-				sess.emitTab(hit.tab, hit.head)
-				if hit.hasMeta {
-					sess.emitTab(hit.tab, hit.meta)
-				}
-				return
-			}
-			_, head, meta, tab, hasMeta := buildChatBlock(wire, av, withMeta)
-			head = maybeCollapse(head, wire, tab)
-			renderCache.put(key, renderedBlock{tab: tab, head: head, meta: meta, hasMeta: hasMeta})
-			sess.emitTab(tab, head)
-			if hasMeta {
-				sess.emitTab(tab, meta)
-			}
-			return
-		}
-		quote, head, meta, tab, hasMeta := buildChatBlock(wire, av, withMeta)
-		head = maybeCollapse(head, wire, tab)
-		for _, q := range quote {
-			sess.emitTab(tab, q+"\n")
-		}
-		sess.emitTab(tab, head)
-		if hasMeta {
-			sess.emitTab(tab, meta)
-		}
-	}
-
-	// switchTab replays the target buffer under a single lock.
-	switchTab := func(n int) {
-		if n != TabChat && n != TabSystem {
-			return
-		}
-		sess.DisplayMu.Lock()
-		defer sess.DisplayMu.Unlock()
-		if n == sess.ActiveTab {
-			return
-		}
-		sess.ActiveTab = n
-		sess.PrintGen++
-		fmt.Fprint(sess.Out, "\033[H\033[2J")
-		var buf *tabBuffer
-		if n == TabChat {
-			buf = sess.TabChat
-		} else {
-			buf = sess.TabSys
-		}
-		var sb strings.Builder
-		for _, l := range buf.lines {
-			sb.WriteString(l)
-		}
-		fmt.Fprint(sess.Out, sb.String())
-		term.Refresh()
-	}
-
+	sess.RenderCache = newRenderCache(200)
 	go func() {
 		for job := range verifyCh {
 			// Use shared trip verification (same as server) — serverPub is enforced to server's own key
@@ -666,7 +455,7 @@ func main() {
 			sess.DisplayMu.Lock()
 			sess.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 			sess.DisplayMu.Unlock()
-			refreshCoalesced()
+			sess.refreshCoalesced()
 		}
 	}()
 
@@ -681,7 +470,7 @@ func main() {
 				pendingDateBanner = ""
 			}
 			if pendingDateBannerWire != nil {
-				renderChatBlock(*pendingDateBannerWire)
+				sess.renderChatBlock(*pendingDateBannerWire)
 				pendingDateBannerWire = nil
 			}
 		}
@@ -700,7 +489,7 @@ func main() {
 			sess.DisplayMu.Unlock()
 		}
 		for {
-			_, msg, err := conn.ReadMessage()
+			_, msg, err := sess.Conn.ReadMessage()
 			if err != nil {
 				select {
 				case <-quitting:
@@ -708,10 +497,10 @@ func main() {
 				default:
 					fmt.Fprintf(sess.Out, "\r\033[K\n ❌ Mất kết nối server\n")
 					// Flush before exit: os.Exit skips deferred
-					// term.Close/flushChainTip, losing the newest tip and
+					// sess.Term.Close/flushChainTip, losing the newest tip and
 					// leaving the terminal raw.
 					sess.flushChainTip()
-					term.Close()
+					sess.Term.Close()
 					ClearLoadedPassphrase()
 					os.Exit(1)
 				}
@@ -728,9 +517,9 @@ func main() {
 				sess.consumeEchoLocked(wire, true)
 				sess.checkChainLink(wire)
 				flushDateBannerLocked()
-				renderChatBlock(wire)
+				sess.renderChatBlock(wire)
 				sess.DisplayMu.Unlock()
-				refreshCoalesced()
+				sess.refreshCoalesced()
 				continue
 			}
 			var sysWire WireMessage
@@ -740,25 +529,25 @@ func main() {
 				if !isShowingJoin && isDateBanner(sysWire) {
 					pendingDateBannerWire = &sysWire
 					sess.DisplayMu.Unlock()
-					refreshCoalesced()
+					sess.refreshCoalesced()
 					continue
 				}
 				if !isShowingJoin && isJoinLeave(sysWire) {
 					sess.DisplayMu.Unlock()
-					refreshCoalesced()
+					sess.refreshCoalesced()
 					continue
 				}
 				flushDateBannerLocked()
-				renderChatBlock(sysWire)
+				sess.renderChatBlock(sysWire)
 				sess.DisplayMu.Unlock()
-				refreshCoalesced()
+				sess.refreshCoalesced()
 				continue
 			}
 			// Machine-readable replay trailer: never rendered, only the
 			// fork check below consumes it.
 			if hs, ok := parseHistorySync(msg); ok {
 				handleHistorySync(hs)
-				refreshCoalesced()
+				sess.refreshCoalesced()
 				continue
 			}
 			for _, line := range strings.Split(string(msg), "\n") {
@@ -784,7 +573,7 @@ func main() {
 						continue
 					}
 					flushDateBannerLocked()
-					renderChatBlock(wl)
+					sess.renderChatBlock(wl)
 					sess.DisplayMu.Unlock()
 					continue
 				}
@@ -831,7 +620,7 @@ func main() {
 				sess.emitTab(classifyTab(line), fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 				sess.DisplayMu.Unlock()
 			}
-			refreshCoalesced()
+			sess.refreshCoalesced()
 		}
 	}()
 
@@ -843,7 +632,7 @@ func main() {
 		quitting <- true
 		sess.flushChainTip()
 		verifyCloseOnce.Do(func() { close(verifyCh) })
-		conn.WriteMessage(wsCloseMessage, []byte{})
+		sess.Conn.WriteMessage(wsCloseMessage, []byte{})
 		// Zero trip private key
 		if tripPriv != nil {
 			for i := range tripPriv {
@@ -856,7 +645,7 @@ func main() {
 	}
 
 	for {
-		text, err := term.ReadLine()
+		text, err := sess.Term.ReadLine()
 		if err != nil {
 			if errors.Is(err, ErrInputCancel) {
 				// Reply targets attach to the next send only; reset first so a
@@ -865,18 +654,18 @@ func main() {
 				pendingReplyTo = 0
 				if replyDraft > 0 {
 					replyDraft = 0
-					term.SetPrompt("| > ")
+					sess.Term.SetPrompt("| > ")
 					sess.DisplayMu.Lock()
 					sess.emitLocalFeedback("| [Local]: Đã hủy reply nháp.\n")
 					sess.DisplayMu.Unlock()
-					term.Refresh()
+					sess.Term.Refresh()
 					continue
 				}
-				term.SetPrompt("| > ")
+				sess.Term.SetPrompt("| > ")
 				sess.DisplayMu.Lock()
 				sess.emitLocalFeedback("| [Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.\n")
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			gracefulQuit()
@@ -893,12 +682,12 @@ func main() {
 				// through the dispatch below (a "/" body could never send
 				// anyway: the unknown-slash guard rejects it).
 				replyDraft = 0
-				term.SetPrompt("| > ")
+				sess.Term.SetPrompt("| > ")
 			} else {
 				// Draft body (codeblock fences included): attach and send.
 				pendingReplyTo = replyDraft
 				replyDraft = 0
-				term.SetPrompt("| > ")
+				sess.Term.SetPrompt("| > ")
 			}
 		}
 		if text == "/quit" || text == "/q" {
@@ -920,7 +709,7 @@ func main() {
 			showJoinMu.RUnlock()
 			sess.DisplayMu.Lock()
 			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Server: %s | Đã kết nối: %s | Phiên bản: %s | Show-join: %s\n",
-				wsURL, time.Since(sessConnected).Round(time.Second), Version, sj))
+				sess.WSURL, time.Since(sessConnected).Round(time.Second), Version, sj))
 			sess.DisplayMu.Unlock()
 			continue
 		}
@@ -1001,7 +790,7 @@ func main() {
 					n = TabSystem
 				}
 			}
-			switchTab(n)
+			sess.switchTab(n)
 			sess.DisplayMu.Lock()
 			sess.emitLocalFeedback(tabBarLine(sess.ActiveTab))
 			sess.PrintGen++
@@ -1020,7 +809,7 @@ func main() {
 				sess.DisplayMu.Lock()
 				sess.emitLocalFeedback("| [Local]: Reply đã tắt trong config (ui.reply.enabled).\n")
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			rest := strings.TrimSpace(strings.TrimPrefix(text, "/reply"))
@@ -1035,7 +824,7 @@ func main() {
 				sess.DisplayMu.Lock()
 				sess.emitLocalFeedback("| [Local]: Dùng /reply <height>[:hash] [tin nhắn] (vd /reply 1234 đồng ý; /reply 1234 để soạn nháp).\n")
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			sess.DisplayMu.Lock()
@@ -1046,22 +835,22 @@ func main() {
 				sess.DisplayMu.Lock()
 				sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ, không reply được.\n", height))
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			if body == "" {
 				// Draft mode: quote now, body on the next line. Any slash
 				// command or empty-line ^C aborts it (see loop top).
 				replyDraft = height
-				term.SetPrompt(fmt.Sprintf("| ↩ #%d > ", height))
+				sess.Term.SetPrompt(fmt.Sprintf("| ↩ #%d > ", height))
 				sess.DisplayMu.Lock()
-				for _, q := range quoteLinesFor(height, false) {
+				for _, q := range sess.quoteLinesFor(height, false) {
 					fmt.Fprint(sess.Out, q+"\n")
 					sess.PrintGen++
 				}
 				sess.emitLocalFeedback("| [Local]: Gõ nội dung reply (Enter gửi, ^C ở dòng trống hủy, lệnh / khác hủy draft).\n")
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			// Quote validated: the body flows through the normal dispatch
@@ -1091,7 +880,7 @@ func main() {
 				sess.DisplayMu.Lock()
 				sess.emitLocalFeedback("| [Local]: Dùng /meta, /meta on hoặc /meta off.\n")
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			state := "HIỆN"
@@ -1102,7 +891,7 @@ func main() {
 			sess.DisplayMu.Lock()
 			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Dòng meta (#height:hash) %s (chain vẫn verify ngầm).\n", state))
 			sess.DisplayMu.Unlock()
-			term.Refresh()
+			sess.Term.Refresh()
 			continue
 		}
 
@@ -1118,7 +907,7 @@ func main() {
 				sess.DisplayMu.Lock()
 				sess.emitLocalFeedback(fmt.Sprintf("| [Local]: %v.\n", err))
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			sess.DisplayMu.Lock()
@@ -1148,7 +937,7 @@ func main() {
 				sess.emitLocalFeedback("| [Local]: Không thấy (tin cũ đã bị evict khỏi bộ nhớ hoặc chưa sync).\n")
 			}
 			sess.DisplayMu.Unlock()
-			term.Refresh()
+			sess.Term.Refresh()
 			continue
 		}
 
@@ -1159,21 +948,21 @@ func main() {
 				sess.DisplayMu.Lock()
 				sess.emitLocalFeedback("| [Local]: Dùng /expand #height (vd /expand 1234).\n")
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			sess.DisplayMu.Lock()
-			wire, ok := wireIdx.get(height)
+			wire, ok := sess.WireIdx.get(height)
 			if !ok {
 				sess.emitLocalFeedback("| [Local]: Tin đã trôi khỏi bộ nhớ hoặc chưa sync.\n")
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			if findCollapsed(sess.TabChat.lines, height) < 0 {
 				sess.emitLocalFeedback("| [Local]: Tin này không thu gọn.\n")
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			// Re-render full and replay it inside a dim heredoc frame
@@ -1185,14 +974,14 @@ func main() {
 			showMetaMu.RLock()
 			withMeta := showMeta
 			showMetaMu.RUnlock()
-			_, full, _, _, _ := buildChatBlock(wire, av, withMeta)
+			_, full, _, _, _ := sess.buildChatBlock(wire, av, withMeta)
 			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m\n", height))
 			for _, line := range strings.Split(strings.TrimSuffix(full, "\n"), "\n") {
 				sess.emitLocalFeedback(line + "\n")
 			}
 			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m\n", height))
 			sess.DisplayMu.Unlock()
-			term.Refresh()
+			sess.Term.Refresh()
 			continue
 		}
 
@@ -1203,28 +992,28 @@ func main() {
 				sess.DisplayMu.Lock()
 				sess.emitLocalFeedback("| [Local]: Dùng /info <height>[:hash] (vd /info 1234).\n")
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			sess.DisplayMu.Lock()
-			wire, ok := wireIdx.get(height)
+			wire, ok := sess.WireIdx.get(height)
 			if !ok {
 				sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height))
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			if suffix != "" && !strings.HasPrefix(strings.ToLower(wire.ChainHash), suffix) {
 				sess.emitLocalFeedback("| [Local]: Height đúng nhưng hash khác — kiểm tra lại số.\n")
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			for _, line := range formatInfoBlock(wire) {
 				sess.emitLocalFeedback(line)
 			}
 			sess.DisplayMu.Unlock()
-			term.Refresh()
+			sess.Term.Refresh()
 			continue
 		}
 
@@ -1235,15 +1024,15 @@ func main() {
 				sess.DisplayMu.Lock()
 				sess.emitLocalFeedback("| [Local]: Dùng /copy <height>[:hash] (vd /copy 1234).\n")
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			sess.DisplayMu.Lock()
-			wire, ok := wireIdx.get(height)
+			wire, ok := sess.WireIdx.get(height)
 			if !ok {
 				sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height))
 				sess.DisplayMu.Unlock()
-				term.Refresh()
+				sess.Term.Refresh()
 				continue
 			}
 			if err := copyToClipboard(wire.Text); err != nil {
@@ -1253,7 +1042,7 @@ func main() {
 				scheduleClipboardClear(wire.Text, ClientCfg.ClipboardClearAfterSec())
 			}
 			sess.DisplayMu.Unlock()
-			term.Refresh()
+			sess.Term.Refresh()
 			continue
 		}
 
@@ -1273,7 +1062,7 @@ func main() {
 			sess.DisplayMu.Lock()
 			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Lệnh không tồn tại: %s. Gõ /help để xem danh sách.\n", text))
 			sess.DisplayMu.Unlock()
-			term.Refresh()
+			sess.Term.Refresh()
 			continue
 		}
 
@@ -1285,7 +1074,7 @@ func main() {
 				typedLinesCount = 1
 			} else {
 				var canceled bool
-				text, canceled = collectCodeblock(term, text)
+				text, canceled = collectCodeblock(sess.Term, text)
 				if canceled {
 					continue
 				}
@@ -1297,7 +1086,7 @@ func main() {
 			sess.DisplayMu.Lock()
 			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin nhắn chứa ký tự không hợp lệ và đã bị chặn (client-side): %v\n", err))
 			sess.DisplayMu.Unlock()
-			term.Refresh()
+			sess.Term.Refresh()
 			continue
 		}
 
@@ -1312,14 +1101,14 @@ func main() {
 					sess.DisplayMu.Lock()
 					sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Bạn đang chat quá nhanh! Vui lòng đợi %v.\n", ClientCfg.Limits.MessageCooldown))
 					sess.DisplayMu.Unlock()
-					term.Refresh()
+					sess.Term.Refresh()
 					continue
 				}
 				if err == guard.ErrTooLong {
 					sess.DisplayMu.Lock()
 					sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin nhắn quá dài (tối đa %d ký tự).\n", ClientCfg.Limits.MaxMessageLength))
 					sess.DisplayMu.Unlock()
-					term.Refresh()
+					sess.Term.Refresh()
 					continue
 				}
 			}
@@ -1347,7 +1136,7 @@ func main() {
 		// both blocks share the shape; pending quotes carry ⏳ so the
 		// erase region check keeps passing).
 		if pendingReplyTo > 0 {
-			for _, q := range quoteLinesFor(pendingReplyTo, true) {
+			for _, q := range sess.quoteLinesFor(pendingReplyTo, true) {
 				sess.emitTab(TabChat, q+"\n")
 				phRows++
 			}
@@ -1385,7 +1174,7 @@ func main() {
 			phRows++
 		}
 		phBufEnd = len(sess.TabChat.lines)
-		term.Refresh()
+		sess.Term.Refresh()
 		sess.DisplayMu.Unlock()
 
 		tmpSeq++
@@ -1404,7 +1193,7 @@ func main() {
 			newPrev := h.Sum(nil)
 			copy(tripPrev, newPrev)
 			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(tripPub)), Seq: tripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: sess.Username, TmpID: tmpSeq, ReplyTo: pendingReplyTo}
-			err = conn.WriteJSON(tripMsg)
+			err = sess.Conn.WriteJSON(tripMsg)
 			if err != nil {
 				// Rollback seq/prev on send failure to avoid permanent fork
 				tripSeq--
@@ -1414,7 +1203,7 @@ func main() {
 		} else {
 			// Unsigned chat always travels in an envelope carrying the
 			// session counter; raw text is rejected by the server.
-			err = conn.WriteJSON(PlainMessage{TmpID: tmpSeq, Text: text, ReplyTo: pendingReplyTo})
+			err = sess.Conn.WriteJSON(PlainMessage{TmpID: tmpSeq, Text: text, ReplyTo: pendingReplyTo})
 			if err != nil {
 				tmpSeq--
 			}
