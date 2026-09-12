@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/CleveTok3125/V2V/internal/env"
@@ -139,7 +140,9 @@ func saveContainer(idf *identity.IdentityFile, path string) error {
 	return idf.Save(path)
 }
 
-func rolesPath() string { return "roles.json" }
+// rolesPath is the single canonical location. No fallback: unmigrated
+// deploys fail closed instead of silently using defaults.
+func rolesPath() string { return filepath.Join("config", "roles.json") }
 
 // --- keygen ed25519 -----------------------------------------------------
 

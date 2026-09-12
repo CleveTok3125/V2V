@@ -22,6 +22,7 @@ func TestRegistry(t *testing.T) {
 		{"ALLOWED_ORIGINS", KeyAllowedOrigins, AllowedOrigins},
 		{"V2V_CONFIG_DIR", KeyConfigDir, nil},
 		{"V2V_CACHE_DIR", KeyCacheDir, nil},
+		{"DATA_DIR", KeyDataDir, DataDir},
 	}
 	for _, c := range cases {
 		if c.key != c.want {

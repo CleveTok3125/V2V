@@ -40,7 +40,7 @@ func parseFlags() {
 	historyFile = filepath.Join(CLI.CacheDir, "history.tmp")
 	// Client config is immutable state: read freely, replaced only by
 	// explicit actions. A missing file means in-memory defaults; copy
-	// template/config.jsonc to the config dir to customize.
+	// template/client/config.jsonc to the config dir to customize.
 	cfgPath := resolveCfgPath()
 	if cfg, err := config.Load(cfgPath); err == nil {
 		ClientCfg = cfg
@@ -62,7 +62,7 @@ func parseFlags() {
 func resolveCfgPath() string {
 	cfgPath := configdir.DefaultConfigFile(CLI.ConfigDir)
 	if _, err := os.Stat(cfgPath); err != nil {
-		fmt.Printf("config %s not found, using defaults (see template/config.jsonc)\n", cfgPath)
+		fmt.Printf("config %s not found, using defaults (see template/client/config.jsonc)\n", cfgPath)
 	}
 	return cfgPath
 }

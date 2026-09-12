@@ -63,7 +63,7 @@ Tin nhắn của bạn hiện xám kèm `⏳` trước, rồi được thay bằ
 
 Chat và system nằm ở 2 tab riêng: `/tab` chuyển giữa Tab 1 (chat) và Tab 2 (local & system). Thanh tab hiện `[1:chat] 2:system`, tab đang xem nằm trong ngoặc.
 
-Key và cấu hình nằm trong thư mục config của hệ điều hành (`~/.config/V2V/` trên Linux, `%AppData%\V2V` trên Windows, `~/Library/Application Support/V2V` trên macOS): `key.json` cho danh tính, `config.jsonc` chỉ đọc cho cài đặt (cho comment JSONC, copy `template/config.jsonc` để tùy biến, `v2v --encrypt-config` để mã hóa). Ghi đè bằng `-c/--config-dir` (`V2V_CONFIG_DIR`) và `-C/--cache-dir` (`V2V_CACHE_DIR`). Flag phụ: `-v` phiên bản, `-a` user-agent, `-i` thông tin server, `-j` hiện ra/vào (cả trực tiếp lẫn lịch sử catch-up; replay mặc định lọc join).
+Key và cấu hình nằm trong thư mục config của hệ điều hành (`~/.config/V2V/` trên Linux, `%AppData%\V2V` trên Windows, `~/Library/Application Support/V2V` trên macOS): `key.json` cho danh tính, `config.jsonc` chỉ đọc cho cài đặt (cho comment JSONC, copy `template/client/config.jsonc` để tùy biến, `v2v --encrypt-config` để mã hóa). Ghi đè bằng `-c/--config-dir` (`V2V_CONFIG_DIR`) và `-C/--cache-dir` (`V2V_CACHE_DIR`). Flag phụ: `-v` phiên bản, `-a` user-agent, `-i` thông tin server, `-j` hiện ra/vào (cả trực tiếp lẫn lịch sử catch-up; replay mặc định lọc join).
 
 ## Dành cho Admin
 
@@ -90,14 +90,14 @@ Cấp passkey web (link dùng 1 lần, 10 phút):
 # → https://chat.example.com/web/#enroll=...
 ```
 
-Xem `template/.env` và `template/roles.json` để cấu hình server.
+Xem `template/server/config/` để cấu hình server.
 
 ## Chạy Server
 
 **Từ mã nguồn:**
 
 ```bash
-cp template/.env .env          # sửa PORT, ALLOWED_ORIGINS, ...
+cp template/server/config/.env config/.env          # sửa PORT, ALLOWED_ORIGINS, ...
 make server web                # -> public/server.bin + webterm/app.wasm
 ./public/server.bin
 # hoặc: docker compose up -d --build   (lưu ./data và ./logs)
@@ -109,7 +109,7 @@ Mở `http://localhost:10000/web/` cho bản web.
 ## Tìm hiểu thêm
 
 - **Chi tiết kỹ thuật:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — kiến trúc, giao thức wire, tripcode, lưu trữ, bảo mật.
-- **Cấu hình:** `template/.env` có đủ biến môi trường với comment.
+- **Cấu hình:** `template/server/config/.env` có đủ biến môi trường với comment.
 - **Công cụ quản trị:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`).
 
 Báo lỗi và PR luôn được chào đón.

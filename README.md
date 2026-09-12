@@ -63,7 +63,7 @@ Your message first appears grey with `⏳` and is replaced by the confirmed line
 
 Chat and system messages live on separate tabs: `/tab` switches between Tab 1 (chat) and Tab 2 (local & system). The bar shows `[1:chat] 2:system` with the active tab in brackets.
 
-Keys and settings live in your OS config dir (`~/.config/V2V/` on Linux, `%AppData%\V2V` on Windows, `~/Library/Application Support/V2V` on macOS): `key.json` for identities, read-only `config.jsonc` for settings (JSONC comments allowed, copy `template/config.jsonc` to customize, `v2v --encrypt-config` to seal it). Override with `-c/--config-dir` (`V2V_CONFIG_DIR`) and `-C/--cache-dir` (`V2V_CACHE_DIR`). Extra flags: `-v` version, `-a` user-agent, `-i` server info, `-j` show join/leave (live display and catch-up history; replays filter joins by default).
+Keys and settings live in your OS config dir (`~/.config/V2V/` on Linux, `%AppData%\V2V` on Windows, `~/Library/Application Support/V2V` on macOS): `key.json` for identities, read-only `config.jsonc` for settings (JSONC comments allowed, copy `template/client/config.jsonc` to customize, `v2v --encrypt-config` to seal it). Override with `-c/--config-dir` (`V2V_CONFIG_DIR`) and `-C/--cache-dir` (`V2V_CACHE_DIR`). Extra flags: `-v` version, `-a` user-agent, `-i` server info, `-j` show join/leave (live display and catch-up history; replays filter joins by default).
 
 ## For Admins
 
@@ -90,14 +90,14 @@ Web passkey enrollment (one-time link, 10 min):
 # → https://chat.example.com/web/#enroll=...
 ```
 
-See `template/.env` and `template/roles.json` for server configuration.
+See `template/server/config/` for server configuration.
 
 ## Running the Server
 
 **From source:**
 
 ```bash
-cp template/.env .env          # edit PORT, ALLOWED_ORIGINS, etc.
+cp template/server/config/.env config/.env          # edit PORT, ALLOWED_ORIGINS, etc.
 make server web                # -> public/server.bin + webterm/app.wasm
 ./public/server.bin
 # or: docker compose up -d --build   (persists ./data and ./logs)
@@ -109,7 +109,7 @@ Open `http://localhost:10000/web/` for the browser client.
 ## Learn More
 
 - **How it works:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — architecture, wire protocol, tripcode crypto, storage, and security model.
-- **Configuration:** `template/.env` has all env vars with comments (`PORT`, `MAX_MESSAGE_LENGTH`, `HISTORY_FILE_PATH`, `WEBAUTHN_*`, etc.).
+- **Configuration:** `template/server/config/.env` has all env vars with comments (`PORT`, `MAX_MESSAGE_LENGTH`, `HISTORY_FILE_PATH`, `WEBAUTHN_*`, etc.).
 - **Management tool:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`).
 
 Issues and PRs are welcome.

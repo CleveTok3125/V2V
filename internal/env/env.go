@@ -24,6 +24,7 @@ const (
 	KeyAllowedOrigins = "ALLOWED_ORIGINS"
 	KeyConfigDir      = "V2V_CONFIG_DIR"
 	KeyCacheDir       = "V2V_CACHE_DIR"
+	KeyDataDir        = "DATA_DIR"
 )
 
 // Tripcode feeds tripcode entry without prompting (CI).
@@ -46,3 +47,8 @@ func WebauthnStore() string { return os.Getenv(KeyWebauthnStore) }
 
 // AllowedOrigins is the raw comma-separated CORS allow-list.
 func AllowedOrigins() string { return os.Getenv(KeyAllowedOrigins) }
+
+// DataDir is the server data root for generated files. Empty means
+// the caller default (./data); resolution lives caller-side so tests
+// can point it anywhere with t.Setenv.
+func DataDir() string { return os.Getenv(KeyDataDir) }

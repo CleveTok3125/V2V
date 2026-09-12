@@ -144,9 +144,9 @@ func loadStaticConfig() (StaticConfig, error) {
 		Port:                 loader.Smart("PORT"),
 		InstanceID:           instanceID,
 		Timezone:             getEnvAsLocationOptional("TIMEZONE", "Asia/Ho_Chi_Minh"),
-		LogFilePath:          loader.Smart("LOG_FILE_PATH"),
+		LogFilePath:          getEnvOptional("LOG_FILE_PATH", dataPath("app.log")),
 		MaxLogSizeMB:         loader.Int("MAX_LOG_SIZE_MB"),
-		HistoryFilePath:      loader.Smart("HISTORY_FILE_PATH"),
+		HistoryFilePath:      getEnvOptional("HISTORY_FILE_PATH", dataPath("history.jsonl")),
 		MaxHistoryFileSizeMB: loader.Int("MAX_HISTORY_FILE_SIZE_MB"),
 	}
 	if err := loader.Err(); err != nil {
@@ -282,7 +282,7 @@ func main() {
 	}
 
 	chatApp := NewChatServer()
-	sid, err := LoadOrCreateServerIdentity("data/server_identity.json")
+	sid, err := LoadOrCreateServerIdentity(dataPath("server_identity.json"))
 	if err != nil {
 		log.Fatalf("❌ CRITICAL ERROR: cannot load server identity: %v", err)
 	}

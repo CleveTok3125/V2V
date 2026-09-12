@@ -13,9 +13,7 @@ services:
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
     volumes:
-      - ./.env:/app/.env:ro
-      - ./roles.json:/app/roles.json:ro
-      - ./logs:/app/logs
+      - ./config:/app/config:ro
       - ./data:/app/data
     environment:
       - TZ=${TIMEZONE:-Asia/Ho_Chi_Minh}

@@ -25,9 +25,9 @@ func withTempDir(t *testing.T, fn func()) {
 
 func readRoles(t *testing.T) map[string]any {
 	t.Helper()
-	data, err := os.ReadFile("roles.json")
+	data, err := os.ReadFile(rolesPath())
 	if err != nil {
-		t.Fatalf("read roles.json: %v", err)
+		t.Fatalf("read roles: %v", err)
 	}
 	var m map[string]any
 	if err := json.Unmarshal(data, &m); err != nil {
@@ -164,13 +164,13 @@ func TestKeygenDecoupledDoesNotTouchRoles(t *testing.T) {
 		if err := (&RoleCreateCmd{Role: "tester", Prefix: "[T] "}).Run(); err != nil {
 			t.Fatal(err)
 		}
-		before, _ := os.ReadFile("roles.json")
+		before, _ := os.ReadFile(rolesPath())
 		// keygen ed25519 should not modify roles.json
 		k := &Ed25519Keygen{Role: "tester", Out: "key.json", ServerPubKey: "deadbeef"}
 		if err := k.Run(); err != nil {
 			t.Fatalf("keygen: %v", err)
 		}
-		after, _ := os.ReadFile("roles.json")
+		after, _ := os.ReadFile(rolesPath())
 		if string(before) != string(after) {
 			t.Fatalf("keygen should not modify roles.json")
 		}
@@ -232,7 +232,7 @@ func TestRoleUpdateShowDeleteMerge(t *testing.T) {
 		if err := (&RoleDeleteCmd{Role: "ops", Force: true}).Run(); err != nil {
 			t.Fatalf("delete: %v", err)
 		}
-		if _, err := os.Stat("roles.json"); err == nil {
+		if _, err := os.Stat(rolesPath()); err == nil {
 			if m := readRoles(t); len(m) != 0 {
 				t.Fatalf("roles not empty after delete: %v", m)
 			}
@@ -250,7 +250,7 @@ func TestAtomicWriteFileAdmin_Permissions(t *testing.T) {
 		if err := (&RoleCreateCmd{Role: "sec"}).Run(); err != nil {
 			t.Fatal(err)
 		}
-		fi, err := os.Stat("roles.json")
+		fi, err := os.Stat(rolesPath())
 		if err != nil {
 			t.Fatal(err)
 		}
