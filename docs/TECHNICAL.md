@@ -43,7 +43,9 @@ For a friendly getting-started guide, see [README.md](../README.md).
 │   └── codebg/       # inline `code` + ``` blocks → background SGR + chroma highlight (display only)
 ├── webterm/          # Browser terminal (xterm.js + WASM glue)
 ├── cmd/v2vctl/       # Management tool, one file per concern (main, role, keygen, enroll, migrate, list, prompt)
-├── template/         # Example .env / key.json / roles.json
+├── template/         # Samples mirroring real locations
+│   ├── server/config/  # .env + roles.json → copy to ./config/
+│   └── client/         # config.jsonc + key.json → copy to OS config dir
 └── docs/             # This file
 ```
 
@@ -80,7 +82,7 @@ make clean
 - Locations follow the OS (`internal/configdir`): config dir holds `key.json` + read-only `config.jsonc` (`~/.config/V2V/` Linux, `%AppData%\V2V` Windows, `~/Library/Application Support/V2V` macOS); cache dir holds `history.tmp`. Config is JSONC (`//` and `/* */` comments allowed, no trailing commas), never written by the app (missing file means in-memory defaults), and optionally passphrase-sealed with the identity envelope (`v2v --encrypt-config`, `V2V_PASSPHRASE` or TTY prompt to unlock).
 - Override with `-c/--config-dir` (`V2V_CONFIG_DIR`) and `-C/--cache-dir` (`V2V_CACHE_DIR`).
 - Identity flags: `-k` uses the default key in the config dir, `-K/--key-file <path>` uses an explicit path (old `v2v -k <path>` now errors). No key given means guest mode.
-- `template/config.jsonc` documents every group (`defaults`, `network`, `limits`, `guard`, `channels`, `crypto`, `ui`, `commands`, `timeouts`, `tabs`); `internal/config` loads it with `LoadOrCreate`.
+- `template/client/config.jsonc` documents every group (`defaults`, `network`, `limits`, `guard`, `channels`, `crypto`, `ui`, `commands`, `timeouts`, `tabs`); `internal/config` loads it with `LoadOrCreate`.
 - Partial files stay usable: missing `tabs`/`codeStyle` sections, numeric `limits`, and `ui.meta.show` are backfilled.
 - Sensitive fields (tripcode, passphrases, private keys) never go in `config.json` — they stay in encrypted `key.json`.
 - `ui.meta.show` (default true, `*bool` so absent ≠ false) toggles the trailing `#height:hash` line; `/meta` overrides it for the session only.
@@ -144,7 +146,7 @@ Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `interna
 ### History persistence
 - File: `data/history.jsonl` — one JSON record per line: `{"ts":"RFC3339Nano","wire":{...}}` for chat, `{"ts","msg":"..."}` for system messages.
 - The top-level `trip` field was removed (dedup); only `wire.trip` is kept.
-- Rotation: when `size > MAX_HISTORY_FILE_SIZE_MB` (`50MB` in `template/.env`), current file is renamed to `.old` and compressed to `.old.zst` via `klauspost/compress/zstd` (`50MB → ~3MB`).
+- Rotation: when `size > MAX_HISTORY_FILE_SIZE_MB` (`50MB` in `template/server/config/.env`), current file is renamed to `.old` and compressed to `.old.zst` via `klauspost/compress/zstd` (`50MB → ~3MB`).
 - At most 2 generations are kept (`~53MB` max). `LoadRecords` tries `.old.zst`, then `.old`, then current.
 - Durability: `HistoryStore.writeLoop` batches `Sync` every `1s` **only when dirty** (`dirty` flag set on `Write`, cleared on `Sync`), plus `SIGTERM` drain via `HistoryStore.Close()` in `server/main.go`.
 - Directory `fsync` after rotate (like `webauthn_store.go`).

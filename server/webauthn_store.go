@@ -21,7 +21,7 @@ import (
 
 const (
 	webauthnFileVersion  = 3
-	defaultWebauthnStore = "data/webauthn.json"
+	defaultWebauthnStore = "webauthn.json"
 )
 
 var (
@@ -64,7 +64,7 @@ type WebAuthnStore struct {
 
 func NewWebAuthnStore(path string) *WebAuthnStore {
 	if path == "" {
-		path = defaultWebauthnStore
+		path = dataPath(defaultWebauthnStore)
 	}
 	return &WebAuthnStore{path: path}
 }

@@ -40,6 +40,10 @@ roles.json
 *.log
 logs/
 
+# Live server dirs (template/ holds the samples)
+/config/
+/data/
+
 # Template
 !template/*
 template/*.log
