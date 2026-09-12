@@ -339,6 +339,7 @@ func main() {
 		fmt.Fprintf(w, "Múi giờ    : %s\n", Cfg.Static.Timezone)
 		fmt.Fprintf(w, "Trạng thái : %s\n", dynCfg.StatusURL)
 		fmt.Fprintln(w, "------------------------------------")
+		fmt.Fprintf(w, "Blog       : /blog\n")
 		fmt.Fprintf(w, "Web Client : /web\n")
 		fmt.Fprintf(w, "Tải Client : %s\n", dynCfg.DownloadURL)
 		fmt.Fprintf(w, "Homepage   : %s\n", dynCfg.HomepageURL)
