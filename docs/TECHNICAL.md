@@ -110,7 +110,7 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 
 ## Slash Commands
 
-- Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, `/meta`/`/m` with optional `on|off`, `/find`/`/f` with `<height>[:hash]` and `/info` with `<height>[:hash>`.
+- Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, `/meta`/`/m` with optional `on|off`, `/find`/`/f` with `<height>[:hash]`, `/info` with `<height>[:hash]` and `/expand`/`/xpan` with `<height>`.
 - Session commands: `/whoami`/`/w`, `/status`, `/showjoin`/`/sj`, `/autoverify`/`/av`, `/clear`/`/c`, `/clearhistory`/`/ch` (deletes the keystroke history file), `/copy <height>[:hash]` (clipboard, auto-cleared).
 - Anything else starting with `/` is an unknown command (`client/commands.go:isUnknownSlashCommand`) rejected locally with `| [Local]: Lệnh không tồn tại…`, never broadcast or trip-signed.
 - Code blocks (```) are unaffected, so they double as the escape hatch for sending literal text starting with `/`.
@@ -118,6 +118,7 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 - Bare `/reply <height>` opens a draft: the quote previews at once and the next line becomes the body (any `/` command or empty-line `^C` aborts); only chat messages are quotable, never server markers.
 - Quotes resolve per receiver (`wireIdx` first for time/author/verdict, buffer-head fallback) and render `↩ #height | time author ✓/✗: text…` in placeholder and echo alike; the verdict recomputes the target's chain content locally.
 - `/info <height>[:hash]` prints the full metadata detail of one indexed wire (height/tmp/reply, full hashes, trip fields with live signature verdict, chain verdict, plus a `raw:` row with stored bytes unrendered: newlines as `⏎`, ESC/control dropped).
+- Long blocks fold at render (`ui.collapse {enabled, rows, previewRows}`, defaults on/10/5): over-threshold heads print preview rows with dim `...` plus `[Xem thêm: /expand #height]` on the last preview line (OSC8 `v2v://expand/<height>` link on web, clicked via Ctrl+U-clean command injection). `/expand <height>` re-renders the full block from the wire index and replays it inside a git-style conflict frame (`| [Local]: <<<<<<< #height` … `| [Local]: >>>>>>> #height`, markers dimmed) — no buffer surgery, no cursor math. Evicted wires report as drifted; system-tab content never folds.
 - The trip section shows every signature input (pub, seq, prev, sig, msg_hash with text-match mark, server_pub, payload bytes), so the verdict is checkable by hand with any ed25519 tool.
 - Wires index by height (cap 1000 FIFO); legacy and evicted report as missing.
 - `/find` looks up messages by chain height (the mandatory identifier; a bare hash is rejected since short hashes collide by design, and an appended `:hash` acts only as a typo checksum) across both tab buffers; evicted history reports as not found.
