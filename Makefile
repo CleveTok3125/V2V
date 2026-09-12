@@ -13,7 +13,7 @@ PLATFORMS := windows/amd64 windows/arm64 linux/amd64 linux/arm64 android/arm64 d
 HOST_GOOS ?= $(shell go env GOOS)
 HOST_GOARCH ?= $(shell go env GOARCH)
 
-.PHONY: all server web client v2vctl dev dev-server dev-client dev-v2vctl dev-web vet test clean help
+.PHONY: all server web web-wasm web-compress client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test clean help
 
 all: server web client v2vctl
 
@@ -36,28 +36,40 @@ dev-v2vctl:
 	GOCACHE=$(GOCACHE) CGO_ENABLED=0 go build -trimpath -ldflags "$(DEV_LDFLAGS)" -o bin/v2vctl ./cmd/v2vctl
 	@echo "Done! -> bin/v2vctl ($(DEV_VERSION))"
 
-dev-web:
+dev-web: dev-web-wasm web-compress
+
+dev-web-wasm:
 	mkdir -p webterm
 	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" webterm/wasm_exec.js
 	printf 'window.V2V_VERSION = "%s";\n' "$(DEV_VERSION)" > webterm/version.js
 	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go build -trimpath -ldflags "-X 'main.Version=$(DEV_VERSION)'" -o webterm/app.wasm ./client
-	@if command -v gzip >/dev/null 2>&1; then gzip -9 -kf webterm/app.wasm; fi
-	@if command -v brotli >/dev/null 2>&1; then brotli -q 11 -k -f webterm/app.wasm; fi
-	@echo "webterm built (version $(DEV_VERSION))"
+	@echo "webterm raw ready (version $(DEV_VERSION)): start the server now, then run 'make web-compress'"
+
+# web-compress adds the precompressed variants gzip and brotli run in
+# parallel with each other. Each writes to a temp file first and renames
+# atomically: a running server never serves a half-written .gz/.br (the
+# handler falls back to raw while a variant is missing).
+web-compress:
+	@if command -v gzip >/dev/null 2>&1; then (gzip -9 -c webterm/app.wasm > webterm/app.wasm.gz.tmp && mv webterm/app.wasm.gz.tmp webterm/app.wasm.gz && echo "   gzip: $$(wc -c < webterm/app.wasm.gz) bytes") & fi; \
+	if command -v brotli >/dev/null 2>&1; then (brotli -q 11 -f webterm/app.wasm -o webterm/app.wasm.br.tmp && mv webterm/app.wasm.br.tmp webterm/app.wasm.br && echo "   brotli: $$(wc -c < webterm/app.wasm.br) bytes") & fi; \
+	wait; \
+	if [ ! -f webterm/app.wasm.gz ]; then echo "WARNING: gzip missing, no .gz variant"; fi; \
+	if [ ! -f webterm/app.wasm.br ]; then echo "WARNING: brotli missing, no .br variant"; fi
 
 server:
 	mkdir -p public
 	GOCACHE=$(GOCACHE) CGO_ENABLED=0 go build -tags netgo -trimpath -ldflags '-s -w -X main.Version=$(APP_VERSION)' -o public/server.bin ./server
 
-web:
-	@if [ -n "$(GIT_HASH)" ] && [ "$$(git rev-parse --short HEAD 2>/dev/null)" != "$(GIT_HASH)" ]; then echo "WARNING: GIT_HASH=$(GIT_HASH) differs from HEAD; browser may cache a stale app.wasm. Unset GIT_HASH or use 'make dev-web' for dev."; fi
+web: web-wasm web-compress
+	@echo "webterm built (version $(VERSION), $$(wc -c < webterm/app.wasm) bytes)"
+
+web-wasm:
+	@if [ -n "$(GIT_HASH)" ] && [ "$$(git rev-parse --short HEAD 2>/dev/null)" != "$(GIT_HASH)" ]; then echo "WARNING: GIT_HASH=$(GIT_HASH) differs from HEAD; browser may cache a stale app.wasm. Unset GIT_HASH or use 'make dev-web-wasm' for dev."; fi
 	mkdir -p webterm
 	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" webterm/wasm_exec.js
 	printf 'window.V2V_VERSION = "%s";\n' "$(VERSION)" > webterm/version.js
 	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go build -trimpath -ldflags "$(WEB_LDFLAGS)" -o webterm/app.wasm ./client
-	@if command -v gzip >/dev/null 2>&1; then gzip -9 -kf webterm/app.wasm; echo "   gzip: $$(wc -c < webterm/app.wasm.gz) bytes"; fi
-	@if command -v brotli >/dev/null 2>&1; then brotli -q 11 -k -f webterm/app.wasm; echo "   brotli: $$(wc -c < webterm/app.wasm.br) bytes"; fi
-	@echo "webterm built (version $(VERSION), $$(wc -c < webterm/app.wasm) bytes)"
+	@echo "webterm raw ready (version $(VERSION)): start the server now, then run 'make web-compress'"
 
 client:
 	mkdir -p public
@@ -118,7 +130,9 @@ help:
 	@echo "    default: client/v2vctl build for host OS ($(HOST_GOOS)/$(HOST_GOARCH))"
 	@echo "    ALL=1:   build full matrix for CI (e.g. make all ALL=1 -j4)"
 	@echo "  make server   - build public/server.bin"
-	@echo "  make web      - build webterm/app.wasm"
+	@echo "  make web      - build webterm/app.wasm + parallel gzip/brotli (atomic replace)"
+	@echo "  make web-wasm - raw wasm only: start the server immediately, compress afterwards"
+	@echo "  make web-compress - parallel gzip/brotli for an existing app.wasm"
 	@echo "  make client   - build public/V2V-* (host only, or all with ALL=1)"
 	@echo "  make v2vctl   - build public/V2Vctl-* (host only, or all with ALL=1)"
 	@echo "  make vet      - go vet"
