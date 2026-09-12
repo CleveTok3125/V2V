@@ -8,7 +8,6 @@ import (
 	"crypto/sha512"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,7 +24,6 @@ import (
 	"github.com/CleveTok3125/V2V/internal/linkify"
 	"github.com/CleveTok3125/V2V/internal/markup"
 	"github.com/CleveTok3125/V2V/internal/strutil"
-	"github.com/CleveTok3125/V2V/internal/trip"
 	"github.com/CleveTok3125/V2V/internal/tripcolor"
 	"github.com/CleveTok3125/V2V/internal/wire"
 
@@ -389,20 +387,13 @@ func main() {
 	defer ClearLoadedPassphrase()
 	sess.Out = sess.Term.Writer()
 
-	quitting := make(chan bool, 1)
-	showJoinLeave := CLI.ShowJoin
-	var showJoinMu sync.RWMutex
+	sess.ShowJoinLeave = CLI.ShowJoin
 
-	verifyCh := make(chan verifyJob, 128)
-	var verifyCloseOnce sync.Once
-	autoVerify := true
-	var autoVerifyMu sync.RWMutex
-	// showMeta toggles the trailing "#height:hash" line (/meta, default
+	sess.AutoVerify = true
+	// sess.ShowMeta toggles the trailing "#height:hash" line (/meta, default
 	// from ui.meta.show in config). The session command overrides
 	// in-memory only; the chain still verifies when hidden.
-	showMeta := ClientCfg.ShowMeta()
-	var showMetaMu sync.RWMutex
-	serverPubForVerify := challenge.ServerPubKey
+	sess.ShowMeta = ClientCfg.ShowMeta()
 	lastMessageTime := time.Now().Add(-10 * time.Second)
 
 	sess.ActiveTab = TabChat
@@ -417,221 +408,18 @@ func main() {
 	sess.WireIdx = newWireIndex(1000)
 
 	sess.RenderCache = newRenderCache(200)
-	go func() {
-		for job := range verifyCh {
-			// Use shared trip verification (same as server) — serverPub is enforced to server's own key
-			serverPub := strings.ToLower(job.serverPub)
-			if serverPub == "" {
-				serverPub = strings.ToLower(serverPubForVerify)
-			}
-			textForVerify := job.textParam
-			// Links without text= verify the signature over msgHash alone;
-			// nothing is displayed from the link, so no text binding exists.
-			_, err := trip.Verify(trip.VerifyParams{
-				Text:          textForVerify,
-				DisplayName:   job.displayName,
-				ServerPub:     serverPub,
-				PubHex:        job.pub,
-				Seq:           job.seq,
-				PrevHex:       job.prev,
-				SigHex:        job.sig,
-				MsgHashHex:    job.msgHash,
-				TmpID:         job.tmpID,
-				ReplyTo:       job.tmpReplyTo,
-				SkipTextCheck: textForVerify == "",
-			})
-			valid := err == nil
-			// Fallback: if textParam was empty but msgHash check failed, try empty text path
-			if !valid && textForVerify != "" {
-				// Already handled; keep invalid
-			}
-			var colored string
-			if valid {
-				colored = badgeColor(job.badge) + job.badge + "\x1b[0m"
-			} else {
-				colored = "\x1b[91m" + job.badge + " ✗\x1b[0m"
-			}
-			line := fmt.Sprintf("  └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", job.urlStr, colored)
-			sess.DisplayMu.Lock()
-			sess.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
-			sess.DisplayMu.Unlock()
-			sess.refreshCoalesced()
-		}
-	}()
+	go sess.runVerify()
 
-	go func() {
-		var pendingDateBanner string
-		var pendingDateBannerWire *WireMessage
-		// flushDateBannerLocked prints a stashed date banner to TabSystem
-		// before the block that follows it. Caller must hold sess.DisplayMu.
-		flushDateBannerLocked := func() {
-			if pendingDateBanner != "" {
-				sess.emitTab(TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(pendingDateBanner)))
-				pendingDateBanner = ""
-			}
-			if pendingDateBannerWire != nil {
-				sess.renderChatBlock(*pendingDateBannerWire)
-				pendingDateBannerWire = nil
-			}
-		}
-		// handleHistorySync consumes a replay trailer from either a whole
-		// frame or a coalesced per-line blob: never rendered, only the
-		// fork check runs. Caller refreshes after.
-		handleHistorySync := func(hs HistorySync) {
-			sess.DisplayMu.Lock()
-			sess.InSync = false
-			if warn, flush := forkWarning(hs, sess.HavePersistedTip, sess.PersistedTip, sess.PersistedHeight, sess.SyncHashes); warn != "" {
-				sess.emitLocalFeedback(warn)
-				if flush {
-					sess.flushChainTip()
-				}
-			}
-			sess.DisplayMu.Unlock()
-		}
-		for {
-			_, msg, err := sess.Conn.ReadMessage()
-			if err != nil {
-				select {
-				case <-quitting:
-					return
-				default:
-					fmt.Fprintf(sess.Out, "\r\033[K\n ❌ Mất kết nối server\n")
-					// Flush before exit: os.Exit skips deferred
-					// sess.Term.Close/flushChainTip, losing the newest tip and
-					// leaving the terminal raw.
-					sess.flushChainTip()
-					sess.Term.Close()
-					ClearLoadedPassphrase()
-					os.Exit(1)
-				}
-			}
-
-			showJoinMu.RLock()
-			isShowingJoin := showJoinLeave
-			showJoinMu.RUnlock()
-
-			// Try to handle structured WireMessage JSON first (for new protocol)
-			var wire WireMessage
-			if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
-				sess.DisplayMu.Lock()
-				sess.consumeEchoLocked(wire, true)
-				sess.checkChainLink(wire)
-				flushDateBannerLocked()
-				sess.renderChatBlock(wire)
-				sess.DisplayMu.Unlock()
-				sess.refreshCoalesced()
-				continue
-			}
-			var sysWire WireMessage
-			if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {
-				sess.DisplayMu.Lock()
-				sess.checkChainLink(sysWire)
-				if !isShowingJoin && isDateBanner(sysWire) {
-					pendingDateBannerWire = &sysWire
-					sess.DisplayMu.Unlock()
-					sess.refreshCoalesced()
-					continue
-				}
-				if !isShowingJoin && isJoinLeave(sysWire) {
-					sess.DisplayMu.Unlock()
-					sess.refreshCoalesced()
-					continue
-				}
-				flushDateBannerLocked()
-				sess.renderChatBlock(sysWire)
-				sess.DisplayMu.Unlock()
-				sess.refreshCoalesced()
-				continue
-			}
-			// Machine-readable replay trailer: never rendered, only the
-			// fork check below consumes it.
-			if hs, ok := parseHistorySync(msg); ok {
-				handleHistorySync(hs)
-				sess.refreshCoalesced()
-				continue
-			}
-			for _, line := range strings.Split(string(msg), "\n") {
-				// Also try per-line JSON (for history blob where each line is a WireMessage JSON)
-				var wl WireMessage
-				if hs, ok := parseHistorySync([]byte(line)); ok {
-					handleHistorySync(hs)
-					continue
-				}
-				if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
-					sess.DisplayMu.Lock()
-					if wl.Type == "chat" {
-						sess.consumeEchoLocked(wl, !sess.InSync)
-					}
-					sess.checkChainLink(wl)
-					if wl.Type == "system" && !isShowingJoin && isDateBanner(wl) {
-						pendingDateBannerWire = &wl
-						sess.DisplayMu.Unlock()
-						continue
-					}
-					if wl.Type == "system" && !isShowingJoin && isJoinLeave(wl) {
-						sess.DisplayMu.Unlock()
-						continue
-					}
-					flushDateBannerLocked()
-					sess.renderChatBlock(wl)
-					sess.DisplayMu.Unlock()
-					continue
-				}
-				if !isShowingJoin && isDateBannerLine(line) {
-					pendingDateBanner = line
-					continue
-				}
-				if !isShowingJoin && isJoinLeaveSystemLine(line) {
-					continue
-				}
-				if boundary, start := parseHistoryBoundary(line); boundary {
-					sess.DisplayMu.Lock()
-					if start {
-						sess.InSync = true
-					} else {
-						pendingDateBanner = ""
-						pendingDateBannerWire = nil
-						sess.InSync = false
-					}
-					sess.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
-					sess.DisplayMu.Unlock()
-					continue
-				}
-				if !isShowingJoin && (pendingDateBanner != "" || pendingDateBannerWire != nil) {
-					sess.DisplayMu.Lock()
-					flushDateBannerLocked()
-					sess.DisplayMu.Unlock()
-				}
-				if isTripBadgeLine(line) {
-					autoVerifyMu.RLock()
-					av := autoVerify
-					autoVerifyMu.RUnlock()
-					if av {
-						if job, ok := parseTripBadgeLine(line); ok {
-							// Drop-oldest on full: dropped is treated as verify fail (deterministic)
-							// Show the line immediately as pending-plain then queue newest for real verify
-							// If queue was full, oldest was dropped and will stay uncolored (fail)
-							sess.enqueueVerify(job)
-							continue
-						}
-					}
-				}
-				sess.DisplayMu.Lock()
-				sess.emitTab(classifyTab(line), fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
-				sess.DisplayMu.Unlock()
-			}
-			sess.refreshCoalesced()
-		}
-	}()
+	go sess.runPump()
 
 	greeting(sess.Out, sess.Username)
 
 	// gracefulQuit closes the connection cleanly like /quit does, so both
 	// an explicit quit command and an EOF (Ctrl+D) leave no dangling state.
 	gracefulQuit := func() {
-		quitting <- true
+		sess.Quitting <- true
 		sess.flushChainTip()
-		verifyCloseOnce.Do(func() { close(verifyCh) })
+		sess.VerifyCloseOnce.Do(func() { close(sess.VerifyCh) })
 		sess.Conn.WriteMessage(wsCloseMessage, []byte{})
 		// Zero trip private key
 		if tripPriv != nil {
@@ -701,12 +489,12 @@ func main() {
 		}
 
 		if text == "/status" {
-			showJoinMu.RLock()
+			sess.ShowJoinMu.RLock()
 			sj := "TẮT"
-			if showJoinLeave {
+			if sess.ShowJoinLeave {
 				sj = "BẬT"
 			}
-			showJoinMu.RUnlock()
+			sess.ShowJoinMu.RUnlock()
 			sess.DisplayMu.Lock()
 			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Server: %s | Đã kết nối: %s | Phiên bản: %s | Show-join: %s\n",
 				sess.WSURL, time.Since(sessConnected).Round(time.Second), Version, sj))
@@ -742,13 +530,13 @@ func main() {
 		}
 
 		if text == "/showjoin" || text == "/sj" {
-			showJoinMu.Lock()
-			showJoinLeave = !showJoinLeave
+			sess.ShowJoinMu.Lock()
+			sess.ShowJoinLeave = !sess.ShowJoinLeave
 			status := "ĐÃ TẮT"
-			if showJoinLeave {
+			if sess.ShowJoinLeave {
 				status = "ĐÃ BẬT"
 			}
-			showJoinMu.Unlock()
+			sess.ShowJoinMu.Unlock()
 			sess.DisplayMu.Lock()
 			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: %s hiển thị thông báo người dùng ra/vào phòng cho các tin kế tiếp.\n", status))
 			sess.DisplayMu.Unlock()
@@ -756,13 +544,13 @@ func main() {
 		}
 
 		if text == "/autoverify" || text == "/av" {
-			autoVerifyMu.Lock()
-			autoVerify = !autoVerify
+			sess.AutoVerifyMu.Lock()
+			sess.AutoVerify = !sess.AutoVerify
 			status := "BẬT"
-			if !autoVerify {
+			if !sess.AutoVerify {
 				status = "TẮT"
 			}
-			autoVerifyMu.Unlock()
+			sess.AutoVerifyMu.Unlock()
 			sess.DisplayMu.Lock()
 			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Auto-verify đã %s (mặc định BẬT, verify song song qua channel FIFO).\n", status))
 			sess.DisplayMu.Unlock()
@@ -867,16 +655,16 @@ func main() {
 			} else {
 				rest = strings.TrimSpace(strings.TrimPrefix(text, "/m"))
 			}
-			showMetaMu.Lock()
+			sess.ShowMetaMu.Lock()
 			switch rest {
 			case "on":
-				showMeta = true
+				sess.ShowMeta = true
 			case "off":
-				showMeta = false
+				sess.ShowMeta = false
 			case "":
-				showMeta = !showMeta
+				sess.ShowMeta = !sess.ShowMeta
 			default:
-				showMetaMu.Unlock()
+				sess.ShowMetaMu.Unlock()
 				sess.DisplayMu.Lock()
 				sess.emitLocalFeedback("| [Local]: Dùng /meta, /meta on hoặc /meta off.\n")
 				sess.DisplayMu.Unlock()
@@ -884,10 +672,10 @@ func main() {
 				continue
 			}
 			state := "HIỆN"
-			if !showMeta {
+			if !sess.ShowMeta {
 				state = "ẨN"
 			}
-			showMetaMu.Unlock()
+			sess.ShowMetaMu.Unlock()
 			sess.DisplayMu.Lock()
 			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Dòng meta (#height:hash) %s (chain vẫn verify ngầm).\n", state))
 			sess.DisplayMu.Unlock()
@@ -968,12 +756,12 @@ func main() {
 			// Re-render full and replay it inside a dim heredoc frame
 			// (like shell <<EOF): the delimiters mark history replay
 			// without touching the verbatim content. No buffer surgery.
-			autoVerifyMu.RLock()
-			av := autoVerify
-			autoVerifyMu.RUnlock()
-			showMetaMu.RLock()
-			withMeta := showMeta
-			showMetaMu.RUnlock()
+			sess.AutoVerifyMu.RLock()
+			av := sess.AutoVerify
+			sess.AutoVerifyMu.RUnlock()
+			sess.ShowMetaMu.RLock()
+			withMeta := sess.ShowMeta
+			sess.ShowMetaMu.RUnlock()
 			_, full, _, _, _ := sess.buildChatBlock(wire, av, withMeta)
 			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m\n", height))
 			for _, line := range strings.Split(strings.TrimSuffix(full, "\n"), "\n") {
@@ -1166,9 +954,9 @@ func main() {
 		// The chain position is unknown until the server echo arrives.
 		// Hidden with /meta off; the echo follows the same session flag,
 		// so row counts stay consistent.
-		showMetaMu.RLock()
-		pmMeta := showMeta
-		showMetaMu.RUnlock()
+		sess.ShowMetaMu.RLock()
+		pmMeta := sess.ShowMeta
+		sess.ShowMetaMu.RUnlock()
 		if pmMeta {
 			sess.emitTab(TabChat, "\x1b[90m|   └─  ··· ⏳\x1b[0m\n")
 			phRows++
