@@ -1,0 +1,294 @@
+/* Static port of astro-theme-cactus visuals (no Tailwind build needed).
+   Tokens copied from src/styles/global.css; prose rules mirror the
+   tailwind typography config in tailwind.config.ts. */
+@property --color-global-bg {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #f4f6fb;
+}
+@property --color-global-text {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #1a1d29;
+}
+@property --color-muted {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #5b6478;
+}
+@property --color-link {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #4f7dff;
+}
+@property --color-accent {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #4f7dff;
+}
+@property --color-accent-2 {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #101014;
+}
+@property --color-quote {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #4f7dff;
+}
+:root {
+	--color-global-bg: #f4f6fb;
+	--color-global-text: #1a1d29;
+	--color-muted: #5b6478;
+	--color-link: #4f7dff;
+	--color-accent: #4f7dff;
+	--color-accent-2: #101014;
+	--color-quote: #4f7dff;
+}
+html {
+	color-scheme: light dark;
+	accent-color: var(--color-accent);
+	scrollbar-gutter: stable;
+}
+html[data-theme="light"] {
+	color-scheme: light;
+}
+html[data-theme="dark"] {
+	color-scheme: dark;
+	--color-global-bg: #101014;
+	--color-global-text: #d8dee8;
+	--color-muted: #8b93a5;
+	--color-link: #4f7dff;
+	--color-accent: #4f7dff;
+	--color-accent-2: #ffffff;
+	--color-quote: #4f7dff;
+}
+* {
+	box-sizing: border-box;
+}
+body {
+	background: var(--color-global-bg);
+	color: var(--color-global-text);
+	max-width: 48rem;
+	margin: 0 auto;
+	display: flex;
+	flex-direction: column;
+	min-height: 100vh;
+	padding: 4rem 1rem 2rem;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 1rem;
+	line-height: 1.7;
+	-webkit-font-smoothing: antialiased;
+}
+a {
+	color: inherit;
+	text-underline-offset: 2px;
+}
+a:hover {
+	text-decoration-color: var(--color-link);
+	text-decoration-thickness: 2px;
+}
+header {
+	margin-bottom: 7rem;
+}
+header .top {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+header .brand {
+	font-size: 1.5rem;
+	font-weight: 700;
+	color: var(--color-accent-2);
+	text-decoration: none;
+}
+header nav ul {
+	display: flex;
+	gap: 0.25rem;
+	list-style: none;
+	margin: 0.5rem 0 0 -1rem;
+	padding: 0;
+	flex-wrap: wrap;
+}
+header nav a {
+	color: var(--color-accent);
+	font-weight: 600;
+	padding: 0 1rem;
+	text-decoration: none;
+}
+header nav a:hover {
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+#theme {
+	background: none;
+	border: 1px solid var(--color-muted);
+	border-radius: 0.375rem;
+	color: var(--color-global-text);
+	cursor: pointer;
+	font: inherit;
+	padding: 0.1rem 0.6rem;
+}
+main {
+	flex: 1;
+}
+footer {
+	margin-top: auto;
+	padding-top: 5rem;
+	padding-bottom: 1rem;
+	color: var(--color-muted);
+	font-weight: 600;
+	text-align: center;
+}
+footer nav ul {
+	display: flex;
+	justify-content: center;
+	gap: 0.5rem;
+	list-style: none;
+	margin: 0.5rem 0 0;
+	padding: 0;
+	flex-wrap: wrap;
+}
+footer nav a {
+	padding: 0.5rem 1rem;
+}
+footer nav a:hover {
+	color: var(--color-global-text);
+}
+.masthead {
+	margin-bottom: 3rem;
+}
+.masthead h1 {
+	color: var(--color-accent-2);
+	font-size: 1.75rem;
+	margin: 0 0 0.5rem;
+}
+.masthead small {
+	color: var(--color-muted);
+}
+#to-top {
+	position: fixed;
+	right: 1rem;
+	bottom: 2rem;
+	width: 2.5rem;
+	height: 2.5rem;
+	border-radius: 9999px;
+	border: 2px solid transparent;
+	background: var(--color-muted);
+	color: var(--color-global-bg);
+	font-size: 1.25rem;
+	cursor: pointer;
+	opacity: 0;
+	transform: translateY(7rem);
+	transition: opacity 300ms ease-in-out, transform 300ms ease-in-out;
+}
+#to-top[data-show="true"] {
+	opacity: 1;
+	transform: translateY(0);
+}
+#to-top:hover {
+	border-color: var(--color-link);
+}
+article.prose h1,
+article.prose h2,
+article.prose h3 {
+	color: var(--color-accent-2);
+	font-weight: 600;
+}
+article.prose h1 {
+	font-size: 1.5rem;
+}
+article.prose h2 {
+	font-size: 1.25rem;
+}
+article.prose a {
+	color: var(--color-global-text);
+}
+article.prose blockquote {
+	border-left-width: 0;
+	color: var(--color-quote);
+	margin-left: 0;
+	padding-left: 0;
+}
+article.prose code {
+	border: 1px dotted #666;
+	border-radius: 2px;
+	padding: 0 0.25rem;
+}
+article.prose pre {
+	border: 1px solid var(--color-muted);
+	border-radius: 0.5rem;
+	padding: 1rem;
+	overflow-x: auto;
+}
+article.prose pre code {
+	border: none;
+	padding: 0;
+}
+article.prose hr {
+	border-top: 0.5px dashed #666;
+}
+article.prose thead {
+	border-bottom-width: 0;
+}
+article.prose thead th {
+	border-bottom: 1px dashed #666;
+	font-weight: 700;
+}
+article.prose tbody tr {
+	border-bottom-width: 0;
+}
+article.prose tfoot {
+	border-top: 1px dashed #666;
+}
+article.prose ul.contains-task-list {
+	list-style: none;
+	padding-left: 0.25rem;
+}
+/* Code token colors ride the same cactus variables. */
+.chroma .c,
+.chroma .ch,
+.chroma .cm,
+.chroma .cp,
+.chroma .cpf,
+.chroma .c1,
+.chroma .cs {
+	color: var(--color-muted);
+	font-style: italic;
+}
+.chroma .k,
+.chroma .kc,
+.chroma .kd,
+.chroma .kn,
+.chroma .kp,
+.chroma .kr,
+.chroma .kt,
+.chroma .m,
+.chroma .mb,
+.chroma .mf,
+.chroma .mh,
+.chroma .mi,
+.chroma .il,
+.chroma .mo {
+	color: var(--color-accent);
+}
+.chroma .s,
+.chroma .sa,
+.chroma .sb,
+.chroma .sc,
+.chroma .sd,
+.chroma .se,
+.chroma .sh,
+.chroma .si,
+.chroma .sr,
+.chroma .ss,
+.chroma .sx {
+	color: var(--color-link);
+}
+.post-list {
+	list-style: none;
+	padding: 0;
+}
+.post-list small {
+	color: var(--color-muted);
+}
