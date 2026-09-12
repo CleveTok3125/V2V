@@ -1127,6 +1127,7 @@ func main() {
 			emitLocalFeedback("    - /status        : Trạng thái kết nối và phiên bản client\n")
 			emitLocalFeedback("    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
 			emitLocalFeedback("    - /info <n>[:hash]: Xem đầy đủ metadata tin nhắn (verify lại tại local)\n")
+			emitLocalFeedback("    - /expand <n>, /xpan  : Mở đầy đủ tin bị thu gọn (vd /expand 1234)\n")
 			emitLocalFeedback("    - /copy <n>[:hash]: Copy nội dung thô tin nhắn vào clipboard\n")
 			emitLocalFeedback("    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
 			emitLocalFeedback("    - /meta, /m [on|off]: Hiện/ẩn dòng meta #height:hash (mặc định hiện, chain vẫn verify)\n")
@@ -1336,6 +1337,50 @@ func main() {
 			if shown == 0 {
 				emitLocalFeedback("| [Local]: Không thấy (tin cũ đã bị evict khỏi bộ nhớ hoặc chưa sync).\n")
 			}
+			displayMu.Unlock()
+			term.Refresh()
+			continue
+		}
+
+		if text == "/expand" || text == "/xpan" || strings.HasPrefix(text, "/expand ") || strings.HasPrefix(text, "/xpan ") {
+			rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, "/expand"), "/xpan"))
+			height, _, err := parseFindArg(rest)
+			if err != nil {
+				displayMu.Lock()
+				emitLocalFeedback("| [Local]: Dùng /expand #height (vd /expand 1234).\n")
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			displayMu.Lock()
+			wire, ok := wireIdx.get(height)
+			if !ok {
+				emitLocalFeedback("| [Local]: Tin đã trôi khỏi bộ nhớ hoặc chưa sync.\n")
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			if findCollapsed(tabChat.lines, height) < 0 {
+				emitLocalFeedback("| [Local]: Tin này không thu gọn.\n")
+				displayMu.Unlock()
+				term.Refresh()
+				continue
+			}
+			// Re-render full and replay it inside a dim heredoc frame
+			// (like shell <<EOF): the delimiters mark history replay
+			// without touching the verbatim content. No buffer surgery.
+			autoVerifyMu.RLock()
+			av := autoVerify
+			autoVerifyMu.RUnlock()
+			showMetaMu.RLock()
+			withMeta := showMeta
+			showMetaMu.RUnlock()
+			_, full, _, _, _ := buildChatBlock(wire, av, withMeta)
+			emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m\n", height))
+			for _, line := range strings.Split(strings.TrimSuffix(full, "\n"), "\n") {
+				emitLocalFeedback(line + "\n")
+			}
+			emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m\n", height))
 			displayMu.Unlock()
 			term.Refresh()
 			continue

@@ -364,6 +364,14 @@
       term.options.linkHandler = {
         allowNonHttpProtocols: true,
         activate: function (e, uri) {
+          if (uri && uri.indexOf("v2v://expand/") === 0) {
+            if (e && e.preventDefault) e.preventDefault();
+            // Inject a clean command line: Ctrl+U kills any draft the
+            // user was typing, then the expand command submits itself.
+            var h = uri.slice("v2v://expand/".length).replace(/[^0-9]/g, "");
+            if (h && window.v2vSendKeys) window.v2vSendKeys("\x15/expand #" + h + "\n");
+            return;
+          }
           if (uri && (uri.indexOf("v2v://trip") === 0 || uri.indexOf("/api/trip/verify") !== -1)) {
             if (e && e.preventDefault) e.preventDefault();
             if (uri.indexOf("/api/trip/verify") !== -1) {

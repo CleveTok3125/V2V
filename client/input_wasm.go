@@ -246,6 +246,9 @@ func (t *wasmTerm) lineLoop() {
 				t.deletePrev()
 			case '\x01': // Ctrl+A: home
 				t.home()
+			case '\x15': // Ctrl+U: kill the whole draft (lets link
+				// clicks inject a clean command line).
+				t.clearLine()
 			case '\x05': // Ctrl+E: end
 				t.end()
 		case '\x03':
@@ -363,6 +366,19 @@ func (t *wasmTerm) deletePrev() {
 	up := t.wipeOffsetLocked()
 	t.line = append(t.line[:t.cur-1], t.line[t.cur:]...)
 	t.cur--
+	t.repaintLocked(up)
+}
+
+// clearLine drops the whole draft and repaints empty.
+func (t *wasmTerm) clearLine() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.line) == 0 {
+		return
+	}
+	up := t.wipeOffsetLocked()
+	t.line = t.line[:0]
+	t.cur = 0
 	t.repaintLocked(up)
 }
 

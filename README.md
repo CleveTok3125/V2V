@@ -57,7 +57,7 @@ make help            # see all targets
 
 `V2V_TRIPCODE` env also works (CI only — prefer the encrypted file).
 
-Type `/help` inside the chat for commands (`/quit`, `/clear`, `/clearhistory`, `/whoami`, `/status`, `/showjoin`, `/autoverify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`, `/copy`).
+Type `/help` inside the chat for commands (`/quit`, `/clear`, `/clearhistory`, `/whoami`, `/status`, `/showjoin`, `/autoverify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`, `/expand`, `/copy`).
 
 Your message first appears grey with `⏳` and is replaced by the confirmed line once the server echoes it back. Unknown `/commands` are rejected locally and never broadcast (to send text starting with `/`, wrap it in a ``` code block).
 
