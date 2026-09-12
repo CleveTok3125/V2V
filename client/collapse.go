@@ -1,7 +1,7 @@
 package main
 
 // Long-message folding: blocks taller than CollapseRows screen rows
-// render as head preview rows plus an expand trailer. Row math counts
+// render as preview rows plus an inline expand trailer. Row math counts
 // characters, lines and terminal wrap (CJK-aware via cells.go) against
 // the live width, falling back to 80 columns off-TTY.
 
@@ -30,42 +30,43 @@ func estimateRows(s string, width int) int {
 	}
 	rows := 0
 	for _, line := range strings.Split(strings.TrimSuffix(s, "\n"), "\n") {
-		cells := runeStrCells(line)
-		if cells == 0 {
-			rows++
-			continue
-		}
-		rows += (cells + width - 1) / width
+		rows += rowCost(line, width)
 	}
 	return rows
 }
 
-// maybeCollapse folds head when it exceeds the configured row budget.
-// System-tab content and height-less wires render untouched; everything
-// else collapses. Pure except the live width probe.
-func maybeCollapse(head string, wire WireMessage, tab int) string {
-	if tab == TabSystem || ClientCfg == nil || !ClientCfg.CollapseEnabled() {
-		return head
+// rowCost is screen rows for one logical line (empty line costs 1).
+func rowCost(line string, width int) int {
+	if cells := runeStrCells(line); cells > 0 {
+		return (cells + width - 1) / width
 	}
-	folded, ok := collapseHead(head, wire.ChainHeight, ClientCfg.CollapseRows(), ClientCfg.CollapsePreviewRows(), termWidth())
-	if !ok || runtime.GOOS != "js" {
-		return folded
+	return 1
+}
+
+// cutCells returns the longest rune prefix of s fitting in budget
+// cells (wide runes never split).
+func cutCells(s string, budget int) string {
+	cells := 0
+	for i, r := range s {
+		cells += runeWidth(r)
+		if cells > budget {
+			return s[:i]
+		}
 	}
-	// Web only: wrap just the trailer tail in an OSC8 link so a click
-	// expands. Desktop terminals cannot report clicks on this stack.
-	lines := strings.Split(strings.TrimSuffix(folded, "\n"), "\n")
-	last := lines[len(lines)-1]
-	if i := strings.LastIndex(last, "\x1b[90m..."); i >= 0 {
-		lines[len(lines)-1] = last[:i] + fmt.Sprintf("\x1b]8;;v2v://expand/%d\x1b\\%s\x1b]8;;\x1b\\", wire.ChainHeight, last[i:])
-	}
-	return strings.Join(lines, "\n") + "\n"
+	return s
 }
 
 // expandTrailer renders the inline trailer addressing a collapsed
-// block: dim "..." plus a plain expand command. It carries no newline;
-// collapseHead appends it to the last preview line.
+// block: dim "..." plus the expand command. On web just the bracket
+// part becomes an OSC8 link (desktop terminals cannot report clicks,
+// so the ellipsis and the space stay outside the clickable region).
 func expandTrailer(height uint64) string {
-	return fmt.Sprintf("\x1b[90m...\x1b[0m [Xem thêm: /expand #%d]", height)
+	cmd := fmt.Sprintf("[Xem thêm: /expand #%d]", height)
+	tail := "\x1b[90m...\x1b[0m " + cmd
+	if runtime.GOOS == "js" {
+		tail = "\x1b[90m...\x1b[0m " + fmt.Sprintf("\x1b]8;;v2v://expand/%d\x1b\\%s\x1b]8;;\x1b\\", height, cmd)
+	}
+	return tail
 }
 
 // findCollapsed locates the buffer entry holding the expand trailer for
@@ -81,62 +82,47 @@ func findCollapsed(lines []string, height uint64) int {
 	return -1
 }
 
-// collapseHead folds head to previewRows head rows with the expand
-// trailer appended to the last preview line (same line, never its own).
-// Cut happens on line boundaries, never mid-line.
-func collapseHead(head string, height uint64, rows, preview, width int) (string, bool) {
-	trimmed := strings.TrimSuffix(head, "\n")
-	lines := strings.Split(trimmed, "\n")
-	if estimateRows(head, width) <= rows || height == 0 {
-		return head, false
-	}
+// foldLines walks lines once, emitting whole lines while they fit in
+// budget rows. A single wall taller than the whole budget is cut
+// mid-line instead (line boundaries cannot apply when one line owns
+// every row). Returns emitted lines, possibly empty.
+func foldLines(lines []string, budget, width int) []string {
+	var kept []string
 	used := 0
-	cut := 0
-	partial := ""
-	for i, line := range lines {
-		cells := runeStrCells(line)
-		cost := (cells + width - 1) / width
-		if cost == 0 {
-			cost = 1
-		}
-		if used+cost > preview {
-			if cut == 0 {
-				// Single wall taller than the whole budget: cut
-				// mid-line at the remaining cells. Line boundaries
-				// cannot apply when one line owns every row.
-				budget := (preview - used) * width
-				if budget < 1 {
-					budget = width
-				}
-				partial = cutCells(line, budget)
+	for _, line := range lines {
+		if used+rowCost(line, width) > budget {
+			if len(kept) == 0 {
+				kept = append(kept, cutCells(line, budget*width))
 			}
 			break
 		}
-		used += cost
-		cut = i + 1
+		used += rowCost(line, width)
+		kept = append(kept, line)
 	}
-	var kept []string
-	kept = append(kept, lines[:cut]...)
-	if partial != "" {
-		kept = append(kept, partial)
+	return kept
+}
+
+// collapseHead folds head to previewRows head rows with the expand
+// trailer on the last preview line. False means head fits untouched.
+func collapseHead(head string, height uint64, rows, preview, width int) (string, bool) {
+	if height == 0 || estimateRows(head, width) <= rows {
+		return head, false
 	}
+	kept := foldLines(strings.Split(strings.TrimSuffix(head, "\n"), "\n"), preview, width)
 	if len(kept) == 0 {
-		return head, false // unreachable: budget always fits ≥1 line
+		return head, false // unreachable: budget fits ≥1 row
 	}
-	// Trailer rides the last preview line, never its own.
 	kept[len(kept)-1] += expandTrailer(height)
 	return strings.Join(kept, "\n") + "\n", true
 }
 
-// cutCells returns the longest rune prefix of s fitting in budget
-// cells (wide runes never split).
-func cutCells(s string, budget int) string {
-	cells := 0
-	for i, r := range s {
-		cells += runeWidth(r)
-		if cells > budget {
-			return s[:i]
-		}
+// maybeCollapse folds head when it exceeds the configured row budget.
+// System-tab content and height-less wires render untouched; everything
+// else collapses. Pure except the live width probe.
+func maybeCollapse(head string, wire WireMessage, tab int) string {
+	if tab == TabSystem || ClientCfg == nil || !ClientCfg.CollapseEnabled() {
+		return head
 	}
-	return s
+	folded, _ := collapseHead(head, wire.ChainHeight, ClientCfg.CollapseRows(), ClientCfg.CollapsePreviewRows(), termWidth())
+	return folded
 }
