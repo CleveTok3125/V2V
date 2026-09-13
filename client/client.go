@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"crypto/hmac"
 	cryptorand "crypto/rand"
-	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/binary"
 	"encoding/hex"
@@ -17,13 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/codebg"
-	"github.com/CleveTok3125/V2V/internal/filter"
-	"github.com/CleveTok3125/V2V/internal/guard"
-	"github.com/CleveTok3125/V2V/internal/linkify"
-	"github.com/CleveTok3125/V2V/internal/markup"
 	"github.com/CleveTok3125/V2V/internal/strutil"
-	"github.com/CleveTok3125/V2V/internal/tripcolor"
 	"github.com/CleveTok3125/V2V/internal/wire"
 
 	"github.com/alecthomas/kong"
@@ -173,8 +166,8 @@ func main() {
 	// Tripcode is a secret: -t takes no value. Resolve it here, before
 	// dialing: the prompts (secret, save offer, unlock) are interactive
 	// and would blow the server's 12s auth-response deadline if they ran
-	// after the challenge. Key derivation still happens after the
-	// challenge so serverPub stays salt-bound.
+	// after the sess.Challenge. Key derivation still happens after the
+	// sess.Challenge so serverPub stays salt-bound.
 	if CLI.UseTripcode && CLI.Tripcode == "" {
 		tc, terr := resolveTripcode(true, CLI.ConfigDir, sess.Username, CLI.Server)
 		if terr != nil {
@@ -194,12 +187,12 @@ func main() {
 	sess.WSURL = dialURL
 	defer sess.Conn.Close()
 
-	challenge, err := readChallenge(sess.Conn)
+	sess.Challenge, err = readChallenge(sess.Conn)
 	if err != nil {
 		return
 	}
 
-	// Derive trip key after challenge so serverPub is known for salt binding
+	// Derive trip key after sess.Challenge so serverPub is known for salt binding
 	// sess.TmpSeq numbers every outgoing message in this session (trip and
 	// plain alike). The server relays it verbatim but never assigns it.
 	// The base is random per connection (upper 32 bits) so a reconnect
@@ -213,7 +206,7 @@ func main() {
 	}
 	passphraseBytes := []byte(CLI.Tripcode)
 	if len(passphraseBytes) > 0 {
-		priv, pub, badge := deriveTripKey(CLI.Tripcode, challenge.ServerPubKey)
+		priv, pub, badge := deriveTripKey(CLI.Tripcode, sess.Challenge.ServerPubKey)
 		sess.TripPriv = priv
 		sess.TripPub = pub
 		sess.TripBadge = badge
@@ -226,7 +219,7 @@ func main() {
 
 	respPacket := AuthPacket{
 		Username: sess.Username,
-		Nonce:    challenge.Nonce,
+		Nonce:    sess.Challenge.Nonce,
 	}
 	// Replay filtering follows the same knob as live display: -j asks
 	// for join/leave lines in catch-up history too.
@@ -262,16 +255,16 @@ func main() {
 		priv := ed25519.PrivateKey(privBytes)
 
 		// Server pubkey pinning: verify server's identity before sending auth
-		if challenge.ServerPubKey != "" {
-			if id.ServerPubKey != "" && !strings.EqualFold(id.ServerPubKey, challenge.ServerPubKey) {
-				fmt.Printf("🚨 Server identity mismatch! Pin %s != %s — abort.\n", strutil.ShortN(id.ServerPubKey, 12), strutil.ShortN(challenge.ServerPubKey, 12))
+		if sess.Challenge.ServerPubKey != "" {
+			if id.ServerPubKey != "" && !strings.EqualFold(id.ServerPubKey, sess.Challenge.ServerPubKey) {
+				fmt.Printf("🚨 Server identity mismatch! Pin %s != %s — abort.\n", strutil.ShortN(id.ServerPubKey, 12), strutil.ShortN(sess.Challenge.ServerPubKey, 12))
 				notifyQuit()
 				return
 			}
-			if challenge.ServerSig != "" {
-				srvPub, _ := hex.DecodeString(challenge.ServerPubKey)
-				srvSig, _ := hex.DecodeString(challenge.ServerSig)
-				msg := []byte("V2V-SERVER-v1\x00" + challenge.Nonce + "\x00" + challenge.ServerHost)
+			if sess.Challenge.ServerSig != "" {
+				srvPub, _ := hex.DecodeString(sess.Challenge.ServerPubKey)
+				srvSig, _ := hex.DecodeString(sess.Challenge.ServerSig)
+				msg := []byte("V2V-SERVER-v1\x00" + sess.Challenge.Nonce + "\x00" + sess.Challenge.ServerHost)
 				if len(srvPub) == ed25519.PublicKeySize && len(srvSig) == ed25519.SignatureSize {
 					if !ed25519.Verify(srvPub, msg, srvSig) {
 						fmt.Println("❌ Server không chứng minh được private key — dừng.")
@@ -280,14 +273,14 @@ func main() {
 					}
 				}
 			}
-			if id.ServerPubKey == "" && challenge.ServerPubKey != "" {
-				fmt.Printf("⚠️ Lần đầu kết nối tới server %s pin %s…\n", challenge.ServerHost, strutil.ShortN(challenge.ServerPubKey, 16))
+			if id.ServerPubKey == "" && sess.Challenge.ServerPubKey != "" {
+				fmt.Printf("⚠️ Lần đầu kết nối tới server %s pin %s…\n", sess.Challenge.ServerHost, strutil.ShortN(sess.Challenge.ServerPubKey, 16))
 			}
 		}
 		// Use server's pubkey for anti-reuse (instead of host string)
 		bindValue := ""
-		if challenge.ServerPubKey != "" {
-			bindValue = challenge.ServerPubKey
+		if sess.Challenge.ServerPubKey != "" {
+			bindValue = sess.Challenge.ServerPubKey
 		} else if id.ServerPubKey != "" {
 			bindValue = id.ServerPubKey
 		} else {
@@ -295,13 +288,13 @@ func main() {
 				bindValue = strings.ToLower(u.Hostname())
 			}
 		}
-		dataToSign := challenge.Nonce + "|" + id.Role + "|" + respPacket.Username + "|" + bindValue
+		dataToSign := sess.Challenge.Nonce + "|" + id.Role + "|" + respPacket.Username + "|" + bindValue
 		sig := ed25519.Sign(priv, []byte(dataToSign))
 		respPacket.Signature = hex.EncodeToString(sig)
 
 		h := hmac.New(sha512.New, []byte(id.HmacShield))
 		h.Write(sig)
-		h.Write([]byte(challenge.Nonce))
+		h.Write([]byte(sess.Challenge.Nonce))
 		respPacket.Hmac = hex.EncodeToString(h.Sum(nil))
 
 		fmt.Printf("🔑 Đang yêu cầu cấp quyền: [%s]...\n", id.Role)
@@ -309,7 +302,7 @@ func main() {
 		// WebAuthn passkey login (web build only): failure already shown
 		// via setWasmStatus; keep the runtime alive so late browser
 		// callbacks (dialog dismissal, timers) don't hit a dead runtime.
-		if !applyWebPasskey(&respPacket, challenge.Nonce) {
+		if !applyWebPasskey(&respPacket, sess.Challenge.Nonce) {
 			sess.Conn.Close()
 			parkForever()
 			return
@@ -421,195 +414,15 @@ func main() {
 			continue
 		}
 
-		typedLinesCount := 1
-
-		if strings.HasPrefix(text, "```") {
-			if !codebg.NeedsContinuation(text) {
-				// Single-line fence (```code```): complete already.
-				typedLinesCount = 1
-			} else {
-				var canceled bool
-				text, canceled = collectCodeblock(sess.Term, text)
-				if canceled {
-					continue
-				}
-				typedLinesCount = strings.Count(text, "\n") + 1
-			}
-		}
-
-		if err := filter.ValidateMessage(text); err != nil {
-			sess.DisplayMu.Lock()
-			sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin nhắn chứa ký tự không hợp lệ và đã bị chặn (client-side): %v\n", err))
-			sess.DisplayMu.Unlock()
-			sess.Term.Refresh()
+		body, lines, ok := sess.collectBody(text)
+		if !ok {
 			continue
 		}
-
-		// Guard: client-side MessageCooldown (mirror server, zero-trust)
-		if ClientCfg != nil {
-			if err := guard.ValidateMessageForSend(text, sess.LastMessageTime, &guard.Limits{
-				MaxMessageLength: ClientCfg.Limits.MaxMessageLength,
-				MaxMessageLine:   ClientCfg.Limits.MaxMessageLine,
-				MessageCooldown:  ClientCfg.Limits.MessageCooldown,
-			}, false); err != nil {
-				if err == guard.ErrTooFast {
-					sess.DisplayMu.Lock()
-					sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Bạn đang chat quá nhanh! Vui lòng đợi %v.\n", ClientCfg.Limits.MessageCooldown))
-					sess.DisplayMu.Unlock()
-					sess.Term.Refresh()
-					continue
-				}
-				if err == guard.ErrTooLong {
-					sess.DisplayMu.Lock()
-					sess.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin nhắn quá dài (tối đa %d ký tự).\n", ClientCfg.Limits.MaxMessageLength))
-					sess.DisplayMu.Unlock()
-					sess.Term.Refresh()
-					continue
-				}
-			}
+		if !sess.checkSendGuards(body) {
+			continue
 		}
-
-		// Placeholder: keep original text grey with pending indicator until server echo
-		// Single sess.DisplayMu lock for entire wipe + placeholder + trip sign + send to avoid burst drift
-		phRows := 0
-		phShown := sess.ActiveTab == TabChat
-		phBufEnd := 0
-		sess.DisplayMu.Lock()
-		for range typedLinesCount {
-			fmt.Fprint(sess.Out, "\033[1A\033[2K\r")
-		}
-
-		// Render markup on the whole text first so fenced blocks
-		// keep their state across lines; phRows then counts rendered
-		// rows (headers added, closers dropped), matching the erase math.
-		// Plain rendering (no highlight): highlight's full resets would
-		// cancel the grey placeholder wrapper mid-line, and line counts
-		// match the highlighted echo anyway.
-		lines := strings.Split(markup.SpanPlain(text), "\n")
-		phRows = len(lines)
-		// Quoted target previews first (same helper as the echo path, so
-		// both blocks share the shape; pending quotes carry ⏳ so the
-		// erase region check keeps passing).
-		if sess.PendingReplyTo > 0 {
-			for _, q := range sess.quoteLinesFor(sess.PendingReplyTo, true) {
-				sess.emitTab(TabChat, q+"\n")
-				phRows++
-			}
-		}
-		for i, line := range lines {
-			line = linkify.Linkify(line)
-			if i == 0 {
-				sess.emitTab(TabChat, fmt.Sprintf("\x1b[90m| Bạn: %s ⏳\x1b[0m\n", line))
-			} else {
-				sess.emitTab(TabChat, fmt.Sprintf("\x1b[90m|      %s\x1b[0m\n", line))
-			}
-		}
-		// Trip placeholder (grey ◆ …) — real badge will come from server echo
-		if sess.TripPriv != nil || CLI.Tripcode != "" {
-			badgePlaceholder := sess.TripBadge
-			if badgePlaceholder == "" && CLI.Tripcode != "" {
-				h := sha256.Sum256([]byte(CLI.Tripcode))
-				badgePlaceholder = hex.EncodeToString(h[:])[:8]
-			}
-			if badgePlaceholder != "" {
-				sess.emitTab(TabChat, fmt.Sprintf("\x1b[90m|  └─ ✍ ◆ %s ⏳\x1b[0m\n", badgePlaceholder))
-				phRows++
-			}
-		}
-		// Trailing meta line: every block ends with exactly one meta row so
-		// the echo (carrying the real #height:hash) replaces it in place.
-		// The chain position is unknown until the server echo arrives.
-		// Hidden with /meta off; the echo follows the same session flag,
-		// so row counts stay consistent.
-		sess.ShowMetaMu.RLock()
-		pmMeta := sess.ShowMeta
-		sess.ShowMetaMu.RUnlock()
-		if pmMeta {
-			sess.emitTab(TabChat, "\x1b[90m|   └─  ··· ⏳\x1b[0m\n")
-			phRows++
-		}
-		phBufEnd = len(sess.TabChat.lines)
-		sess.Term.Refresh()
-		sess.DisplayMu.Unlock()
-
-		sess.TmpSeq++
-		if sess.TripPriv != nil {
-			// Sign message with trip chain — bind displayName for anti-spoof
-			sess.TripSeq++
-			msgHash := sha256.Sum256([]byte(text))
-			prevCopy := make([]byte, len(sess.TripPrev))
-			copy(prevCopy, sess.TripPrev)
-			payload := tripcolor.CanonicalPayload(strings.ToLower(challenge.ServerPubKey), sess.TripSeq, prevCopy, msgHash[:], []byte(sess.TripPub), sess.Username, sess.TmpSeq, sess.PendingReplyTo)
-			sig := ed25519.Sign(sess.TripPriv, payload)
-			h := sha256.New()
-			h.Write(prevCopy)
-			h.Write(sig)
-			h.Write(msgHash[:])
-			newPrev := h.Sum(nil)
-			copy(sess.TripPrev, newPrev)
-			tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(sess.TripPub)), Seq: sess.TripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: sess.Username, TmpID: sess.TmpSeq, ReplyTo: sess.PendingReplyTo}
-			err = sess.Conn.WriteJSON(tripMsg)
-			if err != nil {
-				// Rollback seq/prev on send failure to avoid permanent fork
-				sess.TripSeq--
-				copy(sess.TripPrev, prevCopy)
-				sess.TmpSeq--
-			}
-		} else {
-			// Unsigned chat always travels in an envelope carrying the
-			// session counter; raw text is rejected by the server.
-			err = sess.Conn.WriteJSON(PlainMessage{TmpID: sess.TmpSeq, Text: text, ReplyTo: sess.PendingReplyTo})
-			if err != nil {
-				sess.TmpSeq--
-			}
-		}
-		// Reply targets are one-shot: consumed by the send above whether
-		// it succeeded or not (a failed send ends the session anyway).
-		// Reset happens after placeholder tracking below, which records
-		// the target for echo matching.
-		if err != nil {
-			// Mark placeholder as failed (red) is handled by server unicast; keep placeholder grey until then
-			sess.LastMessageTime = time.Now()
-		} else {
-			sess.LastMessageTime = time.Now()
-			// Track placeholder so the server echo can replace it.
-			sess.DisplayMu.Lock()
-			pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: sess.PrintGen, bufEnd: phBufEnd, sentAt: time.Now(), tmpID: sess.TmpSeq, replyTo: sess.PendingReplyTo}
-			if sess.TripPriv != nil {
-				pm.hasTrip = true
-				pm.seq = sess.TripSeq
-				pm.pub = hex.EncodeToString([]byte(sess.TripPub))
-			}
-			sess.PendingPlaceholders = append(sess.PendingPlaceholders, pm)
-			// Bound the queue: echoes that never arrive (dead server, old
-			// build) must not grow memory or turn matching quadratic.
-			// Evicted entries stay grey on screen: honestly unconfirmed.
-			// Linear scan stays trivial at this bound, so no index map.
-			const maxPendingPlaceholders = 128
-			for len(sess.PendingPlaceholders) > maxPendingPlaceholders {
-				sess.PendingPlaceholders = sess.PendingPlaceholders[1:]
-			}
-			// The echo may have beaten us here (local echo race): if a
-			// stashed echo matches, erase the placeholder at once. The
-			// echo itself was already rendered when it arrived.
-			var haveStashed bool
-			sess.PendingEchoes, _, haveStashed = takeStashedEcho(sess.PendingEchoes, pm.tmpID)
-			if haveStashed {
-				for i, p := range sess.PendingPlaceholders {
-					if p.tmpID == pm.tmpID {
-						sess.PendingPlaceholders = append(sess.PendingPlaceholders[:i], sess.PendingPlaceholders[i+1:]...)
-						break
-					}
-				}
-				sess.erasePlaceholderLocked(pm)
-			}
-			sess.DisplayMu.Unlock()
-		}
-		// Reply targets are one-shot, cleared after tracking above (the
-		// pending entry already captured the target for echo matching).
-		sess.PendingReplyTo = 0
-		if err != nil {
-			fmt.Println("❌ Lỗi gửi tin nhắn:", err)
+		phRows, phShown, phBufEnd := sess.renderPlaceholder(body, lines)
+		if serr := sess.sendMessage(body, phRows, phShown, phBufEnd); serr != nil {
 			break
 		}
 
