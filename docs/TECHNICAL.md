@@ -36,6 +36,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 │   ├── passprompt/   # Masked password entry + strength meter (uses tui line readers and TTY probes)
 │   ├── guard/        # Pure send/rate/ban/tripcode policy (fully unit-tested)
 │   ├── config/       # Client/server config schema + defaults
+│   ├── trustedproxy/ # Explicit proxy chain (none/cloudflare/direct) + trust-file loading
 │   └── configdir/    # XDG-aware default dirs
 │   └── tui/          # General huh confirms/selects + piped fallbacks
 │   ├── markup/       # Forum markdown facade over codebg + linkify
@@ -45,7 +46,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 ├── cmd/v2vctl/       # Management tool, one file per concern (main, role, keygen, enroll, migrate, list, prompt)
 ├── template/         # Samples mirroring real locations
 │   ├── .env            # → copy to ./.env (project root)
-│   ├── server/config/  # roles.json → copy to ./config/
+│   ├── server/config/  # roles.json + trustedproxy/ → copy to ./config/
 │   └── client/         # config.jsonc + key.json → copy to OS config dir
 └── docs/             # This file
 ```
@@ -321,10 +322,14 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - **Phishing:** Privileged identities are pinned to `server_pubkey` (not hostname); real passkeys are pinned by `RPID`/`origin`.
 - **Spam/Abuse:** `MaxConnectionsPerIP`, `MessageCooldown`, `IdleChatTimeout`, `Trip verify 200ms/IP` rate limit, `SetReadLimit` `64KB` for auth and `MaxMessageLength*3` for chat.
 - **Transport:** `REQUIRE_TLS` option blocks `ws://` (returns `426`), `ALLOWED_ORIGINS` checked in `Upgrader.CheckOrigin`.
-- `IsSecuredConnect` trusts `X-Forwarded-Proto` only behind proxy.
+- `IsSecuredConnect` trusts `X-Forwarded-Proto` only from a header-trusted proxy (see below), never from direct clients.
+- **Trusted proxy (explicit chain):** `PROXY_PROVIDER` (required, e.g. `cloudflare,direct`) selects modules from `internal/trustedproxy` (`none`, `cloudflare`, `direct`); only `none|cloudflare|direct` are supported. Trust comes solely from per-module `<name>.txt` files under `TRUSTED_PROXY_DIR` (default `./config/trustedproxy`): no embedded IP defaults, no implicit fallback.
+- Resolution per request: trusted edge → provider header (`CF-Connecting-IP`, validated); listed `direct` IP → `RemoteAddr` (never reads headers, so a misplaced entry is harmless); chain with `none` → `RemoteAddr` with a warning; otherwise reject `403` with the received headers logged (clipped). Missing `cloudflare.txt`, malformed entries, or an empty `PROXY_PROVIDER` fail the boot on purpose.
+- Boot prints the active trust (providers, per-file range counts, direct policy); each connect logs `clientIP | RemoteAddr | provider | trusted`.
+- Stray `.txt` files fold into one bounded warning line and directory scans are capped, so a directory dump cannot flood the logs.
 - **Outbound proxy (desktop client):** `--proxy URL` / `V2V_PROXY` env beat the system `HTTP(S)_PROXY`/`NO_PROXY` (gorilla `DefaultDialer` still honors those when nothing is set).
 - `--ask-proxy` runs an interactive wizard (huh scheme select, host, port, optional user, hidden password) that overrides all static config.
-- HTTP(S) proxies use a dedicated gorilla `Dialer`; SOCKS5 handshakes by hand on stdlib (`client/proxy.go`, no new dependency) with the target always sent as a domain name so no local DNS leaks, plus TLS for `wss`.
+- HTTP(S) proxies use a dedicated gorilla `Dialer`; SOCKS5 handshakes via `golang.org/x/net/proxy` (RFC 1928/1929) with the target always sent as a domain name so no local DNS leaks, plus TLS for `wss`.
 - The proxy password is the proxy's secret: no meter, no weak gate. It lives as `[]byte`, wipes after dial, and logs show `user:***@host`; prompt/URL strings at the stdlib boundary await GC as documented for all secrets.
 
 ## Roadmap
