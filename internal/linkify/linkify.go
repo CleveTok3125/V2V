@@ -7,12 +7,25 @@ package linkify
 import (
 	"regexp"
 	"strings"
+
+	"mvdan.cc/xurls"
 )
 
-// urlRe matches absolute http(s) URLs. ESC bytes are excluded so an escape
-// sequence already present in the payload can never be swallowed, and a
-// scheme is required so timestamps or plain prose are never matched.
-var urlRe = regexp.MustCompile(`https?://[^\s\x1b]+`)
+// strictHTTP matches absolute http(s) URLs with xurls Strict-class
+// boundaries, restricted to the http(s) schemes this package wraps:
+// plain xurls.Strict would also link ftp:// and other schemes. ESC
+// bytes can never match (outside the character classes), so an escape
+// sequence already present in the payload is never swallowed, and a
+// scheme is required so timestamps or plain prose never match.
+var strictHTTP = mustStrictHTTP()
+
+func mustStrictHTTP() *regexp.Regexp {
+	re, err := xurls.StrictMatchingScheme("https?")
+	if err != nil {
+		panic("linkify: invalid http scheme pattern: " + err.Error())
+	}
+	return re
+}
 
 const (
 	osc8Open  = "\x1b]8;;"
@@ -32,7 +45,7 @@ func Linkify(text string) string {
 	if !strings.Contains(text, "http") || strings.Contains(text, osc8Open) {
 		return text
 	}
-	return urlRe.ReplaceAllStringFunc(text, func(m string) string {
+	return strictHTTP.ReplaceAllStringFunc(text, func(m string) string {
 		url := strings.TrimRight(m, trailingPunct)
 		tail := m[len(url):]
 		return Wrap(url, url) + tail

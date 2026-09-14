@@ -26,6 +26,7 @@ require (
 	github.com/yuin/goldmark-highlighting/v2 v2.0.0-20230729083705-37449abec8cc
 	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.59.0
+	mvdan.cc/xurls v1.1.0
 )
 
 require (
@@ -51,6 +52,7 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
+	github.com/mvdan/xurls v1.1.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
