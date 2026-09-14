@@ -98,3 +98,17 @@ func TestSelectPiped(t *testing.T) {
 		t.Error("empty options must fail")
 	}
 }
+
+// TestNoTTYOverrideForcesNonInteractive pins the automation override:
+// with V2V_NO_TTY set, both detectors stay false even when a
+// controlling terminal exists, so tests never block on huh forms.
+func TestNoTTYOverrideForcesNonInteractive(t *testing.T) {
+	t.Setenv("V2V_NO_TTY", "1")
+	t.Setenv("CI", "")
+	if Interactive() {
+		t.Error("Interactive() must be false under V2V_NO_TTY=1")
+	}
+	if HasControllingTTY() {
+		t.Error("HasControllingTTY() must be false under V2V_NO_TTY=1")
+	}
+}

@@ -114,8 +114,10 @@ endif
 vet:
 	GOCACHE=$(GOCACHE) go vet ./...
 
+# test forces non-interactive mode so huh forms never block waiting for
+# input when tests run from a terminal with /dev/tty (same as CI).
 test:
-	GOCACHE=$(GOCACHE) go test ./... -count=1
+	V2V_NO_TTY=1 GOCACHE=$(GOCACHE) go test ./... -count=1
 
 check: vet test
 	@echo "check done (vet+test)"
