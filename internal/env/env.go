@@ -10,7 +10,10 @@
 // so the registry lists every variable exactly once.
 package env
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 // Key names, including flag-bound-only variables that have no
 // accessor because kong resolves them.
@@ -25,6 +28,7 @@ const (
 	KeyConfigDir      = "V2V_CONFIG_DIR"
 	KeyCacheDir       = "V2V_CACHE_DIR"
 	KeyDataDir        = "DATA_DIR"
+	KeyNoTTY          = "V2V_NO_TTY"
 )
 
 // Tripcode feeds tripcode entry without prompting (CI).
@@ -52,3 +56,16 @@ func AllowedOrigins() string { return os.Getenv(KeyAllowedOrigins) }
 // the caller default (./data); resolution lives caller-side so tests
 // can point it anywhere with t.Setenv.
 func DataDir() string { return os.Getenv(KeyDataDir) }
+
+// NoTTY forces non-interactive behavior even when a controlling
+// terminal exists (e.g. `go test` run from a terminal, where /dev/tty
+// opens but no human can answer huh forms). True when V2V_NO_TTY is
+// 1/true/yes (case-insensitive) or CI=true. Automation must never hang
+// waiting for input, so either signal suffices (OR, fail-closed).
+func NoTTY() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(KeyNoTTY))) {
+	case "1", "true", "yes":
+		return true
+	}
+	return os.Getenv("CI") == "true"
+}

@@ -12,6 +12,8 @@ import (
 
 	"github.com/charmbracelet/huh"
 	xterm "github.com/charmbracelet/x/term"
+
+	"github.com/CleveTok3125/V2V/internal/env"
 )
 
 // Interactive reports whether stdin is a real terminal. Stdin-reading
@@ -20,13 +22,23 @@ import (
 // exists (/dev/tty probe). huh forms open /dev/tty directly and ignore
 // piped stdin, so they gate on this instead: piped stdin with a live
 // tty can still run huh, but must not run stdin readers.
+//
+// Both return false under the V2V_NO_TTY/CI override so automated runs
+// (e.g. `go test` from a terminal, where /dev/tty opens but no human
+// can answer) always take the non-interactive path instead of hanging.
 func Interactive() bool {
+	if env.NoTTY() {
+		return false
+	}
 	return xterm.IsTerminal(os.Stdin.Fd())
 }
 
 // HasControllingTTY reports whether /dev/tty opens. huh forms gate on
 // this (see Interactive for the distinction).
 func HasControllingTTY() bool {
+	if env.NoTTY() {
+		return false
+	}
 	tty, err := os.Open("/dev/tty")
 	if err != nil {
 		return false

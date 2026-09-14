@@ -22,6 +22,7 @@ func TestRegistry(t *testing.T) {
 		{"ALLOWED_ORIGINS", KeyAllowedOrigins, AllowedOrigins},
 		{"V2V_CONFIG_DIR", KeyConfigDir, nil},
 		{"V2V_CACHE_DIR", KeyCacheDir, nil},
+		{"V2V_NO_TTY", KeyNoTTY, nil},
 		{"DATA_DIR", KeyDataDir, DataDir},
 	}
 	for _, c := range cases {
@@ -41,5 +42,30 @@ func TestRegistry(t *testing.T) {
 	}
 	if got := Tripcode(); got != "" {
 		t.Fatalf("unset Tripcode() = %q, want empty", got)
+	}
+}
+
+// NoTTY pins the non-interactive override: V2V_NO_TTY accepts
+// 1/true/yes case-insensitively, CI=true also forces it, and anything
+// else stays interactive.
+func TestNoTTY(t *testing.T) {
+	for _, v := range []string{"1", "true", "TRUE", "yes", " Yes "} {
+		t.Setenv(KeyNoTTY, v)
+		t.Setenv("CI", "")
+		if !NoTTY() {
+			t.Errorf("NoTTY() with %s=%q = false, want true", KeyNoTTY, v)
+		}
+	}
+	for _, v := range []string{"", "0", "no", "false", "maybe"} {
+		t.Setenv(KeyNoTTY, v)
+		t.Setenv("CI", "")
+		if NoTTY() {
+			t.Errorf("NoTTY() with %s=%q = true, want false", KeyNoTTY, v)
+		}
+	}
+	t.Setenv(KeyNoTTY, "")
+	t.Setenv("CI", "true")
+	if !NoTTY() {
+		t.Error("NoTTY() with CI=true = false, want true")
 	}
 }
