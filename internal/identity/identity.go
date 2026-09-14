@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/google/renameio"
 )
 
 const Version = 3
@@ -104,39 +106,10 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 			return err
 		}
 	}
-	tmpFile, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmpFile.Name()
-	if err := tmpFile.Chmod(perm); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmpFile.Sync(); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
-		return err
-	}
-	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if dirFile, err := os.Open(dir); err == nil {
-		_ = dirFile.Sync()
-		dirFile.Close()
-	}
-	return nil
+	// Temp-file + fsync + rename via renameio (chmod-before-write, same
+	// directory). The old parent-dir sync is dropped: renameio does not
+	// sync it, and crash-window parity with common tooling is accepted.
+	return renameio.WriteFile(path, data, perm)
 }
 
 // Save writes the container with owner-only permissions using atomic write.
