@@ -34,7 +34,9 @@ func TestStripLineComment(t *testing.T) {
 func TestStripCommentMarkersInsideStringsSurvive(t *testing.T) {
 	in := `{"url": "http://x/y", "glob": "/* not a comment", "q": "say \"//hi\""}`
 	got := stripMust(t, in)
-	if got != in {
+	// The stripper re-encodes (trailing newline); string contents must
+	// survive byte-identical.
+	if strings.TrimRight(got, "\n") != in {
 		t.Fatalf("string contents altered:\n got %q\nwant %q", got, in)
 	}
 }
@@ -56,9 +58,13 @@ func TestStripLineCommentAtEOFAccepts(t *testing.T) {
 }
 
 func TestStripCRLFComment(t *testing.T) {
-	got := stripMust(t, "{\"a\": 1} // c\r\n{\"b\": 2}")
+	got := stripMust(t, "{\"a\": 1} // c\r\n")
 	if strings.Contains(got, "//") {
 		t.Fatalf("CRLF comment survived: %q", got)
+	}
+	var v map[string]int
+	if err := json.Unmarshal([]byte(got), &v); err != nil || v["a"] != 1 {
+		t.Fatalf("CRLF strip failed: %v (%q)", err, got)
 	}
 }
 
@@ -68,12 +74,22 @@ func TestStripUnterminatedBlockErrors(t *testing.T) {
 	}
 }
 
-func TestStripCommentDelimitersAloneSurvive(t *testing.T) {
-	// A lone slash is not valid JSON anyway; the stripper must pass it
-	// through untouched so encoding/json reports the real error.
-	got := stripMust(t, "{\"a\": 1} /")
-	if !strings.Contains(got, "/") {
-		t.Fatalf("lone slash altered: %q", got)
+func TestStripMalformedErrors(t *testing.T) {
+	// A lone slash is not valid JSON; the stripper reports it instead
+	// of passing it through to encoding/json.
+	if _, err := StripComments([]byte("{\"a\": 1} /")); err == nil {
+		t.Fatal("lone slash must error, not pass through")
+	}
+}
+
+func TestStripTrailingCommaAccepted(t *testing.T) {
+	got := stripMust(t, "{\"a\": 1, \"b\": [1, 2,],}")
+	var v map[string]any
+	if err := json.Unmarshal([]byte(got), &v); err != nil {
+		t.Fatalf("trailing comma must parse: %v (%q)", err, got)
+	}
+	if v["a"] != 1.0 {
+		t.Fatalf("values altered: %q", got)
 	}
 }
 
