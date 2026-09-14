@@ -41,7 +41,7 @@ func (l *RotatingLogger) open() error {
 		l.size = info.Size()
 	}
 
-	file, err := os.OpenFile(l.Filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	file, err := os.OpenFile(l.Filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
