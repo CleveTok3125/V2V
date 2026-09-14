@@ -175,7 +175,7 @@ func main() {
 			continue
 		}
 		sess.handleDraftGate(text)
-		act := sess.dispatch(text)
+		text, act := sess.dispatch(text)
 		if act == cmdQuit {
 			break
 		}
@@ -185,9 +185,15 @@ func main() {
 
 		body, lines, ok := sess.collectBody(text)
 		if !ok {
+			// Codeblock canceled: no send happens, so drop the
+			// one-shot reply target (inline /reply or draft).
+			sess.PendingReplyTo = 0
 			continue
 		}
 		if !sess.checkSendGuards(body) {
+			// Guard rejected the message: same one-shot cleanup;
+			// only sendMessage may consume PendingReplyTo.
+			sess.PendingReplyTo = 0
 			continue
 		}
 		phRows, phShown, phBufEnd := sess.renderPlaceholder(body, lines)

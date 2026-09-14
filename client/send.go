@@ -162,7 +162,6 @@ func (s *Session) sendMessage(text string, phRows int, phShown bool, phBufEnd in
 		newPrev := h.Sum(nil)
 		copy(s.TripPrev, newPrev)
 		tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(s.TripPub)), Seq: s.TripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: s.Username, TmpID: s.TmpSeq, ReplyTo: s.PendingReplyTo}
-		var err error
 		err = s.Conn.WriteJSON(tripMsg)
 		if err != nil {
 			// Rollback seq/prev on send failure to avoid permanent fork
