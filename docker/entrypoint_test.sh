@@ -1,0 +1,117 @@
+#!/bin/sh
+# Tests for docker/entrypoint.sh. Needs root (chown) and a `nobody`
+# user; skips otherwise. No frameworks: plain asserts, fail fast.
+# Covers the accepted trade-off explicitly: top-dir OK + inner file
+# wrong owner takes the fast path (see T-blindspot).
+set -eu
+
+HERE=$(dirname "$0")
+ENTRY="$HERE/entrypoint.sh"
+
+pass=0
+fail=0
+ok() { pass=$((pass + 1)); echo "ok: $1"; }
+bad() { fail=$((fail + 1)); echo "FAIL: $1"; }
+
+if [ "$(id -u)" != "0" ]; then
+	echo "SKIP: entrypoint tests need root"
+	exit 0
+fi
+if ! id nobody >/dev/null 2>&1; then
+	echo "SKIP: no nobody user"
+	exit 0
+fi
+NOBODY_GROUP=$(id -gn nobody)
+NOBODY_IDS="$(id -u nobody):$(id -g nobody)"
+
+sh -n "$ENTRY" || { echo "FAIL: syntax"; exit 1; }
+
+# Sandbox with test doubles: fake su-exec logs the user spec then
+# runs the command; fake server records invocation.
+sandbox() {
+	ROOT=$(mktemp -d)
+	mkdir -p "$ROOT/app/data" "$ROOT/app/config" "$ROOT/bin"
+	CALL_LOG="$ROOT/calls.log"
+	touch "$CALL_LOG"
+	cat > "$ROOT/bin/su-exec" <<EOF
+#!/bin/sh
+echo "SU_EXEC_USER=\$1" >> "$CALL_LOG"
+shift
+exec "\$@"
+EOF
+	chmod +x "$ROOT/bin/su-exec"
+	cat > "$ROOT/bin/server" <<EOF
+#!/bin/sh
+echo "SERVER_INVOKED \$*" >> "$CALL_LOG"
+exit 0
+EOF
+	chmod +x "$ROOT/bin/server"
+	export APP_ROOT="$ROOT/app" APP_USER=nobody APP_GROUP="$NOBODY_GROUP" \
+		SU_EXEC_BIN="$ROOT/bin/su-exec" SERVER_BIN="$ROOT/bin/server"
+	echo "$ROOT"
+}
+readable_mounts() {
+	echo "x=1" > "$APP_ROOT/.env"
+	echo '{}' > "$APP_ROOT/config/roles.json"
+	chmod 644 "$APP_ROOT/.env" "$APP_ROOT/config/roles.json"
+}
+
+# T-fresh: empty data dir gets owned, args pass through.
+ROOT=$(sandbox)
+readable_mounts
+out=$(sh "$ENTRY" arg1 arg2 2>&1)
+[ "$(stat -c %u:%g "$APP_ROOT/data")" = "$NOBODY_IDS" ] && ok "fresh: data owned" || bad "fresh: data owner $(stat -c %u:%g "$APP_ROOT/data")"
+grep -q "SERVER_INVOKED arg1 arg2" "$CALL_LOG" && ok "fresh: passthrough" || bad "fresh: passthrough"
+grep -q "SU_EXEC_USER=nobody:" "$CALL_LOG" && ok "fresh: drop-priv user" || bad "fresh: drop-priv user"
+rm -rf "$ROOT"
+
+# T-mismatch: only wrong-owned files change hands.
+ROOT=$(sandbox)
+readable_mounts
+echo root > "$APP_ROOT/data/a.log"
+echo keep > "$APP_ROOT/data/b.log"
+chown nobody:"$NOBODY_GROUP" "$APP_ROOT/data/b.log"
+ctime_before=$(stat -c %z "$APP_ROOT/data/b.log")
+out=$(sh "$ENTRY" 2>&1)
+[ "$(stat -c %u "$APP_ROOT/data/a.log")" = "$(id -u nobody)" ] && ok "mismatch: fixed" || bad "mismatch: a.log owner"
+[ "$(stat -c %z "$APP_ROOT/data/b.log")" = "$ctime_before" ] && ok "mismatch: correct untouched" || bad "mismatch: b.log touched"
+echo "$out" | grep -q "fixing" && ok "mismatch: logged" || bad "mismatch: log branch"
+rm -rf "$ROOT"
+
+# T-blindspot: top dir OK + inner wrong owner takes the fast path by
+# design (pinned trade-off): skips scan, leaves the file, still execs.
+# The server fails closed loudly on its first write to it instead.
+ROOT=$(sandbox)
+readable_mounts
+chown -R nobody:"$NOBODY_GROUP" "$APP_ROOT/data"
+echo root > "$APP_ROOT/data/inner.log"
+out=$(sh "$ENTRY" 2>&1)
+echo "$out" | grep -q "skipping scan" && ok "blindspot: fast path logged" || bad "blindspot: branch"
+[ "$(stat -c %u "$APP_ROOT/data/inner.log")" = "0" ] && ok "blindspot: left as-is" || bad "blindspot: inner changed"
+grep -q "SERVER_INVOKED" "$CALL_LOG" && ok "blindspot: still execs" || bad "blindspot: exec"
+rm -rf "$ROOT"
+
+# T-prefail-env: missing .env fails closed with the host fix.
+ROOT=$(sandbox)
+echo '{}' > "$APP_ROOT/config/roles.json"
+chmod 644 "$APP_ROOT/config/roles.json"
+if out=$(sh "$ENTRY" 2>&1); then
+	bad "prefail-env: must exit nonzero"
+else
+	echo "$out" | grep -q "chmod o+r .env" && ok "prefail-env: actionable msg" || bad "prefail-env: msg"
+fi
+rm -rf "$ROOT"
+
+# T-prefail-roles: same for roles.json.
+ROOT=$(sandbox)
+echo "x=1" > "$APP_ROOT/.env"
+chmod 644 "$APP_ROOT/.env"
+if out=$(sh "$ENTRY" 2>&1); then
+	bad "prefail-roles: must exit nonzero"
+else
+	echo "$out" | grep -q "chmod o+r config/roles.json" && ok "prefail-roles: actionable msg" || bad "prefail-roles: msg"
+fi
+rm -rf "$ROOT"
+
+echo "pass=$pass fail=$fail"
+[ "$fail" = "0" ]
