@@ -24,11 +24,17 @@ services:
       - ./data:/app/data
     # Least privilege: drop all capabilities, block privilege
     # escalation, mount the rootfs read-only (the server only writes
-    # /app/data and stdout). No `user:` on purpose: the entrypoint
+    # /app/data and stdout). The entrypoint's root phase needs exactly
+    # three back: CHOWN (prepare /app/data) plus SETUID/SETGID for
+    # su-exec to drop to app. No `user:` on purpose: the entrypoint
     # adapts /app/data ownership itself, so ops fills in nothing.
     # Rollback if a runtime proves picky: comment out read_only.
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges:true
     read_only: true
