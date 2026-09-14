@@ -92,6 +92,39 @@ func TestWebFilesHandler_EncodingAndEscape(t *testing.T) {
 	}
 }
 
+// Directories without their own index must 404 instead of listing
+// files; directories with an index keep serving it.
+func TestWebFilesHandler_NoDirectoryListing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "blog"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "blog", "cactus.css"), []byte("css"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "index.html"), []byte("idx"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := webFilesHandler(dir)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/blog/", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("indexless dir = %d, want 404", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "cactus.css") {
+		t.Fatal("directory listing leaked filenames")
+	}
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/docs/", nil))
+	if rec2.Code != http.StatusOK || rec2.Body.String() != "idx" {
+		t.Fatalf("indexed dir = %d %q, want 200 idx", rec2.Code, rec2.Body.String())
+	}
+}
+
 // Rotating logger must rotate at the size cap and keep writing.
 func TestRotatingLogger_Rotate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v2v.log")

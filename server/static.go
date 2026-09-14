@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -55,6 +56,17 @@ func webFilesHandler(dir string) http.Handler {
 						w.Header().Set("Content-Type", ct)
 					}
 					http.ServeContent(w, r, st.Name(), st.ModTime(), rs)
+					return
+				}
+			}
+		}
+
+		// No directory listings: a directory without its own index
+		// answers 404 instead of exposing the file list.
+		if name := strings.TrimPrefix(path.Clean(r.URL.Path), "/"); name != "" {
+			if st, err := os.Stat(filepath.Join(dir, name)); err == nil && st.IsDir() {
+				if _, err := os.Stat(filepath.Join(dir, name, "index.html")); err != nil {
+					http.NotFound(w, r)
 					return
 				}
 			}
