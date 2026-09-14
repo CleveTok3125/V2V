@@ -53,3 +53,30 @@ func TestIsDateBannerTagFirst(t *testing.T) {
 		t.Error("untagged date text must match")
 	}
 }
+
+func TestNormalizeURL(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"example.com:8080", "wss://example.com:8080/ws"},
+		{"example.com:8080/chat", "wss://example.com:8080/chat"},
+		{"http://h", "ws://h/ws"},
+		{"https://h/", "wss://h/ws"},
+		{"ws://h/", "ws://h/ws"},
+		{"wss://h/ws", "wss://h/ws"},
+		{"  wss://h/ws  ", "wss://h/ws"},
+		// Scheme is case-insensitive per RFC: must not gain a prefix
+		// (host case itself is preserved, net/url semantics).
+		{"HTTP://H", "ws://H/ws"},
+		// Unknown scheme: leave untouched instead of mangling.
+		{"ftp://h", "ftp://h"},
+		// An inner http:// in the path is not the scheme: https still
+		// becomes wss, but the path survives byte-identical.
+		{"https://proxy/http://internal", "wss://proxy/http://internal"},
+	}
+	for _, c := range cases {
+		if got := normalizeURL(c.in); got != c.want {
+			t.Errorf("normalizeURL(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

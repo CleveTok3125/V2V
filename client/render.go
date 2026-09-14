@@ -197,24 +197,29 @@ func collectCodeblock(term inputTerminal, firstLine string) (string, bool) {
 
 func normalizeURL(input string) string {
 	input = strings.TrimSpace(input)
-
-	if !strings.HasPrefix(input, "http://") && !strings.HasPrefix(input, "https://") &&
-		!strings.HasPrefix(input, "ws://") && !strings.HasPrefix(input, "wss://") {
+	if !strings.Contains(input, "://") {
 		input = "wss://" + input
 	}
-
-	input = strings.Replace(input, "http://", "ws://", 1)
-	input = strings.Replace(input, "https://", "wss://", 1)
-
 	u, err := url.Parse(input)
-	if err == nil {
-		if u.Path == "" || u.Path == "/" {
-			u.Path = "/ws"
-		}
-		return u.String()
+	if err != nil || u.Host == "" {
+		return input
 	}
-
-	return input
+	// Rewrite only the scheme: replacing the substring would also hit
+	// an inner http:// inside the path, and schemes are
+	// case-insensitive. Unknown schemes pass through untouched.
+	switch strings.ToLower(u.Scheme) {
+	case "http":
+		u.Scheme = "ws"
+	case "https":
+		u.Scheme = "wss"
+	case "ws", "wss":
+	default:
+		return input
+	}
+	if u.Path == "" || u.Path == "/" {
+		u.Path = "/ws"
+	}
+	return u.String()
 }
 
 func checkServerInfo(input string) {
