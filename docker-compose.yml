@@ -11,7 +11,13 @@ services:
     container_name: v2v_server
     restart: always
     ports:
-      - "${PORT:-8080}:${PORT:-8080}"
+      # Loopback-bound by default: the app is reachable from the host
+      # itself (debug) and from sibling containers by service name, but
+      # never from the outside network. This keeps the tunnel the sole
+      # ingress so trusted-proxy headers stay sound. Set BIND_ADDR=0.0.0.0
+      # only for direct (non-tunnel) exposure, behind a CF-whitelisted
+      # host firewall.
+      - "${BIND_ADDR:-127.0.0.1}:${PORT:-8080}:${PORT:-8080}"
     volumes:
       - ./.env:/app/.env:ro
       - ./config:/app/config:ro
