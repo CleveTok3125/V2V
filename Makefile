@@ -13,7 +13,7 @@ PLATFORMS := windows/amd64 windows/arm64 linux/amd64 linux/arm64 android/arm64 d
 HOST_GOOS ?= $(shell go env GOOS)
 HOST_GOARCH ?= $(shell go env GOARCH)
 
-.PHONY: all server web web-wasm web-compress client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test clean help
+.PHONY: all server web web-wasm web-compress client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test test-sh clean help
 
 all: server web client v2vctl
 
@@ -119,8 +119,14 @@ vet:
 test:
 	V2V_NO_TTY=1 GOCACHE=$(GOCACHE) go test ./... -count=1
 
-check: vet test
-	@echo "check done (vet+test)"
+# test-sh runs the entrypoint shell tests. They need root for chown
+# and self-skip otherwise, so check stays green everywhere; CI runs
+# them with sudo for the full matrix.
+test-sh:
+	sh docker/entrypoint_test.sh
+
+check: vet test test-sh
+	@echo "check done (vet+test+test-sh)"
 
 clean:
 	rm -rf public webterm/app.wasm webterm/app.wasm.gz webterm/app.wasm.br webterm/version.js webterm/wasm_exec.js
@@ -139,5 +145,6 @@ help:
 	@echo "  make v2vctl   - build public/V2Vctl-* (host only, or all with ALL=1)"
 	@echo "  make vet      - go vet"
 	@echo "  make test     - go test"
-	@echo "  make check    - vet+test"
+	@echo "  make test-sh  - entrypoint shell tests (skip without root)"
+	@echo "  make check    - vet+test+test-sh"
 	@echo "  make clean    - remove build artifacts"
