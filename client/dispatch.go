@@ -20,19 +20,35 @@ const (
 )
 
 // dispatch routes one input line. Table order matches the on-screen help.
-func (s *Session) dispatch(text string) cmdAction {
+func (s *Session) dispatch(text string) (string, cmdAction) {
 	if text == "/quit" || text == "/q" {
 		s.gracefulQuit()
-		return cmdQuit
+		return text, cmdQuit
 	}
 	for _, cmd := range []func(string) bool{
 		s.cmdWhoami, s.cmdStatus, s.cmdHelp, s.cmdShowjoin,
-		s.cmdAutoverify, s.cmdTab, s.cmdClear, s.cmdReply,
+		s.cmdAutoverify, s.cmdTab, s.cmdClear,
+	} {
+		if cmd(text) {
+			return text, cmdDone
+		}
+	}
+	if next, act, ok := s.cmdReply(text); ok {
+		if act != cmdPass {
+			return next, act
+		}
+		text = next
+	}
+	for _, cmd := range []func(string) bool{
 		s.cmdMeta, s.cmdFind, s.cmdExpand, s.cmdInfo,
 		s.cmdCopy, s.cmdClearhistory,
 	} {
 		if cmd(text) {
-			return cmdDone
+			// Inline /reply body intercepted by a command is never
+			// sent: drop its one-shot target so the next plain
+			// message does not inherit the quote.
+			s.PendingReplyTo = 0
+			return text, cmdDone
 		}
 	}
 	// Unknown slash input: every built-in command was already matched
@@ -44,9 +60,12 @@ func (s *Session) dispatch(text string) cmdAction {
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Lệnh không tồn tại: %s. Gõ /help để xem danh sách.\n", text))
 		s.DisplayMu.Unlock()
 		s.Term.Refresh()
-		return cmdDone
+		// Rejected input never sends: drop the one-shot reply target
+		// so the next plain message does not inherit the quote.
+		s.PendingReplyTo = 0
+		return text, cmdDone
 	}
-	return cmdPass
+	return text, cmdPass
 }
 
 // handleReadErr maps a ReadLine failure to a loop action: cancel
@@ -241,16 +260,16 @@ func (s *Session) cmdClear(text string) bool {
 	return true
 }
 
-func (s *Session) cmdReply(text string) bool {
+func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 	if !(text == "/reply" || strings.HasPrefix(text, "/reply ")) {
-		return false
+		return text, cmdPass, false
 	}
 	if !ClientCfg.ReplyEnabled() {
 		s.DisplayMu.Lock()
 		s.emitLocalFeedback("| [Local]: Reply đã tắt trong config (ui.reply.enabled).\n")
 		s.DisplayMu.Unlock()
 		s.Term.Refresh()
-		return true
+		return text, cmdDone, true
 	}
 	rest := strings.TrimSpace(strings.TrimPrefix(text, "/reply"))
 	fields := strings.Fields(rest)
@@ -265,7 +284,7 @@ func (s *Session) cmdReply(text string) bool {
 		s.emitLocalFeedback("| [Local]: Dùng /reply <height>[:hash] [tin nhắn] (vd /reply 1234 đồng ý; /reply 1234 để soạn nháp).\n")
 		s.DisplayMu.Unlock()
 		s.Term.Refresh()
-		return true
+		return text, cmdDone, true
 	}
 	s.DisplayMu.Lock()
 	found := len(findMetaMatches(s.TabChat.lines, height, suffix)) > 0 ||
@@ -276,7 +295,7 @@ func (s *Session) cmdReply(text string) bool {
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ, không reply được.\n", height))
 		s.DisplayMu.Unlock()
 		s.Term.Refresh()
-		return true
+		return text, cmdDone, true
 	}
 	if body == "" {
 		// Draft mode: quote now, body on the next line. Any slash
@@ -291,14 +310,13 @@ func (s *Session) cmdReply(text string) bool {
 		s.emitLocalFeedback("| [Local]: Gõ nội dung reply (Enter gửi, ^C ở dòng trống hủy, lệnh / khác hủy draft).\n")
 		s.DisplayMu.Unlock()
 		s.Term.Refresh()
-		return true
+		return text, cmdDone, true
 	}
-	// Quote validated: the body flows through the normal dispatch
-	// below (codeblock collection, guards, send) with the target
-	// attached one-shot.
+	// Quote validated: the body flows through the remaining dispatch
+	// (later slash commands, unknown-slash guard, then send) with the
+	// target attached one-shot.
 	s.PendingReplyTo = height
-	text = body
-	return true
+	return body, cmdPass, true
 }
 
 func (s *Session) cmdMeta(text string) bool {

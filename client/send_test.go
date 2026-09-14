@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +13,17 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+type stubConn struct {
+	writeErr error
+	wrote    any
+}
+
+func (c *stubConn) ReadJSON(any) error                         { return io.EOF }
+func (c *stubConn) WriteJSON(v any) error                      { c.wrote = v; return c.writeErr }
+func (c *stubConn) ReadMessage() (int, []byte, error)          { return 0, nil, io.EOF }
+func (c *stubConn) WriteMessage(int, []byte) error             { return nil }
+func (c *stubConn) Close() error                               { return nil }
 
 // TestSendMessagePlainLoopback exercises the moved send path over a real
 // loopback websocket: the server must receive the envelope, the
@@ -77,4 +91,64 @@ func TestCollectBodyPassthrough(t *testing.T) {
 		t.Fatal("simple greeting blocked")
 	}
 	// Empty input is dropped by the input loop before guards run.
+}
+
+func tripSessionForSend(t *testing.T, conn wsConn) *Session {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := NewSession()
+	sess.Conn = conn
+	sess.TripPriv = priv
+	sess.TripPub = pub
+	sess.Username = "u"
+	sess.Out = io.Discard
+	sess.Term = &fakeTerm{}
+	sess.TabChat = newTabBuffer(100, 100000)
+	return sess
+}
+
+func TestSendMessageTripWriteJSONError(t *testing.T) {
+	conn := &stubConn{writeErr: errors.New("conn closed")}
+	sess := tripSessionForSend(t, conn)
+	sess.TripSeq = 5
+	sess.TmpSeq = 10
+	prev := append([]byte(nil), sess.TripPrev...)
+	sess.PendingReplyTo = 7
+	err := sess.sendMessage("hello", 1, true, 0)
+	if err == nil {
+		t.Fatal("WriteJSON fail must return err")
+	}
+	if sess.TripSeq != 5 {
+		t.Fatalf("TripSeq=%d want rollback to 5", sess.TripSeq)
+	}
+	if sess.TmpSeq != 10 {
+		t.Fatalf("TmpSeq=%d want rollback to 10", sess.TmpSeq)
+	}
+	if string(sess.TripPrev) != string(prev) {
+		t.Fatal("TripPrev not rolled back")
+	}
+	if len(sess.PendingPlaceholders) != 0 {
+		t.Fatalf("placeholder tracked on fail: %+v", sess.PendingPlaceholders)
+	}
+	if sess.PendingReplyTo != 0 {
+		t.Fatal("one-shot reply target not cleared")
+	}
+}
+
+func TestSendMessageTripWriteJSONOK(t *testing.T) {
+	conn := &stubConn{}
+	sess := tripSessionForSend(t, conn)
+	if err := sess.sendMessage("hello", 1, true, 0); err != nil {
+		t.Fatalf("sendMessage: %v", err)
+	}
+	tm, ok := conn.wrote.(TripMessage)
+	if !ok || tm.Text != "hello" || tm.TmpID == 0 {
+		t.Fatalf("wrote %+v", conn.wrote)
+	}
+	if len(sess.PendingPlaceholders) != 1 {
+		t.Fatalf("placeholder not tracked: %+v", sess.PendingPlaceholders)
+	}
 }
