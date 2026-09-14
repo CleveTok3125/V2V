@@ -27,28 +27,29 @@ NOBODY_IDS="$(id -u nobody):$(id -g nobody)"
 sh -n "$ENTRY" || { echo "FAIL: syntax"; exit 1; }
 
 # Sandbox with test doubles: fake su-exec logs the user spec then
-# runs the command; fake server records invocation.
+# runs the command; fake server records invocation. Called directly
+# (never in $()), so exports survive; path comes back in SANDBOX_ROOT.
 sandbox() {
-	ROOT=$(mktemp -d)
-	mkdir -p "$ROOT/app/data" "$ROOT/app/config" "$ROOT/bin"
-	CALL_LOG="$ROOT/calls.log"
+	SANDBOX_ROOT=$(mktemp -d)
+	mkdir -p "$SANDBOX_ROOT/app/data" "$SANDBOX_ROOT/app/config" "$SANDBOX_ROOT/bin"
+	CALL_LOG="$SANDBOX_ROOT/calls.log"
 	touch "$CALL_LOG"
-	cat > "$ROOT/bin/su-exec" <<EOF
+	cat > "$SANDBOX_ROOT/bin/su-exec" <<EOF
 #!/bin/sh
 echo "SU_EXEC_USER=\$1" >> "$CALL_LOG"
 shift
 exec "\$@"
 EOF
-	chmod +x "$ROOT/bin/su-exec"
-	cat > "$ROOT/bin/server" <<EOF
+	chmod +x "$SANDBOX_ROOT/bin/su-exec"
+	cat > "$SANDBOX_ROOT/bin/server" <<EOF
 #!/bin/sh
 echo "SERVER_INVOKED \$*" >> "$CALL_LOG"
 exit 0
 EOF
-	chmod +x "$ROOT/bin/server"
-	export APP_ROOT="$ROOT/app" APP_USER=nobody APP_GROUP="$NOBODY_GROUP" \
-		SU_EXEC_BIN="$ROOT/bin/su-exec" SERVER_BIN="$ROOT/bin/server"
-	echo "$ROOT"
+	chmod +x "$SANDBOX_ROOT/bin/server"
+	export APP_ROOT="$SANDBOX_ROOT/app" CALL_LOG
+	export APP_USER=nobody APP_GROUP="$NOBODY_GROUP" \
+		SU_EXEC_BIN="$SANDBOX_ROOT/bin/su-exec" SERVER_BIN="$SANDBOX_ROOT/bin/server"
 }
 readable_mounts() {
 	echo "x=1" > "$APP_ROOT/.env"
@@ -57,7 +58,7 @@ readable_mounts() {
 }
 
 # T-fresh: empty data dir gets owned, args pass through.
-ROOT=$(sandbox)
+sandbox; ROOT=$SANDBOX_ROOT
 readable_mounts
 out=$(sh "$ENTRY" arg1 arg2 2>&1)
 [ "$(stat -c %u:%g "$APP_ROOT/data")" = "$NOBODY_IDS" ] && ok "fresh: data owned" || bad "fresh: data owner $(stat -c %u:%g "$APP_ROOT/data")"
@@ -66,7 +67,7 @@ grep -q "SU_EXEC_USER=nobody:" "$CALL_LOG" && ok "fresh: drop-priv user" || bad 
 rm -rf "$ROOT"
 
 # T-mismatch: only wrong-owned files change hands.
-ROOT=$(sandbox)
+sandbox; ROOT=$SANDBOX_ROOT
 readable_mounts
 echo root > "$APP_ROOT/data/a.log"
 echo keep > "$APP_ROOT/data/b.log"
@@ -81,7 +82,7 @@ rm -rf "$ROOT"
 # T-blindspot: top dir OK + inner wrong owner takes the fast path by
 # design (pinned trade-off): skips scan, leaves the file, still execs.
 # The server fails closed loudly on its first write to it instead.
-ROOT=$(sandbox)
+sandbox; ROOT=$SANDBOX_ROOT
 readable_mounts
 chown -R nobody:"$NOBODY_GROUP" "$APP_ROOT/data"
 echo root > "$APP_ROOT/data/inner.log"
@@ -92,7 +93,7 @@ grep -q "SERVER_INVOKED" "$CALL_LOG" && ok "blindspot: still execs" || bad "blin
 rm -rf "$ROOT"
 
 # T-prefail-env: missing .env fails closed with the host fix.
-ROOT=$(sandbox)
+sandbox; ROOT=$SANDBOX_ROOT
 echo '{}' > "$APP_ROOT/config/roles.json"
 chmod 644 "$APP_ROOT/config/roles.json"
 if out=$(sh "$ENTRY" 2>&1); then
@@ -103,7 +104,7 @@ fi
 rm -rf "$ROOT"
 
 # T-prefail-roles: same for roles.json.
-ROOT=$(sandbox)
+sandbox; ROOT=$SANDBOX_ROOT
 echo "x=1" > "$APP_ROOT/.env"
 chmod 644 "$APP_ROOT/.env"
 if out=$(sh "$ENTRY" 2>&1); then
