@@ -93,8 +93,12 @@ func extraWarning(extra []string) string {
 // loadTrustFile parses one trust file: one IP or CIDR per line,
 // "#" comments, blank lines skipped. A bare IP becomes a /32 (v4) or
 // /128 (v6) net. The first malformed line fails the file with its
-// line number.
+// line number. World-writable files are refused outright: trust must
+// not rest on content anyone on the host can rewrite.
 func loadTrustFile(path string) (*Set, error) {
+	if fi, err := os.Stat(path); err == nil && fi.Mode().Perm()&0o022 != 0 {
+		return nil, fmt.Errorf("%s: world-writable (perm %o), refusing to trust", path, fi.Mode().Perm())
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

@@ -178,6 +178,22 @@ func TestLoadTrustDir(t *testing.T) {
 	}
 }
 
+func TestLoadTrustDirRefusesWorldWritable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cloudflare.txt")
+	if err := os.WriteFile(path, []byte("173.245.48.0/20\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Chmod, not WriteFile mode: umask would strip 0666 at creation.
+	if err := os.Chmod(path, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := LoadTrustDir(dir, []string{"cloudflare"}, map[string]bool{"cloudflare": true})
+	if err == nil || !strings.Contains(err.Error(), "world-writable") {
+		t.Fatalf("world-writable trust file must fail, got %v", err)
+	}
+}
+
 func TestClip(t *testing.T) {
 	if got := Clip("abcdef", 10); got != "abcdef" {
 		t.Errorf("short Clip = %q", got)
