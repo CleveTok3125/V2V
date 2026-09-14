@@ -85,12 +85,12 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing ticket", http.StatusBadRequest)
 		return
 	}
-	if !enrollBeginCooldowns.Allow(r.RemoteAddr, enrollBeginCooldown) {
+	if !enrollBeginCooldowns.Allow(getClientIP(r), enrollBeginCooldown) {
 		http.Error(w, "too many enroll attempts", http.StatusTooManyRequests)
 		return
 	}
 	s.WebAuthn.PruneExpired()
-	logInfof("🔐 [ENROLL BEGIN] ticket=%s… from=%s", strutil.Short(code), r.RemoteAddr)
+	logInfof("🔐 [ENROLL BEGIN] ticket=%s… from=%s", strutil.Short(code), getClientIP(r))
 
 	challenge, err := randomB64url(32)
 	if err != nil {

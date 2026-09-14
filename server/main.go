@@ -14,17 +14,20 @@ import (
 	_ "time/tzdata"
 
 	"github.com/CleveTok3125/V2V/internal/env"
+	"github.com/CleveTok3125/V2V/internal/trustedproxy"
 	"github.com/joho/godotenv"
 )
 
-func IsSecuredConnect(w http.ResponseWriter, r *http.Request, clientIP string) bool {
+func IsSecuredConnect(w http.ResponseWriter, r *http.Request, clientIP string, headerTrusted bool) bool {
 	if !Cfg.Static.RequireTLS {
 		logWarnf("⚠️ Server đang không buộc sử dụng kết nối mã hoá")
 		return true
 	}
 
 	isTLS := r.TLS != nil
-	isProxyTLS := strings.ToLower(r.Header.Get("X-Forwarded-Proto")) == "https"
+	// X-Forwarded-Proto is only meaningful behind a trusted proxy:
+	// anyone can send that header directly.
+	isProxyTLS := headerTrusted && strings.ToLower(r.Header.Get("X-Forwarded-Proto")) == "https"
 	isLocalhost := clientIP == "127.0.0.1" || clientIP == "::1"
 
 	if isTLS || isProxyTLS || isLocalhost {
@@ -37,9 +40,18 @@ func IsSecuredConnect(w http.ResponseWriter, r *http.Request, clientIP string) b
 }
 
 func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
-	clientIP := getClientIP(r)
+	outcome := resolveClientIP(r)
+	if outcome.Reject {
+		logWarnf("⛔ [PROXY] Reject %s (%s): %s", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Reason, proxyHeadersForLog(r))
+		http.Error(w, "Untrusted proxy.", http.StatusForbidden)
+		return
+	}
+	clientIP := outcome.ClientIP
+	if outcome.Provider == "none" || outcome.Provider == "direct" {
+		logWarnf("⚠️ [PROXY] Direct connection from %s via %s (no proxy headers trusted)", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Provider)
+	}
 
-	if !IsSecuredConnect(w, r, clientIP) {
+	if !IsSecuredConnect(w, r, clientIP, outcome.Trusted) {
 		return
 	}
 
@@ -53,7 +65,7 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 	defer s.releaseIPConnection(clientIP)
 
-	logInfof("🔌 New request | Client IP: %s | Proxy IP: %s | Upgrade: %s\n", clientIP, r.RemoteAddr, r.Header.Get("Upgrade"))
+	logInfof("🔌 New request | Client IP: %s | Proxy IP: %s | Via: %s trusted=%v | Upgrade: %s | %s\n", clientIP, r.RemoteAddr, outcome.Provider, outcome.Trusted, r.Header.Get("Upgrade"), proxyHeadersForLog(r))
 
 	conn, err := s.Upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -148,10 +160,18 @@ func loadStaticConfig() (StaticConfig, error) {
 		MaxLogSizeMB:         loader.Int("MAX_LOG_SIZE_MB"),
 		HistoryFilePath:      getEnvOptional("HISTORY_FILE_PATH", dataPath("history.jsonl")),
 		MaxHistoryFileSizeMB: loader.Int("MAX_HISTORY_FILE_SIZE_MB"),
+		TrustedProxyDir:      getEnvOptional(env.KeyTrustedProxyDir, DefaultTrustedProxyDir),
 	}
 	if err := loader.Err(); err != nil {
 		return StaticConfig{}, err
 	}
+	// PROXY_PROVIDER is required with no implicit default: the
+	// operator must state the proxy chain explicitly (fail-closed).
+	chain, err := trustedproxy.ParseChain(loader.Smart(env.KeyProxyProvider))
+	if err != nil {
+		return StaticConfig{}, err
+	}
+	cfg.ProxyChain = chain
 
 	return cfg, nil
 }
@@ -270,6 +290,12 @@ func main() {
 		log.Fatalf("❌ CRITICAL ERROR: %v", err)
 	}
 	Cfg.Static = staticCfg
+
+	proxyChain, err := initProxyChain(Cfg.Static.TrustedProxyDir, Cfg.Static.ProxyChain)
+	if err != nil {
+		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+	}
+	ProxyChain = proxyChain
 
 	initialDynamic, err := loadDynamicConfig()
 	if err != nil {

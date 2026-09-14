@@ -18,17 +18,19 @@ import (
 // Key names, including flag-bound-only variables that have no
 // accessor because kong resolves them.
 const (
-	KeyTripcode       = "V2V_TRIPCODE"
-	KeyPassphrase     = "V2V_PASSPHRASE"
-	KeyProxy          = "V2V_PROXY"
-	KeyWebauthnRPID   = "WEBAUTHN_RPID"
-	KeyWebauthnOrigin = "WEBAUTHN_ORIGIN"
-	KeyWebauthnStore  = "WEBAUTHN_STORE"
-	KeyAllowedOrigins = "ALLOWED_ORIGINS"
-	KeyConfigDir      = "V2V_CONFIG_DIR"
-	KeyCacheDir       = "V2V_CACHE_DIR"
-	KeyDataDir        = "DATA_DIR"
-	KeyNoTTY          = "V2V_NO_TTY"
+	KeyTripcode        = "V2V_TRIPCODE"
+	KeyPassphrase      = "V2V_PASSPHRASE"
+	KeyProxy           = "V2V_PROXY"
+	KeyWebauthnRPID    = "WEBAUTHN_RPID"
+	KeyWebauthnOrigin  = "WEBAUTHN_ORIGIN"
+	KeyWebauthnStore   = "WEBAUTHN_STORE"
+	KeyAllowedOrigins  = "ALLOWED_ORIGINS"
+	KeyConfigDir       = "V2V_CONFIG_DIR"
+	KeyCacheDir        = "V2V_CACHE_DIR"
+	KeyDataDir         = "DATA_DIR"
+	KeyNoTTY           = "V2V_NO_TTY"
+	KeyProxyProvider   = "PROXY_PROVIDER"
+	KeyTrustedProxyDir = "TRUSTED_PROXY_DIR"
 )
 
 // Tripcode feeds tripcode entry without prompting (CI).
@@ -69,3 +71,12 @@ func NoTTY() bool {
 	}
 	return os.Getenv("CI") == "true"
 }
+
+// ProxyProvider is the explicit reverse-proxy chain (e.g.
+// "cloudflare,direct"). Empty is fatal at boot: the operator must
+// state it, there is no implicit default.
+func ProxyProvider() string { return os.Getenv(KeyProxyProvider) }
+
+// TrustedProxyDir holds per-module "<name>.txt" trust files. Empty
+// means the caller default (./config/trustedproxy).
+func TrustedProxyDir() string { return os.Getenv(KeyTrustedProxyDir) }
