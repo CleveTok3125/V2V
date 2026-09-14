@@ -44,9 +44,15 @@ if [ "$cur" = "$want" ]; then
 	echo "entrypoint: $DATA_DIR ownership OK ($cur), skipping scan"
 else
 	echo "entrypoint: fixing $DATA_DIR ownership ($cur -> $want)"
-	find "$DATA_DIR" -xdev \
+	# A failed chown must say why, not die silent inside set -e and
+	# spam restarts: usually a missing CAP_CHOWN (check cap_add),
+	# rootless docker, or a filesystem that forbids chown.
+	if ! find "$DATA_DIR" -xdev \
 		\( ! -user "$APP_USER" -o ! -group "$APP_GROUP" \) \
-		-exec chown "$APP_USER:$APP_GROUP" {} +
+		-exec chown "$APP_USER:$APP_GROUP" {} +; then
+		echo "FATAL: cannot chown $DATA_DIR (need CAP_CHOWN: check cap_add in compose; rootless docker maps uids differently). Host-side fix: chown -R $want ./data"
+		exit 1
+	fi
 fi
 
 # Read-only mounts cannot be fixed from here: fail closed with the
