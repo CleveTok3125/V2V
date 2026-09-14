@@ -1,0 +1,10 @@
+# Operator-owned addresses treated as plain direct clients.
+#
+# Entries here bypass the 403 strict-mode reject and always resolve
+# to RemoteAddr. They can NEVER assert proxy headers, so a misplaced
+# address is harmless (unlike the same mistake in cloudflare.txt).
+# One IP or CIDR per line, "#" comments, blank lines skipped.
+#
+# Examples (uncomment and adapt):
+# 203.0.113.7/32
+# 10.0.0.0/8

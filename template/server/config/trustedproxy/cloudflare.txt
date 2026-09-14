@@ -1,0 +1,13 @@
+# Trusted Cloudflare edge ranges for header trust.
+#
+# WARNING: every entry here may assert CF-Connecting-IP, i.e. claim ANY
+# client IP. List ONLY Cloudflare edge ranges. NEVER add office IPs,
+# health-check IPs or any non-CF address here; those belong in
+# direct.txt (direct access, no header power).
+#
+# This file ships EMPTY on purpose: ranges are operator-loaded, never
+# embedded. Fetch the current published ranges with:
+#   curl -s https://www.cloudflare.com/ips-v4 >> cloudflare.txt
+#   curl -s https://www.cloudflare.com/ips-v6 >> cloudflare.txt
+# A chain with cloudflare but an empty file fails the boot on purpose.
+# One IP or CIDR per line, "#" comments, blank lines skipped.
