@@ -129,5 +129,18 @@ else
 fi
 rm -rf "$ROOT"
 
+# T-writeprobe: data dir not writable by the runtime user fails
+# closed with the host fix (instead of a bare permission denied
+# on the server's first write).
+sandbox; ROOT=$SANDBOX_ROOT
+readable_mounts
+chmod 555 "$APP_ROOT/data"
+if run_entry; then
+	bad "writeprobe: must exit nonzero"
+else
+	echo "$RUN_OUT" | grep -q "not writable" && ok "writeprobe: actionable msg" || bad "writeprobe: msg"
+fi
+rm -rf "$ROOT"
+
 echo "pass=$pass fail=$fail"
 [ "$fail" = "0" ]

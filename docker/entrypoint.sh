@@ -66,4 +66,11 @@ fi
 	exit 1
 }
 
+# Writability probe: without it the server dies on its first write
+# with a bare "permission denied". Fail here instead, with the fix.
+if ! "$SU_EXEC_BIN" "$APP_USER:$APP_GROUP" sh -c 'touch "$1/.wtest" && rm "$1/.wtest"' _ "$DATA_DIR"; then
+	echo "FATAL: $DATA_DIR not writable by $APP_USER; on the host run: chown -R $want ./data"
+	exit 1
+fi
+
 exec "$SU_EXEC_BIN" "$APP_USER:$APP_GROUP" "$SERVER_BIN" "$@"
