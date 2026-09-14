@@ -60,7 +60,7 @@ func NewHistoryStore(path string, maxSizeMB int) (*HistoryStore, error) {
 }
 
 func (h *HistoryStore) open() error {
-	if err := os.MkdirAll(filepath.Dir(h.Filename), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(h.Filename), 0o700); err != nil {
 		return err
 	}
 
@@ -71,7 +71,10 @@ func (h *HistoryStore) open() error {
 		return err
 	}
 
-	file, err := os.OpenFile(h.Filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	// Chat plaintext stays owner-only. Existing files keep whatever
+	// mode they already have (OpenFile never rechmods): deployments
+	// predating this must chmod once, see the commit message.
+	file, err := os.OpenFile(h.Filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}

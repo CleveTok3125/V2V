@@ -21,6 +21,50 @@ func TestRotatingLogger_NilFileNoPanic(t *testing.T) {
 	}
 }
 
+// History and log files hold plaintext chat: they must land
+// owner-only, and their parent dir must not be traversable.
+func TestHistoryStore_Permissions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sub", "history.jsonl")
+	s, err := NewHistoryStore(path, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("history perm = %o, want 600", fi.Mode().Perm())
+	}
+	di, err := os.Stat(filepath.Join(dir, "sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if di.Mode().Perm() != 0o700 {
+		t.Fatalf("history dir perm = %o, want 700", di.Mode().Perm())
+	}
+}
+
+func TestRotatingLogger_Permissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v2v.log")
+	rl := &RotatingLogger{Filename: path, MaxSize: 1024 * 1024}
+	if err := rl.open(); err != nil {
+		t.Fatal(err)
+	}
+	if rl.file != nil {
+		defer rl.file.Close()
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("log perm = %o, want 600", fi.Mode().Perm())
+	}
+}
+
 // Enqueue-after-close and double close must not panic.
 func TestHistoryStore_CloseThenEnqueueNoPanic(t *testing.T) {
 	s, err := NewHistoryStore(filepath.Join(t.TempDir(), "history.jsonl"), 1)
