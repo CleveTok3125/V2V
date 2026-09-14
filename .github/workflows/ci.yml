@@ -22,9 +22,9 @@ jobs:
       - name: Test
         run: make test
       - name: Entrypoint tests
-        # Shell tests for docker/entrypoint.sh (need root for chown;
-        # runners have passwordless sudo, local non-root runs skip).
-        run: sudo sh docker/entrypoint_test.sh
+        # Same target local check runs (self-skips without root);
+        # sudo here for the full matrix on runners.
+        run: sudo make test-sh
       - name: WASM build
         # Build only: several server-only dependency trees are not
         # js-compatible, so vet ./... cannot run under GOOS=js.
