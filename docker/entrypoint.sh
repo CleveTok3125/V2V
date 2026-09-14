@@ -15,7 +15,29 @@ SU_EXEC_BIN="${SU_EXEC_BIN:-su-exec}"
 SERVER_BIN="${SERVER_BIN:-$APP_ROOT/server.bin}"
 DATA_DIR="$APP_ROOT/data"
 
-want="$(id -u "$APP_USER"):$(id -g "$APP_GROUP")"
+# uid_of resolves a username (or passes a numeric uid through).
+# gid_of resolves a group name via /etc/group (or passes a numeric
+# gid through). Note: `id -g` takes a USERNAME, not a group name, so
+# it must never be used for groups. Unresolvable input fails: the
+# caller turns it into a FATAL with the offending value.
+uid_of() {
+	case $1 in '' | *[!0-9]*) ;;
+		*) printf '%s' "$1"; return 0 ;;
+	esac
+	id -u "$1" 2>/dev/null || return 1
+}
+gid_of() {
+	case $1 in '' | *[!0-9]*) ;;
+		*) printf '%s' "$1"; return 0 ;;
+	esac
+	gid=$(awk -F: -v g="$1" '$1==g{print $3; exit}' /etc/group 2>/dev/null)
+	[ -n "$gid" ] && printf '%s' "$gid" || return 1
+}
+
+want="$(uid_of "$APP_USER"):$(gid_of "$APP_GROUP")" || {
+	echo "FATAL: unknown user/group $APP_USER/$APP_GROUP"
+	exit 1
+}
 mkdir -p "$DATA_DIR"
 cur="$(stat -c %u:%g "$DATA_DIR")"
 if [ "$cur" = "$want" ]; then
