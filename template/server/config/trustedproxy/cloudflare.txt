@@ -10,4 +10,12 @@
 #   curl -s https://www.cloudflare.com/ips-v4 >> cloudflare.txt
 #   curl -s https://www.cloudflare.com/ips-v6 >> cloudflare.txt
 # A chain with cloudflare but an empty file fails the boot on purpose.
+#
+# BEHIND DOCKER NAT / CLOUDFLARE TUNNEL: the container never sees the
+# CF edge IP; RemoteAddr is the tunnel/NAT hop (e.g. a 172.18.0.0/16
+# address). Add that hop range here so the forwarded CF-Connecting-IP
+# is trusted. This is sound ONLY when the tunnel is the sole ingress:
+# either drop the compose `ports:` block entirely or bind it to
+# loopback ("127.0.0.1:8080:8080"), otherwise anyone reaching the host
+# port directly arrives with the same hop IP and can spoof headers.
 # One IP or CIDR per line, "#" comments, blank lines skipped.
