@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"encoding/json"
@@ -82,22 +83,11 @@ func readPasteJSON() ([]byte, error) {
 		}
 		return []byte(pasted), nil
 	}
-	// Non-interactive: read all stdin
-	data, err := os.ReadFile("/dev/stdin")
+	// Non-interactive: read all stdin (portable, honors a swapped
+	// os.Stdin in tests, unlike /dev/stdin).
+	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		// Fallback to os.Stdin read
-		var buf strings.Builder
-		tmp := make([]byte, 4096)
-		for {
-			n, rerr := os.Stdin.Read(tmp)
-			if n > 0 {
-				buf.Write(tmp[:n])
-			}
-			if rerr != nil {
-				break
-			}
-		}
-		data = []byte(buf.String())
+		return nil, err
 	}
 	if len(data) == 0 {
 		return nil, errors.New("không có dữ liệu paste")
