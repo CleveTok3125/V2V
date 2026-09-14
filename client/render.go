@@ -20,6 +20,7 @@ import (
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/markup"
 	"github.com/CleveTok3125/V2V/internal/trip"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func renderChatText(text string) string {
@@ -64,16 +65,10 @@ func parseTripBadgeLine(line string) (verifyJob, bool) {
 	var badge string
 	if secondOsc != -1 {
 		badge = strings.TrimSpace(line[firstTermEnd : firstTermEnd+secondOsc])
-		// Strip ANSI color if present (should be plain, but handle)
-		// Badge is like "◆ ab12" possibly with color codes - strip them for hash
-		// For now, badge as visible text without ANSI
+		// Badge is like "◆ ab12" possibly with color codes: strip all
+		// escapes so only the visible text feeds the hash lookup.
 		if idx2 := strings.Index(badge, "◆"); idx2 != -1 {
-			badge = badge[idx2:]
-			// Remove any ANSI inside badge (e.g., color prefix)
-			if strings.Contains(badge, "\x1b[") {
-				// Strip SGR codes for badge extraction
-				badge = strings.TrimSpace(filter.SanitizeForDisplay(badge))
-			}
+			badge = strings.TrimSpace(ansi.Strip(badge[idx2:]))
 		}
 	} else {
 		// Fallback: find ◆
