@@ -334,6 +334,10 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - `--ask-proxy` runs an interactive wizard (huh scheme select, host, port, optional user, hidden password) that overrides all static config.
 - HTTP(S) proxies use a dedicated gorilla `Dialer`; SOCKS5 handshakes via `golang.org/x/net/proxy` (RFC 1928/1929) with the target always sent as a domain name so no local DNS leaks, plus TLS for `wss`.
 - The proxy password is the proxy's secret: no meter, no weak gate. It lives as `[]byte`, wipes after dial, and logs show `user:***@host`; prompt/URL strings at the stdlib boundary await GC as documented for all secrets.
+- **File exposure:** secrets and chat land owner-only — `key.json`, `roles.json`, `webauthn.json`, `server_identity.json` via `atomicWriteFile 0600` (dirs `0700`); `history.jsonl` and `app.log` via `0600` (`history` dir `0700`). `OpenFile` applies the mode only at creation, so pre-existing files keep theirs: re-harden once on the host with `chmod 700 data` and `chmod 600 data/history.jsonl* data/app.log* data/server_identity.json data/webauthn.json`.
+- Missing `config/roles.json` fails the boot (no silent default-permission fallback); a corrupt file fails too, while hot-reload keeps the old registry with a warning.
+- Trust files refuse to load when world-writable; templates ship no secrets (placeholders only).
+- **Container:** the image builds with live `data/`/`config/`/`.env` excluded (`.dockerignore`), runs the server as a non-root `app` user via `docker/entrypoint.sh` (root prepares `/app/data` idempotently, preflights the read-only mounts with actionable errors, then `exec su-exec`), drops all capabilities, blocks privilege escalation and mounts the rootfs read-only (`/tmp` tmpfs). No `user:` is set on purpose — the entrypoint adapts, rollback is commenting out `read_only`.
 
 ## Roadmap
 
