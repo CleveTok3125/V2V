@@ -24,6 +24,7 @@ require (
 	github.com/yuin/goldmark v1.8.6
 	github.com/yuin/goldmark-highlighting/v2 v2.0.0-20230729083705-37449abec8cc
 	golang.org/x/crypto v0.57.0
+	golang.org/x/net v0.59.0
 )
 
 require (
@@ -57,4 +58,5 @@ require (
 	github.com/xo/terminfo v1.2.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
+	mvdan.cc/xurls v1.1.0 // indirect
 )

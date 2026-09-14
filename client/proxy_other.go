@@ -23,6 +23,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/gorilla/websocket"
+	"golang.org/x/net/proxy"
 
 	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/identity"
@@ -36,50 +37,45 @@ import (
 const socks5DialTimeout = 45 * time.Second
 
 // socks5NetDialer returns a gorilla NetDialContext that connects to
-// the proxy and handshakes to host:port, leaving a bare stream.
-// gorilla applies TLS itself when the URL asks for wss.
+// the proxy and handshakes to host:port via x/net/proxy, leaving a
+// bare stream. gorilla applies TLS itself when the URL asks for wss.
+// The target hostname travels unresolved (socks5h semantics): the
+// proxy resolves it, nothing is looked up locally.
 func socks5NetDialer(p *proxyConfig) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, portStr, err := net.SplitHostPort(addr)
-		if err != nil {
+		if err != nil || host == "" {
 			return nil, fmt.Errorf("địa chỉ server không hợp lệ: %q", addr)
 		}
 		targetPort, err := strconv.Atoi(portStr)
 		if err != nil || targetPort < 1 || targetPort > 65535 {
 			return nil, fmt.Errorf("port server không hợp lệ: %q", portStr)
 		}
-		// Honor cancellation: DialContext aborts the TCP setup when the
-		// caller gives up instead of pinning a socket for the full 45s.
-		dialer := &net.Dialer{Timeout: socks5DialTimeout}
-		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(p.Host, strconv.Itoa(p.Port)))
+		// Handshake with per-attempt copies: the shared config must keep
+		// its secret for ws->wss retry, so only these copies cross into
+		// the dialer. Auth rides only when a username is set, matching
+		// the old methods offer ([0x02] iff user).
+		var auth *proxy.Auth
+		if p.User != "" {
+			userCopy := []byte(p.User)
+			passCopy := append([]byte(nil), p.Pass...)
+			defer identity.ZeroBytes(userCopy)
+			defer identity.ZeroBytes(passCopy)
+			auth = &proxy.Auth{User: string(userCopy), Password: string(passCopy)}
+		}
+		// The forward dialer honors ctx (ContextDialer), so the TCP
+		// setup aborts when the caller gives up instead of pinning a
+		// socket for the full 45s; the timeout below is the backstop.
+		forward := &net.Dialer{Timeout: socks5DialTimeout}
+		socksDialer, err := proxy.SOCKS5("tcp",
+			net.JoinHostPort(p.Host, strconv.Itoa(p.Port)), auth, forward)
 		if err != nil {
 			return nil, fmt.Errorf("không tới được proxy: %w", err)
 		}
-		// Fail closed on any setup error: never leak a half-open socket.
-		failed := true
-		defer func() {
-			if failed {
-				_ = conn.Close()
-			}
-		}()
-		if err := conn.SetDeadline(time.Now().Add(socks5DialTimeout)); err != nil {
-			return nil, err
+		if cd, ok := socksDialer.(proxy.ContextDialer); ok {
+			return cd.DialContext(ctx, "tcp", addr)
 		}
-		// Handshake with per-attempt copies: the shared config must keep
-		// its secret for ws->wss retry, so only these copies wipe here.
-		// The []byte(user) conversion also copies; wipe it too.
-		userCopy := []byte(p.User)
-		passCopy := append([]byte(nil), p.Pass...)
-		defer identity.ZeroBytes(userCopy)
-		defer identity.ZeroBytes(passCopy)
-		if err := socks5Handshake(conn, host, targetPort, userCopy, passCopy); err != nil {
-			return nil, err
-		}
-		if err := conn.SetDeadline(time.Time{}); err != nil {
-			return nil, err
-		}
-		failed = false
-		return conn, nil
+		return socksDialer.Dial("tcp", addr)
 	}
 }
 

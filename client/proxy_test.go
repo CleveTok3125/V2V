@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strconv"
@@ -185,19 +186,46 @@ func fakeSocks5Server(t *testing.T, conn net.Conn, method byte, user, pass strin
 	_, _ = conn.Write([]byte{0x05, reply, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 }
 
-func TestSocks5Handshake(t *testing.T) {
-	client, server := net.Pipe()
+// dialViaFakeProxy runs fakeSocks5Server on a loopback listener and
+// dials target through it with the production x/net-based dialer. It
+// returns the client conn (nil plus the error on failure) and the raw
+// bytes the fake server saw, so tests assert the wire transcript.
+func dialViaFakeProxy(t *testing.T, method byte, user, pass string, reply byte, target, cfgUser string, cfgPass []byte) (net.Conn, []byte, error) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
 	var got []byte
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		fakeSocks5Server(t, server, 0x00, "", "", 0x00, &got)
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		fakeSocks5Server(t, c, method, user, pass, reply, &got)
 	}()
-	if err := socks5Handshake(client, "chat.example.com", 443, nil, nil); err != nil {
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, port), User: cfgUser, Pass: cfgPass}
+	conn, err := socks5NetDialer(p)(context.Background(), "tcp", target)
+	<-done
+	if err != nil {
+		return nil, got, err
+	}
+	return conn, got, nil
+}
+
+func TestSocks5Handshake(t *testing.T) {
+	conn, got, err := dialViaFakeProxy(t, 0x00, "", "", 0x00, "chat.example.com:443", "", nil)
+	if err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
-	_ = client.Close()
-	<-done
+	_ = conn.Close()
 	// Domain target must travel as ATYP 0x03 with the raw hostname:
 	// the proxy resolves it, nothing is looked up locally.
 	found := false
@@ -213,49 +241,24 @@ func TestSocks5Handshake(t *testing.T) {
 }
 
 func TestSocks5HandshakeAuth(t *testing.T) {
-	client, server := net.Pipe()
-	var got []byte
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		fakeSocks5Server(t, server, 0x02, "u", "p", 0x00, &got)
-	}()
-	if err := socks5Handshake(client, "10.0.0.1", 80, []byte("u"), []byte("p")); err != nil {
+	conn, got, err := dialViaFakeProxy(t, 0x02, "u", "p", 0x00, "10.0.0.1:80", "u", []byte("p"))
+	if err != nil {
 		t.Fatalf("auth handshake: %v", err)
 	}
-	_ = client.Close()
-	<-done
+	_ = conn.Close()
 	if len(got) == 0 || got[0] != 0x05 {
 		t.Errorf("client bytes: %x", got)
 	}
 }
 
 func TestSocks5HandshakeRefused(t *testing.T) {
-	client, server := net.Pipe()
-	var got []byte
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		fakeSocks5Server(t, server, 0xFF, "", "", 0x00, &got)
-	}()
-	if err := socks5Handshake(client, "h", 80, nil, nil); err == nil {
+	if _, _, err := dialViaFakeProxy(t, 0xFF, "", "", 0x00, "h:80", "", nil); err == nil {
 		t.Error("method 0xFF must fail")
 	}
-	_ = client.Close()
-	<-done
 
-	client2, server2 := net.Pipe()
-	var got2 []byte
-	done2 := make(chan struct{})
-	go func() {
-		defer close(done2)
-		fakeSocks5Server(t, server2, 0x00, "", "", 0x05, &got2)
-	}()
-	if err := socks5Handshake(client2, "h", 80, nil, nil); err == nil {
+	if _, _, err := dialViaFakeProxy(t, 0x00, "", "", 0x05, "h:80", "", nil); err == nil {
 		t.Error("non-zero reply must fail")
 	}
-	_ = client2.Close()
-	<-done2
 }
 
 func TestValidateProxyScheme(t *testing.T) {
@@ -291,19 +294,10 @@ func TestProxyFieldValidators(t *testing.T) {
 }
 
 func TestSocks5HandshakeAuthFail(t *testing.T) {
-	client, server := net.Pipe()
-	done := make(chan struct{})
-	var got []byte
-	go func() {
-		defer close(done)
-		// Server expects u/p; client offers wrong secret.
-		fakeSocks5Server(t, server, 0x02, "u", "p", 0x00, &got)
-	}()
-	if err := socks5Handshake(client, "h", 80, []byte("u"), []byte("WRONG")); err == nil {
+	// Server expects u/p; client offers wrong secret.
+	if _, _, err := dialViaFakeProxy(t, 0x02, "u", "p", 0x00, "h:80", "u", []byte("WRONG")); err == nil {
 		t.Error("wrong proxy password must fail the handshake")
 	}
-	_ = client.Close()
-	<-done
 }
 
 // TestDialSocks5WS_AuthFail: end-to-end dial against a proxy that
