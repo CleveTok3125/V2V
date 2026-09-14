@@ -19,6 +19,7 @@ import (
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/trip"
 	"github.com/CleveTok3125/V2V/internal/tripcolor"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Chain meta line and echo matching helpers. Pure logic lives here for
@@ -292,11 +293,11 @@ func mentionSGR(c [3]int) (open, close string) {
 	return fmt.Sprintf("\x1b[1;38;2;%d;%d;%dm", c[0], c[1], c[2]), sgrMentionClose
 }
 
-var ansiStripRe = regexp.MustCompile("\x1b\\[[0-9;]*m|\x1b\\]8;;[^\x1b]*\x1b\\\\")
-
-// stripANSIForFind removes SGR/OSC8 sequences for text matching.
+// stripANSIForFind removes SGR/OSC8 sequences for text matching via
+// the x/ansi state machine, which also covers escape shapes outside
+// the two this codebase emits.
 func stripANSIForFind(s string) string {
-	return ansiStripRe.ReplaceAllString(s, "")
+	return ansi.Strip(s)
 }
 
 // parseFindArg parses "/find" arguments: "<height>" or "<height>:<hash>"
