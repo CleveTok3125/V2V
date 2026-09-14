@@ -23,8 +23,8 @@ jobs:
         run: make test
       - name: Entrypoint tests
         # Shell tests for docker/entrypoint.sh (need root for chown;
-        # GitHub runners are root, local non-root runs skip).
-        run: sh docker/entrypoint_test.sh
+        # runners have passwordless sudo, local non-root runs skip).
+        run: sudo sh docker/entrypoint_test.sh
       - name: WASM build
         # Build only: several server-only dependency trees are not
         # js-compatible, so vet ./... cannot run under GOOS=js.
