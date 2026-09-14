@@ -1,4 +1,4 @@
-FROM golang:1.25-alpine AS server-builder
+FROM golang:1.27-alpine AS server-builder
 WORKDIR /build
 # Dependencies are vendored into the repo, so no module downloads (or
 # working DNS) are needed during the image build.
@@ -17,7 +17,7 @@ ENV GIT_HASH=${GIT_HASH}
 RUN --mount=type=cache,target=/tmp/gocache \
   apk add --no-cache make git && make server
 
-FROM golang:1.25-alpine AS web-builder
+FROM golang:1.27-alpine AS web-builder
 WORKDIR /build
 COPY go.mod go.sum ./
 COPY vendor ./vendor
