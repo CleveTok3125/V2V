@@ -1,9 +1,10 @@
-# Build context hygiene: COPY . . must never drag live secrets,
-# state or VCS metadata into builder layers.
+# Build context hygiene: COPY . . must never drag live secrets or
+# state into builder layers. .git stays INCLUDED on purpose: the
+# builders stamp versions via git describe, and tracked history was
+# audited secret-free (.env/data/config were never committed).
 .env
 data/
 config/
-.git/
 .tmp/
 public/
 bin/
