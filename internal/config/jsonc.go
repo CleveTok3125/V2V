@@ -1,59 +1,21 @@
 package config
 
-import "errors"
+import "github.com/tailscale/hujson"
 
-// errUnterminatedComment reports a block comment without a closing */.
-var errUnterminatedComment = errors.New("unterminated block comment")
-
-// StripComments removes // line comments and /* */ block comments that
-// appear outside JSON string literals. Only comments are handled:
-// trailing commas and other JSONC extensions stay invalid on purpose.
-// The returned slice aliases data; no copy is made.
+// StripComments removes // line comments and /* */ block comments,
+// returning standard JSON. Trailing commas are also accepted (standard
+// JSONC behavior). Malformed input errors here instead of reaching
+// encoding/json.
+//
+// A missing final newline is added before parsing: a // comment runs
+// to end of line, so without it the parser would report unexpected EOF
+// on inputs the old scanner (and sealed configs in the wild) accept.
 func StripComments(data []byte) ([]byte, error) {
-	out := make([]byte, 0, len(data))
-	i := 0
-	for i < len(data) {
-		c := data[i]
-		if c == '"' {
-			j := i + 1
-			for j < len(data) {
-				if data[j] == '\\' {
-					j += 2
-					continue
-				}
-				if data[j] == '"' {
-					break
-				}
-				j++
-			}
-			if j >= len(data) {
-				return nil, errors.New("unterminated string")
-			}
-			out = append(out, data[i:j+1]...)
-			i = j + 1
-			continue
-		}
-		if c == '/' && i+1 < len(data) {
-			switch data[i+1] {
-			case '/':
-				for i < len(data) && data[i] != '\n' {
-					i++
-				}
-				continue
-			case '*':
-				j := i + 2
-				for j+1 < len(data) && !(data[j] == '*' && data[j+1] == '/') {
-					j++
-				}
-				if j+1 >= len(data) {
-					return nil, errUnterminatedComment
-				}
-				i = j + 2
-				continue
-			}
-		}
-		out = append(out, c)
-		i++
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		buf := make([]byte, 0, len(data)+1)
+		buf = append(buf, data...)
+		buf = append(buf, '\n')
+		data = buf
 	}
-	return out, nil
+	return hujson.Standardize(data)
 }
