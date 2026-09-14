@@ -21,6 +21,10 @@ if ! id nobody >/dev/null 2>&1; then
 	echo "SKIP: no nobody user"
 	exit 0
 fi
+if ! command -v runuser >/dev/null 2>&1; then
+	echo "SKIP: no runuser for privilege drop"
+	exit 0
+fi
 NOBODY_GROUP=$(id -gn nobody)
 NOBODY_IDS="$(id -u nobody):$(id -g nobody)"
 echo "env: uid=$(id -u):$(id -g) $(uname -sm)"
@@ -37,9 +41,11 @@ sandbox() {
 	touch "$CALL_LOG"
 	cat > "$SANDBOX_ROOT/bin/su-exec" <<EOF
 #!/bin/sh
+# Real privilege drop: probes below must run as the target user,
+# otherwise permission checks pass vacuously under root.
 echo "SU_EXEC_USER=\$1" >> "$CALL_LOG"
-shift
-exec "\$@"
+spec=\$1; shift
+exec runuser -u "\${spec%%:*}" -- "\$@"
 EOF
 	chmod +x "$SANDBOX_ROOT/bin/su-exec"
 	cat > "$SANDBOX_ROOT/bin/server" <<EOF
@@ -48,6 +54,9 @@ echo "SERVER_INVOKED \$*" >> "$CALL_LOG"
 exit 0
 EOF
 	chmod +x "$SANDBOX_ROOT/bin/server"
+	# The fakes run as nobody: traversable tree, writable call log.
+	chmod 755 "$SANDBOX_ROOT" "$SANDBOX_ROOT/app" "$SANDBOX_ROOT/app/data" "$SANDBOX_ROOT/app/config" "$SANDBOX_ROOT/bin"
+	chmod 666 "$CALL_LOG"
 	export APP_ROOT="$SANDBOX_ROOT/app" CALL_LOG
 	export APP_USER=nobody APP_GROUP="$NOBODY_GROUP" \
 		SU_EXEC_BIN="$SANDBOX_ROOT/bin/su-exec" SERVER_BIN="$SANDBOX_ROOT/bin/server"
