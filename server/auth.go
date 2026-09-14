@@ -218,8 +218,6 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 	return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
 }
 
-// To prevent IP spoofing, only accept IPs sent from Cloudflare
-// Change this getClientIP function if you are not using Cloudflare
 // clientHost extracts the lowercase hostname the client connected through.
 func clientHost(r *http.Request) string {
 	host := strings.ToLower(strings.TrimSpace(r.Host))
@@ -251,14 +249,6 @@ func (s *ChatServer) alertConcurrentIdentity(identityPubHex, newClientIP string)
 	default:
 	}
 	logWarnf("⚠️ [IDENTITY CONCURRENT] identity đăng nhập song song từ %s (phiên cũ còn sống)", newClientIP)
-}
-
-func getClientIP(r *http.Request) string {
-	remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
-	if cfIP := r.Header.Get("CF-Connecting-IP"); cfIP != "" {
-		return cfIP
-	}
-	return remoteIP
 }
 
 func (s *ChatServer) LoadRoles() {

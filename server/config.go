@@ -19,6 +19,12 @@ type StaticConfig struct {
 	MaxLogSizeMB         int
 	HistoryFilePath      string
 	MaxHistoryFileSizeMB int
+	// ProxyChain is the explicit reverse-proxy chain (e.g.
+	// ["cloudflare", "direct"]). Parsed from PROXY_PROVIDER at
+	// boot; empty is fatal, there is no implicit default.
+	ProxyChain []string
+	// TrustedProxyDir holds per-module "<name>.txt" trust files.
+	TrustedProxyDir string
 }
 
 type DynamicConfig = config.DynamicConfig

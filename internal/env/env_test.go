@@ -23,6 +23,8 @@ func TestRegistry(t *testing.T) {
 		{"V2V_CONFIG_DIR", KeyConfigDir, nil},
 		{"V2V_CACHE_DIR", KeyCacheDir, nil},
 		{"V2V_NO_TTY", KeyNoTTY, nil},
+		{"PROXY_PROVIDER", KeyProxyProvider, ProxyProvider},
+		{"TRUSTED_PROXY_DIR", KeyTrustedProxyDir, TrustedProxyDir},
 		{"DATA_DIR", KeyDataDir, DataDir},
 	}
 	for _, c := range cases {
