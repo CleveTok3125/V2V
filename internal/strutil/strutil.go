@@ -10,12 +10,18 @@ func Short(s string) string {
 	return ShortN(s, 12)
 }
 
-// ShortN is Short with an explicit width. Widths <= 0 return s as-is
-// (no truncation requested); short inputs still pass through, so the
-// result never overruns len(s).
+// ShortN is Short with an explicit width. Width counts runes (never
+// bytes), so multibyte input is cut on a rune boundary instead of
+// mid-UTF-8-sequence. Widths <= 0 return s as-is (no truncation
+// requested); short inputs still pass through, so the result never
+// overruns len(s).
 func ShortN(s string, n int) string {
-	if n <= 0 || len(s) <= n {
+	if n <= 0 {
 		return s
 	}
-	return s[:n] + "…"
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
 }

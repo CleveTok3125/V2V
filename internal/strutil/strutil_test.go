@@ -19,3 +19,14 @@ func TestShortN(t *testing.T) {
 		t.Errorf("Short default width = %q", got)
 	}
 }
+
+func TestShortNMultibyte(t *testing.T) {
+	// Truncation counts runes, never splits a UTF-8 sequence: the first
+	// 4 runes of "日本語test" plus an ellipsis.
+	if got := ShortN("日本語test", 4); got != "日本語t…" {
+		t.Errorf("ShortN multibyte = %q", got)
+	}
+	if got := Short("日本語テストですよ長い文です"); got != "日本語テストですよ長い文…" {
+		t.Errorf("Short multibyte = %q", got)
+	}
+}
