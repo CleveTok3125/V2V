@@ -22,5 +22,17 @@ services:
       - ./.env:/app/.env:ro
       - ./config:/app/config:ro
       - ./data:/app/data
+    # Least privilege: drop all capabilities, block privilege
+    # escalation, mount the rootfs read-only (the server only writes
+    # /app/data and stdout). No `user:` on purpose: the entrypoint
+    # adapts /app/data ownership itself, so ops fills in nothing.
+    # Rollback if a runtime proves picky: comment out read_only.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     environment:
       - TZ=${TIMEZONE:-Asia/Ho_Chi_Minh}

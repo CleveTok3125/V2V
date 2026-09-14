@@ -1,0 +1,11 @@
+# Build context hygiene: COPY . . must never drag live secrets,
+# state or VCS metadata into builder layers.
+.env
+data/
+config/
+.git/
+.tmp/
+public/
+bin/
+secrets
+*.log

@@ -29,8 +29,13 @@ RUN --mount=type=cache,target=/tmp/gocache \
 
 FROM alpine:latest
 WORKDIR /app
-RUN apk --no-cache add tzdata ca-certificates
+RUN apk --no-cache add tzdata ca-certificates su-exec && \
+    adduser -D -H -s /sbin/nologin app
 COPY --from=server-builder /build/public/server.bin ./server.bin
 COPY --from=web-builder /build/webterm ./webterm
-RUN touch .env roles.json
+COPY docker/entrypoint.sh ./entrypoint.sh
+# No USER directive on purpose: the entrypoint starts as root to
+# prepare /app/data, then drops to app via su-exec. The server
+# process itself is never root.
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["./server.bin"]
