@@ -345,3 +345,22 @@ func TestEnrollWritesV2Store(t *testing.T) {
 		}
 	})
 }
+
+// TestReadPasteJSONPiped pins stdin paste delivery: piped JSON arrives
+// intact and empty stdin errors instead of returning empty bytes.
+func TestReadPasteJSONPiped(t *testing.T) {
+	t.Setenv("V2V_NO_TTY", "1")
+	withPipedStdin(t, "{\"public_key\":\"ff00\"}")
+	got, err := readPasteJSON()
+	if err != nil || string(got) != "{\"public_key\":\"ff00\"}" {
+		t.Errorf("readPasteJSON = %q, %v", got, err)
+	}
+}
+
+func TestReadPasteJSONEmptyErrors(t *testing.T) {
+	t.Setenv("V2V_NO_TTY", "1")
+	withPipedStdin(t, "")
+	if _, err := readPasteJSON(); err == nil {
+		t.Error("empty stdin must error, not return empty JSON")
+	}
+}
