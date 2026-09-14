@@ -268,7 +268,11 @@ func (s *ChatServer) WatchRolesFile() {
 						lastModTime = info.ModTime()
 						logInfof("🔄 [HOT-RELOAD] Phát hiện thay đổi trong %s, đang nạp lại roles...", p)
 
-						s.LoadRoles()
+						// Runtime failures keep the old registry: only
+						// the boot path below is fatal.
+						if err := s.LoadRoles(); err != nil {
+							logErrorf("❌ [HOT-RELOAD LỖI] %v. Đang giữ nguyên Roles cũ!", err)
+						}
 					}
 					break
 				}
@@ -317,7 +321,11 @@ func main() {
 		log.Fatalf("❌ CRITICAL ERROR: %v", err)
 	}
 
-	chatApp.LoadRoles()
+	// Booting without roles would silently grant default permissions
+	// to everyone: fail closed instead.
+	if err := chatApp.LoadRoles(); err != nil {
+		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+	}
 	chatApp.WatchEnvFile()
 	chatApp.WatchRolesFile()
 	chatApp.StartCleanupTasks()

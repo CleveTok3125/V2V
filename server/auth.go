@@ -251,14 +251,13 @@ func (s *ChatServer) alertConcurrentIdentity(identityPubHex, newClientIP string)
 	logWarnf("⚠️ [IDENTITY CONCURRENT] identity đăng nhập song song từ %s (phiên cũ còn sống)", newClientIP)
 }
 
-func (s *ChatServer) LoadRoles() {
+func (s *ChatServer) LoadRoles() error {
 	for _, p := range RolesFilePaths {
 		data, err := os.ReadFile(p)
 		if err == nil {
 			var tempRegistry map[string]RoleDefinition
 			if err := json.Unmarshal(data, &tempRegistry); err != nil {
-				logErrorf("❌ [HOT-RELOAD LỖI] Cú pháp file %s không hợp lệ: %v. Đang giữ nguyên Roles cũ!", p, err)
-				return
+				return fmt.Errorf("cú pháp file %s không hợp lệ: %w", p, err)
 			}
 
 			s.RoleRegistryMu.Lock()
@@ -266,10 +265,10 @@ func (s *ChatServer) LoadRoles() {
 			s.RoleRegistryMu.Unlock()
 
 			logInfof("✅ Đã nạp cấu hình quyền hạn (Roles) từ: %s", p)
-			return
+			return nil
 		}
 	}
-	logInfo("ℹ️ Không tìm thấy roles.json (Sẽ hoạt động với quyền User mặc định)")
+	return fmt.Errorf("không tìm thấy roles.json trong %v", RolesFilePaths)
 }
 
 func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string) bool {
