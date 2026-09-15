@@ -29,6 +29,7 @@ const (
 	KeyCacheDir        = "V2V_CACHE_DIR"
 	KeyDataDir         = "DATA_DIR"
 	KeyNoTTY           = "V2V_NO_TTY"
+	KeyCI              = "CI"
 	KeyProxyProvider   = "PROXY_PROVIDER"
 	KeyTrustedProxyDir = "TRUSTED_PROXY_DIR"
 )
@@ -69,7 +70,7 @@ func NoTTY() bool {
 	case "1", "true", "yes":
 		return true
 	}
-	return os.Getenv("CI") == "true"
+	return os.Getenv(KeyCI) == "true"
 }
 
 // ProxyProvider is the explicit reverse-proxy chain (e.g.

@@ -16,6 +16,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 - [Tripcode](#tripcode)
 - [Storage & Persistence](#storage--persistence)
 - [Security Model](#security-model)
+- [Error Handling](#error-handling)
 - [Roadmap](#roadmap)
 
 ## Project Structure
@@ -339,6 +340,12 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - Trust files refuse to load when world-writable; templates ship no secrets (placeholders only).
 - **Container:** the image builds with live `data/`/`config/`/`.env` excluded (`.dockerignore`), runs the server as a non-root `app` user via `docker/entrypoint.sh` (root prepares `/app/data` idempotently, preflights the read-only mounts with actionable errors, then `exec su-exec`), drops all capabilities except `CHOWN`/`SETUID`/`SETGID` (needed by that root phase), blocks privilege escalation and mounts the rootfs read-only (`/tmp` tmpfs). No `user:` is set on purpose — the entrypoint adapts, rollback is commenting out `read_only`.
 
+## Error Handling
+
+- Return paths wrap with `%w` so callers can `errors.Is`/`errors.As`: sentinel auth errors (`server/auth_errors.go`, byte-identical legacy text), `config.ErrEncrypted`, env parse errors up to the boot fatal.
+- Terminal sinks use `%v`: `logInfof`/`logWarnf`/`logErrorf` and test failures never unwrap further, so `%w` there would only mislead.
+- `log.Fatal` stays reserved for process death at boot (`server/main.go`); everywhere else degrades or returns the error.
+
 ## Roadmap
 
 Planned work grouped by dependency, in recommended order. Each item stays self-contained: it can land without the others, but the order avoids rework.
@@ -347,7 +354,7 @@ Planned work grouped by dependency, in recommended order. Each item stays self-c
 
 - **Session surgery** — extract main-loop session state (`term/out/displayMu/tabs/chain/verify`) and split `ChatServer` fields (`chain.Service`/`history.Store`/`hub`); the client tip-state mutex depends on this refactor. — *NOT DONE*
 - **Dependency arrows** — `markup` is the sole facade (`Style` alias, `DefaultStyle`, `NeedsContinuation`, `Linkify` passthroughs): `client` no longer imports `codebg`/`linkify` directly; `strength` owns its report type and `guard` takes a plain limits struct are done. — *DONE*
-- **Env/log/error unification** — typed getenv helper (`internal/env/env.go:20`) and leveled logging (`server/loglevel.go:10`) are done; document the `%w` wrapping rule (`server/auth_errors.go:7`) in one place. — *PARTIAL*
+- **Env/log/error unification** — typed getenv helper (`internal/env/env.go:20`) and leveled logging (`server/loglevel.go:10`) are done; the `%w` rule lives in [Error Handling](#error-handling). — *DONE*
 
 ### Phase 1 — Evidence
 

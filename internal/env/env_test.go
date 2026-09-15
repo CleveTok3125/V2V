@@ -23,6 +23,7 @@ func TestRegistry(t *testing.T) {
 		{"V2V_CONFIG_DIR", KeyConfigDir, nil},
 		{"V2V_CACHE_DIR", KeyCacheDir, nil},
 		{"V2V_NO_TTY", KeyNoTTY, nil},
+		{"CI", KeyCI, nil},
 		{"PROXY_PROVIDER", KeyProxyProvider, ProxyProvider},
 		{"TRUSTED_PROXY_DIR", KeyTrustedProxyDir, TrustedProxyDir},
 		{"DATA_DIR", KeyDataDir, DataDir},
@@ -53,20 +54,20 @@ func TestRegistry(t *testing.T) {
 func TestNoTTY(t *testing.T) {
 	for _, v := range []string{"1", "true", "TRUE", "yes", " Yes "} {
 		t.Setenv(KeyNoTTY, v)
-		t.Setenv("CI", "")
+		t.Setenv(KeyCI, "")
 		if !NoTTY() {
 			t.Errorf("NoTTY() with %s=%q = false, want true", KeyNoTTY, v)
 		}
 	}
 	for _, v := range []string{"", "0", "no", "false", "maybe"} {
 		t.Setenv(KeyNoTTY, v)
-		t.Setenv("CI", "")
+		t.Setenv(KeyCI, "")
 		if NoTTY() {
 			t.Errorf("NoTTY() with %s=%q = true, want false", KeyNoTTY, v)
 		}
 	}
 	t.Setenv(KeyNoTTY, "")
-	t.Setenv("CI", "true")
+	t.Setenv(KeyCI, "true")
 	if !NoTTY() {
 		t.Error("NoTTY() with CI=true = false, want true")
 	}
