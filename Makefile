@@ -13,7 +13,7 @@ PLATFORMS := windows/amd64 windows/arm64 linux/amd64 linux/arm64 android/arm64 d
 HOST_GOOS ?= $(shell go env GOOS)
 HOST_GOARCH ?= $(shell go env GOARCH)
 
-.PHONY: all server web web-wasm web-compress client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test test-sh clean help
+.PHONY: all server web web-wasm web-compress client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test test-sh test-wasm clean help
 
 all: server web client v2vctl
 
@@ -125,6 +125,13 @@ test:
 test-sh:
 	sh docker/entrypoint_test.sh
 
+# test-wasm runs the js-tagged client tests (wasm terminal emulator,
+# wasm proxy path) under node. Not part of check: it needs node, and
+# CI runs it explicitly.
+test-wasm:
+	@if ! command -v node >/dev/null 2>&1; then echo "SKIP: node required for wasm tests"; exit 0; fi
+	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go test -exec "node $(CURDIR)/scripts/wasm_exec_runner.js" ./client/ -run 'TestWasm' -count=1 -timeout 120s
+
 check: vet test test-sh
 	@echo "check done (vet+test+test-sh)"
 
@@ -146,5 +153,6 @@ help:
 	@echo "  make vet      - go vet"
 	@echo "  make test     - go test"
 	@echo "  make test-sh  - entrypoint shell tests (skip without root)"
+	@echo "  make test-wasm - js-tagged client tests under node (skip without node)"
 	@echo "  make check    - vet+test+test-sh"
 	@echo "  make clean    - remove build artifacts"

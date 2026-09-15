@@ -147,15 +147,16 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 }
 
 func (s *ChatServer) sendWithRetry(conn *websocket.Conn, client *ClientSession, msg []byte, isSystem bool) {
-	// System/date messages get one retry to avoid drift when burst follows
+	// System/date messages get one bounded retry to avoid drift when
+	// burst follows: wait up to 20ms for buffer space instead of
+	// sleeping blindly, so an early drain delivers immediately.
 	select {
 	case client.Send <- msg:
 	default:
 		if isSystem {
-			time.Sleep(20 * time.Millisecond)
 			select {
 			case client.Send <- msg:
-			default:
+			case <-time.After(20 * time.Millisecond):
 			}
 		}
 	}
