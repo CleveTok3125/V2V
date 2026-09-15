@@ -8,10 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/codebg"
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
-	"github.com/CleveTok3125/V2V/internal/linkify"
 	"github.com/CleveTok3125/V2V/internal/markup"
 	"github.com/CleveTok3125/V2V/internal/tripcolor"
 )
@@ -25,7 +23,7 @@ func (s *Session) collectBody(text string) (string, int, bool) {
 	typedLinesCount := 1
 
 	if strings.HasPrefix(text, "```") {
-		if !codebg.NeedsContinuation(text) {
+		if !markup.NeedsContinuation(text) {
 			// Single-line fence (```code```): complete already.
 			typedLinesCount = 1
 		} else {
@@ -106,7 +104,7 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 		}
 	}
 	for i, line := range lines {
-		line = linkify.Linkify(line)
+		line = markup.Linkify(line)
 		if i == 0 {
 			s.emitTab(TabChat, fmt.Sprintf("\x1b[90m| Bạn: %s ⏳\x1b[0m\n", line))
 		} else {

@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/codebg"
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/markup"
 	"github.com/CleveTok3125/V2V/internal/trip"
@@ -24,10 +23,10 @@ import (
 )
 
 func renderChatText(text string) string {
-	st := codebg.DefaultStyle()
+	st := markup.DefaultStyle()
 	if ClientCfg != nil {
 		cs := ClientCfg.UI.CodeStyle
-		st = codebg.Style{
+		st = markup.Style{
 			Background: cs.Background,
 			Keyword:    cs.Keyword,
 			String:     cs.String,

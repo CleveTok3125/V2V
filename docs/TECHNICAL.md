@@ -346,7 +346,7 @@ Planned work grouped by dependency, in recommended order. Each item stays self-c
 ### Phase 0 — Foundation
 
 - **Session surgery** — extract main-loop session state (`term/out/displayMu/tabs/chain/verify`) and split `ChatServer` fields (`chain.Service`/`history.Store`/`hub`); the client tip-state mutex depends on this refactor. — *NOT DONE*
-- **Dependency arrows** — use the `markup` facade instead of importing `codebg`/`linkify` directly (`client/render.go:19`, `client/send.go:11` still import them); `strength` owns its report type and `guard` takes a plain limits struct are done. — *PARTIAL*
+- **Dependency arrows** — `markup` is the sole facade (`Style` alias, `DefaultStyle`, `NeedsContinuation`, `Linkify` passthroughs): `client` no longer imports `codebg`/`linkify` directly; `strength` owns its report type and `guard` takes a plain limits struct are done. — *DONE*
 - **Env/log/error unification** — typed getenv helper (`internal/env/env.go:20`) and leveled logging (`server/loglevel.go:10`) are done; document the `%w` wrapping rule (`server/auth_errors.go:7`) in one place. — *PARTIAL*
 
 ### Phase 1 — Evidence
