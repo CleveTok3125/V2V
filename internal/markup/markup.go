@@ -40,6 +40,27 @@ const (
 	sgrQuoteOff = "\x1b[39m"
 )
 
+// Style is the code-block palette. Aliased (not wrapped) so callers
+// configure palettes through markup alone without importing codebg.
+type Style = codebg.Style
+
+// DefaultStyle returns the compiled-in palette.
+func DefaultStyle() Style {
+	return codebg.DefaultStyle()
+}
+
+// NeedsContinuation reports whether a first fence line needs more
+// input lines before the block is complete.
+func NeedsContinuation(firstLine string) bool {
+	return codebg.NeedsContinuation(firstLine)
+}
+
+// Linkify wraps bare http(s) URLs in OSC8 hyperlinks. Displayed
+// characters are unchanged, keeping cell arithmetic intact.
+func Linkify(text string) string {
+	return linkify.Linkify(text)
+}
+
 // Span renders full chat text: code via codebg with syntax highlighting,
 // plus trio/link/quote styling. Callers sanitize first, as with codebg.
 func Span(text string, st codebg.Style) string {
