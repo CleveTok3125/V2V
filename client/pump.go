@@ -43,6 +43,9 @@ func (s *Session) handleHistorySync(hs HistorySync) {
 // runPump reads server frames (chat/system/history/trailer) and
 // renders them. Started once from main.
 func (s *Session) runPump() {
+	if s.PumpDone != nil {
+		defer close(s.PumpDone)
+	}
 
 	for {
 		_, msg, err := s.Conn.ReadMessage()

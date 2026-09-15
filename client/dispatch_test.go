@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"testing"
+	"time"
 )
 
 func sessionForDispatch(t *testing.T) *Session {
@@ -102,5 +103,43 @@ func TestDispatchInlineReplyUnknownBodyClearsPending(t *testing.T) {
 	}
 	if sess.PendingReplyTo != 0 {
 		t.Fatalf("PendingReplyTo=%d want 0 (rejected body must not leak quote)", sess.PendingReplyTo)
+	}
+}
+
+func TestGracefulQuitWaitsForPump(t *testing.T) {
+	// Exited pump: returns as soon as PumpDone closes, no 500ms wait.
+	sess := sessionForDispatch(t)
+	sess.Conn = &stubConn{}
+	close(sess.PumpDone)
+	start := time.Now()
+	sess.gracefulQuit()
+	if time.Since(start) > 400*time.Millisecond {
+		t.Fatal("gracefulQuit with exited pump must not take the full cap")
+	}
+	select {
+	case <-sess.Quitting:
+	default:
+		t.Fatal("gracefulQuit must signal Quitting")
+	}
+}
+
+func TestGracefulQuitBoundsMissingPump(t *testing.T) {
+	// Pump never exits: the 500ms cap bounds the wait, never hangs.
+	sess := sessionForDispatch(t)
+	sess.Conn = &stubConn{}
+	start := time.Now()
+	sess.gracefulQuit()
+	if d := time.Since(start); d < 400*time.Millisecond || d > 2*time.Second {
+		t.Fatalf("gracefulQuit without pump exit took %v, want ~500ms cap", d)
+	}
+}
+
+func TestGracefulQuitNilPumpDone(t *testing.T) {
+	// Test-built sessions without a pump skip the wait entirely.
+	sess := &Session{Out: io.Discard, Term: &fakeTerm{}, Conn: &stubConn{}, Quitting: make(chan bool, 1), VerifyCh: make(chan verifyJob, 1)}
+	start := time.Now()
+	sess.gracefulQuit()
+	if time.Since(start) > 400*time.Millisecond {
+		t.Fatal("gracefulQuit with nil PumpDone must not wait")
 	}
 }

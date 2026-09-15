@@ -374,7 +374,7 @@ Frontend (`server/blog/render.go`, `webterm/blog/cactus.css`) shipped; backend d
 
 ### Phase 3 — Hardening & Coverage
 
-- **Wasm and timing tests** — wasm coverage for the terminal emulator and proxy on wasm is missing (`client/input_wasm.go`, `//go:build !js` proxy); two fixed sleeps remain (`server/history.go:155`, `client/dispatch.go:129`), tests already use bounded waits. — *PARTIAL*
+- **Wasm and timing tests** — js-tagged client tests run under node (`make test-wasm`, `scripts/wasm_exec_runner.js`): wasm terminal line editing and the wasm proxy error path; production sleeps replaced by bounded waits (`sendWithRetry` waits up to 20ms for buffer space, `gracefulQuit` waits for pump exit with a 500ms cap). — *DONE*
 - **Client config encryption** — guard limits load from the v3 envelope (`internal/config/config.go:15,447`, `client/config_other.go:70`); passphrase flows reused. — *DONE*
 - **Blog docs** — `TECHNICAL.md` blog section + README EN+VI + E2E for the blog feature. — *NOT DONE*
 - **Relay mesh** — a lightweight distribution network outside the server: each relay connects to one server plus many relays, and each client connects to one server plus many relays (CDN-style reads). Writes go to the server only (relays are read-only); relays share one wire protocol subset, alert each other with the client as the consumer, and serve as backup sources the client verifies against known chain tips. Not a federation: no cross-server identity or routing, one server's content only. — *NOT DONE*

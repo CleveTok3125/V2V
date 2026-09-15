@@ -42,6 +42,11 @@ type Session struct {
 	Term     inputTerminal
 	Out      io.Writer
 	Quitting chan bool
+	// PumpDone closes when runPump returns. gracefulQuit waits on it
+	// (bounded) so the goodbye flush and pump teardown complete
+	// instead of racing a fixed sleep. Nil for test-built sessions
+	// that never start a pump: gracefulQuit skips the wait then.
+	PumpDone chan struct{}
 
 	// Display toggles and locks.
 	ShowJoinLeave bool
@@ -103,6 +108,7 @@ type Session struct {
 func NewSession() *Session {
 	return &Session{
 		Quitting:            make(chan bool, 1),
+		PumpDone:            make(chan struct{}),
 		VerifyCh:            make(chan verifyJob, 128),
 		TripPrev:            make([]byte, 32),
 		PendingPlaceholders: []pendingMsg{},

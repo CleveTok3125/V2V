@@ -29,3 +29,7 @@ jobs:
         # Build only: several server-only dependency trees are not
         # js-compatible, so vet ./... cannot run under GOOS=js.
         run: GOOS=js GOARCH=wasm go build -o /dev/null ./client/
+      - name: WASM tests
+        # js-tagged client tests (wasm terminal, wasm proxy path)
+        # under node, which ubuntu runners provide.
+        run: make test-wasm

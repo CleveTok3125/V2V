@@ -126,7 +126,15 @@ func (s *Session) gracefulQuit() {
 		}
 	}
 	fmt.Fprintf(s.Out, "👋 Đang ngắt kết nối... Tạm biệt!\n")
-	time.Sleep(500 * time.Millisecond)
+	// Let the goodbye flush and the pump tear down instead of racing
+	// them: return as soon as the pump exits, same 500ms cap as the
+	// old fixed sleep when it never does.
+	if s.PumpDone != nil {
+		select {
+		case <-s.PumpDone:
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
 	notifyQuit()
 }
 
