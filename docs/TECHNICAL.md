@@ -341,13 +341,33 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 
 ## Roadmap
 
-Planned future work, in no particular order. Each item is self-contained: it can land without the others.
+Planned work grouped by dependency, in recommended order. Each item stays self-contained: it can land without the others, but the order avoids rework.
 
-- **Paged history** — fetch older segments on demand (`/history`); the connect-time replay (`MAX_HISTORY_SEND`) stays a join burst for fast startup.
-- **Session surgery** — extract main-loop session state (`term/out/displayMu/tabs/chain/verify`) and split `ChatServer` fields (`chain.Service`/`history.Store`/`hub`); the client tip-state mutex depends on this refactor.
-- **First audit producer** — the `BroadcastAudit` route has tests but no callers; wire the first management action (ban/kick/mute/rolechange) through it, with verify and replay tests proving the line chains and replays.
-- **Env/log/error unification** — one typed getenv helper replacing scattered `os.Getenv`, leveled logging replacing bare `log.Printf`, and a documented rule for when errors wrap with `%w`.
-- **Dependency arrows** — use the `markup` facade instead of importing `codebg`/`linkify` directly; `strength` returns its own report type instead of `passprompt.Assessment`; `guard` takes a plain limits struct instead of `*config.DynamicConfig`.
-- **Wasm and timing tests** — coverage for the terminal emulator and proxy paths on wasm; bounded waits instead of fixed sleeps in timing-sensitive tests.
-- **Client config encryption** — guard limits (`MaxMessageLength`, cooldowns) currently load from plaintext `config.json`, so editing the local file weakens client-side guards. Encrypt the client config with the tripcode v3-envelope pattern (argon2id + XChaCha20, passphrase-opened), reusing the existing prompt and unlock flows; no new secrets, server `.env` out of scope.
-- **Relay mesh** — a lightweight distribution network outside the server: each relay connects to one server plus many relays, and each client connects to one server plus many relays (CDN-style reads). Writes go to the server only (relays are read-only); relays share one wire protocol subset, alert each other with the client as the consumer, and serve as backup sources the client verifies against known chain tips. Not a federation: no cross-server identity or routing, one server's content only.
+### Phase 0 — Foundation
+
+- **Session surgery** — extract main-loop session state (`term/out/displayMu/tabs/chain/verify`) and split `ChatServer` fields (`chain.Service`/`history.Store`/`hub`); the client tip-state mutex depends on this refactor. — *NOT DONE*
+- **Dependency arrows** — use the `markup` facade instead of importing `codebg`/`linkify` directly (`client/render.go:19`, `client/send.go:11` still import them); `strength` owns its report type and `guard` takes a plain limits struct are done. — *PARTIAL*
+- **Env/log/error unification** — typed getenv helper (`internal/env/env.go:20`) and leveled logging (`server/loglevel.go:10`) are done; document the `%w` wrapping rule (`server/auth_errors.go:7`) in one place. — *PARTIAL*
+
+### Phase 1 — Evidence
+
+- **First audit producer** — `BroadcastAudit` (`server/history.go:214`) has tests but no callers; wire the first management action (ban/kick/mute/rolechange) through it. Spec: `.note.ai/20260910_backlog_audit_mod_plan.md`. — *NOT DONE*
+- **Paged history** — fetch older segments on demand (`/history`); the connect-time replay (`MAX_HISTORY_SEND`) stays a join burst for fast startup. — *NOT DONE*
+
+### Phase 2 — Blog (frontend done, backend deferred)
+
+Frontend (`server/blog/render.go`, `webterm/blog/cactus.css`) shipped; backend deferred per `.note.ai/20260912_235900_blog_frontend_plan.md`. In order:
+
+- **Blog permission** — `CanManageBlog` in `wire.Permission` + role template + `v2vctl` flags. — *NOT DONE*
+- **Blog store** — `DATA_DIR/blog/{slug}.md` + sidecar JSON (slug `[a-z0-9-]`, 3 fixed tags, atomic write, read cache). — *NOT DONE*
+- **Blog management auth** — mirror WS auth (ed25519/passkey + nonce/IP cooldown, ed25519 first). — *NOT DONE*
+- **Blog routes** — `GET /blog/`, `/blog/{slug}`, JSON `/api/blog/*` + rate limits. — *NOT DONE*
+- **CLI raw read** — `v2v --blog [slug]` prints raw markdown (`?format=raw`), pipes to `glow`/`mdcat`, TTY pages via `$PAGER`. — *NOT DONE*
+- **Blog toggle** — server config DEFAULT ON; OFF returns 404 and CLI reports disabled. — *NOT DONE*
+
+### Phase 3 — Hardening & Coverage
+
+- **Wasm and timing tests** — wasm coverage for the terminal emulator and proxy on wasm is missing (`client/input_wasm.go`, `//go:build !js` proxy); two fixed sleeps remain (`server/history.go:155`, `client/dispatch.go:129`), tests already use bounded waits. — *PARTIAL*
+- **Client config encryption** — guard limits load from the v3 envelope (`internal/config/config.go:15,447`, `client/config_other.go:70`); passphrase flows reused. — *DONE*
+- **Blog docs** — `TECHNICAL.md` blog section + README EN+VI + E2E for the blog feature. — *NOT DONE*
+- **Relay mesh** — a lightweight distribution network outside the server: each relay connects to one server plus many relays, and each client connects to one server plus many relays (CDN-style reads). Writes go to the server only (relays are read-only); relays share one wire protocol subset, alert each other with the client as the consumer, and serve as backup sources the client verifies against known chain tips. Not a federation: no cross-server identity or routing, one server's content only. — *NOT DONE*
