@@ -17,8 +17,8 @@ func behaviorSession(t *testing.T) (*Session, *bytes.Buffer) {
 	t.Helper()
 	sess := sessionForDispatch(t)
 	var out bytes.Buffer
-	sess.Out = &out
-	sess.ActiveTab = TabChat
+	sess.Display.Out = &out
+	sess.Display.ActiveTab = TabChat
 	return sess, &out
 }
 
@@ -32,8 +32,8 @@ func TestCmdWhoamiLines(t *testing.T) {
 	if got := out.String(); !strings.Contains(got, "Alice") {
 		t.Fatalf("whoami output missing username: %q", got)
 	}
-	if len(sess.TabSys.lines) != 1 {
-		t.Fatalf("guest whoami must emit 1 line, got %d", len(sess.TabSys.lines))
+	if len(sess.Display.TabSys.lines) != 1 {
+		t.Fatalf("guest whoami must emit 1 line, got %d", len(sess.Display.TabSys.lines))
 	}
 
 	sess, out = behaviorSession(t)
@@ -46,8 +46,8 @@ func TestCmdWhoamiLines(t *testing.T) {
 	if got := out.String(); !strings.Contains(got, "Role:") {
 		t.Fatalf("key whoami must show role: %q", got)
 	}
-	if len(sess.TabSys.lines) != 2 {
-		t.Fatalf("key whoami must emit 2 lines, got %d", len(sess.TabSys.lines))
+	if len(sess.Display.TabSys.lines) != 2 {
+		t.Fatalf("key whoami must emit 2 lines, got %d", len(sess.Display.TabSys.lines))
 	}
 }
 
@@ -55,7 +55,7 @@ func TestCmdStatusShowsConnection(t *testing.T) {
 	sess, out := behaviorSession(t)
 	sess.WSURL = "ws://example.com"
 	sess.Connected = time.Now()
-	sess.ShowJoinLeave = true
+	sess.Display.ShowJoinLeave = true
 	if !sess.cmdStatus("/status") {
 		t.Fatal("/status must match")
 	}
@@ -96,69 +96,69 @@ func TestCmdTabSwitches(t *testing.T) {
 	if !sess.cmdTab("/tab") {
 		t.Fatal("/tab must match")
 	}
-	if sess.ActiveTab != TabSystem {
-		t.Fatalf("ActiveTab=%d, want TabSystem", sess.ActiveTab)
+	if sess.Display.ActiveTab != TabSystem {
+		t.Fatalf("ActiveTab=%d, want TabSystem", sess.Display.ActiveTab)
 	}
 	sess.cmdTab("/tab 1")
-	if sess.ActiveTab != TabChat {
-		t.Fatalf("ActiveTab=%d, want TabChat", sess.ActiveTab)
+	if sess.Display.ActiveTab != TabChat {
+		t.Fatalf("ActiveTab=%d, want TabChat", sess.Display.ActiveTab)
 	}
 	sess.cmdTab("/t 2")
-	if sess.ActiveTab != TabSystem {
-		t.Fatalf("ActiveTab=%d, want TabSystem", sess.ActiveTab)
+	if sess.Display.ActiveTab != TabSystem {
+		t.Fatalf("ActiveTab=%d, want TabSystem", sess.Display.ActiveTab)
 	}
 	if !sess.cmdTab("/tab bogus") {
 		t.Fatal("bogus tab arg must still match")
 	}
-	if sess.ActiveTab != TabSystem {
-		t.Fatalf("bogus tab arg must keep tab, got %d", sess.ActiveTab)
+	if sess.Display.ActiveTab != TabSystem {
+		t.Fatalf("bogus tab arg must keep tab, got %d", sess.Display.ActiveTab)
 	}
 }
 
 func TestCmdShowjoinToggles(t *testing.T) {
 	sess, _ := behaviorSession(t)
-	sess.ShowJoinLeave = false
+	sess.Display.ShowJoinLeave = false
 	sess.cmdShowjoin("/showjoin")
-	if !sess.ShowJoinLeave {
+	if !sess.Display.ShowJoinLeave {
 		t.Fatal("showjoin must turn on")
 	}
 	sess.cmdShowjoin("/sj")
-	if sess.ShowJoinLeave {
+	if sess.Display.ShowJoinLeave {
 		t.Fatal("showjoin must turn off")
 	}
 }
 
 func TestCmdAutoverifyToggles(t *testing.T) {
 	sess, _ := behaviorSession(t)
-	sess.AutoVerify = true
+	sess.Verify.AutoVerify = true
 	sess.cmdAutoverify("/autoverify")
-	if sess.AutoVerify {
+	if sess.Verify.AutoVerify {
 		t.Fatal("autoverify must turn off")
 	}
 	sess.cmdAutoverify("/av")
-	if !sess.AutoVerify {
+	if !sess.Verify.AutoVerify {
 		t.Fatal("autoverify must turn on")
 	}
 }
 
 func TestCmdMetaSwitch(t *testing.T) {
 	sess, out := behaviorSession(t)
-	sess.ShowMeta = true
+	sess.Display.ShowMeta = true
 	sess.cmdMeta("/meta off")
-	if sess.ShowMeta {
+	if sess.Display.ShowMeta {
 		t.Fatal("meta off must hide")
 	}
 	sess.cmdMeta("/meta on")
-	if !sess.ShowMeta {
+	if !sess.Display.ShowMeta {
 		t.Fatal("meta on must show")
 	}
 	sess.cmdMeta("/meta")
-	if sess.ShowMeta {
+	if sess.Display.ShowMeta {
 		t.Fatal("bare meta must toggle")
 	}
 	out.Reset()
 	sess.cmdMeta("/meta bogus")
-	if sess.ShowMeta {
+	if sess.Display.ShowMeta {
 		t.Fatal("bad meta arg must keep state")
 	}
 	if got := out.String(); !strings.Contains(got, "/meta") {
@@ -175,7 +175,7 @@ func seedIndexedWire(sess *Session, height uint64) WireMessage {
 		ChainHeight: height,
 		ChainVer:    2,
 	}
-	sess.WireIdx.put(wire)
+	sess.Chain.WireIdx.put(wire)
 	return wire
 }
 
@@ -247,7 +247,7 @@ func TestCmdInfoShowsMetadata(t *testing.T) {
 func TestCmdExpandReplaysFull(t *testing.T) {
 	sess, out := behaviorSession(t)
 	seedIndexedWire(sess, 42)
-	sess.TabChat.append("| Alice: hello wo\x1b[90m...\x1b[0m [Xem thêm: /expand #42]\n")
+	sess.Display.TabChat.append("| Alice: hello wo\x1b[90m...\x1b[0m [Xem thêm: /expand #42]\n")
 	if !sess.cmdExpand("/expand 42") {
 		t.Fatal("/expand must match")
 	}
@@ -320,7 +320,7 @@ func TestDispatchQuitExitsCleanly(t *testing.T) {
 	sess, _ := behaviorSession(t)
 	sess.Conn = &stubConn{}
 	sess.Quitting = make(chan bool, 1)
-	sess.VerifyCh = make(chan verifyJob, 1)
+	sess.Verify.VerifyCh = make(chan verifyJob, 1)
 	// Pump already exited: skip the 500ms gracefulQuit cap, this test
 	// only asserts the quit action and the Quitting signal.
 	close(sess.PumpDone)

@@ -28,7 +28,7 @@ func (s *Session) collectBody(text string) (string, int, bool) {
 			typedLinesCount = 1
 		} else {
 			var canceled bool
-			text, canceled = collectCodeblock(s.Term, text)
+			text, canceled = collectCodeblock(s.Display.Term, text)
 			if canceled {
 				return text, 0, false
 			}
@@ -41,32 +41,32 @@ func (s *Session) collectBody(text string) (string, int, bool) {
 // checkSendGuards runs the client-side content and cooldown gates.
 func (s *Session) checkSendGuards(text string) bool {
 	if err := filter.ValidateMessage(text); err != nil {
-		s.DisplayMu.Lock()
+		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin nhắn chứa ký tự không hợp lệ và đã bị chặn (client-side): %v\n", err))
-		s.DisplayMu.Unlock()
-		s.Term.Refresh()
+		s.Display.DisplayMu.Unlock()
+		s.Display.Term.Refresh()
 		return false
 	}
 
 	// Guard: client-side MessageCooldown (mirror server, zero-trust)
 	if ClientCfg != nil {
-		if err := guard.ValidateMessageForSend(text, s.LastMessageTime, &guard.Limits{
+		if err := guard.ValidateMessageForSend(text, s.Pending.LastMessageTime, &guard.Limits{
 			MaxMessageLength: ClientCfg.Limits.MaxMessageLength,
 			MaxMessageLine:   ClientCfg.Limits.MaxMessageLine,
 			MessageCooldown:  ClientCfg.Limits.MessageCooldown,
 		}, false); err != nil {
 			if err == guard.ErrTooFast {
-				s.DisplayMu.Lock()
+				s.Display.DisplayMu.Lock()
 				s.emitLocalFeedback(fmt.Sprintf("| [Local]: Bạn đang chat quá nhanh! Vui lòng đợi %v.\n", ClientCfg.Limits.MessageCooldown))
-				s.DisplayMu.Unlock()
-				s.Term.Refresh()
+				s.Display.DisplayMu.Unlock()
+				s.Display.Term.Refresh()
 				return false
 			}
 			if err == guard.ErrTooLong {
-				s.DisplayMu.Lock()
+				s.Display.DisplayMu.Lock()
 				s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin nhắn quá dài (tối đa %d ký tự).\n", ClientCfg.Limits.MaxMessageLength))
-				s.DisplayMu.Unlock()
-				s.Term.Refresh()
+				s.Display.DisplayMu.Unlock()
+				s.Display.Term.Refresh()
 				return false
 			}
 		}
@@ -77,13 +77,13 @@ func (s *Session) checkSendGuards(text string) bool {
 // renderPlaceholder wipes the input line and prints the grey pending block.
 func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows int, phShown bool, phBufEnd int) {
 	// Placeholder: keep original text grey with pending indicator until server echo
-	// Single s.DisplayMu lock for entire wipe + placeholder + trip sign + send to avoid burst drift
+	// Single s.Display.DisplayMu lock for entire wipe + placeholder + trip sign + send to avoid burst drift
 	phRows = 0
-	phShown = s.ActiveTab == TabChat
+	phShown = s.Display.ActiveTab == TabChat
 	phBufEnd = 0
-	s.DisplayMu.Lock()
+	s.Display.DisplayMu.Lock()
 	for range typedLinesCount {
-		fmt.Fprint(s.Out, "\033[1A\033[2K\r")
+		fmt.Fprint(s.Display.Out, "\033[1A\033[2K\r")
 	}
 
 	// Render markup on the whole text first so fenced blocks
@@ -97,8 +97,8 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 	// Quoted target previews first (same helper as the echo path, so
 	// both blocks share the shape; pending quotes carry ⏳ so the
 	// erase region check keeps passing).
-	if s.PendingReplyTo > 0 {
-		for _, q := range s.quoteLinesFor(s.PendingReplyTo, true) {
+	if s.Pending.PendingReplyTo > 0 {
+		for _, q := range s.quoteLinesFor(s.Pending.PendingReplyTo, true) {
 			s.emitTab(TabChat, q+"\n")
 			phRows++
 		}
@@ -128,22 +128,22 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 	// The chain position is unknown until the server echo arrives.
 	// Hidden with /meta off; the echo follows the same session flag,
 	// so row counts stay consistent.
-	s.ShowMetaMu.RLock()
-	pmMeta := s.ShowMeta
-	s.ShowMetaMu.RUnlock()
+	s.Display.ShowMetaMu.RLock()
+	pmMeta := s.Display.ShowMeta
+	s.Display.ShowMetaMu.RUnlock()
 	if pmMeta {
 		s.emitTab(TabChat, "\x1b[90m|   └─  ··· ⏳\x1b[0m\n")
 		phRows++
 	}
-	phBufEnd = len(s.TabChat.lines)
-	s.Term.Refresh()
-	s.DisplayMu.Unlock()
+	phBufEnd = len(s.Display.TabChat.lines)
+	s.Display.Term.Refresh()
+	s.Display.DisplayMu.Unlock()
 	return phRows, phShown, phBufEnd
 }
 
 // sendMessage signs (trip) or envelopes (plain) one message, tracks its
 func (s *Session) sendMessage(text string, phRows int, phShown bool, phBufEnd int) error {
-	s.TmpSeq++
+	s.Pending.TmpSeq++
 	var err error
 	if s.TripPriv != nil {
 		// Sign message with trip chain — bind displayName for anti-spoof
@@ -151,7 +151,7 @@ func (s *Session) sendMessage(text string, phRows int, phShown bool, phBufEnd in
 		msgHash := sha256.Sum256([]byte(text))
 		prevCopy := make([]byte, len(s.TripPrev))
 		copy(prevCopy, s.TripPrev)
-		payload := tripcolor.CanonicalPayload(strings.ToLower(s.Challenge.ServerPubKey), s.TripSeq, prevCopy, msgHash[:], []byte(s.TripPub), s.Username, s.TmpSeq, s.PendingReplyTo)
+		payload := tripcolor.CanonicalPayload(strings.ToLower(s.Challenge.ServerPubKey), s.TripSeq, prevCopy, msgHash[:], []byte(s.TripPub), s.Username, s.Pending.TmpSeq, s.Pending.PendingReplyTo)
 		sig := ed25519.Sign(s.TripPriv, payload)
 		h := sha256.New()
 		h.Write(prevCopy)
@@ -159,20 +159,20 @@ func (s *Session) sendMessage(text string, phRows int, phShown bool, phBufEnd in
 		h.Write(msgHash[:])
 		newPrev := h.Sum(nil)
 		copy(s.TripPrev, newPrev)
-		tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(s.TripPub)), Seq: s.TripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: s.Username, TmpID: s.TmpSeq, ReplyTo: s.PendingReplyTo}
+		tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(s.TripPub)), Seq: s.TripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: s.Username, TmpID: s.Pending.TmpSeq, ReplyTo: s.Pending.PendingReplyTo}
 		err = s.Conn.WriteJSON(tripMsg)
 		if err != nil {
 			// Rollback seq/prev on send failure to avoid permanent fork
 			s.TripSeq--
 			copy(s.TripPrev, prevCopy)
-			s.TmpSeq--
+			s.Pending.TmpSeq--
 		}
 	} else {
 		// Unsigned chat always travels in an envelope carrying the
 		// session counter; raw text is rejected by the server.
-		err = s.Conn.WriteJSON(PlainMessage{TmpID: s.TmpSeq, Text: text, ReplyTo: s.PendingReplyTo})
+		err = s.Conn.WriteJSON(PlainMessage{TmpID: s.Pending.TmpSeq, Text: text, ReplyTo: s.Pending.PendingReplyTo})
 		if err != nil {
-			s.TmpSeq--
+			s.Pending.TmpSeq--
 		}
 	}
 	// Reply targets are one-shot: consumed by the send above whether
@@ -181,44 +181,44 @@ func (s *Session) sendMessage(text string, phRows int, phShown bool, phBufEnd in
 	// the target for echo matching.
 	if err != nil {
 		// Mark placeholder as failed (red) is handled by server unicast; keep placeholder grey until then
-		s.LastMessageTime = time.Now()
+		s.Pending.LastMessageTime = time.Now()
 	} else {
-		s.LastMessageTime = time.Now()
+		s.Pending.LastMessageTime = time.Now()
 		// Track placeholder so the server echo can replace it.
-		s.DisplayMu.Lock()
-		pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: s.PrintGen, bufEnd: phBufEnd, sentAt: time.Now(), tmpID: s.TmpSeq, replyTo: s.PendingReplyTo}
+		s.Display.DisplayMu.Lock()
+		pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: s.Display.PrintGen, bufEnd: phBufEnd, sentAt: time.Now(), tmpID: s.Pending.TmpSeq, replyTo: s.Pending.PendingReplyTo}
 		if s.TripPriv != nil {
 			pm.hasTrip = true
 			pm.seq = s.TripSeq
 			pm.pub = hex.EncodeToString([]byte(s.TripPub))
 		}
-		s.PendingPlaceholders = append(s.PendingPlaceholders, pm)
+		s.Pending.PendingPlaceholders = append(s.Pending.PendingPlaceholders, pm)
 		// Bound the queue: echoes that never arrive (dead server, old
 		// build) must not grow memory or turn matching quadratic.
 		// Evicted entries stay grey on screen: honestly unconfirmed.
 		// Linear scan stays trivial at this bound, so no index map.
-		for len(s.PendingPlaceholders) > maxPendingPlaceholders {
-			s.PendingPlaceholders = s.PendingPlaceholders[1:]
+		for len(s.Pending.PendingPlaceholders) > maxPendingPlaceholders {
+			s.Pending.PendingPlaceholders = s.Pending.PendingPlaceholders[1:]
 		}
 		// The echo may have beaten us here (local echo race): if a
 		// stashed echo matches, erase the placeholder at once. The
 		// echo itself was already rendered when it arrived.
 		var haveStashed bool
-		s.PendingEchoes, _, haveStashed = takeStashedEcho(s.PendingEchoes, pm.tmpID)
+		s.Pending.PendingEchoes, _, haveStashed = takeStashedEcho(s.Pending.PendingEchoes, pm.tmpID)
 		if haveStashed {
-			for i, p := range s.PendingPlaceholders {
+			for i, p := range s.Pending.PendingPlaceholders {
 				if p.tmpID == pm.tmpID {
-					s.PendingPlaceholders = append(s.PendingPlaceholders[:i], s.PendingPlaceholders[i+1:]...)
+					s.Pending.PendingPlaceholders = append(s.Pending.PendingPlaceholders[:i], s.Pending.PendingPlaceholders[i+1:]...)
 					break
 				}
 			}
 			s.erasePlaceholderLocked(pm)
 		}
-		s.DisplayMu.Unlock()
+		s.Display.DisplayMu.Unlock()
 	}
 	// Reply targets are one-shot, cleared after tracking above (the
 	// pending entry already captured the target for echo matching).
-	s.PendingReplyTo = 0
+	s.Pending.PendingReplyTo = 0
 	if err != nil {
 		fmt.Println("❌ Lỗi gửi tin nhắn:", err)
 		return err

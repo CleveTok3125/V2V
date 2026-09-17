@@ -263,29 +263,29 @@ func greeting(w io.Writer, uname string) {
 // trailing timer guarantees the last update is never swallowed, so
 // single messages still appear instantly.
 func (s *Session) refreshCoalesced() {
-	s.RefreshMu.Lock()
-	if time.Since(s.LastRefresh) >= 100*time.Millisecond {
-		s.LastRefresh = time.Now()
-		s.RefreshMu.Unlock()
-		s.Term.Refresh()
+	s.Display.RefreshMu.Lock()
+	if time.Since(s.Display.LastRefresh) >= 100*time.Millisecond {
+		s.Display.LastRefresh = time.Now()
+		s.Display.RefreshMu.Unlock()
+		s.Display.Term.Refresh()
 		return
 	}
-	if !s.RefreshPending {
-		s.RefreshPending = true
+	if !s.Display.RefreshPending {
+		s.Display.RefreshPending = true
 		time.AfterFunc(100*time.Millisecond, func() {
-			s.RefreshMu.Lock()
-			s.RefreshPending = false
-			s.LastRefresh = time.Now()
-			s.RefreshMu.Unlock()
-			s.Term.Refresh()
+			s.Display.RefreshMu.Lock()
+			s.Display.RefreshPending = false
+			s.Display.LastRefresh = time.Now()
+			s.Display.RefreshMu.Unlock()
+			s.Display.Term.Refresh()
 		})
 	}
-	s.RefreshMu.Unlock()
+	s.Display.RefreshMu.Unlock()
 }
 
 // erasePlaceholderLocked splices a placeholder block out of the tab
 // buffer and rewrites the screen region, reprinting any lines that
-// intervened after it. Caller must hold s.DisplayMu.
+// intervened after it. Caller must hold s.Display.DisplayMu.
 // consumeEchoLocked matches a server echo of our own message against
 // pending placeholders by exact tmp_id (duplicate texts stay
 // unambiguous), with the legacy oldest-text match as fallback. A match
@@ -295,7 +295,7 @@ func (s *Session) refreshCoalesced() {
 // entries never matched expire with a warning, which is how
 // server-side ID tampering surfaces. allowStash is false for history
 // replay: our own old messages must never pollute the stash (their
-// tmpIDs belong to previous sessions). Caller must hold s.DisplayMu.
+// tmpIDs belong to previous sessions). Caller must hold s.Display.DisplayMu.
 
 // badgeForWire verifies a trip badge and builds its colored display
 // plus the manual-verify hyperlink (kept, opens the stateless API).
@@ -337,27 +337,27 @@ func (s *Session) badgeForWire(wire WireMessage, av bool) (colored, urlStr strin
 // renderChatBlock renders one wire message as content rows plus exactly
 // one trailing meta line ("  └─  #height:hash | ✍️ badge"). Legacy
 // lines without chain fields render content only. System wires render
-// sanitized text to their classified tab. Caller must hold s.DisplayMu.
+// sanitized text to their classified tab. Caller must hold s.Display.DisplayMu.
 
 // resolveMentionLocked reports whether @#height names a buffered
 // message (suffix checksum when given). Unresolved mentions render
-// plain so evicted targets never mislead. Caller must hold s.DisplayMu.
+// plain so evicted targets never mislead. Caller must hold s.Display.DisplayMu.
 func (s *Session) resolveMentionLocked(height uint64, suffix string) bool {
-	return len(findMetaMatches(s.TabChat.lines, height, suffix)) > 0
+	return len(findMetaMatches(s.Display.TabChat.lines, height, suffix)) > 0
 }
 
 // quoteLinesFor resolves a reply target to quote preview lines from
 // either tab buffer (chat first). Nil when evicted. The preview shows
 // the target's head line, so liars quoting strangers expose themselves
-// to every receiver resolving locally. Caller must hold s.DisplayMu.
+// to every receiver resolving locally. Caller must hold s.Display.DisplayMu.
 func (s *Session) quoteLinesFor(replyTo uint64, pending bool) []string {
 	// Rich path first: the struct carries clean time/author plus a
 	// content verdict. System wires are never quotable (date/join
 	// markers), only chat. Buffer fallback keeps legacy heads quotable.
-	if wire, ok := s.WireIdx.get(replyTo); ok && quotable(wire) {
+	if wire, ok := s.Chain.WireIdx.get(replyTo); ok && quotable(wire) {
 		return []string{formatQuoteRich(wire, pending, ClientCfg.QuoteMaxRunes())}
 	}
-	for _, buf := range []*tabBuffer{s.TabChat, s.TabSys} {
+	for _, buf := range []*tabBuffer{s.Display.TabChat, s.Display.TabSys} {
 		for _, idx := range findMetaMatches(buf.lines, replyTo, "") {
 			if idx == 0 {
 				continue
@@ -397,13 +397,13 @@ func (s *Session) buildChatBlock(wire WireMessage, av, withMeta bool) (quote []s
 }
 
 func (s *Session) renderChatBlock(wire WireMessage) {
-	s.WireIdx.put(wire)
-	s.AutoVerifyMu.RLock()
-	av := s.AutoVerify
-	s.AutoVerifyMu.RUnlock()
-	s.ShowMetaMu.RLock()
-	withMeta := s.ShowMeta
-	s.ShowMetaMu.RUnlock()
+	s.Chain.WireIdx.put(wire)
+	s.Verify.AutoVerifyMu.RLock()
+	av := s.Verify.AutoVerify
+	s.Verify.AutoVerifyMu.RUnlock()
+	s.Display.ShowMetaMu.RLock()
+	withMeta := s.Display.ShowMeta
+	s.Display.ShowMetaMu.RUnlock()
 	// Replay and tab switches re-render the same immutable wires;
 	// the chain hash covers the content, so it is a safe cache key
 	// (verify mode and meta visibility are folded in). Messages with
@@ -413,7 +413,7 @@ func (s *Session) renderChatBlock(wire WireMessage) {
 		key := strings.ToLower(wire.ChainHash) + "\x00" + wire.Type +
 			"\x00" + map[bool]string{true: "v", false: "p"}[av] +
 			"\x00" + map[bool]string{true: "m", false: "n"}[withMeta]
-		if hit, ok := s.RenderCache.get(key); ok {
+		if hit, ok := s.Chain.RenderCache.get(key); ok {
 			s.emitTab(hit.tab, hit.head)
 			if hit.hasMeta {
 				s.emitTab(hit.tab, hit.meta)
@@ -422,7 +422,7 @@ func (s *Session) renderChatBlock(wire WireMessage) {
 		}
 		_, head, meta, tab, hasMeta := s.buildChatBlock(wire, av, withMeta)
 		head = maybeCollapse(head, wire, tab)
-		s.RenderCache.put(key, renderedBlock{tab: tab, head: head, meta: meta, hasMeta: hasMeta})
+		s.Chain.RenderCache.put(key, renderedBlock{tab: tab, head: head, meta: meta, hasMeta: hasMeta})
 		s.emitTab(tab, head)
 		if hasMeta {
 			s.emitTab(tab, meta)
@@ -445,24 +445,24 @@ func (s *Session) switchTab(n int) {
 	if n != TabChat && n != TabSystem {
 		return
 	}
-	s.DisplayMu.Lock()
-	defer s.DisplayMu.Unlock()
-	if n == s.ActiveTab {
+	s.Display.DisplayMu.Lock()
+	defer s.Display.DisplayMu.Unlock()
+	if n == s.Display.ActiveTab {
 		return
 	}
-	s.ActiveTab = n
-	s.PrintGen++
-	fmt.Fprint(s.Out, "\033[H\033[2J")
+	s.Display.ActiveTab = n
+	s.Display.PrintGen++
+	fmt.Fprint(s.Display.Out, "\033[H\033[2J")
 	var buf *tabBuffer
 	if n == TabChat {
-		buf = s.TabChat
+		buf = s.Display.TabChat
 	} else {
-		buf = s.TabSys
+		buf = s.Display.TabSys
 	}
 	var sb strings.Builder
 	for _, l := range buf.lines {
 		sb.WriteString(l)
 	}
-	fmt.Fprint(s.Out, sb.String())
-	s.Term.Refresh()
+	fmt.Fprint(s.Display.Out, sb.String())
+	s.Display.Term.Refresh()
 }

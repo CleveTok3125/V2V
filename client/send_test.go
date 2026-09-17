@@ -55,10 +55,10 @@ func TestSendMessagePlainLoopback(t *testing.T) {
 	sess := NewSession()
 	sess.Conn = conn
 	sess.Username = "u"
-	sess.Out = io.Discard
-	sess.Term = &fakeTerm{}
-	sess.TabChat = newTabBuffer(100, 100000)
-	sess.PendingReplyTo = 7
+	sess.Display.Out = io.Discard
+	sess.Display.Term = &fakeTerm{}
+	sess.Display.TabChat = newTabBuffer(100, 100000)
+	sess.Pending.PendingReplyTo = 7
 	if err := sess.sendMessage("hello", 1, true, 0); err != nil {
 		t.Fatalf("sendMessage: %v", err)
 	}
@@ -70,11 +70,11 @@ func TestSendMessagePlainLoopback(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("server received nothing")
 	}
-	if len(sess.PendingPlaceholders) != 1 ||
-		sess.PendingPlaceholders[0].text != "hello" {
-		t.Fatalf("placeholder not tracked: %+v", sess.PendingPlaceholders)
+	if len(sess.Pending.PendingPlaceholders) != 1 ||
+		sess.Pending.PendingPlaceholders[0].text != "hello" {
+		t.Fatalf("placeholder not tracked: %+v", sess.Pending.PendingPlaceholders)
 	}
-	if sess.PendingReplyTo != 0 {
+	if sess.Pending.PendingReplyTo != 0 {
 		t.Fatal("one-shot reply target not cleared")
 	}
 }
@@ -104,9 +104,9 @@ func tripSessionForSend(t *testing.T, conn wsConn) *Session {
 	sess.TripPriv = priv
 	sess.TripPub = pub
 	sess.Username = "u"
-	sess.Out = io.Discard
-	sess.Term = &fakeTerm{}
-	sess.TabChat = newTabBuffer(100, 100000)
+	sess.Display.Out = io.Discard
+	sess.Display.Term = &fakeTerm{}
+	sess.Display.TabChat = newTabBuffer(100, 100000)
 	return sess
 }
 
@@ -114,9 +114,9 @@ func TestSendMessageTripWriteJSONError(t *testing.T) {
 	conn := &stubConn{writeErr: errors.New("conn closed")}
 	sess := tripSessionForSend(t, conn)
 	sess.TripSeq = 5
-	sess.TmpSeq = 10
+	sess.Pending.TmpSeq = 10
 	prev := append([]byte(nil), sess.TripPrev...)
-	sess.PendingReplyTo = 7
+	sess.Pending.PendingReplyTo = 7
 	err := sess.sendMessage("hello", 1, true, 0)
 	if err == nil {
 		t.Fatal("WriteJSON fail must return err")
@@ -124,16 +124,16 @@ func TestSendMessageTripWriteJSONError(t *testing.T) {
 	if sess.TripSeq != 5 {
 		t.Fatalf("TripSeq=%d want rollback to 5", sess.TripSeq)
 	}
-	if sess.TmpSeq != 10 {
-		t.Fatalf("TmpSeq=%d want rollback to 10", sess.TmpSeq)
+	if sess.Pending.TmpSeq != 10 {
+		t.Fatalf("TmpSeq=%d want rollback to 10", sess.Pending.TmpSeq)
 	}
 	if string(sess.TripPrev) != string(prev) {
 		t.Fatal("TripPrev not rolled back")
 	}
-	if len(sess.PendingPlaceholders) != 0 {
-		t.Fatalf("placeholder tracked on fail: %+v", sess.PendingPlaceholders)
+	if len(sess.Pending.PendingPlaceholders) != 0 {
+		t.Fatalf("placeholder tracked on fail: %+v", sess.Pending.PendingPlaceholders)
 	}
-	if sess.PendingReplyTo != 0 {
+	if sess.Pending.PendingReplyTo != 0 {
 		t.Fatal("one-shot reply target not cleared")
 	}
 }
@@ -148,7 +148,7 @@ func TestSendMessageTripWriteJSONOK(t *testing.T) {
 	if !ok || tm.Text != "hello" || tm.TmpID == 0 {
 		t.Fatalf("wrote %+v", conn.wrote)
 	}
-	if len(sess.PendingPlaceholders) != 1 {
-		t.Fatalf("placeholder not tracked: %+v", sess.PendingPlaceholders)
+	if len(sess.Pending.PendingPlaceholders) != 1 {
+		t.Fatalf("placeholder not tracked: %+v", sess.Pending.PendingPlaceholders)
 	}
 }

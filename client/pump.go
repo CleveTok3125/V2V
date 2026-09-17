@@ -13,15 +13,15 @@ import (
 // Session read pump and async verify worker (moved from main).
 
 // flushDateBannerLocked prints a stashed date banner to TabSystem
-// before the block that follows it. Caller must hold s.DisplayMu.
+// before the block that follows it. Caller must hold s.Display.DisplayMu.
 func (s *Session) flushDateBannerLocked() {
-	if s.PendingDateBanner != "" {
-		s.emitTab(TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(s.PendingDateBanner)))
-		s.PendingDateBanner = ""
+	if s.Pending.PendingDateBanner != "" {
+		s.emitTab(TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(s.Pending.PendingDateBanner)))
+		s.Pending.PendingDateBanner = ""
 	}
-	if s.PendingDateBannerWire != nil {
-		s.renderChatBlock(*s.PendingDateBannerWire)
-		s.PendingDateBannerWire = nil
+	if s.Pending.PendingDateBannerWire != nil {
+		s.renderChatBlock(*s.Pending.PendingDateBannerWire)
+		s.Pending.PendingDateBannerWire = nil
 	}
 }
 
@@ -29,15 +29,15 @@ func (s *Session) flushDateBannerLocked() {
 // frame or a coalesced per-line blob: never rendered, only the
 // fork check runs. Caller refreshes after.
 func (s *Session) handleHistorySync(hs HistorySync) {
-	s.DisplayMu.Lock()
-	s.InSync = false
-	if warn, flush := forkWarning(hs, s.HavePersistedTip, s.PersistedTip, s.PersistedHeight, s.SyncHashes); warn != "" {
+	s.Display.DisplayMu.Lock()
+	s.Chain.InSync = false
+	if warn, flush := forkWarning(hs, s.Chain.HavePersistedTip, s.Chain.PersistedTip, s.Chain.PersistedHeight, s.Chain.SyncHashes); warn != "" {
 		s.emitLocalFeedback(warn)
 		if flush {
 			s.flushChainTip()
 		}
 	}
-	s.DisplayMu.Unlock()
+	s.Display.DisplayMu.Unlock()
 }
 
 // runPump reads server frames (chat/system/history/trailer) and
@@ -54,51 +54,51 @@ func (s *Session) runPump() {
 			case <-s.Quitting:
 				return
 			default:
-				fmt.Fprintf(s.Out, "\r\033[K\n ❌ Mất kết nối server\n")
+				fmt.Fprintf(s.Display.Out, "\r\033[K\n ❌ Mất kết nối server\n")
 				// Flush before exit: os.Exit skips deferred
-				// s.Term.Close/flushChainTip, losing the newest tip and
+				// s.Display.Term.Close/flushChainTip, losing the newest tip and
 				// leaving the terminal raw.
 				s.flushChainTip()
-				s.Term.Close()
+				s.Display.Term.Close()
 				ClearLoadedPassphrase()
 				os.Exit(1)
 			}
 		}
 
-		s.ShowJoinMu.RLock()
-		isShowingJoin := s.ShowJoinLeave
-		s.ShowJoinMu.RUnlock()
+		s.Display.ShowJoinMu.RLock()
+		isShowingJoin := s.Display.ShowJoinLeave
+		s.Display.ShowJoinMu.RUnlock()
 
 		// Try to handle structured WireMessage JSON first (for new protocol)
 		var wire WireMessage
 		if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
-			s.DisplayMu.Lock()
+			s.Display.DisplayMu.Lock()
 			s.consumeEchoLocked(wire, true)
 			s.checkChainLink(wire)
 			s.flushDateBannerLocked()
 			s.renderChatBlock(wire)
-			s.DisplayMu.Unlock()
+			s.Display.DisplayMu.Unlock()
 			s.refreshCoalesced()
 			continue
 		}
 		var sysWire WireMessage
 		if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {
-			s.DisplayMu.Lock()
+			s.Display.DisplayMu.Lock()
 			s.checkChainLink(sysWire)
 			if !isShowingJoin && isDateBanner(sysWire) {
-				s.PendingDateBannerWire = &sysWire
-				s.DisplayMu.Unlock()
+				s.Pending.PendingDateBannerWire = &sysWire
+				s.Display.DisplayMu.Unlock()
 				s.refreshCoalesced()
 				continue
 			}
 			if !isShowingJoin && isJoinLeave(sysWire) {
-				s.DisplayMu.Unlock()
+				s.Display.DisplayMu.Unlock()
 				s.refreshCoalesced()
 				continue
 			}
 			s.flushDateBannerLocked()
 			s.renderChatBlock(sysWire)
-			s.DisplayMu.Unlock()
+			s.Display.DisplayMu.Unlock()
 			s.refreshCoalesced()
 			continue
 		}
@@ -117,54 +117,54 @@ func (s *Session) runPump() {
 				continue
 			}
 			if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
-				s.DisplayMu.Lock()
+				s.Display.DisplayMu.Lock()
 				if wl.Type == "chat" {
-					s.consumeEchoLocked(wl, !s.InSync)
+					s.consumeEchoLocked(wl, !s.Chain.InSync)
 				}
 				s.checkChainLink(wl)
 				if wl.Type == "system" && !isShowingJoin && isDateBanner(wl) {
-					s.PendingDateBannerWire = &wl
-					s.DisplayMu.Unlock()
+					s.Pending.PendingDateBannerWire = &wl
+					s.Display.DisplayMu.Unlock()
 					continue
 				}
 				if wl.Type == "system" && !isShowingJoin && isJoinLeave(wl) {
-					s.DisplayMu.Unlock()
+					s.Display.DisplayMu.Unlock()
 					continue
 				}
 				s.flushDateBannerLocked()
 				s.renderChatBlock(wl)
-				s.DisplayMu.Unlock()
+				s.Display.DisplayMu.Unlock()
 				continue
 			}
 			if !isShowingJoin && isDateBannerLine(line) {
-				s.PendingDateBanner = line
+				s.Pending.PendingDateBanner = line
 				continue
 			}
 			if !isShowingJoin && isJoinLeaveSystemLine(line) {
 				continue
 			}
 			if boundary, start := parseHistoryBoundary(line); boundary {
-				s.DisplayMu.Lock()
+				s.Display.DisplayMu.Lock()
 				if start {
-					s.InSync = true
+					s.Chain.InSync = true
 				} else {
-					s.PendingDateBanner = ""
-					s.PendingDateBannerWire = nil
-					s.InSync = false
+					s.Pending.PendingDateBanner = ""
+					s.Pending.PendingDateBannerWire = nil
+					s.Chain.InSync = false
 				}
 				s.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
-				s.DisplayMu.Unlock()
+				s.Display.DisplayMu.Unlock()
 				continue
 			}
-			if !isShowingJoin && (s.PendingDateBanner != "" || s.PendingDateBannerWire != nil) {
-				s.DisplayMu.Lock()
+			if !isShowingJoin && (s.Pending.PendingDateBanner != "" || s.Pending.PendingDateBannerWire != nil) {
+				s.Display.DisplayMu.Lock()
 				s.flushDateBannerLocked()
-				s.DisplayMu.Unlock()
+				s.Display.DisplayMu.Unlock()
 			}
 			if isTripBadgeLine(line) {
-				s.AutoVerifyMu.RLock()
-				av := s.AutoVerify
-				s.AutoVerifyMu.RUnlock()
+				s.Verify.AutoVerifyMu.RLock()
+				av := s.Verify.AutoVerify
+				s.Verify.AutoVerifyMu.RUnlock()
 				if av {
 					if job, ok := parseTripBadgeLine(line); ok {
 						// Drop-oldest on full: dropped is treated as verify fail (deterministic)
@@ -175,9 +175,9 @@ func (s *Session) runPump() {
 					}
 				}
 			}
-			s.DisplayMu.Lock()
+			s.Display.DisplayMu.Lock()
 			s.emitTab(classifyTab(line), fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
-			s.DisplayMu.Unlock()
+			s.Display.DisplayMu.Unlock()
 		}
 		s.refreshCoalesced()
 	}
@@ -187,7 +187,7 @@ func (s *Session) runPump() {
 // entries stay red. Started once from main.
 func (s *Session) runVerify() {
 
-	for job := range s.VerifyCh {
+	for job := range s.Verify.VerifyCh {
 		// Use shared trip verification (same as server) — serverPub is enforced to server's own key
 		serverPub := strings.ToLower(job.serverPub)
 		if serverPub == "" {
@@ -221,9 +221,9 @@ func (s *Session) runVerify() {
 			colored = "\x1b[91m" + job.badge + " ✗\x1b[0m"
 		}
 		line := fmt.Sprintf("  └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", job.urlStr, colored)
-		s.DisplayMu.Lock()
+		s.Display.DisplayMu.Lock()
 		s.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
-		s.DisplayMu.Unlock()
+		s.Display.DisplayMu.Unlock()
 		s.refreshCoalesced()
 	}
 }

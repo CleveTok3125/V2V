@@ -712,80 +712,80 @@ const tipBatchSaves = 50
 // initChainState loads the persisted tip (namespaced by server identity)
 // after setup. Called once from main before the pump.
 func (s *Session) initChainState() {
-	s.ServerPubHex = strings.ToLower(strings.TrimSpace(s.Challenge.ServerPubKey))
-	s.TipPath = chainTipFile(historyFile)
-	s.PersistedTip, s.PersistedHeight, s.PersistedServer, s.HavePersistedTip = loadChainTip(s.TipPath)
-	if s.HavePersistedTip && !strings.EqualFold(s.PersistedServer, s.ServerPubHex) {
-		s.PersistedTip, s.PersistedHeight, s.HavePersistedTip = [32]byte{}, 0, false
+	s.Chain.ServerPubHex = strings.ToLower(strings.TrimSpace(s.Challenge.ServerPubKey))
+	s.Chain.TipPath = chainTipFile(historyFile)
+	s.Chain.PersistedTip, s.Chain.PersistedHeight, s.Chain.PersistedServer, s.Chain.HavePersistedTip = loadChainTip(s.Chain.TipPath)
+	if s.Chain.HavePersistedTip && !strings.EqualFold(s.Chain.PersistedServer, s.Chain.ServerPubHex) {
+		s.Chain.PersistedTip, s.Chain.PersistedHeight, s.Chain.HavePersistedTip = [32]byte{}, 0, false
 	}
-	s.InSync = false
+	s.Chain.InSync = false
 }
 
 func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
-	if !pm.shown || s.ActiveTab != TabChat || pm.rows <= 0 {
+	if !pm.shown || s.Display.ActiveTab != TabChat || pm.rows <= 0 {
 		return
 	}
 	start := pm.bufEnd - pm.rows
-	if start < 0 || pm.bufEnd > len(s.TabChat.lines) {
+	if start < 0 || pm.bufEnd > len(s.Display.TabChat.lines) {
 		return
 	}
 	// Verify the region still holds our placeholder (eviction or
 	// concurrent appends may have shifted it); otherwise leave the
 	// screen alone and render the echo normally.
-	for _, l := range s.TabChat.lines[start:pm.bufEnd] {
+	for _, l := range s.Display.TabChat.lines[start:pm.bufEnd] {
 		if !strings.Contains(l, "⏳") {
 			return
 		}
 	}
-	intervening := append([]string{}, s.TabChat.lines[pm.bufEnd:]...)
-	s.TabChat.spliceOut(start, pm.bufEnd)
+	intervening := append([]string{}, s.Display.TabChat.lines[pm.bufEnd:]...)
+	s.Display.TabChat.spliceOut(start, pm.bufEnd)
 	// Rows on screen: placeholder block plus intervening lines printed after it.
-	fmt.Fprintf(s.Out, "\x1b[%dA", pm.rows+len(intervening))
-	fmt.Fprint(s.Out, "\x1b[J")
+	fmt.Fprintf(s.Display.Out, "\x1b[%dA", pm.rows+len(intervening))
+	fmt.Fprint(s.Display.Out, "\x1b[J")
 	for _, l := range intervening {
-		fmt.Fprint(s.Out, l)
+		fmt.Fprint(s.Display.Out, l)
 	}
-	s.PrintGen++
+	s.Display.PrintGen++
 }
 
 func (s *Session) consumeEchoLocked(wire WireMessage, allowStash bool) {
 	var stale []WireMessage
-	s.PendingEchoes, stale = reapStaleEchoes(s.PendingEchoes, 10*time.Second)
+	s.Pending.PendingEchoes, stale = reapStaleEchoes(s.Pending.PendingEchoes, 10*time.Second)
 	for _, w := range stale {
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Echo không khớp tin đang chờ (tmp_id=%d) — ID có thể đã bị sửa.\n", w.TmpID))
 	}
-	if wire.DisplayName != s.Username || len(s.PendingPlaceholders) == 0 {
+	if wire.DisplayName != s.Username || len(s.Pending.PendingPlaceholders) == 0 {
 		if allowStash && wire.DisplayName == s.Username && wire.TmpID != 0 {
-			s.PendingEchoes = stashEcho(s.PendingEchoes, wire, 16)
+			s.Pending.PendingEchoes = stashEcho(s.Pending.PendingEchoes, wire, 16)
 		}
 		return
 	}
-	idx := matchPendingIndex(s.PendingPlaceholders, wire.TmpID, wire.ReplyTo, wire.Text, s.Username, wire.DisplayName)
+	idx := matchPendingIndex(s.Pending.PendingPlaceholders, wire.TmpID, wire.ReplyTo, wire.Text, s.Username, wire.DisplayName)
 	if idx == -1 {
 		if allowStash && wire.TmpID != 0 {
-			s.PendingEchoes = stashEcho(s.PendingEchoes, wire, 16)
+			s.Pending.PendingEchoes = stashEcho(s.Pending.PendingEchoes, wire, 16)
 		}
 		return
 	}
-	pm := s.PendingPlaceholders[idx]
-	s.PendingPlaceholders = append(s.PendingPlaceholders[:idx], s.PendingPlaceholders[idx+1:]...)
+	pm := s.Pending.PendingPlaceholders[idx]
+	s.Pending.PendingPlaceholders = append(s.Pending.PendingPlaceholders[:idx], s.Pending.PendingPlaceholders[idx+1:]...)
 	s.erasePlaceholderLocked(pm)
 }
 
 func (s *Session) noteChainTip(tip [32]byte, height uint64) {
-	s.ChainTip, s.ChainHeight, s.ChainHaveTip = tip, height, true
-	s.TipSinceSave++
-	if s.TipSinceSave >= tipBatchSaves {
-		if saveChainTip(s.TipPath, tip, height, s.ServerPubHex) == nil {
-			s.TipSinceSave = 0
+	s.Chain.ChainTip, s.Chain.ChainHeight, s.Chain.ChainHaveTip = tip, height, true
+	s.Chain.TipSinceSave++
+	if s.Chain.TipSinceSave >= tipBatchSaves {
+		if saveChainTip(s.Chain.TipPath, tip, height, s.Chain.ServerPubHex) == nil {
+			s.Chain.TipSinceSave = 0
 		}
 	}
 }
 
 func (s *Session) flushChainTip() {
-	if s.ChainHaveTip {
-		if saveChainTip(s.TipPath, s.ChainTip, s.ChainHeight, s.ServerPubHex) == nil {
-			s.TipSinceSave = 0
+	if s.Chain.ChainHaveTip {
+		if saveChainTip(s.Chain.TipPath, s.Chain.ChainTip, s.Chain.ChainHeight, s.Chain.ServerPubHex) == nil {
+			s.Chain.TipSinceSave = 0
 		}
 	}
 }
@@ -794,16 +794,16 @@ func (s *Session) checkChainLink(wire WireMessage) {
 	if wire.ChainHash == "" {
 		return
 	}
-	if s.InSync {
-		s.SyncHashes[strings.ToLower(wire.ChainHash)] = true
+	if s.Chain.InSync {
+		s.Chain.SyncHashes[strings.ToLower(wire.ChainHash)] = true
 	}
-	newTip, err := verifyWireLink(wire, s.ChainTip)
-	if err != nil && !s.ChainHaveTip {
+	newTip, err := verifyWireLink(wire, s.Chain.ChainTip)
+	if err != nil && !s.Chain.ChainHaveTip {
 		// No tip yet: adopt the message's own prev, content-check only.
 		prev, ok := chain.ParseHex64(wire.ChainPrev)
 		if !ok {
-			if !s.ChainWarned {
-				s.ChainWarned = true
+			if !s.Chain.ChainWarned {
+				s.Chain.ChainWarned = true
 				s.emitLocalFeedback("| [Local]: Chain link đầu tiên sai định dạng — bỏ qua kiểm tra.\n")
 			}
 			return
@@ -811,8 +811,8 @@ func (s *Session) checkChainLink(wire WireMessage) {
 		newTip, err = verifyWireLink(wire, prev)
 	}
 	if err != nil {
-		if !s.ChainWarned {
-			s.ChainWarned = true
+		if !s.Chain.ChainWarned {
+			s.Chain.ChainWarned = true
 			s.emitLocalFeedback(fmt.Sprintf("| [Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", wire.ChainHeight, err))
 		}
 		if parsed, ok := chain.ParseHex64(wire.ChainHash); ok {
@@ -825,19 +825,19 @@ func (s *Session) checkChainLink(wire WireMessage) {
 }
 
 func (s *Session) enqueueVerify(job verifyJob) {
-	s.VerifyMu.Lock()
-	defer s.VerifyMu.Unlock()
+	s.Verify.VerifyMu.Lock()
+	defer s.Verify.VerifyMu.Unlock()
 	select {
-	case s.VerifyCh <- job:
+	case s.Verify.VerifyCh <- job:
 	default:
 		// Drop oldest (FIFO) — dropped is considered verify fail (red ✗)
 		select {
-		case <-s.VerifyCh:
+		case <-s.Verify.VerifyCh:
 		default:
 		}
 		// Now space is guaranteed (or channel was emptied)
 		select {
-		case s.VerifyCh <- job:
+		case s.Verify.VerifyCh <- job:
 		default:
 			// Extremely unlikely: channel filled again between drop and send
 		}

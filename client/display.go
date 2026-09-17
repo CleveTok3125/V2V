@@ -9,15 +9,15 @@ import (
 // takes it.
 func (s *Session) emitTab(tab int, line string) {
 	if tab == TabChat {
-		s.TabChat.append(line)
+		s.Display.TabChat.append(line)
 	} else {
-		s.TabSys.append(line)
+		s.Display.TabSys.append(line)
 	}
 	// Tab 1 shows the full legacy stream, so it is unaffected by tabs.
 	// Tab 2 is purely additive and shows only its own lines.
-	if tab == s.ActiveTab || s.ActiveTab == TabChat {
-		fmt.Fprint(s.Out, line)
-		s.PrintGen++
+	if tab == s.Display.ActiveTab || s.Display.ActiveTab == TabChat {
+		fmt.Fprint(s.Display.Out, line)
+		s.Display.PrintGen++
 	}
 }
 
@@ -28,7 +28,7 @@ func (s *Session) emitTab(tab int, line string) {
 // go through here — printing to out directly bypasses Tab 2 and
 // leaves it incomplete. Caller must hold DisplayMu.
 func (s *Session) emitLocalFeedback(line string) {
-	s.TabSys.append(line)
-	fmt.Fprint(s.Out, line)
-	s.PrintGen++
+	s.Display.TabSys.append(line)
+	fmt.Fprint(s.Display.Out, line)
+	s.Display.PrintGen++
 }

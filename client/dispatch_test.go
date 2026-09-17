@@ -9,17 +9,17 @@ import (
 func sessionForDispatch(t *testing.T) *Session {
 	t.Helper()
 	sess := NewSession()
-	sess.Out = io.Discard
-	sess.Term = &fakeTerm{}
-	sess.TabChat = newTabBuffer(100, 100000)
-	sess.TabSys = newTabBuffer(100, 100000)
-	sess.WireIdx = newWireIndex(16)
+	sess.Display.Out = io.Discard
+	sess.Display.Term = &fakeTerm{}
+	sess.Display.TabChat = newTabBuffer(100, 100000)
+	sess.Display.TabSys = newTabBuffer(100, 100000)
+	sess.Chain.WireIdx = newWireIndex(16)
 	return sess
 }
 
 func seedChatHeight(sess *Session, height uint64) {
-	sess.TabChat.append("| Alice: hi")
-	sess.TabChat.append(metaLineFor(height, "abcd0000", ""))
+	sess.Display.TabChat.append("| Alice: hi")
+	sess.Display.TabChat.append(metaLineFor(height, "abcd0000", ""))
 }
 
 func TestDispatchInlineReplyPassesBody(t *testing.T) {
@@ -32,8 +32,8 @@ func TestDispatchInlineReplyPassesBody(t *testing.T) {
 	if text != "đồng ý" {
 		t.Fatalf("text=%q", text)
 	}
-	if sess.PendingReplyTo != 1234 {
-		t.Fatalf("PendingReplyTo=%d", sess.PendingReplyTo)
+	if sess.Pending.PendingReplyTo != 1234 {
+		t.Fatalf("PendingReplyTo=%d", sess.Pending.PendingReplyTo)
 	}
 }
 
@@ -47,11 +47,11 @@ func TestDispatchReplyDraftDoesNotSend(t *testing.T) {
 	if text != "/reply 1234" {
 		t.Fatalf("text=%q", text)
 	}
-	if sess.ReplyDraft != 1234 {
-		t.Fatalf("ReplyDraft=%d", sess.ReplyDraft)
+	if sess.Pending.ReplyDraft != 1234 {
+		t.Fatalf("ReplyDraft=%d", sess.Pending.ReplyDraft)
 	}
-	if sess.PendingReplyTo != 0 {
-		t.Fatalf("PendingReplyTo=%d", sess.PendingReplyTo)
+	if sess.Pending.PendingReplyTo != 0 {
+		t.Fatalf("PendingReplyTo=%d", sess.Pending.PendingReplyTo)
 	}
 }
 
@@ -61,8 +61,8 @@ func TestDispatchReplyMissingHeight(t *testing.T) {
 	if act != cmdDone {
 		t.Fatalf("act=%v want cmdDone", act)
 	}
-	if sess.PendingReplyTo != 0 {
-		t.Fatalf("PendingReplyTo=%d", sess.PendingReplyTo)
+	if sess.Pending.PendingReplyTo != 0 {
+		t.Fatalf("PendingReplyTo=%d", sess.Pending.PendingReplyTo)
 	}
 }
 
@@ -89,8 +89,8 @@ func TestDispatchInlineReplyCommandBodyClearsPending(t *testing.T) {
 	if act != cmdDone {
 		t.Fatalf("act=%v want cmdDone", act)
 	}
-	if sess.PendingReplyTo != 0 {
-		t.Fatalf("PendingReplyTo=%d want 0 (command body must not leak quote)", sess.PendingReplyTo)
+	if sess.Pending.PendingReplyTo != 0 {
+		t.Fatalf("PendingReplyTo=%d want 0 (command body must not leak quote)", sess.Pending.PendingReplyTo)
 	}
 }
 
@@ -101,8 +101,8 @@ func TestDispatchInlineReplyUnknownBodyClearsPending(t *testing.T) {
 	if act != cmdDone {
 		t.Fatalf("act=%v want cmdDone", act)
 	}
-	if sess.PendingReplyTo != 0 {
-		t.Fatalf("PendingReplyTo=%d want 0 (rejected body must not leak quote)", sess.PendingReplyTo)
+	if sess.Pending.PendingReplyTo != 0 {
+		t.Fatalf("PendingReplyTo=%d want 0 (rejected body must not leak quote)", sess.Pending.PendingReplyTo)
 	}
 }
 
@@ -142,7 +142,12 @@ func TestGracefulQuitBoundsMissingPump(t *testing.T) {
 
 func TestGracefulQuitNilPumpDone(t *testing.T) {
 	// Test-built sessions without a pump skip the wait entirely.
-	sess := &Session{Out: io.Discard, Term: &fakeTerm{}, Conn: &stubConn{}, Quitting: make(chan bool, 1), VerifyCh: make(chan verifyJob, 1)}
+	sess := &Session{
+		Conn:     &stubConn{},
+		Quitting: make(chan bool, 1),
+		Display:  DisplayState{Out: io.Discard, Term: &fakeTerm{}},
+		Verify:   VerifyState{VerifyCh: make(chan verifyJob, 1)},
+	}
 	start := time.Now()
 	sess.gracefulQuit()
 	if time.Since(start) > time.Second {
