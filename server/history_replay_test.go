@@ -195,7 +195,7 @@ func TestRegister_HoldsBroadcastMu(t *testing.T) {
 	sess := &ClientSession{Send: make(chan []byte, 1 << 20), DisplayName: "New#0000", Perms: GetDefaultPermission()}
 	regDone := make(chan struct{})
 	go func() {
-		s.registerClient(sess, "127.0.0.1")
+		s.Hub.registerClient(sess, "127.0.0.1")
 		close(regDone)
 	}()
 	lockedObserved := false
@@ -205,8 +205,8 @@ func TestRegister_HoldsBroadcastMu(t *testing.T) {
 			goto checked
 		default:
 		}
-		if s.BroadcastMu.TryLock() {
-			s.BroadcastMu.Unlock()
+		if s.Hub.BroadcastMu.TryLock() {
+			s.Hub.BroadcastMu.Unlock()
 		} else {
 			lockedObserved = true
 		}
@@ -238,7 +238,7 @@ func TestRegister_NoLiveInterleave(t *testing.T) {
 	sess := &ClientSession{Conn: nil, Send: make(chan []byte, 16384), DisplayName: "New#0000", Perms: GetDefaultPermission()}
 	regDone := make(chan struct{})
 	go func() {
-		s.registerClient(sess, "127.0.0.1")
+		s.Hub.registerClient(sess, "127.0.0.1")
 		close(regDone)
 	}()
 	// Wait for the replay header: proves registerClient is inside the
@@ -251,7 +251,7 @@ func TestRegister_NoLiveInterleave(t *testing.T) {
 	go func() {
 		defer close(liveDone)
 		for i := 0; i < 50; i++ {
-			s.BroadcastWire(WireMessage{Type: "chat", Text: "live line", DisplayName: "Other#1111"}, nil)
+			s.Hub.BroadcastWire(WireMessage{Type: "chat", Text: "live line", DisplayName: "Other#1111"}, nil, "")
 		}
 	}()
 	<-regDone
@@ -285,10 +285,10 @@ func TestAudit_LiveAndReplay(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	peer := &ClientSession{Send: make(chan []byte, 64), DisplayName: "P#0000", Perms: GetDefaultPermission()}
-	s.ClientsMu.Lock()
-	s.Clients[peerConn()] = peer
-	s.ClientsMu.Unlock()
-	s.BroadcastAudit("moderation note", nil)
+	s.Hub.ClientsMu.Lock()
+	s.Hub.Clients[peerConn()] = peer
+	s.Hub.ClientsMu.Unlock()
+	s.Hub.BroadcastAudit("moderation note", nil, "")
 	select {
 	case m := <-peer.Send:
 		var w WireMessage

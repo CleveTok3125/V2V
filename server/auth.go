@@ -206,7 +206,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 
 			hmacBytes, err := hex.DecodeString(resp.Hmac)
 			if err == nil && hmac.Equal(h.Sum(nil), hmacBytes) {
-				s.alertConcurrentIdentity(resp.IdentityPub, clientIP)
+				s.Hub.alertConcurrentIdentity(resp.IdentityPub, clientIP)
 				resp.AuthType = "ed25519"
 				logInfof("✅ [AUTH SUCCESS] %s đăng nhập thành công role: [%s]", clientIP, resp.Role)
 				return roleDef.Permission, resp, nil
@@ -229,8 +229,8 @@ func clientHost(r *http.Request) string {
 
 // alertConcurrentIdentity notifies an existing session when its identity
 // logs in from somewhere else. MVP: notify only; kicking is opt-in later.
-func (s *ChatServer) alertConcurrentIdentity(identityPubHex, newClientIP string) {
-	raw, ok := s.ActiveIdentities.Load(identityPubHex)
+func (h *Hub) alertConcurrentIdentity(identityPubHex, newClientIP string) {
+	raw, ok := h.ActiveIdentities.Load(identityPubHex)
 	if !ok {
 		return
 	}
@@ -238,9 +238,9 @@ func (s *ChatServer) alertConcurrentIdentity(identityPubHex, newClientIP string)
 	if prev == nil || prev.Conn == nil {
 		return
 	}
-	s.ClientsMu.Lock()
-	_, alive := s.Clients[prev.Conn]
-	s.ClientsMu.Unlock()
+	h.ClientsMu.Lock()
+	_, alive := h.Clients[prev.Conn]
+	h.ClientsMu.Unlock()
 	if !alive {
 		return
 	}
@@ -326,9 +326,9 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 	}
 
 	// Dynamic hash length based on active connections
-	s.ClientsMu.RLock()
-	n := len(s.Clients)
-	s.ClientsMu.RUnlock()
+	s.Hub.ClientsMu.RLock()
+	n := len(s.Hub.Clients)
+	s.Hub.ClientsMu.RUnlock()
 	total := n + 1
 	hashLen := 4
 	if total > 800 {
@@ -358,17 +358,17 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 	}
 
 	// Serial handling for duplicate hash (same baseDisplay already taken)
-	s.DisplayNameCountMu.Lock()
-	defer s.DisplayNameCountMu.Unlock()
-	if _, exists := s.DisplayNameCount[baseDisplay]; !exists {
-		s.DisplayNameCount[baseDisplay] = 1
+	s.Hub.DisplayNameCountMu.Lock()
+	defer s.Hub.DisplayNameCountMu.Unlock()
+	if _, exists := s.Hub.DisplayNameCount[baseDisplay]; !exists {
+		s.Hub.DisplayNameCount[baseDisplay] = 1
 		return baseDisplay
 	}
 	// Find next available serial: base-2, base-3, ...
 	for serial := 2; serial < 1000; serial++ {
 		candidate := fmt.Sprintf("%s-%d", baseDisplay, serial)
-		if _, exists := s.DisplayNameCount[candidate]; !exists {
-			s.DisplayNameCount[candidate] = 1
+		if _, exists := s.Hub.DisplayNameCount[candidate]; !exists {
+			s.Hub.DisplayNameCount[candidate] = 1
 			return candidate
 		}
 	}

@@ -130,9 +130,9 @@ func TestChainResumeAfterRestart(t *testing.T) {
 		t.Fatalf("resume tip/height = %x/%d, want %s/2", tip, height, w2.ChainHash)
 	}
 	// Next message continues the chain.
-	r.BroadcastMu.Lock()
+	r.Hub.BroadcastMu.Lock()
 	w3 := r.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:06", DisplayName: "C", Text: "three", TmpID: 1}, "")
-	r.BroadcastMu.Unlock()
+	r.Hub.BroadcastMu.Unlock()
 	if w3.ChainHeight != 3 {
 		t.Fatalf("post-restart height = %d, want 3", w3.ChainHeight)
 	}
@@ -148,9 +148,9 @@ func TestChainConcurrentAppend(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			s.BroadcastMu.Lock()
+			s.Hub.BroadcastMu.Lock()
 			s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "U", Text: fmt.Sprintf("m%d", i), TmpID: uint64(i + 1)}, "")
-			s.BroadcastMu.Unlock()
+			s.Hub.BroadcastMu.Unlock()
 		}(i)
 	}
 	wg.Wait()
@@ -199,7 +199,7 @@ func TestNoticeAuditRoutes(t *testing.T) {
 	if w1.ChainHeight != 1 {
 		t.Fatalf("first height = %d, want 1", w1.ChainHeight)
 	}
-	s.BroadcastNotice("A joined", "join", nil)
+	s.Hub.BroadcastNotice("A joined", "join", nil)
 	if s.Chain.height != 1 {
 		t.Fatalf("notice advanced height to %d", s.Chain.height)
 	}
@@ -212,7 +212,7 @@ func TestNoticeAuditRoutes(t *testing.T) {
 		t.Fatal("chat prev must skip the notice and link the previous chat")
 	}
 	audit := func() WireMessage {
-		s.BroadcastAudit("moderation note", nil)
+		s.Hub.BroadcastAudit("moderation note", nil, "")
 		var w WireMessage
 		last := s.Chain.History[len(s.Chain.History)-1]
 		if err := json.Unmarshal([]byte(last), &w); err != nil {
@@ -301,8 +301,8 @@ func TestChainResumeAuditAndDate(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
-	s.BroadcastNotice("day marker", "date", nil)
-	s.BroadcastAudit("moderation note", nil)
+	s.Hub.BroadcastNotice("day marker", "date", nil)
+	s.Hub.BroadcastAudit("moderation note", nil, "")
 	if s.Chain.height != 2 {
 		t.Fatalf("height = %d, want 2 (chat+audit only)", s.Chain.height)
 	}
