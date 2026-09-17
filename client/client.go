@@ -153,16 +153,16 @@ func main() {
 	if !sess.initUI() {
 		return
 	}
-	defer sess.Term.Close()
+	defer sess.Display.Term.Close()
 	defer ClearLoadedPassphrase()
 	go sess.runVerify()
 
 	go sess.runPump()
 
-	greeting(sess.Out, sess.Username)
+	greeting(sess.Display.Out, sess.Username)
 
 	for {
-		text, err := sess.Term.ReadLine()
+		text, err := sess.Display.Term.ReadLine()
 		if err != nil {
 			if sess.handleReadErr(err) == cmdQuit {
 				break
@@ -187,13 +187,13 @@ func main() {
 		if !ok {
 			// Codeblock canceled: no send happens, so drop the
 			// one-shot reply target (inline /reply or draft).
-			sess.PendingReplyTo = 0
+			sess.Pending.PendingReplyTo = 0
 			continue
 		}
 		if !sess.checkSendGuards(body) {
 			// Guard rejected the message: same one-shot cleanup;
 			// only sendMessage may consume PendingReplyTo.
-			sess.PendingReplyTo = 0
+			sess.Pending.PendingReplyTo = 0
 			continue
 		}
 		phRows, phShown, phBufEnd := sess.renderPlaceholder(body, lines)

@@ -20,7 +20,9 @@ import (
 )
 
 // Session carries the chat session state shared by the read pump, the
-// input loop, the render path and the chain tracker.
+// input loop, the render path and the chain tracker. Sub-state lives
+// in the Display, Chain, Verify and Pending groups; the root keeps
+// only identity and connection lifecycle.
 type Session struct {
 	// Connection and identity.
 	Conn      wsConn
@@ -38,9 +40,6 @@ type Session struct {
 	Prefix    string
 	Connected time.Time
 
-	// Terminal and output funnel.
-	Term     inputTerminal
-	Out      io.Writer
 	Quitting chan bool
 	// PumpDone closes when runPump returns. gracefulQuit waits on it
 	// (bounded) so the goodbye flush and pump teardown complete
@@ -48,40 +47,39 @@ type Session struct {
 	// that never start a pump: gracefulQuit skips the wait then.
 	PumpDone chan struct{}
 
+	Display DisplayState
+	Chain   ChainState
+	Verify  VerifyState
+	Pending PendingState
+}
+
+// DisplayState is everything the render path paints: tabs, buffers,
+// generation counters, toggles, terminal and output funnel.
+type DisplayState struct {
 	// Display toggles and locks.
 	ShowJoinLeave bool
 	ShowJoinMu    sync.RWMutex
 	ShowMeta      bool
 	ShowMetaMu    sync.RWMutex
-	AutoVerify    bool
-	AutoVerifyMu  sync.RWMutex
 	DisplayMu     sync.Mutex
 	ActiveTab     int
 	TabChat       *tabBuffer
 	TabSys        *tabBuffer
 	PrintGen      uint64
 
+	// Terminal and output funnel.
+	Term inputTerminal
+	Out  io.Writer
+
 	// Coalesced repaint state.
 	RefreshMu      sync.Mutex
 	LastRefresh    time.Time
 	RefreshPending bool
+}
 
-	// Async verify worker.
-	VerifyCh        chan verifyJob
-	VerifyMu        sync.Mutex
-	VerifyCloseOnce sync.Once
-
-	// Outgoing message state.
-	TmpSeq          uint64
-	PendingReplyTo  uint64
-	ReplyDraft      uint64
-	LastMessageTime time.Time
-
-	// Pending placeholders and early echoes.
-	PendingPlaceholders []pendingMsg
-	PendingEchoes       []pendingEcho
-
-	// Chain tracking and fork detection.
+// ChainState is the fork-detection tracker: tip, heights, sync set,
+// persisted tip, wire index and render cache.
+type ChainState struct {
 	ChainTip         [32]byte
 	ChainHeight      uint64
 	ChainHaveTip     bool
@@ -97,8 +95,29 @@ type Session struct {
 	TipSinceSave     uint64
 	WireIdx          *wireIndex
 	RenderCache      *renderCache
+}
 
-	// Read-pump banner staging.
+// VerifyState is the async badge-verify worker: channel, guard,
+// close-once and the autoverify toggle.
+type VerifyState struct {
+	VerifyCh        chan verifyJob
+	VerifyMu        sync.Mutex
+	VerifyCloseOnce sync.Once
+	AutoVerify      bool
+	AutoVerifyMu    sync.RWMutex
+}
+
+// PendingState is the outgoing message state: sequence counters,
+// one-shot targets, placeholders, early echoes and banner staging.
+type PendingState struct {
+	TmpSeq          uint64
+	PendingReplyTo  uint64
+	ReplyDraft      uint64
+	LastMessageTime time.Time
+
+	PendingPlaceholders []pendingMsg
+	PendingEchoes       []pendingEcho
+
 	PendingDateBanner     string
 	PendingDateBannerWire *WireMessage
 }
@@ -107,12 +126,18 @@ type Session struct {
 // main() previously created alongside the first use.
 func NewSession() *Session {
 	return &Session{
-		Quitting:            make(chan bool, 1),
-		PumpDone:            make(chan struct{}),
-		VerifyCh:            make(chan verifyJob, 128),
-		TripPrev:            make([]byte, 32),
-		PendingPlaceholders: []pendingMsg{},
-		SyncHashes:          map[string]bool{},
+		Quitting: make(chan bool, 1),
+		PumpDone: make(chan struct{}),
+		TripPrev: make([]byte, 32),
+		Verify: VerifyState{
+			VerifyCh: make(chan verifyJob, 128),
+		},
+		Pending: PendingState{
+			PendingPlaceholders: []pendingMsg{},
+		},
+		Chain: ChainState{
+			SyncHashes: map[string]bool{},
+		},
 	}
 }
 
@@ -156,16 +181,16 @@ func (s *Session) connect() bool {
 	}
 
 	// Derive trip key after s.Challenge so serverPub is known for salt binding
-	// s.TmpSeq numbers every outgoing message in this session (trip and
+	// s.Pending.TmpSeq numbers every outgoing message in this session (trip and
 	// plain alike). The server relays it verbatim but never assigns it.
 	// The base is random per connection (upper 32 bits) so a reconnect
 	// never reuses another session's IDs in stash/pending matching.
 	// CSPRNG: a predictable base would let an observer pre-compute
 	// placeholder collisions.
-	s.TmpSeq = (uint64(rand.Uint32()) + 1) << 32
+	s.Pending.TmpSeq = (uint64(rand.Uint32()) + 1) << 32
 	var seed [4]byte
 	if _, rerr := cryptorand.Read(seed[:]); rerr == nil {
-		s.TmpSeq = (uint64(binary.BigEndian.Uint32(seed[:])) + 1) << 32
+		s.Pending.TmpSeq = (uint64(binary.BigEndian.Uint32(seed[:])) + 1) << 32
 	}
 	passphraseBytes := []byte(CLI.Tripcode)
 	if len(passphraseBytes) > 0 {
@@ -324,33 +349,33 @@ func (s *Session) connect() bool {
 // initUI opens the terminal, tabs, toggles and chain state.
 func (s *Session) initUI() bool {
 	var err error
-	s.Term, err = newInputTerminal()
+	s.Display.Term, err = newInputTerminal()
 	if err != nil {
 		fmt.Println("❌ Lỗi khởi tạo terminal:", err)
 		return false
 	}
-	s.Out = s.Term.Writer()
+	s.Display.Out = s.Display.Term.Writer()
 
-	s.ShowJoinLeave = CLI.ShowJoin
+	s.Display.ShowJoinLeave = CLI.ShowJoin
 
-	s.AutoVerify = true
-	// s.ShowMeta toggles the trailing "#height:hash" line (/meta, default
+	s.Verify.AutoVerify = true
+	// s.Display.ShowMeta toggles the trailing "#height:hash" line (/meta, default
 	// from ui.meta.show in config). The session command overrides
 	// in-memory only; the chain still verifies when hidden.
-	s.ShowMeta = ClientCfg.ShowMeta()
-	s.LastMessageTime = time.Now().Add(-10 * time.Second)
+	s.Display.ShowMeta = ClientCfg.ShowMeta()
+	s.Pending.LastMessageTime = time.Now().Add(-10 * time.Second)
 
-	s.ActiveTab = TabChat
+	s.Display.ActiveTab = TabChat
 	cl, cb, sl, sb := tabCaps()
-	s.TabChat = newTabBuffer(cl, cb)
-	s.TabSys = newTabBuffer(sl, sb)
+	s.Display.TabChat = newTabBuffer(cl, cb)
+	s.Display.TabSys = newTabBuffer(sl, sb)
 
 	s.initChainState()
 
-	// s.WireIdx keeps full wires by height for /info lookups and rich
-	// quotes. Populated on every render (s.DisplayMu held by all callers).
-	s.WireIdx = newWireIndex(1000)
+	// s.Chain.WireIdx keeps full wires by height for /info lookups and rich
+	// quotes. Populated on every render (s.Display.DisplayMu held by all callers).
+	s.Chain.WireIdx = newWireIndex(1000)
 
-	s.RenderCache = newRenderCache(200)
+	s.Chain.RenderCache = newRenderCache(200)
 	return true
 }
