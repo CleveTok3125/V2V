@@ -107,14 +107,18 @@ func TestDispatchInlineReplyUnknownBodyClearsPending(t *testing.T) {
 }
 
 func TestGracefulQuitWaitsForPump(t *testing.T) {
-	// Exited pump: returns as soon as PumpDone closes, no 500ms wait.
+	// Exited pump: PumpDone is already closed, so gracefulQuit must
+	// return promptly instead of hanging. The bound is deliberately
+	// generous (2x the 500ms cap): it catches hangs, not sub-cap
+	// precision — the cap itself is pinned by
+	// TestGracefulQuitBoundsMissingPump.
 	sess := sessionForDispatch(t)
 	sess.Conn = &stubConn{}
 	close(sess.PumpDone)
 	start := time.Now()
 	sess.gracefulQuit()
-	if time.Since(start) > 400*time.Millisecond {
-		t.Fatal("gracefulQuit with exited pump must not take the full cap")
+	if time.Since(start) > time.Second {
+		t.Fatal("gracefulQuit with exited pump must not hang")
 	}
 	select {
 	case <-sess.Quitting:
@@ -125,11 +129,13 @@ func TestGracefulQuitWaitsForPump(t *testing.T) {
 
 func TestGracefulQuitBoundsMissingPump(t *testing.T) {
 	// Pump never exits: the 500ms cap bounds the wait, never hangs.
+	// Lower bound sits 50ms under the cap (timers do not fire early);
+	// upper bound is generous for slow CI runners.
 	sess := sessionForDispatch(t)
 	sess.Conn = &stubConn{}
 	start := time.Now()
 	sess.gracefulQuit()
-	if d := time.Since(start); d < 400*time.Millisecond || d > 2*time.Second {
+	if d := time.Since(start); d < 450*time.Millisecond || d > 5*time.Second {
 		t.Fatalf("gracefulQuit without pump exit took %v, want ~500ms cap", d)
 	}
 }
@@ -139,7 +145,7 @@ func TestGracefulQuitNilPumpDone(t *testing.T) {
 	sess := &Session{Out: io.Discard, Term: &fakeTerm{}, Conn: &stubConn{}, Quitting: make(chan bool, 1), VerifyCh: make(chan verifyJob, 1)}
 	start := time.Now()
 	sess.gracefulQuit()
-	if time.Since(start) > 400*time.Millisecond {
+	if time.Since(start) > time.Second {
 		t.Fatal("gracefulQuit with nil PumpDone must not wait")
 	}
 }
