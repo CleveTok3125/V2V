@@ -389,8 +389,8 @@ func main() {
 		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 		<-ch
 		logInfo("🛑 Nhận tín hiệu dừng, đang flush history...")
-		if chatApp.HistoryStore != nil {
-			_ = chatApp.HistoryStore.Close()
+		if chatApp.Chain.Store != nil {
+			_ = chatApp.Chain.Store.Close()
 		}
 		os.Exit(0)
 	}()

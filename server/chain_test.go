@@ -37,7 +37,7 @@ func checkStoredChainFrom(s *ChatServer, prev [32]byte) error {
 	var anchor string
 	var anchored bool
 	var wantHeight uint64
-	for i, msgStr := range s.ChatHistory {
+	for i, msgStr := range s.Chain.History {
 		var wire WireMessage
 		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil {
 			anchor, anchored = msgStr, true
@@ -76,7 +76,7 @@ func TestChainLinkSequence(t *testing.T) {
 	s := NewChatServer()
 	var last WireMessage
 	for i := 1; i <= 3; i++ {
-		last = s.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "Alice", Text: fmt.Sprintf("msg %d", i), TmpID: uint64(i)})
+		last = s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "Alice", Text: fmt.Sprintf("msg %d", i), TmpID: uint64(i)}, "")
 		if last.ChainHeight != uint64(i) {
 			t.Fatalf("height = %d, want %d", last.ChainHeight, i)
 		}
@@ -94,16 +94,16 @@ func TestChainLinkSequence(t *testing.T) {
 func TestChainTamperBreaksLink(t *testing.T) {
 	defer testChainCfg()()
 	s := NewChatServer()
-	s.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "Alice", Text: "original", TmpID: 1})
-	s.linkAndStore(WireMessage{Type: "chat", Time: "15:05", DisplayName: "Bob", Text: "reply", TmpID: 1})
+	s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "Alice", Text: "original", TmpID: 1}, "")
+	s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:05", DisplayName: "Bob", Text: "reply", TmpID: 1}, "")
 	// Server-side edit of stored text breaks its own link and every later one.
 	var first WireMessage
-	if err := json.Unmarshal([]byte(s.ChatHistory[0]), &first); err != nil {
+	if err := json.Unmarshal([]byte(s.Chain.History[0]), &first); err != nil {
 		t.Fatal(err)
 	}
 	first.Text = "edited by server"
 	bad, _ := json.Marshal(first)
-	s.ChatHistory[0] = string(bad)
+	s.Chain.History[0] = string(bad)
 	if err := checkStoredChain(s); err == nil {
 		t.Fatal("tampered chain must fail verification")
 	}
@@ -112,26 +112,26 @@ func TestChainTamperBreaksLink(t *testing.T) {
 func TestChainResumeAfterRestart(t *testing.T) {
 	defer testChainCfg()()
 	s := NewChatServer()
-	s.ChatHistory = append(s.ChatHistory, "legacy raw line without chain")
-	w1 := s.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1})
-	w2 := s.linkAndStore(WireMessage{Type: "chat", Time: "15:05", DisplayName: "B", Text: "two", TmpID: 7})
+	s.Chain.History = append(s.Chain.History, "legacy raw line without chain")
+	w1 := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
+	w2 := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:05", DisplayName: "B", Text: "two", TmpID: 7}, "")
 	if w1.ChainHeight != 1 {
 		t.Fatalf("first height = %d, want 1", w1.ChainHeight)
 	}
 	// Fresh server over the same history must resume, not fork.
 	r := NewChatServer()
-	r.ChatHistory = append([]string{}, s.ChatHistory...)
-	r.HistoryMu.Lock()
-	r.initChainLocked()
-	tip, height := r.chainTip, r.chainHeight
-	r.HistoryMu.Unlock()
+	r.Chain.History = append([]string{}, s.Chain.History...)
+	r.Chain.Mu.Lock()
+	r.Chain.initChainLocked("")
+	tip, height := r.Chain.tip, r.Chain.height
+	r.Chain.Mu.Unlock()
 	wantTip, _ := chain.ParseHex64(w2.ChainHash)
 	if tip != wantTip || height != 2 {
 		t.Fatalf("resume tip/height = %x/%d, want %s/2", tip, height, w2.ChainHash)
 	}
 	// Next message continues the chain.
 	r.BroadcastMu.Lock()
-	w3 := r.linkAndStore(WireMessage{Type: "chat", Time: "15:06", DisplayName: "C", Text: "three", TmpID: 1})
+	w3 := r.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:06", DisplayName: "C", Text: "three", TmpID: 1}, "")
 	r.BroadcastMu.Unlock()
 	if w3.ChainHeight != 3 {
 		t.Fatalf("post-restart height = %d, want 3", w3.ChainHeight)
@@ -149,17 +149,17 @@ func TestChainConcurrentAppend(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			s.BroadcastMu.Lock()
-			s.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "U", Text: fmt.Sprintf("m%d", i), TmpID: uint64(i + 1)})
+			s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "U", Text: fmt.Sprintf("m%d", i), TmpID: uint64(i + 1)}, "")
 			s.BroadcastMu.Unlock()
 		}(i)
 	}
 	wg.Wait()
-	if len(s.ChatHistory) != n {
-		t.Fatalf("stored %d, want %d", len(s.ChatHistory), n)
+	if len(s.Chain.History) != n {
+		t.Fatalf("stored %d, want %d", len(s.Chain.History), n)
 	}
 	// Heights must be a permutation of 1..n: no reuse, no gap.
 	seen := make([]bool, n+1)
-	for _, msgStr := range s.ChatHistory {
+	for _, msgStr := range s.Chain.History {
 		var wire WireMessage
 		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil {
 			t.Fatal(err)
@@ -170,7 +170,7 @@ func TestChainConcurrentAppend(t *testing.T) {
 		seen[wire.ChainHeight] = true
 	}
 	// In height order the links verify end to end.
-	ordered := append([]string{}, s.ChatHistory...)
+	ordered := append([]string{}, s.Chain.History...)
 	sort.Slice(ordered, func(i, j int) bool {
 		var a, b WireMessage
 		json.Unmarshal([]byte(ordered[i]), &a)
@@ -195,16 +195,16 @@ func TestChainConcurrentAppend(t *testing.T) {
 func TestNoticeAuditRoutes(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
-	w1 := s.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1})
+	w1 := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
 	if w1.ChainHeight != 1 {
 		t.Fatalf("first height = %d, want 1", w1.ChainHeight)
 	}
 	s.BroadcastNotice("A joined", "join", nil)
-	if s.chainHeight != 1 {
-		t.Fatalf("notice advanced height to %d", s.chainHeight)
+	if s.Chain.height != 1 {
+		t.Fatalf("notice advanced height to %d", s.Chain.height)
 	}
-	tipAfterNotice := s.chainTip
-	w2 := s.linkAndStore(WireMessage{Type: "chat", Time: "15:05", DisplayName: "B", Text: "two", TmpID: 2})
+	tipAfterNotice := s.Chain.tip
+	w2 := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:05", DisplayName: "B", Text: "two", TmpID: 2}, "")
 	if w2.ChainHeight != 2 {
 		t.Fatalf("chat after notice height = %d, want 2", w2.ChainHeight)
 	}
@@ -214,7 +214,7 @@ func TestNoticeAuditRoutes(t *testing.T) {
 	audit := func() WireMessage {
 		s.BroadcastAudit("moderation note", nil)
 		var w WireMessage
-		last := s.ChatHistory[len(s.ChatHistory)-1]
+		last := s.Chain.History[len(s.Chain.History)-1]
 		if err := json.Unmarshal([]byte(last), &w); err != nil {
 			t.Fatal(err)
 		}
@@ -232,19 +232,19 @@ func TestNoticeAuditRoutes(t *testing.T) {
 func TestChainResumeSkipsNotices(t *testing.T) {
 	defer testChainCfg()()
 	s := NewChatServer()
-	s.ChatHistory = append(s.ChatHistory, "legacy raw line without chain")
+	s.Chain.History = append(s.Chain.History, "legacy raw line without chain")
 	notice, _ := json.Marshal(WireMessage{Type: "system", Time: "15:04", SysKind: "join", Text: "A joined"})
-	s.ChatHistory = append(s.ChatHistory, string(notice))
-	w1 := s.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1})
+	s.Chain.History = append(s.Chain.History, string(notice))
+	w1 := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
 	if w1.ChainHeight != 1 {
 		t.Fatalf("first height = %d, want 1", w1.ChainHeight)
 	}
 	r := NewChatServer()
-	r.ChatHistory = append([]string{}, s.ChatHistory...)
-	r.HistoryMu.Lock()
-	r.initChainLocked()
-	tip, height := r.chainTip, r.chainHeight
-	r.HistoryMu.Unlock()
+	r.Chain.History = append([]string{}, s.Chain.History...)
+	r.Chain.Mu.Lock()
+	r.Chain.initChainLocked("")
+	tip, height := r.Chain.tip, r.Chain.height
+	r.Chain.Mu.Unlock()
 	wantTip, _ := chain.ParseHex64(w1.ChainHash)
 	if tip != wantTip || height != 1 {
 		t.Fatalf("resume tip/height = %x/%d, want %s/1", tip, height, w1.ChainHash)
@@ -261,22 +261,22 @@ func TestChainBreakAdoptsTipOnce(t *testing.T) {
 	defer log.SetOutput(oldOut)
 
 	s := NewChatServer()
-	s.ChatHistory = append(s.ChatHistory, "legacy raw line without chain")
+	s.Chain.History = append(s.Chain.History, "legacy raw line without chain")
 	badPrev := strings.Repeat("0", 64)
 	badHash := strings.Repeat("1", 64)
 	bad, _ := json.Marshal(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "bad",
 		ChainPrev: badPrev, ChainHash: badHash, ChainHeight: 5, ChainVer: 2, TmpID: 1})
-	s.ChatHistory = append(s.ChatHistory, string(bad))
+	s.Chain.History = append(s.Chain.History, string(bad))
 	// Valid continuation of the adopted bad tip.
 	goodHash := chain.Hash(mustHex(t, badHash), 6, 0, 0, "chat", "15:05", "B", "good", "")
 	good, _ := json.Marshal(WireMessage{Type: "chat", Time: "15:05", DisplayName: "B", Text: "good",
 		ChainPrev: badHash, ChainHash: hex.EncodeToString(goodHash[:]), ChainHeight: 6, ChainVer: 2})
-	s.ChatHistory = append(s.ChatHistory, string(good))
+	s.Chain.History = append(s.Chain.History, string(good))
 
-	s.HistoryMu.Lock()
-	s.initChainLocked()
-	tip, height := s.chainTip, s.chainHeight
-	s.HistoryMu.Unlock()
+	s.Chain.Mu.Lock()
+	s.Chain.initChainLocked("")
+	tip, height := s.Chain.tip, s.Chain.height
+	s.Chain.Mu.Unlock()
 
 	if height != 6 || tip != goodHash {
 		t.Fatalf("tip/height = %x/%d, want good hash/6", tip, height)
@@ -300,19 +300,19 @@ func mustHex(t *testing.T, s string) [32]byte {
 func TestChainResumeAuditAndDate(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
-	s.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1})
+	s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
 	s.BroadcastNotice("day marker", "date", nil)
 	s.BroadcastAudit("moderation note", nil)
-	if s.chainHeight != 2 {
-		t.Fatalf("height = %d, want 2 (chat+audit only)", s.chainHeight)
+	if s.Chain.height != 2 {
+		t.Fatalf("height = %d, want 2 (chat+audit only)", s.Chain.height)
 	}
 	r := NewChatServer()
-	r.ChatHistory = append([]string{}, s.ChatHistory...)
-	r.HistoryMu.Lock()
-	r.initChainLocked()
-	tip, height := r.chainTip, r.chainHeight
-	r.HistoryMu.Unlock()
-	if height != 2 || tip != s.chainTip {
-		t.Fatalf("resume tip/height = %x/%d, want %x/2", tip, height, s.chainTip)
+	r.Chain.History = append([]string{}, s.Chain.History...)
+	r.Chain.Mu.Lock()
+	r.Chain.initChainLocked("")
+	tip, height := r.Chain.tip, r.Chain.height
+	r.Chain.Mu.Unlock()
+	if height != 2 || tip != s.Chain.tip {
+		t.Fatalf("resume tip/height = %x/%d, want %x/2", tip, height, s.Chain.tip)
 	}
 }

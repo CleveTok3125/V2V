@@ -247,8 +247,8 @@ func TestWantJoinsEndToEnd(t *testing.T) {
 		t.Run(map[bool]string{false: "filtered", true: "joins"}[want], func(t *testing.T) {
 			testCfg(t)
 			s := NewChatServer()
-			s.appendMessageToHistory(`{"type":"system","sys_kind":"join","text":"old join"}`)
-			s.appendMessageToHistory(`{"type":"chat","text":"hello"}`)
+			s.Chain.appendMessageToHistory(`{"type":"system","sys_kind":"join","text":"old join"}`)
+			s.Chain.appendMessageToHistory(`{"type":"chat","text":"hello"}`)
 			client, serverConn := dialAuthPair(t, s)
 			sessDone := make(chan *ClientSession, 1)
 			go func() {

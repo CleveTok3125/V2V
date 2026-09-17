@@ -26,7 +26,7 @@ func TestServeAuthenticated_LargeHistoryNoDeadlock(t *testing.T) {
 	s := NewChatServer()
 	const historyLines = 600
 	for i := 0; i < historyLines; i++ {
-		s.appendMessageToHistory(fmt.Sprintf("legacy line %04d", i))
+		s.Chain.appendMessageToHistory(fmt.Sprintf("legacy line %04d", i))
 	}
 
 	serverConnCh := make(chan *websocket.Conn, 1)

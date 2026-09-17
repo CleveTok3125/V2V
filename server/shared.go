@@ -74,6 +74,19 @@ type NonceMeta struct {
 // auth paths never convert between two identical structs.
 type RateLimitRecord = guard.RateLimitRecord
 
+// ChainService owns the message chain tip, the in-memory history and
+// the on-disk store. Mu guards tip, height, ready, History and
+// HistorySize together so linkAndStore stays atomic across both.
+type ChainService struct {
+	Mu          sync.RWMutex
+	tip         [32]byte
+	height      uint64
+	ready       bool
+	History     []string
+	HistorySize int
+	Store       *HistoryStore
+}
+
 type ChatServer struct {
 	StartTime time.Time
 
@@ -89,20 +102,12 @@ type ChatServer struct {
 	AuthFails   map[string]RateLimitRecord
 	AuthFailsMu sync.Mutex
 
-	ChatHistory     []string
-	ChatHistorySize int
-	HistoryMu       sync.RWMutex
-	HistoryStore    *HistoryStore
+	Chain ChainService
 
 	// BroadcastMu serializes link+send so every client receives messages
-	// in chain order (see server/chain.go). Leaf locks inside: HistoryMu,
-	// then ClientsMu.
+	// in chain order (see server/chain.go). Leaf locks inside: HistoryMu
+	// (Chain.Mu), then ClientsMu.
 	BroadcastMu sync.Mutex
-
-	// Global message chain tip. Guarded by HistoryMu; set by initChainLocked.
-	chainTip    [32]byte
-	chainHeight uint64
-	chainReady  bool
 
 	LastMessageDate   string
 	LastMessageDateMu sync.Mutex
@@ -146,7 +151,7 @@ func NewChatServer() *ChatServer {
 		AuthFails:         make(map[string]RateLimitRecord),
 		DisplaySalt:       salt,
 		DisplayNameCount:  make(map[string]int),
-		ChatHistory:       make([]string, 0),
+		Chain:             ChainService{History: make([]string, 0)},
 		RoleRegistry:      make(map[string]RoleDefinition),
 		WebAuthn:         NewWebAuthnStore(env.WebauthnStore()),
 		Upgrader: websocket.Upgrader{

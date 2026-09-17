@@ -15,35 +15,35 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func (s *ChatServer) appendMessageToHistory(msg string) {
-	s.HistoryMu.Lock()
-	defer s.HistoryMu.Unlock()
-	s.appendMessageLocked(msg)
+func (c *ChainService) appendMessageToHistory(msg string) {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	c.appendMessageLocked(msg)
 }
 
 // appendMessageLocked appends one history line with dual-limit eviction.
-// Caller must hold HistoryMu.
-func (s *ChatServer) appendMessageLocked(msg string) {
+// Caller must hold HistoryMu (Chain.Mu).
+func (c *ChainService) appendMessageLocked(msg string) {
 	msgSize := len(msg)
-	s.ChatHistory = append(s.ChatHistory, msg)
-	s.ChatHistorySize += msgSize
+	c.History = append(c.History, msg)
+	c.HistorySize += msgSize
 
-	for s.ChatHistorySize > Cfg.Dynamic.Load().MaxHistoryBytes && len(s.ChatHistory) > 0 {
-		oldestSize := len(s.ChatHistory[0])
-		s.ChatHistorySize -= oldestSize
+	for c.HistorySize > Cfg.Dynamic.Load().MaxHistoryBytes && len(c.History) > 0 {
+		oldestSize := len(c.History[0])
+		c.HistorySize -= oldestSize
 
-		s.ChatHistory[0] = ""
-		s.ChatHistory = s.ChatHistory[1:]
+		c.History[0] = ""
+		c.History = c.History[1:]
 	}
 	// Shrink underlying array when cap bloats >4*len to avoid holding 20MiB when only 5MiB needed
-	if cap(s.ChatHistory) > 4*len(s.ChatHistory) && cap(s.ChatHistory) > 1024 {
-		newCap := len(s.ChatHistory)
+	if cap(c.History) > 4*len(c.History) && cap(c.History) > 1024 {
+		newCap := len(c.History)
 		if newCap < 1024 {
 			newCap = 1024
 		}
-		n := make([]string, len(s.ChatHistory), newCap)
-		copy(n, s.ChatHistory)
-		s.ChatHistory = n
+		n := make([]string, len(c.History), newCap)
+		copy(n, c.History)
+		c.History = n
 	}
 }
 
@@ -53,7 +53,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 		return err
 	}
 
-	s.HistoryStore = store
+	s.Chain.Store = store
 
 	if store == nil {
 		return nil
@@ -78,7 +78,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 			tripForChain = nil
 			wireForVerify = nil
 		}
-		s.appendMessageToHistory(msgForHistory)
+		s.Chain.appendMessageToHistory(msgForHistory)
 		if tripForChain != nil && tripForChain.Pub != "" && wireForVerify != nil {
 			displayName := wireForVerify.DisplayName
 			if displayName == "" {
@@ -138,7 +138,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 		}
 	}
 
-	loggedCount := len(s.ChatHistory)
+	loggedCount := len(s.Chain.History)
 	if loggedCount > 0 {
 		logInfof("📚 Đã phục hồi %d tin nhắn history từ disk", loggedCount)
 	}
@@ -201,9 +201,9 @@ func (s *ChatServer) BroadcastNotice(text, kind string, sender *websocket.Conn) 
 	now := time.Now().In(Cfg.Static.Timezone)
 	wire := WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: kind, Text: text}
 	data, _ := json.Marshal(wire)
-	s.appendMessageToHistory(string(data))
-	if s.HistoryStore != nil {
-		s.HistoryStore.EnqueueWire(wire, now)
+	s.Chain.appendMessageToHistory(string(data))
+	if s.Chain.Store != nil {
+		s.Chain.Store.EnqueueWire(wire, now)
 	}
 	s.fanout(data, sender, true, false)
 }
@@ -216,7 +216,7 @@ func (s *ChatServer) BroadcastAudit(text string, sender *websocket.Conn) {
 	now := time.Now().In(Cfg.Static.Timezone)
 	s.BroadcastMu.Lock()
 	defer s.BroadcastMu.Unlock()
-	wire := s.linkAndStore(WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: "audit", Text: text})
+	wire := s.Chain.linkAndStore(WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: "audit", Text: text}, s.serverPub())
 	data, _ := json.Marshal(wire)
 
 	s.fanout(data, sender, true, false)
@@ -225,7 +225,7 @@ func (s *ChatServer) BroadcastAudit(text string, sender *websocket.Conn) {
 func (s *ChatServer) BroadcastWire(wire WireMessage, sender *websocket.Conn) {
 	s.BroadcastMu.Lock()
 	defer s.BroadcastMu.Unlock()
-	wire = s.linkAndStore(wire)
+	wire = s.Chain.linkAndStore(wire, s.serverPub())
 	data, _ := json.Marshal(wire)
 	// Echo to the sender doubles as delivery confirmation so it can
 	// replace its grey placeholder with the confirmed rendering.
@@ -247,13 +247,13 @@ func (s *ChatServer) CheckAndBroadcastDate(now time.Time) {
 	}
 }
 
-func (s *ChatServer) SendChatHistory(session *ClientSession) {
-	s.HistoryMu.RLock()
+func (c *ChainService) SendChatHistory(session *ClientSession) {
+	c.Mu.RLock()
 
-	historyLen := len(s.ChatHistory)
+	historyLen := len(c.History)
 
 	if historyLen == 0 {
-		s.HistoryMu.RUnlock()
+		c.Mu.RUnlock()
 		return
 	}
 
@@ -265,8 +265,8 @@ func (s *ChatServer) SendChatHistory(session *ClientSession) {
 	}
 
 	historyCopy := make([]string, historyLen-startIndex)
-	copy(historyCopy, s.ChatHistory[startIndex:])
-	s.HistoryMu.RUnlock()
+	copy(historyCopy, c.History[startIndex:])
+	c.Mu.RUnlock()
 
 	// Replay filters join/leave unless the session asked for them.
 	// Dates, audits and untagged lines always go. Filtered lines never
