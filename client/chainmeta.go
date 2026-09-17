@@ -748,60 +748,92 @@ func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
 	s.Display.PrintGen++
 }
 
-func (s *Session) consumeEchoLocked(wire WireMessage, allowStash bool) {
-	// Queue guard, nested under the caller's DisplayMu per the
-	// Display -> Chain -> Pending order. The erase below stays on
-	// DisplayMu: erase math needs tabs, PrintGen and the matched
-	// placeholder atomically.
+// echoConsume is the queue-only outcome of one echo match: stale
+// warnings to emit and, on a hit, the placeholder to erase.
+type echoConsume struct {
+	stale   []WireMessage
+	matched bool
+	pm      pendingMsg
+}
+
+// planEchoConsume runs the queue work under PendingMu (nested under
+// the caller's DisplayMu per the order) and returns the actions for
+// the caller to emit/erase on DisplayMu alone.
+func (s *Session) planEchoConsume(wire WireMessage, allowStash bool) echoConsume {
 	s.Pending.Mu.Lock()
 	defer s.Pending.Mu.Unlock()
-	var stale []WireMessage
-	s.Pending.PendingEchoes, stale = reapStaleEchoes(s.Pending.PendingEchoes, 10*time.Second)
-	for _, w := range stale {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Echo không khớp tin đang chờ (tmp_id=%d) — ID có thể đã bị sửa.\n", w.TmpID))
-	}
+	var out echoConsume
+	s.Pending.PendingEchoes, out.stale = reapStaleEchoes(s.Pending.PendingEchoes, 10*time.Second)
 	if wire.DisplayName != s.Username || len(s.Pending.PendingPlaceholders) == 0 {
 		if allowStash && wire.DisplayName == s.Username && wire.TmpID != 0 {
 			s.Pending.PendingEchoes = stashEcho(s.Pending.PendingEchoes, wire, 16)
 		}
-		return
+		return out
 	}
 	idx := matchPendingIndex(s.Pending.PendingPlaceholders, wire.TmpID, wire.ReplyTo, wire.Text, s.Username, wire.DisplayName)
 	if idx == -1 {
 		if allowStash && wire.TmpID != 0 {
 			s.Pending.PendingEchoes = stashEcho(s.Pending.PendingEchoes, wire, 16)
 		}
-		return
+		return out
 	}
-	pm := s.Pending.PendingPlaceholders[idx]
+	out.matched = true
+	out.pm = s.Pending.PendingPlaceholders[idx]
 	s.Pending.PendingPlaceholders = append(s.Pending.PendingPlaceholders[:idx], s.Pending.PendingPlaceholders[idx+1:]...)
-	s.erasePlaceholderLocked(pm)
+	return out
+}
+
+func (s *Session) consumeEchoLocked(wire WireMessage, allowStash bool) {
+	act := s.planEchoConsume(wire, allowStash)
+	for _, w := range act.stale {
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Echo không khớp tin đang chờ (tmp_id=%d) — ID có thể đã bị sửa.\n", w.TmpID))
+	}
+	if act.matched {
+		s.erasePlaceholderLocked(act.pm)
+	}
 }
 
 func (s *Session) noteChainTip(tip [32]byte, height uint64) {
 	// Tip guard: serializes pump updates against the input loop's
-	// gracefulQuit flush. Pure chain state plus file IO, never emits,
-	// so nesting under a caller-held DisplayMu keeps the order.
+	// gracefulQuit flush. Snapshot under the lock, write outside it,
+	// so concurrent ChainMu waiters (lock-free flush) never block on
+	// disk latency. Pump paths nesting under DisplayMu still cross
+	// the save itself; only the guard hold is narrowed here.
+	// The batch counter is heuristic: reset only when no concurrent
+	// note advanced it past the threshold meanwhile, so a racing
+	// increment delays the next save instead of vanishing.
 	s.Chain.Mu.Lock()
-	defer s.Chain.Mu.Unlock()
 	s.Chain.ChainTip, s.Chain.ChainHeight, s.Chain.ChainHaveTip = tip, height, true
 	s.Chain.TipSinceSave++
-	if s.Chain.TipSinceSave >= tipBatchSaves {
-		if saveChainTip(s.Chain.TipPath, tip, height, s.Chain.ServerPubHex) == nil {
+	path, serverPub := s.Chain.TipPath, s.Chain.ServerPubHex
+	shouldSave := s.Chain.TipSinceSave >= tipBatchSaves
+	s.Chain.Mu.Unlock()
+	if shouldSave && saveChainTip(path, tip, height, serverPub) == nil {
+		s.Chain.Mu.Lock()
+		if s.Chain.TipSinceSave >= tipBatchSaves {
 			s.Chain.TipSinceSave = 0
 		}
+		s.Chain.Mu.Unlock()
 	}
 }
 
 func (s *Session) flushChainTip() {
 	// Same guard as noteChainTip: callable lock-free (gracefulQuit,
 	// disconnect path) or nested under DisplayMu (pump paths).
+	// Snapshot under the lock, write outside it (see noteChainTip).
 	s.Chain.Mu.Lock()
-	defer s.Chain.Mu.Unlock()
-	if s.Chain.ChainHaveTip {
-		if saveChainTip(s.Chain.TipPath, s.Chain.ChainTip, s.Chain.ChainHeight, s.Chain.ServerPubHex) == nil {
+	if !s.Chain.ChainHaveTip {
+		s.Chain.Mu.Unlock()
+		return
+	}
+	tip, height, path, serverPub := s.Chain.ChainTip, s.Chain.ChainHeight, s.Chain.TipPath, s.Chain.ServerPubHex
+	s.Chain.Mu.Unlock()
+	if saveChainTip(path, tip, height, serverPub) == nil {
+		s.Chain.Mu.Lock()
+		if s.Chain.TipSinceSave >= tipBatchSaves {
 			s.Chain.TipSinceSave = 0
 		}
+		s.Chain.Mu.Unlock()
 	}
 }
 

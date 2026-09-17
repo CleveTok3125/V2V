@@ -29,7 +29,10 @@ import (
 // god-lock for erase math (tabs + PrintGen + pending must stay
 // atomic); ChainMu serializes tip updates between the pump and the
 // input loop; PendingMu guards the placeholder/echo queues at the
-// two threads that share them.
+// two threads that share them. Pump-side chain reads (InSync,
+// SyncHashes, HaveTip in checkChainLink and handleHistorySync) stay
+// under caller-held DisplayMu with no ChainMu: the pump is their
+// only writer, so a second lock would add nothing.
 type Session struct {
 	// Connection and identity.
 	Conn      wsConn

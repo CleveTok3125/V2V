@@ -215,9 +215,13 @@ func (s *Session) sendMessage(text string, phRows int, phShown bool, phBufEnd in
 					break
 				}
 			}
+		}
+		// Queue done: release before the erase, which stays on
+		// DisplayMu (still held throughout, so no interleave).
+		s.Pending.Mu.Unlock()
+		if haveStashed {
 			s.erasePlaceholderLocked(pm)
 		}
-		s.Pending.Mu.Unlock()
 		s.Display.DisplayMu.Unlock()
 	}
 	// Reply targets are one-shot, cleared after tracking above (the
