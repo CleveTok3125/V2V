@@ -188,12 +188,18 @@ func TestCmdFindSearchesBuffer(t *testing.T) {
 	if got := out.String(); !strings.Contains(got, "Tìm #1234") {
 		t.Fatalf("find must show header: %q", got)
 	}
+	if got := out.String(); !strings.Contains(got, "<<<<<<< #1234") || !strings.Contains(got, ">>>>>>> #1234") {
+		t.Fatalf("find hits must replay inside frame: %q", got)
+	}
 
 	sess, out = behaviorSession(t)
 	seedChatHeight(sess, 1234)
 	sess.cmdFind("/find 9999")
 	if got := out.String(); !strings.Contains(got, "Không thấy") {
 		t.Fatalf("missing height must report: %q", got)
+	}
+	if got := out.String(); strings.Contains(got, "<<<<<<<") || strings.Contains(got, ">>>>>>>") {
+		t.Fatalf("missing height must not print frame: %q", got)
 	}
 
 	sess, out = behaviorSession(t)

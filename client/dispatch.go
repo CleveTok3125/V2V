@@ -403,11 +403,18 @@ func (s *Session) cmdFind(text string) bool {
 		}
 		shown += len(matches)
 	}
+	// Replay inside the same dim heredoc frame as /expand so replayed
+	// lines never read as live chat. No buffer surgery: markers only.
+	if shown > 0 {
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m\n", height))
+	}
 	for _, h := range hits {
 		s.emitLocalFeedback(h)
 	}
 	if shown == 0 {
 		s.emitLocalFeedback("| [Local]: Không thấy (tin cũ đã bị evict khỏi bộ nhớ hoặc chưa sync).\n")
+	} else {
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m\n", height))
 	}
 	s.Display.DisplayMu.Unlock()
 	s.Display.Term.Refresh()
