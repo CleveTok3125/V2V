@@ -353,18 +353,18 @@ Planned work grouped by dependency, in recommended order. Each item stays self-c
 
 ### Phase 0 — Foundation
 
-- **Session surgery** — client split into display/chain/verify/pending groups with a fixed `Display -> Chain -> Pending` order (tip persist outside the lock, queue-only pending guards); server `chain.Service`/`history.Store`/`hub` split deferred until the client proves stable. — *PARTIAL (client done)*
+- **Session surgery** — client split into display/chain/verify/pending groups with a fixed `Display -> Chain -> Pending` order (tip persist outside the lock, queue-only pending guards); server split into `ChainService` (tip, history, store) and `Hub` (presence and send ordering) with the lock order unchanged. — *DONE*
 - **Dependency arrows** — `markup` is the sole facade (`Style` alias, `DefaultStyle`, `NeedsContinuation`, `Linkify` passthroughs): `client` no longer imports `codebg`/`linkify` directly; `strength` owns its report type and `guard` takes a plain limits struct are done. — *DONE*
 - **Env/log/error unification** — typed getenv helper (`internal/env/env.go:20`) and leveled logging (`server/loglevel.go:10`) are done; the `%w` rule lives in [Error Handling](#error-handling). — *DONE*
 
 ### Phase 1 — Evidence
 
-- **First audit producer** — `BroadcastAudit` (`server/history.go:214`) has tests but no callers; wire the first management action (ban/kick/mute/rolechange) through it. Spec: `.note.ai/20260910_backlog_audit_mod_plan.md`. — *NOT DONE*
+- **First audit producer** — `BroadcastAudit` (`server/history.go:214`) has tests but no callers; wire the first management action through it: rank-gated kick first (actor rank must exceed target; duration 0 = kick, longer = ban), audit text never carries IPs. — *BACKLOG*
 - **Paged history** — fetch older segments on demand (`/history`); the connect-time replay (`MAX_HISTORY_SEND`) stays a join burst for fast startup. — *NOT DONE*
 
 ### Phase 2 — Blog (frontend done, backend deferred)
 
-Frontend (`server/blog/render.go`, `webterm/blog/cactus.css`) shipped; backend deferred per `.note.ai/20260912_235900_blog_frontend_plan.md`. In order:
+Frontend (`server/blog/render.go`, `webterm/blog/cactus.css`) shipped; backend deferred. In order:
 
 - **Blog permission** — `CanManageBlog` in `wire.Permission` + role template + `v2vctl` flags. — *NOT DONE*
 - **Blog store** — `DATA_DIR/blog/{slug}.md` + sidecar JSON (slug `[a-z0-9-]`, 3 fixed tags, atomic write, read cache). — *NOT DONE*
