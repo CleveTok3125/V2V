@@ -168,9 +168,9 @@ func TestJoinBroadcast_IncludesJoiner(t *testing.T) {
 	_ = a
 	sessA := &ClientSession{Conn: a, Send: make(chan []byte, 256), DisplayName: "A#0000", Perms: GetDefaultPermission()}
 	sessB := &ClientSession{Conn: b, Send: make(chan []byte, 256), DisplayName: "B#1111", Perms: GetDefaultPermission()}
-	s.Clients[a] = sessA
-	s.Clients[b] = sessB
-	s.BroadcastNotice("X đã tham gia phòng chat!", "join", nil)
+	s.Hub.Clients[a] = sessA
+	s.Hub.Clients[b] = sessB
+	s.Hub.BroadcastNotice("X đã tham gia phòng chat!", "join", nil)
 	for _, sess := range []*ClientSession{sessA, sessB} {
 		select {
 		case msg := <-sess.Send:
@@ -190,9 +190,9 @@ func TestBroadcastWire_SeqEnforced(t *testing.T) {
 	s := NewChatServer()
 	a, _ := dialAuthPair(t, s)
 	sess := &ClientSession{Conn: a, Send: make(chan []byte, 256), DisplayName: "A#0000", Perms: GetDefaultPermission()}
-	s.Clients[a] = sess
-	s.BroadcastWire(WireMessage{Type: "chat", Text: "one", DisplayName: "A#0000"}, nil)
-	s.BroadcastWire(WireMessage{Type: "chat", Text: "two", DisplayName: "A#0000"}, nil)
+	s.Hub.Clients[a] = sess
+	s.Hub.BroadcastWire(WireMessage{Type: "chat", Text: "one", DisplayName: "A#0000"}, nil, "")
+	s.Hub.BroadcastWire(WireMessage{Type: "chat", Text: "two", DisplayName: "A#0000"}, nil, "")
 	var heights []uint64
 	for i := 0; i < 2; i++ {
 		select {
@@ -222,20 +222,20 @@ func TestActiveIdentities_Takeover(t *testing.T) {
 		return &ClientSession{Conn: serverConn, Send: make(chan []byte, 16), DisplayName: name, Perms: GetDefaultPermission(), IdentityPub: "abc123"}
 	}
 	s1, s2 := mk("One#0001"), mk("Two#0002")
-	s.registerClient(s1, "10.0.0.1")
-	if raw, ok := s.ActiveIdentities.Load("abc123"); !ok || raw.(*ClientSession) != s1 {
+	s.Hub.registerClient(s1, "10.0.0.1")
+	if raw, ok := s.Hub.ActiveIdentities.Load("abc123"); !ok || raw.(*ClientSession) != s1 {
 		t.Fatal("first session must own the identity slot")
 	}
-	s.registerClient(s2, "10.0.0.2")
-	if raw, ok := s.ActiveIdentities.Load("abc123"); !ok || raw.(*ClientSession) != s2 {
+	s.Hub.registerClient(s2, "10.0.0.2")
+	if raw, ok := s.Hub.ActiveIdentities.Load("abc123"); !ok || raw.(*ClientSession) != s2 {
 		t.Fatal("newest session must take over the identity slot")
 	}
-	s.unregisterClient(s1, "10.0.0.1")
-	if _, ok := s.ActiveIdentities.Load("abc123"); !ok {
+	s.Hub.unregisterClient(s1, "10.0.0.1")
+	if _, ok := s.Hub.ActiveIdentities.Load("abc123"); !ok {
 		t.Fatal("stale unregister must not release the new owner's slot")
 	}
-	s.unregisterClient(s2, "10.0.0.2")
-	if _, ok := s.ActiveIdentities.Load("abc123"); ok {
+	s.Hub.unregisterClient(s2, "10.0.0.2")
+	if _, ok := s.Hub.ActiveIdentities.Load("abc123"); ok {
 		t.Fatal("owner unregister must release the slot")
 	}
 }
@@ -279,7 +279,7 @@ func TestWantJoinsEndToEnd(t *testing.T) {
 				t.Fatalf("WantJoins = %v, want %v", sess.WantJoins, want)
 			}
 			sess.Send = make(chan []byte, 64)
-			s.registerClient(sess, "127.0.0.1")
+			s.Hub.registerClient(sess, "127.0.0.1")
 			var got []string
 			timeout := time.After(5 * time.Second)
 		drain:
@@ -318,17 +318,17 @@ func TestRegister_CleansDisplayName(t *testing.T) {
 	s := NewChatServer()
 	_, serverConn := dialAuthPair(t, s)
 	sess := &ClientSession{Conn: serverConn, Send: make(chan []byte, 16), DisplayName: "Temp#0001", Perms: GetDefaultPermission()}
-	s.registerClient(sess, "10.0.0.9")
-	if _, ok := s.Clients[serverConn]; !ok {
+	s.Hub.registerClient(sess, "10.0.0.9")
+	if _, ok := s.Hub.Clients[serverConn]; !ok {
 		t.Fatal("registered session missing from Clients")
 	}
-	s.unregisterClient(sess, "10.0.0.9")
-	if _, ok := s.Clients[serverConn]; ok {
+	s.Hub.unregisterClient(sess, "10.0.0.9")
+	if _, ok := s.Hub.Clients[serverConn]; ok {
 		t.Fatal("unregistered session still in Clients")
 	}
-	s.DisplayNameCountMu.Lock()
-	_, kept := s.DisplayNameCount["Temp#0001"]
-	s.DisplayNameCountMu.Unlock()
+	s.Hub.DisplayNameCountMu.Lock()
+	_, kept := s.Hub.DisplayNameCount["Temp#0001"]
+	s.Hub.DisplayNameCountMu.Unlock()
 	if kept {
 		t.Fatal("display serial slot not released")
 	}

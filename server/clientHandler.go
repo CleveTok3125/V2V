@@ -42,19 +42,19 @@ func (s *ChatServer) releaseIPConnection(clientIP string) {
 	}
 }
 
-func (s *ChatServer) registerClient(session *ClientSession, clientIP string) {
-	s.ClientsMu.Lock()
-	s.Clients[session.Conn] = session
-	s.ClientsMu.Unlock()
+func (h *Hub) registerClient(session *ClientSession, clientIP string) {
+	h.ClientsMu.Lock()
+	h.Clients[session.Conn] = session
+	h.ClientsMu.Unlock()
 
 	// Track the live holder of each privileged identity so a parallel
 	// login elsewhere triggers the concurrent-use alert. Newest wins;
 	// unregisterClient releases only if it still owns the slot.
 	if session.IdentityPub != "" {
-		if prev, loaded := s.ActiveIdentities.LoadOrStore(session.IdentityPub, session); loaded {
+		if prev, loaded := h.ActiveIdentities.LoadOrStore(session.IdentityPub, session); loaded {
 			if old, _ := prev.(*ClientSession); old != nil && old != session {
-				s.alertConcurrentIdentity(session.IdentityPub, clientIP)
-				s.ActiveIdentities.Store(session.IdentityPub, session)
+				h.alertConcurrentIdentity(session.IdentityPub, clientIP)
+				h.ActiveIdentities.Store(session.IdentityPub, session)
 			}
 		}
 	}
@@ -64,59 +64,60 @@ func (s *ChatServer) registerClient(session *ClientSession, clientIP string) {
 	// client collects foreign hashes into its fork window and jumps
 	// tips mid-sync. Notices (no BroadcastMu) can still slip in, but
 	// they carry no chain fields and never disturb tip accounting.
-	// Lock order stays BroadcastMu -> HistoryMu (Chain.Mu) -> ClientsMu:
-	// the map insert above is sequential, never nested.
-	s.BroadcastMu.Lock()
-	s.Chain.SendChatHistory(session)
+	// Lock order stays BroadcastMu -> LastMessageDateMu -> HistoryMu
+	// (Chain.Mu) -> ClientsMu: the Clients map insert in this function
+	// is sequential, never nested.
+	h.BroadcastMu.Lock()
+	h.chain.SendChatHistory(session)
 
 	joinTime := time.Now().In(Cfg.Static.Timezone)
-	s.CheckAndBroadcastDate(joinTime)
+	h.CheckAndBroadcastDate(joinTime)
 
 	joinMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã tham gia phòng chat!", joinTime.Format("15:04"), session.DisplayName)
 	logInfof("🟢 [JOIN] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
 	// The joiner receives its own join too (nil sender): chain continuity
 	// requires every client to see every link; display gating (!showJoin)
 	// still hides it locally.
-	s.BroadcastNotice(joinMsg, "join", nil)
-	s.BroadcastMu.Unlock()
+	h.BroadcastNotice(joinMsg, "join", nil)
+	h.BroadcastMu.Unlock()
 }
 
-func (s *ChatServer) unregisterClient(session *ClientSession, clientIP string) {
+func (h *Hub) unregisterClient(session *ClientSession, clientIP string) {
 	if session.Conn != nil {
 		session.Conn.Close()
 	}
 
-	s.ClientsMu.Lock()
-	if _, exists := s.Clients[session.Conn]; !exists {
-		s.ClientsMu.Unlock()
+	h.ClientsMu.Lock()
+	if _, exists := h.Clients[session.Conn]; !exists {
+		h.ClientsMu.Unlock()
 		return
 	}
-	delete(s.Clients, session.Conn)
-	s.ClientsMu.Unlock()
+	delete(h.Clients, session.Conn)
+	h.ClientsMu.Unlock()
 
 	// Release the identity slot only if this session still owns it (a newer
 	// login elsewhere may have taken over the registration).
 	if session.IdentityPub != "" {
-		if raw, loaded := s.ActiveIdentities.Load(session.IdentityPub); loaded {
+		if raw, loaded := h.ActiveIdentities.Load(session.IdentityPub); loaded {
 			if prev, _ := raw.(*ClientSession); prev == session {
-				s.ActiveIdentities.Delete(session.IdentityPub)
+				h.ActiveIdentities.Delete(session.IdentityPub)
 			}
 		}
 	}
 
 	// Release display name serial slot
-	s.DisplayNameCountMu.Lock()
-	delete(s.DisplayNameCount, session.DisplayName)
-	s.DisplayNameCountMu.Unlock()
+	h.DisplayNameCountMu.Lock()
+	delete(h.DisplayNameCount, session.DisplayName)
+	h.DisplayNameCountMu.Unlock()
 
 	close(session.Send)
 
 	leaveTime := time.Now().In(Cfg.Static.Timezone)
-	s.CheckAndBroadcastDate(leaveTime)
+	h.CheckAndBroadcastDate(leaveTime)
 
 	leaveMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã rời phòng chat.", leaveTime.Format("15:04"), session.DisplayName)
 	logInfof("🔴 [LEAVE] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
-	s.BroadcastNotice(leaveMsg, "leave", nil)
+	h.BroadcastNotice(leaveMsg, "leave", nil)
 }
 
 func (c *ClientSession) WritePump() {
@@ -155,7 +156,7 @@ func (c *ClientSession) WritePump() {
 
 func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 	defer func() {
-		s.unregisterClient(session, clientIP)
+		s.Hub.unregisterClient(session, clientIP)
 		session.Conn.Close()
 	}()
 
@@ -460,7 +461,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		lastMessageTime = time.Now()
 
 		now := time.Now().In(Cfg.Static.Timezone)
-		s.CheckAndBroadcastDate(now)
+		s.Hub.CheckAndBroadcastDate(now)
 
 		wire := WireMessage{
 			Type:        "chat",
@@ -472,6 +473,6 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			ReplyTo:     msgReplyTo,
 		}
 		logInfof("💬 [MSG từ %s] %s (%s): %s\n", clientIP, session.DisplayName, session.Tripcode, strings.ReplaceAll(text, "\n", "\\n"))
-		s.BroadcastWire(wire, session.Conn)
+		s.Hub.BroadcastWire(wire, session.Conn, s.serverPub())
 	}
 }

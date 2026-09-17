@@ -87,11 +87,41 @@ type ChainService struct {
 	Store       *HistoryStore
 }
 
-type ChatServer struct {
-	StartTime time.Time
+// Hub owns presence and send ordering: the client set, the identity
+// slots, the display-name serials and the date marker, plus BroadcastMu
+// which serializes link+send so every client receives messages in chain
+// order (see server/chain.go). chain is a one-way back-ref; ChainService
+// never points back.
+//
+// Lock order: BroadcastMu -> LastMessageDateMu -> HistoryMu (Chain.Mu)
+// -> ClientsMu.
+type Hub struct {
+	// BroadcastMu serializes link+send so every client receives messages
+	// in chain order. Leaf locks inside: HistoryMu (Chain.Mu), then
+	// ClientsMu.
+	BroadcastMu sync.Mutex
 
 	Clients   map[*websocket.Conn]*ClientSession
 	ClientsMu sync.RWMutex
+
+	// ActiveIdentities tracks the live session holding each privileged
+	// ed25519 identity (pubkey hex -> session) for concurrency alerts.
+	ActiveIdentities sync.Map
+
+	// Active display names counter for serial handling (Alice#a1b2 -> Alice#a1b2-2)
+	DisplayNameCount   map[string]int
+	DisplayNameCountMu sync.Mutex
+
+	LastMessageDate   string
+	LastMessageDateMu sync.Mutex
+
+	chain *ChainService
+}
+
+type ChatServer struct {
+	StartTime time.Time
+
+	Hub Hub
 
 	IpCounts   map[string]int
 	IpCountsMu sync.Mutex
@@ -104,30 +134,14 @@ type ChatServer struct {
 
 	Chain ChainService
 
-	// BroadcastMu serializes link+send so every client receives messages
-	// in chain order (see server/chain.go). Leaf locks inside: HistoryMu
-	// (Chain.Mu), then ClientsMu.
-	BroadcastMu sync.Mutex
-
-	LastMessageDate   string
-	LastMessageDateMu sync.Mutex
-
 	ActiveNonces sync.Map
 	Upgrader     websocket.Upgrader
-
-	// ActiveIdentities tracks the live session holding each privileged
-	// ed25519 identity (pubkey hex -> session) for concurrency alerts.
-	ActiveIdentities sync.Map
 
 	TripChains   sync.Map // pub hex -> TripChain
 	TripChainsMu sync.Mutex
 
 	// Display identity salt per server session (ephemeral, not persisted)
 	DisplaySalt []byte
-
-	// Active display names counter for serial handling (Alice#a1b2 -> Alice#a1b2-2)
-	DisplayNameCount   map[string]int
-	DisplayNameCountMu sync.Mutex
 
 	WebAuthn *WebAuthnStore
 
@@ -143,17 +157,16 @@ func NewChatServer() *ChatServer {
 		// fallback to time-based if rand fails (should not happen)
 		salt = []byte(time.Now().String())
 	}
-	return &ChatServer{
-		StartTime:        time.Now(),
-		Clients:           make(map[*websocket.Conn]*ClientSession),
-		IpCounts:          make(map[string]int),
-		LastConnectTime:   make(map[string]time.Time),
-		AuthFails:         make(map[string]RateLimitRecord),
-		DisplaySalt:       salt,
-		DisplayNameCount:  make(map[string]int),
-		Chain:             ChainService{History: make([]string, 0)},
-		RoleRegistry:      make(map[string]RoleDefinition),
-		WebAuthn:         NewWebAuthnStore(env.WebauthnStore()),
+	s := &ChatServer{
+		StartTime:       time.Now(),
+		Hub:             Hub{Clients: make(map[*websocket.Conn]*ClientSession), DisplayNameCount: make(map[string]int)},
+		IpCounts:        make(map[string]int),
+		LastConnectTime: make(map[string]time.Time),
+		AuthFails:       make(map[string]RateLimitRecord),
+		DisplaySalt:     salt,
+		Chain:           ChainService{History: make([]string, 0)},
+		RoleRegistry:    make(map[string]RoleDefinition),
+		WebAuthn:        NewWebAuthnStore(env.WebauthnStore()),
 		Upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -175,6 +188,8 @@ func NewChatServer() *ChatServer {
 			},
 		},
 	}
+	s.Hub.chain = &s.Chain
+	return s
 }
 
 func GetDefaultPermission() Permission {

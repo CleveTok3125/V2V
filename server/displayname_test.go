@@ -67,14 +67,14 @@ func TestDisplayName_DynamicLength(t *testing.T) {
 	s.DisplaySalt = []byte("fixed-salt-dynamic-len-32bytes!!")
 	// Simulate many active clients to trigger hashLen expansion
 	// Fill Clients map with dummy entries
-	s.ClientsMu.Lock()
+	s.Hub.ClientsMu.Lock()
 	for i := 0; i < 150; i++ {
 		// dummy conn nil is okay for counting, but map key must be unique
 		// Use a fake *websocket.Conn via new(websocket.Conn) pointer
 		conn := &websocket.Conn{}
-		s.Clients[conn] = &ClientSession{DisplayName: "dummy"}
+		s.Hub.Clients[conn] = &ClientSession{DisplayName: "dummy"}
 	}
-	s.ClientsMu.Unlock()
+	s.Hub.ClientsMu.Unlock()
 
 	name := s.generateDisplayName("Charlie", "192.168.1.1", GetDefaultPermission())
 	// Extract hash part: after '#', before '-' if any
@@ -90,12 +90,12 @@ func TestDisplayName_DynamicLength(t *testing.T) {
 	}
 
 	// Test with many more to get 6
-	s.ClientsMu.Lock()
+	s.Hub.ClientsMu.Lock()
 	for i := 0; i < 700; i++ {
 		conn := &websocket.Conn{}
-		s.Clients[conn] = &ClientSession{DisplayName: "dummy2"}
+		s.Hub.Clients[conn] = &ClientSession{DisplayName: "dummy2"}
 	}
-	s.ClientsMu.Unlock()
+	s.Hub.ClientsMu.Unlock()
 	name2 := s.generateDisplayName("Dave", "10.10.10.10", GetDefaultPermission())
 	hashPart2 := name2
 	if idx := strings.LastIndex(name2, "#"); idx != -1 {
@@ -131,9 +131,9 @@ func TestDisplayName_ReleaseSerial(t *testing.T) {
 	// Simulate client session
 	conn := &websocket.Conn{}
 	// Manually add to Clients and DisplayNameCount is already done by generateDisplayName
-	s.ClientsMu.Lock()
-	s.Clients[conn] = &ClientSession{DisplayName: n1}
-	s.ClientsMu.Unlock()
+	s.Hub.ClientsMu.Lock()
+	s.Hub.Clients[conn] = &ClientSession{DisplayName: n1}
+	s.Hub.ClientsMu.Unlock()
 
 	// Next duplicate gets -2
 	n2 := s.generateDisplayName("Frank", ip, perms)
@@ -141,12 +141,12 @@ func TestDisplayName_ReleaseSerial(t *testing.T) {
 		t.Fatalf("expected -2, got %q", n2)
 	}
 	// Simulate leave of first user
-	s.DisplayNameCountMu.Lock()
-	delete(s.DisplayNameCount, n1)
-	s.DisplayNameCountMu.Unlock()
-	s.ClientsMu.Lock()
-	delete(s.Clients, conn)
-	s.ClientsMu.Unlock()
+	s.Hub.DisplayNameCountMu.Lock()
+	delete(s.Hub.DisplayNameCount, n1)
+	s.Hub.DisplayNameCountMu.Unlock()
+	s.Hub.ClientsMu.Lock()
+	delete(s.Hub.Clients, conn)
+	s.Hub.ClientsMu.Unlock()
 
 	// Now new user with same base should be able to reuse n1 (without serial)
 	// But current implementation will try to reuse n1 since we deleted it, so it should give n1 again, not -3

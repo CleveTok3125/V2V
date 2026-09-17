@@ -90,7 +90,7 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 func (s *ChatServer) serveAuthenticated(session *ClientSession, clientIP string) {
 	go session.WritePump()
 
-	s.registerClient(session, clientIP)
+	s.Hub.registerClient(session, clientIP)
 
 	s.ReadPump(session, clientIP)
 }

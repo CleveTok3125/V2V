@@ -146,7 +146,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 	return nil
 }
 
-func (s *ChatServer) sendWithRetry(conn *websocket.Conn, client *ClientSession, msg []byte, isSystem bool) {
+func (h *Hub) sendWithRetry(conn *websocket.Conn, client *ClientSession, msg []byte, isSystem bool) {
 	// System/date messages get one bounded retry to avoid drift when
 	// burst follows: wait up to 20ms for buffer space instead of
 	// sleeping blindly, so an early drain delivers immediately.
@@ -173,17 +173,17 @@ func (s *ChatServer) sendWithRetry(conn *websocket.Conn, client *ClientSession, 
 // ordering against chained records matters; the notice path skips it
 // (registerClient already holds it across replay+join, so taking it
 // here would self-deadlock). Callers must NOT hold ClientsMu.
-func (s *ChatServer) fanout(data []byte, sender *websocket.Conn, isSystem, echo bool) {
-	s.ClientsMu.RLock()
-	defer s.ClientsMu.RUnlock()
+func (h *Hub) fanout(data []byte, sender *websocket.Conn, isSystem, echo bool) {
+	h.ClientsMu.RLock()
+	defer h.ClientsMu.RUnlock()
 
-	for conn, client := range s.Clients {
+	for conn, client := range h.Clients {
 		if conn != sender {
-			s.sendWithRetry(conn, client, data, isSystem)
+			h.sendWithRetry(conn, client, data, isSystem)
 		}
 	}
 	if echo && sender != nil {
-		if sess, ok := s.Clients[sender]; ok {
+		if sess, ok := h.Clients[sender]; ok {
 			select {
 			case sess.Send <- data:
 			default:
@@ -197,53 +197,53 @@ func (s *ChatServer) fanout(data []byte, sender *websocket.Conn, isSystem, echo 
 // evidence, only display text. Stored for replay, broadcast live.
 // Management lines that must serve as evidence use BroadcastAudit;
 // unicast warnings stay raw strings (per-client, never chained).
-func (s *ChatServer) BroadcastNotice(text, kind string, sender *websocket.Conn) {
+func (h *Hub) BroadcastNotice(text, kind string, sender *websocket.Conn) {
 	now := time.Now().In(Cfg.Static.Timezone)
 	wire := WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: kind, Text: text}
 	data, _ := json.Marshal(wire)
-	s.Chain.appendMessageToHistory(string(data))
-	if s.Chain.Store != nil {
-		s.Chain.Store.EnqueueWire(wire, now)
+	h.chain.appendMessageToHistory(string(data))
+	if h.chain.Store != nil {
+		h.chain.Store.EnqueueWire(wire, now)
 	}
-	s.fanout(data, sender, true, false)
+	h.fanout(data, sender, true, false)
 }
 
 // BroadcastAudit chains a server-originated management line as evidence:
 // unlike notices, audit lines occupy chain positions and verify like
 // chat. No producers yet; the route exists so management evidence never
 // rides the notice path by mistake.
-func (s *ChatServer) BroadcastAudit(text string, sender *websocket.Conn) {
+func (h *Hub) BroadcastAudit(text string, sender *websocket.Conn, serverPub string) {
 	now := time.Now().In(Cfg.Static.Timezone)
-	s.BroadcastMu.Lock()
-	defer s.BroadcastMu.Unlock()
-	wire := s.Chain.linkAndStore(WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: "audit", Text: text}, s.serverPub())
+	h.BroadcastMu.Lock()
+	defer h.BroadcastMu.Unlock()
+	wire := h.chain.linkAndStore(WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: "audit", Text: text}, serverPub)
 	data, _ := json.Marshal(wire)
 
-	s.fanout(data, sender, true, false)
+	h.fanout(data, sender, true, false)
 }
 
-func (s *ChatServer) BroadcastWire(wire WireMessage, sender *websocket.Conn) {
-	s.BroadcastMu.Lock()
-	defer s.BroadcastMu.Unlock()
-	wire = s.Chain.linkAndStore(wire, s.serverPub())
+func (h *Hub) BroadcastWire(wire WireMessage, sender *websocket.Conn, serverPub string) {
+	h.BroadcastMu.Lock()
+	defer h.BroadcastMu.Unlock()
+	wire = h.chain.linkAndStore(wire, serverPub)
 	data, _ := json.Marshal(wire)
 	// Echo to the sender doubles as delivery confirmation so it can
 	// replace its grey placeholder with the confirmed rendering.
-	s.fanout(data, sender, false, true)
+	h.fanout(data, sender, false, true)
 }
 
-func (s *ChatServer) CheckAndBroadcastDate(now time.Time) {
+func (h *Hub) CheckAndBroadcastDate(now time.Time) {
 	currentDate := now.Format("02/01/2006")
 
-	s.LastMessageDateMu.Lock()
-	defer s.LastMessageDateMu.Unlock()
+	h.LastMessageDateMu.Lock()
+	defer h.LastMessageDateMu.Unlock()
 
-	if s.LastMessageDate == "" || s.LastMessageDate != currentDate {
-		s.LastMessageDate = currentDate
+	if h.LastMessageDate == "" || h.LastMessageDate != currentDate {
+		h.LastMessageDate = currentDate
 
 		dateMsg := fmt.Sprintf("\x1b[36m--- Ngày %s ---\x1b[0m", currentDate)
 
-		s.BroadcastNotice(dateMsg, "date", nil)
+		h.BroadcastNotice(dateMsg, "date", nil)
 	}
 }
 
