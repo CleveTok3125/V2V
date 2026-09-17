@@ -353,7 +353,7 @@ Planned work grouped by dependency, in recommended order. Each item stays self-c
 
 ### Phase 0 — Foundation
 
-- **Session surgery** — extract main-loop session state (`term/out/displayMu/tabs/chain/verify`) and split `ChatServer` fields (`chain.Service`/`history.Store`/`hub`); the client tip-state mutex depends on this refactor. — *NOT DONE*
+- **Session surgery** — client split into display/chain/verify/pending groups with a fixed `Display -> Chain -> Pending` order (tip persist outside the lock, queue-only pending guards); server `chain.Service`/`history.Store`/`hub` split deferred until the client proves stable. — *PARTIAL (client done)*
 - **Dependency arrows** — `markup` is the sole facade (`Style` alias, `DefaultStyle`, `NeedsContinuation`, `Linkify` passthroughs): `client` no longer imports `codebg`/`linkify` directly; `strength` owns its report type and `guard` takes a plain limits struct are done. — *DONE*
 - **Env/log/error unification** — typed getenv helper (`internal/env/env.go:20`) and leveled logging (`server/loglevel.go:10`) are done; the `%w` rule lives in [Error Handling](#error-handling). — *DONE*
 
