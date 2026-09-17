@@ -39,7 +39,7 @@ func drainReplay(t *testing.T, s *ChatServer, wantJoins bool) (contents []string
 	sess := &ClientSession{Send: make(chan []byte, 4096), DisplayName: "T#0000", Perms: GetDefaultPermission(), WantJoins: wantJoins}
 	done := make(chan struct{})
 	go func() {
-		s.SendChatHistory(sess)
+		s.Chain.SendChatHistory(sess)
 		close(done)
 	}()
 	timeout := time.After(10 * time.Second)
@@ -78,7 +78,7 @@ func seedReplayHistory(s *ChatServer) {
 		tagLine(6, "system", "", "old join"),
 	}
 	for _, l := range lines {
-		s.appendMessageToHistory(l)
+		s.Chain.appendMessageToHistory(l)
 	}
 }
 
@@ -129,7 +129,7 @@ func TestReplay_LiveShape142(t *testing.T) {
 	for i := 1; i <= 142; i++ {
 		switch {
 		case i%30 == 1:
-			s.appendMessageToHistory(noticeLine("date", "day marker"))
+			s.Chain.appendMessageToHistory(noticeLine("date", "day marker"))
 			dates++
 		case i%10 == 0:
 			height++
@@ -137,12 +137,12 @@ func TestReplay_LiveShape142(t *testing.T) {
 				firstChat = height
 			}
 			lastChat = height
-			s.appendMessageToHistory(tagLine(height, "chat", "", "message"))
+			s.Chain.appendMessageToHistory(tagLine(height, "chat", "", "message"))
 			chats++
 		case i%2 == 0:
-			s.appendMessageToHistory(noticeLine("join", "visitor joined"))
+			s.Chain.appendMessageToHistory(noticeLine("join", "visitor joined"))
 		default:
-			s.appendMessageToHistory(noticeLine("leave", "visitor left"))
+			s.Chain.appendMessageToHistory(noticeLine("leave", "visitor left"))
 		}
 	}
 	contents, footer, trailer := drainReplay(t, s, false)
@@ -165,12 +165,12 @@ func TestSendChatHistory_NeverBlocks(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	for i := 0; i < 50; i++ {
-		s.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "dead peer line"))
+		s.Chain.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "dead peer line"))
 	}
 	sess := &ClientSession{Send: make(chan []byte), DisplayName: "Ghost#0000", Perms: GetDefaultPermission()}
 	done := make(chan struct{})
 	go func() {
-		s.SendChatHistory(sess)
+		s.Chain.SendChatHistory(sess)
 		close(done)
 	}()
 	select {
@@ -190,7 +190,7 @@ func TestRegister_HoldsBroadcastMu(t *testing.T) {
 	Cfg.Dynamic.Store(cfg)
 	s := NewChatServer()
 	for i := 0; i < 50000; i++ {
-		s.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "bulk line"))
+		s.Chain.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "bulk line"))
 	}
 	sess := &ClientSession{Send: make(chan []byte, 1 << 20), DisplayName: "New#0000", Perms: GetDefaultPermission()}
 	regDone := make(chan struct{})
@@ -233,7 +233,7 @@ func TestRegister_NoLiveInterleave(t *testing.T) {
 	s := NewChatServer()
 	const replayLines = 300
 	for i := 0; i < replayLines; i++ {
-		s.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "replay line"))
+		s.Chain.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "replay line"))
 	}
 	sess := &ClientSession{Conn: nil, Send: make(chan []byte, 16384), DisplayName: "New#0000", Perms: GetDefaultPermission()}
 	regDone := make(chan struct{})
@@ -298,10 +298,10 @@ func TestAudit_LiveAndReplay(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("audit not delivered live")
 	}
-	if s.chainHeight != 1 {
-		t.Fatalf("audit must advance the chain, height=%d", s.chainHeight)
+	if s.Chain.height != 1 {
+		t.Fatalf("audit must advance the chain, height=%d", s.Chain.height)
 	}
-	s.appendMessageToHistory(tagLine(2, "chat", "", "after audit"))
+	s.Chain.appendMessageToHistory(tagLine(2, "chat", "", "after audit"))
 	filtered, _, trailer := drainReplay(t, s, false)
 	found := false
 	for _, m := range filtered {

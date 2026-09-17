@@ -64,10 +64,10 @@ func (s *ChatServer) registerClient(session *ClientSession, clientIP string) {
 	// client collects foreign hashes into its fork window and jumps
 	// tips mid-sync. Notices (no BroadcastMu) can still slip in, but
 	// they carry no chain fields and never disturb tip accounting.
-	// Lock order stays BroadcastMu -> HistoryMu -> ClientsMu: the map
-	// insert above is sequential, never nested.
+	// Lock order stays BroadcastMu -> HistoryMu (Chain.Mu) -> ClientsMu:
+	// the map insert above is sequential, never nested.
 	s.BroadcastMu.Lock()
-	s.SendChatHistory(session)
+	s.Chain.SendChatHistory(session)
 
 	joinTime := time.Now().In(Cfg.Static.Timezone)
 	s.CheckAndBroadcastDate(joinTime)
@@ -235,9 +235,9 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			msgReplyTo = tripMsg.ReplyTo
 			// Cheap sanity: quotes must name a message that exists
 			// (heights start at 1, so anything above the tip is future).
-			s.HistoryMu.RLock()
-			tipReady, tipHeight := s.chainReady, s.chainHeight
-			s.HistoryMu.RUnlock()
+			s.Chain.Mu.RLock()
+			tipReady, tipHeight := s.Chain.ready, s.Chain.height
+			s.Chain.Mu.RUnlock()
 			if msgReplyTo != 0 && tipReady && msgReplyTo > tipHeight {
 				select {
 				case session.Send <- []byte("[Hệ thống]: Tin reply dẫn tới ID chưa tồn tại."):

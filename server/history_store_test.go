@@ -116,7 +116,7 @@ func TestSendChatHistory_NoDoubleUnlock(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	for i := 0; i < 50; i++ {
-		s.appendMessageToHistory("line")
+		s.Chain.appendMessageToHistory("line")
 	}
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -124,7 +124,7 @@ func TestSendChatHistory_NoDoubleUnlock(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			sess := &ClientSession{Send: make(chan []byte, 1024)}
-			s.SendChatHistory(sess)
+			s.Chain.SendChatHistory(sess)
 			for len(sess.Send) > 0 {
 				<-sess.Send
 			}

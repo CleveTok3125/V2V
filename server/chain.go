@@ -23,25 +23,26 @@ const chainVersion = 2
 
 // linkAndStore chains one wire message, stores it in memory + disk, and
 // returns the chained copy for broadcast. Callers must hold BroadcastMu;
-// this takes HistoryMu internally (leaf lock, never the reverse order).
-func (s *ChatServer) linkAndStore(wire WireMessage) WireMessage {
-	s.HistoryMu.Lock()
-	defer s.HistoryMu.Unlock()
-	if !s.chainReady {
-		s.initChainLocked()
+// this takes HistoryMu (Chain.Mu) internally (leaf lock, never the reverse
+// order).
+func (c *ChainService) linkAndStore(wire WireMessage, serverPub string) WireMessage {
+	c.Mu.Lock()
+	defer c.Mu.Unlock()
+	if !c.ready {
+		c.initChainLocked(serverPub)
 	}
-	s.chainHeight++
-	prev := s.chainTip
-	h := chain.Hash(prev, s.chainHeight, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, chain.TripSigOf(wire))
+	c.height++
+	prev := c.tip
+	h := chain.Hash(prev, c.height, wire.TmpID, wire.ReplyTo, wire.Type, wire.Time, wire.DisplayName, wire.Text, chain.TripSigOf(wire))
 	wire.ChainPrev = hex.EncodeToString(prev[:])
 	wire.ChainHash = hex.EncodeToString(h[:])
-	wire.ChainHeight = s.chainHeight
+	wire.ChainHeight = c.height
 	wire.ChainVer = chainVersion
-	s.chainTip = h
+	c.tip = h
 	data, _ := json.Marshal(wire)
-	s.appendMessageLocked(string(data))
-	if s.HistoryStore != nil {
-		s.HistoryStore.EnqueueWire(wire, time.Now().In(Cfg.Static.Timezone))
+	c.appendMessageLocked(string(data))
+	if c.Store != nil {
+		c.Store.EnqueueWire(wire, time.Now().In(Cfg.Static.Timezone))
 	}
 	return wire
 }
@@ -50,18 +51,14 @@ func (s *ChatServer) linkAndStore(wire WireMessage) WireMessage {
 // chain. Genesis derives from the server identity, so restarts resume the
 // same chain without extra state. Pre-chain legacy records are anchored,
 // never rewritten: the first chained message links to an anchor over the
-// last legacy line. Caller must hold HistoryMu.
-func (s *ChatServer) initChainLocked() {
-	var serverPub string
-	if s.ServerID != nil {
-		serverPub = s.ServerID.PublicKey
-	}
+// last legacy line. Caller must hold HistoryMu (Chain.Mu).
+func (c *ChainService) initChainLocked(serverPub string) {
 	tip := chain.Genesis(serverPub)
 	var height uint64
 	var anchor string
 	var anchored bool
 	broken := false
-	for _, msgStr := range s.ChatHistory {
+	for _, msgStr := range c.History {
 		var wire WireMessage
 		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil {
 			// Legacy record: remember as anchor candidate, keep scanning.
@@ -116,5 +113,13 @@ func (s *ChatServer) initChainLocked() {
 		// line instead of genesis.
 		tip = chain.LegacyAnchor(anchor)
 	}
-	s.chainTip, s.chainHeight, s.chainReady = tip, height, true
+	c.tip, c.height, c.ready = tip, height, true
+}
+
+// serverPub returns the hex identity for chain genesis (empty in tests).
+func (s *ChatServer) serverPub() string {
+	if s.ServerID != nil {
+		return s.ServerID.PublicKey
+	}
+	return ""
 }
