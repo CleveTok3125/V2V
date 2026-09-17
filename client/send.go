@@ -186,6 +186,9 @@ func (s *Session) sendMessage(text string, phRows int, phShown bool, phBufEnd in
 		s.Pending.LastMessageTime = time.Now()
 		// Track placeholder so the server echo can replace it.
 		s.Display.DisplayMu.Lock()
+		// Queue guard nested per Display -> Chain -> Pending; the
+		// erasePlaceholderLocked call in this function stays on DisplayMu.
+		s.Pending.Mu.Lock()
 		pm := pendingMsg{text: text, rows: phRows, shown: phShown, gen: s.Display.PrintGen, bufEnd: phBufEnd, sentAt: time.Now(), tmpID: s.Pending.TmpSeq, replyTo: s.Pending.PendingReplyTo}
 		if s.TripPriv != nil {
 			pm.hasTrip = true
@@ -214,6 +217,7 @@ func (s *Session) sendMessage(text string, phRows int, phShown bool, phBufEnd in
 			}
 			s.erasePlaceholderLocked(pm)
 		}
+		s.Pending.Mu.Unlock()
 		s.Display.DisplayMu.Unlock()
 	}
 	// Reply targets are one-shot, cleared after tracking above (the

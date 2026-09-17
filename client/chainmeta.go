@@ -749,6 +749,12 @@ func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
 }
 
 func (s *Session) consumeEchoLocked(wire WireMessage, allowStash bool) {
+	// Queue guard, nested under the caller's DisplayMu per the
+	// Display -> Chain -> Pending order. The erase below stays on
+	// DisplayMu: erase math needs tabs, PrintGen and the matched
+	// placeholder atomically.
+	s.Pending.Mu.Lock()
+	defer s.Pending.Mu.Unlock()
 	var stale []WireMessage
 	s.Pending.PendingEchoes, stale = reapStaleEchoes(s.Pending.PendingEchoes, 10*time.Second)
 	for _, w := range stale {
@@ -773,6 +779,11 @@ func (s *Session) consumeEchoLocked(wire WireMessage, allowStash bool) {
 }
 
 func (s *Session) noteChainTip(tip [32]byte, height uint64) {
+	// Tip guard: serializes pump updates against the input loop's
+	// gracefulQuit flush. Pure chain state plus file IO, never emits,
+	// so nesting under a caller-held DisplayMu keeps the order.
+	s.Chain.Mu.Lock()
+	defer s.Chain.Mu.Unlock()
 	s.Chain.ChainTip, s.Chain.ChainHeight, s.Chain.ChainHaveTip = tip, height, true
 	s.Chain.TipSinceSave++
 	if s.Chain.TipSinceSave >= tipBatchSaves {
@@ -783,6 +794,10 @@ func (s *Session) noteChainTip(tip [32]byte, height uint64) {
 }
 
 func (s *Session) flushChainTip() {
+	// Same guard as noteChainTip: callable lock-free (gracefulQuit,
+	// disconnect path) or nested under DisplayMu (pump paths).
+	s.Chain.Mu.Lock()
+	defer s.Chain.Mu.Unlock()
 	if s.Chain.ChainHaveTip {
 		if saveChainTip(s.Chain.TipPath, s.Chain.ChainTip, s.Chain.ChainHeight, s.Chain.ServerPubHex) == nil {
 			s.Chain.TipSinceSave = 0
