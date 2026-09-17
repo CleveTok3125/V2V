@@ -1,6 +1,6 @@
 [![Build Status](https://github.com/google/renameio/workflows/Test/badge.svg)](https://github.com/google/renameio/actions?query=workflow%3ATest)
-[![PkgGoDev](https://pkg.go.dev/badge/github.com/google/renameio)](https://pkg.go.dev/github.com/google/renameio)
-[![Go Report Card](https://goreportcard.com/badge/github.com/google/renameio)](https://goreportcard.com/report/github.com/google/renameio)
+[![PkgGoDev](https://pkg.go.dev/badge/github.com/google/renameio/v2)](https://pkg.go.dev/github.com/google/renameio/v2)
+[![Go Report Card](https://goreportcard.com/badge/github.com/google/renameio/v2)](https://goreportcard.com/report/github.com/google/renameio/v2)
 
 The `renameio` Go package provides a way to atomically create or replace a file or
 symbolic link.
@@ -42,6 +42,19 @@ correct sequence of operations hard to identify:
 
 This package attempts to get all of these details right, provides an intuitive,
 yet flexible API and caters to use-cases where high performance is required.
+
+## Major changes in v2
+
+With major version renameio/v2, `renameio.WriteFile` changes the way that
+permissions are handled. Before version 2, files were created with the
+permissions passed to the function, ignoring the
+[umask](https://en.wikipedia.org/wiki/Umask). From version 2 onwards, these
+permissions are further modified by process' umask (usually the user's
+preferred umask).
+
+If you were relying on the umask being ignored, add the
+`renameio.IgnoreUmask()` option to your `renameio.WriteFile` calls when
+upgrading to v2.
 
 ## Windows support
 

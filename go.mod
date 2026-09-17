@@ -16,7 +16,7 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/fxamacker/cbor/v2 v2.9.3
 	github.com/go-webauthn/webauthn v0.18.1
-	github.com/google/renameio v1.0.1
+	github.com/google/renameio/v2 v2.0.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/klauspost/compress v1.20.0

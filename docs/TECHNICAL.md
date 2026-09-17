@@ -312,6 +312,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - `data/history.jsonl` / `.old.zst` — chat history, `zstd` compressed old generation, smart batch `Sync`.
 - `data/webauthn.json` — WebAuthn tickets and credentials, `atomicWriteFile` via `CreateTemp+Sync+Rename+dir Sync`.
 - `key.json` — encrypted at rest via `XChaCha20Poly1305 + Argon2id` (`version:3` envelope, `chmod 600`, `V2V_PASSPHRASE` env or hidden prompt via `internal/passprompt` on TTY / `charmbracelet/x/term` piped fallback, same flow as `v2vctl`).
+- Identity writes (`key.json`, `roles.json`) go through `renameio/v2/maybe`: atomic temp-file + fsync + rename on Unix, plain `os.WriteFile` fallback on Windows where atomic replace is not reliably available. The requested `0600` passes through the process umask on v2 (v1 ignored it), and an existing regular file keeps its own permissions.
 - The successful unlock secret is remembered for the session so counter saves re-encrypt instead of dropping to plaintext, and wiped at exit (`ClearLoadedPassphrase`, deferred plus the conn-drop path).
 - File-supplied argon2 costs are clamped (t 1-10, m 8-256MiB, p 1-8) and the envelope identity (v3/argon2id/xchacha20poly1305) verified, so crafted files fail closed instead of exhausting RAM.
 
