@@ -361,16 +361,20 @@ func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) st
 }
 
 // formatQuoteRich renders a quote from the indexed wire itself instead of
-// a parsed buffer line: time, author and a chain-content verdict join the
-// preview. Falls back to formatQuote when the caller only has text.
+// a parsed buffer line: time and author join the preview. A chain-content
+// mismatch appends a bright-red ✗ (matching the trip-tamper language);
+// intact content shows no mark at all, like regular chat lines. The mark
+// uses attribute-off codes (never 0m) so the pending grey wrapper
+// spanning the whole line is never reset mid-line. Falls back to
+// formatQuote when the caller only has text.
 func formatQuoteRich(wire WireMessage, pending bool, maxRunes int) string {
-	mark := "✓"
+	mark := ""
 	if err := verifyWireContent(wire); err != nil {
-		mark = "✗"
+		mark = " \x1b[91m✗\x1b[39m"
 	}
-	line := fmt.Sprintf("|   ┌─  ↩ #%d | %s %s %s: %s",
-		wire.ChainHeight, wire.Time, wire.DisplayName, mark,
-		quoteFirstLine(wire.Text, maxRunes))
+	line := fmt.Sprintf("|   ┌─  ↩ #%d | %s %s: %s%s",
+		wire.ChainHeight, wire.Time, wire.DisplayName,
+		quoteFirstLine(wire.Text, maxRunes), mark)
 	if pending {
 		return "\x1b[90m" + line + " ⏳\x1b[0m"
 	}

@@ -482,7 +482,7 @@ func TestFormatInfoBlockTripDetail(t *testing.T) {
 func TestFormatQuoteRich(t *testing.T) {
 	wire := chainedTripWire(mustTestTrip(t), "hello base msg")
 	got := formatQuoteRich(wire, false, 80)
-	want := "|   ┌─  ↩ #50 | 15:04 Alice ✓: hello base msg"
+	want := "|   ┌─  ↩ #50 | 15:04 Alice: hello base msg"
 	// Hook alignment: ┌ sits where the content time-colon sits (col 4),
 	// ↩ where the username starts (col 8).
 	runes := []rune(want)
@@ -492,15 +492,23 @@ func TestFormatQuoteRich(t *testing.T) {
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
+	if strings.Contains(got, "✓") {
+		t.Fatalf("intact quote must carry no mark: %q", got)
+	}
 	got = formatQuoteRich(wire, true, 80)
 	if !strings.HasPrefix(got, "\x1b[90m") || !strings.HasSuffix(got, "⏳\x1b[0m") {
 		t.Fatalf("pending shape broken: %q", got)
 	}
-	// Tampered target flips the mark.
+	// Grey must span the whole pending line: no full reset may appear
+	// before the trailing one (attribute-off codes only inside).
+	if inner := got[len("\x1b[90m") : len(got)-len("⏳\x1b[0m")]; strings.Contains(inner, "\x1b[0m") {
+		t.Fatalf("pending grey broken mid-line: %q", got)
+	}
+	// Tampered target appends a bright-red mark, trip-tamper style.
 	bad := wire
 	bad.Text = "edited"
-	if got := formatQuoteRich(bad, false, 80); !strings.Contains(got, "✗") {
-		t.Fatalf("tampered target must mark ✗: %q", got)
+	if got := formatQuoteRich(bad, false, 80); !strings.Contains(got, "\x1b[91m✗\x1b[39m") {
+		t.Fatalf("tampered target must mark red ✗: %q", got)
 	}
 	// Single line always, and never shaped like a meta line.
 	multi := wire
