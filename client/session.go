@@ -23,6 +23,13 @@ import (
 // input loop, the render path and the chain tracker. Sub-state lives
 // in the Display, Chain, Verify and Pending groups; the root keeps
 // only identity and connection lifecycle.
+//
+// Lock order is fixed Display -> Chain -> Pending: group locks nest
+// only in that direction, never the reverse. DisplayMu stays the
+// god-lock for erase math (tabs + PrintGen + pending must stay
+// atomic); ChainMu serializes tip updates between the pump and the
+// input loop; PendingMu guards the placeholder/echo queues at the
+// two threads that share them.
 type Session struct {
 	// Connection and identity.
 	Conn      wsConn
@@ -78,8 +85,11 @@ type DisplayState struct {
 }
 
 // ChainState is the fork-detection tracker: tip, heights, sync set,
-// persisted tip, wire index and render cache.
+// persisted tip, wire index and render cache. Mu serializes tip
+// updates; take Mu only while holding DisplayMu, never take DisplayMu
+// while holding Mu.
 type ChainState struct {
+	Mu               sync.Mutex
 	ChainTip         [32]byte
 	ChainHeight      uint64
 	ChainHaveTip     bool
@@ -109,7 +119,11 @@ type VerifyState struct {
 
 // PendingState is the outgoing message state: sequence counters,
 // one-shot targets, placeholders, early echoes and banner staging.
+// Mu guards the placeholder/echo queues shared by the input loop
+// and the pump; take Mu only while holding DisplayMu, never take
+// DisplayMu while holding Mu.
 type PendingState struct {
+	Mu              sync.Mutex
 	TmpSeq          uint64
 	PendingReplyTo  uint64
 	ReplyDraft      uint64
