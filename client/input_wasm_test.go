@@ -29,7 +29,7 @@ func newWasmTestTerm(t *testing.T) (*wasmTerm, *[]string) {
 	return term, &wrote
 }
 
-func (t *wasmTerm) testLine() string { return string(t.line) }
+func (w *wasmTerm) testLine() string { return string(w.line) }
 
 func TestWasmTermEdit(t *testing.T) {
 	term, _ := newWasmTestTerm(t)

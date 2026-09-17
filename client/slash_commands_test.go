@@ -321,6 +321,9 @@ func TestDispatchQuitExitsCleanly(t *testing.T) {
 	sess.Conn = &stubConn{}
 	sess.Quitting = make(chan bool, 1)
 	sess.VerifyCh = make(chan verifyJob, 1)
+	// Pump already exited: skip the 500ms gracefulQuit cap, this test
+	// only asserts the quit action and the Quitting signal.
+	close(sess.PumpDone)
 	_, act := sess.dispatch("/quit")
 	if act != cmdQuit {
 		t.Fatalf("act=%v, want cmdQuit", act)
