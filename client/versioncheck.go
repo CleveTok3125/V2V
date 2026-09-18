@@ -82,10 +82,17 @@ func httpBaseFromWS(wsURL string) (string, error) {
 	return u.String(), nil
 }
 
-// fetchServerVersion GETs /api/version. Empty string means unknown
-// (old server, fork without the endpoint, or network error).
+// fetchServerVersion GETs /api/version over a direct connection.
+// Empty string means unknown (old server, fork without the endpoint,
+// or network error).
 func fetchServerVersion(httpBase string) string {
-	client := &http.Client{Timeout: 5 * time.Second}
+	return fetchServerVersionVia(httpBase, &http.Client{Timeout: 5 * time.Second})
+}
+
+// fetchServerVersionVia is fetchServerVersion over a caller-supplied
+// client, so the pre-dial check can ride the session proxy (tor)
+// instead of always going direct.
+func fetchServerVersionVia(httpBase string, client *http.Client) string {
 	resp, err := client.Get(httpBase + "/api/version")
 	if err != nil {
 		return ""
@@ -127,7 +134,12 @@ func checkServerVersion(wsURL string) bool {
 	base, err := httpBaseFromWS(wsURL)
 	server := ""
 	if err == nil {
-		server = fetchServerVersion(base)
+		client, verr := versionHTTPClient()
+		if verr != nil {
+			fmt.Printf("❌ Proxy: %v\n", verr)
+			return false
+		}
+		server = fetchServerVersionVia(base, client)
 	}
 	switch decideVersionCheck(mode, server, expected) {
 	case versionMatch:
