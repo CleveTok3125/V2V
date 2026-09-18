@@ -150,7 +150,7 @@ func TestLoadTrustDir(t *testing.T) {
 	}
 
 	if _, _, err := LoadTrustDir(dir, []string{"cloudflare", "direct"}, map[string]bool{"cloudflare": true}); err == nil {
-		t.Fatal("direct.txt still broken from above; sanity")
+		t.Fatal("direct.txt is still broken; sanity")
 	}
 	os.Remove(filepath.Join(dir, "cloudflare.txt"))
 	if _, _, err := LoadTrustDir(dir, []string{"cloudflare"}, map[string]bool{"cloudflare": true}); err == nil {
@@ -175,6 +175,34 @@ func TestLoadTrustDir(t *testing.T) {
 
 	if _, _, err := LoadTrustDir(filepath.Join(dir, "nope"), []string{"cloudflare"}, map[string]bool{"cloudflare": true}); err == nil {
 		t.Fatal("missing dir must fail")
+	}
+}
+
+func TestLoadTrustDirMissingDir(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope")
+
+	// No provider needs a file: absent dir degrades to empty sets
+	// with a warning, so a fresh clone boots a file-less chain.
+	sets, warn, err := LoadTrustDir(missing, []string{"direct", "none"}, map[string]bool{})
+	if err != nil {
+		t.Fatalf("absent dir without required files must not fail: %v", err)
+	}
+	if warn == "" {
+		t.Fatal("absent dir must warn so the boot log shows the trust state")
+	}
+	for _, name := range []string{"direct", "none"} {
+		set, ok := sets[name]
+		if !ok || !set.Missing || len(set.Nets) != 0 {
+			t.Fatalf("%s must report an empty Missing set, got %+v", name, set)
+		}
+		if set.Path != filepath.Join(missing, name+".txt") {
+			t.Fatalf("%s path = %q", name, set.Path)
+		}
+	}
+
+	// A required file still fails when the dir is absent.
+	if _, _, err := LoadTrustDir(missing, []string{"cloudflare"}, map[string]bool{"cloudflare": true}); err == nil {
+		t.Fatal("absent dir with a required file must fail")
 	}
 }
 

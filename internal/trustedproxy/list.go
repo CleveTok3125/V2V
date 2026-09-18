@@ -29,11 +29,21 @@ type Set struct {
 // LoadTrustDir loads "<name>.txt" for every active provider from dir
 // and returns the parsed sets keyed by provider name, plus at most
 // one aggregated warning about stray files. Any hard error (missing
-// directory, missing required file, malformed entry) fails the whole
-// load: trust must never silently degrade at boot.
+// required file, malformed entry, present-but-unreadable directory)
+// fails the whole load: trust must never silently degrade at boot.
+// A missing directory is tolerated only when no active provider needs
+// a file: every set reports Missing with a warning, so a fresh clone
+// without config/trustedproxy still boots a file-less chain.
 func LoadTrustDir(dir string, active []string, required map[string]bool) (map[string]*Set, string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		if os.IsNotExist(err) && len(required) == 0 {
+			sets := make(map[string]*Set, len(active))
+			for _, name := range active {
+				sets[name] = &Set{Path: filepath.Join(dir, name+".txt"), Missing: true}
+			}
+			return sets, fmt.Sprintf("trust dir %q absent, empty sets", dir), nil
+		}
 		return nil, "", fmt.Errorf("trusted proxy dir %q unreadable: %w", dir, err)
 	}
 	if len(entries) > maxTrustDirEntries {
