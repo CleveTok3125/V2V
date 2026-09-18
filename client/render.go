@@ -236,21 +236,35 @@ func checkServerInfo(input string) {
 		}
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(input)
+	client, err := versionHTTPClient()
 	if err != nil {
 		fmt.Println("❌ Lỗi khi lấy thông tin:", err)
 		return
+	}
+	body, err := fetchServerInfoBody(client, input)
+	if err != nil {
+		fmt.Println("❌ Lỗi khi lấy thông tin:", err)
+		return
+	}
+
+	fmt.Println("\n" + body)
+}
+
+// fetchServerInfoBody GETs a server info page over a caller-supplied
+// client, so --info rides the session proxy (tor) like the version
+// pre-check instead of always going direct.
+func fetchServerInfoBody(client *http.Client, url string) (string, error) {
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("❌ Lỗi khi đọc dữ liệu:", err)
-		return
+		return "", err
 	}
-
-	fmt.Println("\n" + string(body))
+	return string(body), nil
 }
 
 // Session render methods (moved from main).
