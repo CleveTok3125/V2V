@@ -192,6 +192,48 @@ func TestVersionFetchViaSocks(t *testing.T) {
 	}
 }
 
+func TestServerInfoBodyViaSocks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("info page"))
+	}))
+	defer srv.Close()
+	_, port, err := net.SplitHostPort(srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := net.JoinHostPort("127.0.0.1", port)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	done := make(chan struct{})
+	go relaySocks5(t, ln, target, done)
+	_, proxyPort, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pinProxyCache(&proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, proxyPort)}, nil)()
+	c, err := versionHTTPClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := fetchServerInfoBody(c, srv.URL)
+	c.CloseIdleConnections()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("relay did not finish after the fetch")
+	}
+	if err != nil {
+		t.Fatalf("info via socks: %v", err)
+	}
+	if body != "info page" {
+		t.Fatalf("info via socks = %q, want %q", body, "info page")
+	}
+}
+
 func TestVersionFetchViaSocksRefused(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"version":"s9"}`))
