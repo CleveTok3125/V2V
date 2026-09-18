@@ -116,25 +116,51 @@ echo "$out" | grep -q "skipping scan" && ok "blindspot: fast path logged" || bad
 grep -q "SERVER_INVOKED" "$CALL_LOG" && ok "blindspot: still execs" || bad "blindspot: exec"
 rm -rf "$ROOT"
 
-# T-prefail-env: missing .env fails closed with the host fix.
+# T-missing-env: absent .env names the bootstrap, not chmod.
 sandbox; ROOT=$SANDBOX_ROOT
 echo '{}' > "$APP_ROOT/config/roles.json"
 chmod 644 "$APP_ROOT/config/roles.json"
 if run_entry; then
-	bad "prefail-env: must exit nonzero"
+	bad "missing-env: must exit nonzero"
 else
-	echo "$RUN_OUT" | grep -q "chmod o+r .env" && ok "prefail-env: actionable msg" || bad "prefail-env: msg"
+	echo "$RUN_OUT" | grep -q "missing.*cp template/.env .env" && ok "missing-env: bootstrap msg" || bad "missing-env: msg"
 fi
 rm -rf "$ROOT"
 
-# T-prefail-roles: same for roles.json.
+# T-missing-roles: same for roles.json.
 sandbox; ROOT=$SANDBOX_ROOT
 echo "x=1" > "$APP_ROOT/.env"
 chmod 644 "$APP_ROOT/.env"
 if run_entry; then
-	bad "prefail-roles: must exit nonzero"
+	bad "missing-roles: must exit nonzero"
 else
-	echo "$RUN_OUT" | grep -q "chmod o+r config/roles.json" && ok "prefail-roles: actionable msg" || bad "prefail-roles: msg"
+	echo "$RUN_OUT" | grep -q "missing.*template/server/config" && ok "missing-roles: bootstrap msg" || bad "missing-roles: msg"
+fi
+rm -rf "$ROOT"
+
+# T-unreadable-env: present but root-only .env keeps the chmod fix.
+sandbox; ROOT=$SANDBOX_ROOT
+echo "x=1" > "$APP_ROOT/.env"
+chmod 600 "$APP_ROOT/.env"
+echo '{}' > "$APP_ROOT/config/roles.json"
+chmod 644 "$APP_ROOT/config/roles.json"
+if run_entry; then
+	bad "unreadable-env: must exit nonzero"
+else
+	echo "$RUN_OUT" | grep -q "chmod o+r .env" && ok "unreadable-env: actionable msg" || bad "unreadable-env: msg"
+fi
+rm -rf "$ROOT"
+
+# T-unreadable-roles: same for roles.json.
+sandbox; ROOT=$SANDBOX_ROOT
+echo "x=1" > "$APP_ROOT/.env"
+chmod 644 "$APP_ROOT/.env"
+echo '{}' > "$APP_ROOT/config/roles.json"
+chmod 600 "$APP_ROOT/config/roles.json"
+if run_entry; then
+	bad "unreadable-roles: must exit nonzero"
+else
+	echo "$RUN_OUT" | grep -q "chmod o+r config/roles.json" && ok "unreadable-roles: actionable msg" || bad "unreadable-roles: msg"
 fi
 rm -rf "$ROOT"
 

@@ -98,6 +98,7 @@ Xem `template/server/config/roles.json` và `template/.env` để cấu hình se
 
 ```bash
 cp template/.env .env          # sửa PORT, ALLOWED_ORIGINS, ...
+make config                    # khởi tạo ./config từ mẫu (clone mới; không ghi đè)
 make server web                # -> public/server.bin + webterm/app.wasm
 ./public/server.bin
 # hoặc: docker compose up -d --build   (lưu ./data và ./logs)
