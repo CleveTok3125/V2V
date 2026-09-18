@@ -98,6 +98,7 @@ See `template/server/config/roles.json` and `template/.env` for server configura
 
 ```bash
 cp template/.env .env          # edit PORT, ALLOWED_ORIGINS, etc.
+make config                    # bootstrap ./config from samples (fresh clone; never overwrites)
 make server web                # -> public/server.bin + webterm/app.wasm
 ./public/server.bin
 # or: docker compose up -d --build   (persists ./data and ./logs)

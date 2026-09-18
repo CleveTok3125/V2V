@@ -56,15 +56,25 @@ else
 fi
 
 # Read-only mounts cannot be fixed from here: fail closed with the
-# exact host-side command instead of booting half-blind.
-"$SU_EXEC_BIN" "$APP_USER:$APP_GROUP" test -r "$APP_ROOT/.env" || {
-	echo "FATAL: $APP_ROOT/.env unreadable by $APP_USER; on the host run: chmod o+r .env (or chown it to the data owner)"
-	exit 1
+# exact host-side command instead of booting half-blind. Missing and
+# unreadable are different failures: a missing file needs the
+# bootstrap, a present but unreadable one needs a permission fix.
+# $1 = container path, $2 = bootstrap command for a missing file.
+require_readable() {
+	path=$1
+	bootstrap=$2
+	if ! "$SU_EXEC_BIN" "$APP_USER:$APP_GROUP" test -e "$path"; then
+		echo "FATAL: $path missing; on the host run: $bootstrap"
+		exit 1
+	fi
+	rel=${path#"$APP_ROOT"/}
+	if ! "$SU_EXEC_BIN" "$APP_USER:$APP_GROUP" test -r "$path"; then
+		echo "FATAL: $path unreadable by $APP_USER; on the host run: chmod o+r $rel (or chown it to the data owner)"
+		exit 1
+	fi
 }
-"$SU_EXEC_BIN" "$APP_USER:$APP_GROUP" test -r "$APP_ROOT/config/roles.json" || {
-	echo "FATAL: $APP_ROOT/config/roles.json unreadable by $APP_USER; on the host run: chmod o+r config/roles.json (or chown it to the data owner)"
-	exit 1
-}
+require_readable "$APP_ROOT/.env" "cp template/.env .env"
+require_readable "$APP_ROOT/config/roles.json" "cp -r template/server/config config (or make config)"
 
 # Writability probe: without it the server dies on its first write
 # with a bare "permission denied". Fail here instead, with the fix.

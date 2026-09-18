@@ -13,7 +13,7 @@ PLATFORMS := windows/amd64 windows/arm64 linux/amd64 linux/arm64 android/arm64 d
 HOST_GOOS ?= $(shell go env GOOS)
 HOST_GOARCH ?= $(shell go env GOARCH)
 
-.PHONY: all server web web-wasm web-compress client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test test-sh test-wasm clean help
+.PHONY: all server web web-wasm web-compress client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test test-sh test-wasm config clean help
 
 all: server web client v2vctl
 
@@ -132,6 +132,16 @@ test-wasm:
 	@if ! command -v node >/dev/null 2>&1; then echo "SKIP: node required for wasm tests"; exit 0; fi
 	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go test -exec "node $(CURDIR)/scripts/wasm_exec_runner.js" ./client/ -run 'TestWasm' -count=1 -timeout 120s
 
+# config materializes the gitignored ./config tree from samples.
+# Idempotent (cp -n): never overwrites operator-edited files. Needed
+# once after a fresh clone, before docker compose up (whose :ro mount
+# would otherwise conjure an empty root-owned dir and fail preflight).
+config:
+	@mkdir -p config/trustedproxy
+	@cp -n template/server/config/roles.json config/roles.json 2>/dev/null || true
+	@cp -n template/server/config/trustedproxy/*.txt config/trustedproxy/ 2>/dev/null || true
+	@echo "config ready (existing files kept)"
+
 check: vet test test-sh
 	@echo "check done (vet+test+test-sh)"
 
@@ -154,5 +164,6 @@ help:
 	@echo "  make test     - go test"
 	@echo "  make test-sh  - entrypoint shell tests (skip without root)"
 	@echo "  make test-wasm - js-tagged client tests under node (skip without node)"
+	@echo "  make config   - bootstrap ./config from template samples (fresh clone)"
 	@echo "  make check    - vet+test+test-sh"
 	@echo "  make clean    - remove build artifacts"
