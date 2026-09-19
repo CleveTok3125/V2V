@@ -360,7 +360,7 @@ Planned work grouped by dependency, in recommended order. Each item stays self-c
 ### Phase 1 — Evidence
 
 - **First audit producer** — `BroadcastAudit` (`server/history.go:214`) has tests but no callers; wire the first management action through it: rank-gated kick first (actor rank must exceed target; duration 0 = kick, longer = ban), audit text never carries IPs. — *BACKLOG*
-- **Paged history** — fetch older segments on demand (`/history`); the connect-time replay (`MAX_HISTORY_SEND`) stays a join burst for fast startup. — *NOT DONE*
+- **Paged history** — fetch older segments on demand over the authenticated WS (`history_request` with `before`/`limit`, answered in replay format with a `history_sync` trailer, RAM window only); the connect-time replay (`MAX_HISTORY_SEND`) stays a join burst for fast startup. Client `/older [n]` pages below the oldest height in memory. — *DONE*
 
 ### Phase 2 — Blog (frontend done, backend deferred)
 
