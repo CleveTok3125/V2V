@@ -226,3 +226,20 @@ func TestSocks5WipeOnlyAfterWSSuccess(t *testing.T) {
 		t.Error("password must wipe after successful dial")
 	}
 }
+
+func TestDialSocks5WSRejectsBadURL(t *testing.T) {
+	p := &proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: 1}
+	for _, u := range []string{
+		"http://127.0.0.1:1/ws",
+		"https://127.0.0.1:1/ws",
+		"notaurl://127.0.0.1:1/ws",
+		"ws://",
+		"wss:///ws",
+	} {
+		if _, _, err := dialSocks5WSWithDialer(u, http.Header{}, p, websocket.Dialer{}); err == nil {
+			t.Errorf("dialSocks5WS(%q) must fail fast", u)
+		} else if !strings.Contains(err.Error(), "ws") {
+			t.Errorf("dialSocks5WS(%q) error must name the ws scheme, got %v", u, err)
+		}
+	}
+}

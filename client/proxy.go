@@ -79,6 +79,12 @@ func parseProxyURL(raw string) (*proxyConfig, error) {
 	if u.User != nil {
 		cfg.User = u.User.Username()
 		if pw, ok := u.User.Password(); ok {
+			if cfg.User == "" {
+				// A password without a username would ride no
+				// auth at all: fail here instead of dropping
+				// the secret silently and failing at the proxy.
+				return nil, errors.New("proxy có password nhưng thiếu username")
+			}
 			cfg.Pass = []byte(pw)
 		}
 	}
