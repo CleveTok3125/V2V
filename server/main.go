@@ -180,19 +180,21 @@ func loadDynamicConfig() (DynamicConfig, error) {
 	loader := &envLoader{}
 
 	cfg := DynamicConfig{
-		StatusURL:           loader.Smart("STATUS_URL"),
-		DownloadURL:         loader.Smart("DOWNLOAD_URL"),
-		HomepageURL:         loader.Smart("HOMEPAGE_URL"),
-		MaxConnectionsPerIP: loader.Int("MAX_CONNECTIONS_PER_IP"),
-		MaxMessageLength:    loader.Int("MAX_MESSAGE_LENGTH"),
-		MaxMessageLine:      loader.Int("MAX_MESSAGE_LINE"),
-		MessageCooldown:     loader.Duration("MESSAGE_COOLDOWN"),
-		IdleChatTimeout:     loader.Duration("IDLE_CHAT_TIMEOUT"),
-		MaxHistoryBytes:     loader.Int("MAX_HISTORY_BYTES"),
-		MaxHistorySend:      loader.Int("MAX_HISTORY_SEND"),
-		MaxUsernameLength:   loader.Int("MAX_USERNAME_LENGTH"),
-		MaxTripcodeLength:   getEnvAsIntOptional("MAX_TRIPCODE_LENGTH", 64),
-		ConnectionCooldown:  loader.Duration("CONNECTION_COOLDOWN"),
+		StatusURL:              loader.Smart("STATUS_URL"),
+		DownloadURL:            loader.Smart("DOWNLOAD_URL"),
+		HomepageURL:            loader.Smart("HOMEPAGE_URL"),
+		MaxConnectionsPerIP:    loader.Int("MAX_CONNECTIONS_PER_IP"),
+		MaxMessageLength:       loader.Int("MAX_MESSAGE_LENGTH"),
+		MaxMessageLine:         loader.Int("MAX_MESSAGE_LINE"),
+		MessageCooldown:        loader.Duration("MESSAGE_COOLDOWN"),
+		IdleChatTimeout:        loader.Duration("IDLE_CHAT_TIMEOUT"),
+		MaxHistoryBytes:        loader.Int("MAX_HISTORY_BYTES"),
+		MaxHistorySend:         loader.Int("MAX_HISTORY_SEND"),
+		HistorySegmentCooldown: loader.Duration("HISTORY_SEGMENT_COOLDOWN"),
+		HistoryDiskLookup:      loader.Int("HISTORY_DISK_LOOKUP"),
+		MaxUsernameLength:      loader.Int("MAX_USERNAME_LENGTH"),
+		MaxTripcodeLength:      getEnvAsIntOptional("MAX_TRIPCODE_LENGTH", 64),
+		ConnectionCooldown:     loader.Duration("CONNECTION_COOLDOWN"),
 	}
 	if err := loader.Err(); err != nil {
 		return DynamicConfig{}, err
@@ -201,6 +203,15 @@ func loadDynamicConfig() (DynamicConfig, error) {
 	// empty history on every connect. Mirror the client backfill default.
 	if cfg.MaxHistorySend <= 0 {
 		cfg.MaxHistorySend = 500
+	}
+	// Fail-closed floors: a missing/zero segment throttle would let one
+	// client re-scan history unthrottled; an out-of-range disk tier must
+	// never widen reads beyond what the operator picked.
+	if cfg.HistorySegmentCooldown <= 0 {
+		cfg.HistorySegmentCooldown = 2 * time.Second
+	}
+	if cfg.HistoryDiskLookup < DiskLookupOff || cfg.HistoryDiskLookup > DiskLookupArchive {
+		cfg.HistoryDiskLookup = DiskLookupOff
 	}
 
 	return cfg, nil

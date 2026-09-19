@@ -18,6 +18,17 @@ import (
 
 const historyQueueSize = 256
 
+// Disk lookup tiers for on-demand older segments beyond RAM, matching
+// HISTORY_DISK_LOOKUP levels: each tier adds one older generation.
+// Active is cheapest (hot indexed file), the archive costs a full
+// streaming decode per request.
+const (
+	DiskLookupOff     = iota // RAM only
+	DiskLookupActive         // +history.jsonl
+	DiskLookupRaw            // +.old raw
+	DiskLookupArchive        // +.old.zst (full)
+)
+
 type HistoryStore struct {
 	Filename string
 	MaxSize  int64
@@ -35,7 +46,7 @@ type HistoryStore struct {
 }
 
 type historyRecord struct {
-	Timestamp string       `json:"ts"` // RFC3339Nano for readability
+	Timestamp string       `json:"ts"`            // RFC3339Nano for readability
 	Message   string       `json:"msg,omitempty"` // system messages (date/join/leave) remain as plain string
 	Wire      *WireMessage `json:"wire,omitempty"`
 }
@@ -371,4 +382,3 @@ func (h *HistoryStore) loadJSONLFile(path string) ([]historyRecord, error) {
 	}
 	return out, nil
 }
-

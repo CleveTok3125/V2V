@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/CleveTok3125/V2V/internal/identity"
 )
@@ -226,5 +227,17 @@ func TestClipboardBackfill(t *testing.T) {
 	}
 	if c.ClipboardClearAfterSec() != 0 {
 		t.Fatal("explicit 0 must survive backfill (disable)")
+	}
+}
+
+// History paging knobs pin their defaults: 2s segment throttle,
+// disk lookup off (opt-in per deployment cost).
+func TestHistoryPagingDefaults(t *testing.T) {
+	d := DefaultDynamic()
+	if d.HistorySegmentCooldown != 2*time.Second {
+		t.Fatalf("HistorySegmentCooldown = %v, want 2s", d.HistorySegmentCooldown)
+	}
+	if d.HistoryDiskLookup != 0 {
+		t.Fatalf("HistoryDiskLookup = %d, want 0 (RAM-only default)", d.HistoryDiskLookup)
 	}
 }
