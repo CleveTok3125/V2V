@@ -268,6 +268,47 @@ func (c *ChainService) SendChatHistory(session *ClientSession) {
 	copy(historyCopy, c.History[startIndex:])
 	c.Mu.RUnlock()
 
+	c.sendReplay(session, historyCopy, "--- Lịch sử chat gần đây ---")
+}
+
+// SendChatSegment sends up to limit stored lines older than before in
+// replay format. before is an exclusive chain height; 0 means the tail
+// window over the whole history. Unchained lines carry no height, so
+// they travel with their neighbors by position: the cutoff is the
+// first line at or above before. An empty window still terminates the
+// stream (header, zero-count footer, trailer) so the requester never
+// hangs waiting.
+func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, limit int) {
+	if limit <= 0 {
+		return
+	}
+	c.Mu.RLock()
+	cut := len(c.History)
+	if before != 0 {
+		for i, msgStr := range c.History {
+			var wire WireMessage
+			if err := json.Unmarshal([]byte(msgStr), &wire); err == nil && wire.ChainHeight != 0 && wire.ChainHeight >= before {
+				cut = i
+				break
+			}
+		}
+	}
+	start := 0
+	if cut > limit {
+		start = cut - limit
+	}
+	window := make([]string, cut-start)
+	copy(window, c.History[start:cut])
+	c.Mu.RUnlock()
+
+	c.sendReplay(session, window, "--- Lịch sử cũ ---")
+}
+
+// sendReplay renders stored lines in replay format: header, content,
+// human footer with counts, and a HistorySync trailer. lines must be a
+// private copy. Sends never block (drops on a full peer buffer are
+// counted and logged); the trailer reports what was actually queued.
+func (c *ChainService) sendReplay(session *ClientSession, lines []string, header string) {
 	// Replay filters join/leave unless the session asked for them.
 	// Dates, audits and untagged lines always go. Filtered lines never
 	// occupied chain positions, so the replayed window has no gaps.
@@ -290,8 +331,8 @@ func (c *ChainService) SendChatHistory(session *ClientSession) {
 		}
 	}
 
-	replaySend([]byte("--- Lịch sử chat gần đây ---"))
-	for _, msgStr := range historyCopy {
+	replaySend([]byte(header))
+	for _, msgStr := range lines {
 		// Keep history messages as stored (could be legacy ANSI string or WireMessage JSON)
 		// For WireMessage JSON, send as is; for legacy, clean and send
 		var wire WireMessage
@@ -330,11 +371,11 @@ func (c *ChainService) SendChatHistory(session *ClientSession) {
 			}
 		}
 	}
-	replaySend([]byte(fmt.Sprintf("--- Kết thúc lịch sử (%d/%d) ---", sent, len(historyCopy))))
+	replaySend([]byte(fmt.Sprintf("--- Kết thúc lịch sử (%d/%d) ---", sent, len(lines))))
 	trailer, _ := json.Marshal(HistorySync{Type: "history_sync", MinHeight: minHeight, MaxHeight: maxHeight,
-		Sent: sent, Total: len(historyCopy)})
+		Sent: sent, Total: len(lines)})
 	replaySend(trailer)
 	if dropped > 0 {
-		logWarnf("⚠️ [REPLAY] Dropped %d/%d lines for slow peer (buffer full)", dropped, len(historyCopy)+3)
+		logWarnf("⚠️ [REPLAY] Dropped %d/%d lines for slow peer (buffer full)", dropped, len(lines)+3)
 	}
 }

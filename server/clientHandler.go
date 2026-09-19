@@ -205,6 +205,21 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			updateReadDeadline()
 			continue
 		}
+		// On-demand older segment (paged history): served in replay
+		// format, never chained, never counted as chat. A chat
+		// envelope never carries "type", so this cannot misfire on
+		// chat; a forged request only fetches the requester's own
+		// history window.
+		var histReq HistoryRequest
+		if err := json.Unmarshal([]byte(raw), &histReq); err == nil && histReq.Type == "history_request" {
+			limit := histReq.Limit
+			if limit <= 0 || limit > dynCfg.MaxHistorySend {
+				limit = dynCfg.MaxHistorySend
+			}
+			s.Chain.SendChatSegment(session, histReq.Before, limit)
+			updateReadDeadline()
+			continue
+		}
 		// Break: every chat message arrives in a JSON envelope carrying
 		// the sender's per-session counter. The server relays tmp_id
 		// verbatim into the wire message but never assigns or alters it.
