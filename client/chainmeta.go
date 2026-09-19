@@ -445,6 +445,22 @@ func (x *wireIndex) get(height uint64) (WireMessage, bool) {
 	return wire, ok
 }
 
+// oldest returns the smallest indexed height (the oldest wire held in
+// memory), the paging cursor for /older. False when the index is
+// empty or nil. Callers must hold DisplayMu.
+func (x *wireIndex) oldest() (uint64, bool) {
+	if x == nil || len(x.order) == 0 {
+		return 0, false
+	}
+	min := x.order[0]
+	for _, h := range x.order[1:] {
+		if h < min {
+			min = h
+		}
+	}
+	return min, true
+}
+
 // formatInfoBlock renders the full metadata detail of one indexed wire.
 // Both verdicts recompute locally without network: the chain content
 // hash and, for signed messages, the trip signature.

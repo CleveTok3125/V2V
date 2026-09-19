@@ -149,7 +149,7 @@ func isDateBanner(wire WireMessage) bool {
 }
 
 func isHistoryBoundaryLine(line string) bool {
-	return strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Kết thúc lịch sử")
+	return strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Lịch sử cũ ---") || strings.Contains(line, "--- Kết thúc lịch sử")
 }
 
 // parseHistoryBoundary reports whether line opens (header) or closes
@@ -157,7 +157,7 @@ func isHistoryBoundaryLine(line string) bool {
 // join-display toggle: gating it on showJoin leaves inSync unset, which
 // both disables the fork check and feeds replay lines to echo matching.
 func parseHistoryBoundary(line string) (boundary bool, start bool) {
-	if strings.Contains(line, "--- Lịch sử chat gần đây ---") {
+	if strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Lịch sử cũ ---") {
 		return true, true
 	}
 	// No trailing " ---": counted footers read "(sent/total) ---".
