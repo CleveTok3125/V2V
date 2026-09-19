@@ -32,6 +32,7 @@ func TestParseProxyURL(t *testing.T) {
 	for _, raw := range []string{
 		"ftp://proxy.local:21",
 		"http://:8080",
+		"http://:secret@proxy.local:8080",
 		"http://proxy.local:99999",
 		"http://proxy.local:abc",
 		"://bad",

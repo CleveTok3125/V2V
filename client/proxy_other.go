@@ -88,8 +88,14 @@ func dialSocks5WS(wsURL string, headers http.Header, p *proxyConfig) (wsConn, *h
 // dialSocks5WSWithDialer is dialSocks5WS with an injectable dialer so
 // tests can set TLSClientConfig against a local TLS server.
 func dialSocks5WSWithDialer(wsURL string, headers http.Header, p *proxyConfig, d websocket.Dialer) (wsConn, *http.Response, error) {
-	if _, err := url.Parse(wsURL); err != nil {
+	u, err := url.Parse(wsURL)
+	if err != nil {
 		return nil, nil, fmt.Errorf("URL server không hợp lệ: %w", err)
+	}
+	// Fail here with the scheme named: anything past this point
+	// reports dial/handshake errors that hide a wrong-scheme caller.
+	if u == nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
+		return nil, nil, fmt.Errorf("URL server phải là ws:// hoặc wss:// có host: %q", wsURL)
 	}
 	d.NetDialContext = socks5NetDialer(p)
 	if d.HandshakeTimeout == 0 {
