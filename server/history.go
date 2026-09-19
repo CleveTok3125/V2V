@@ -65,18 +65,15 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 	}
 
 	for _, rec := range records {
-		var msgForHistory string
 		var tripForChain *TripMeta
 		var wireForVerify *WireMessage
+		msgForHistory, ok := recordLine(rec)
+		if !ok {
+			continue
+		}
 		if rec.Wire != nil {
-			data, _ := json.Marshal(rec.Wire)
-			msgForHistory = string(data)
 			tripForChain = rec.Wire.Trip
 			wireForVerify = rec.Wire
-		} else {
-			msgForHistory = rec.Message
-			tripForChain = nil
-			wireForVerify = nil
 		}
 		s.Chain.appendMessageToHistory(msgForHistory)
 		if tripForChain != nil && tripForChain.Pub != "" && wireForVerify != nil {
@@ -281,37 +278,149 @@ func (c *ChainService) SendChatHistory(session *ClientSession) {
 	c.sendReplay(session, historyCopy, "--- Lịch sử chat gần đây ---", false)
 }
 
+// windowRing keeps the last n fed lines oldest→newest: a full forward
+// stream collapses to its tail window with O(limit) memory and O(1)
+// amortized feed (circular overwrite, no memmove churn on big scans).
+type windowRing struct {
+	buf   []string
+	start int
+	n     int
+	limit int
+	done  bool
+}
+
+func newWindowRing(limit int) *windowRing {
+	if limit < 0 {
+		limit = 0
+	}
+	return &windowRing{limit: limit}
+}
+
+// feed adds one stored line and reports whether the global cutoff is
+// reached: the first chained height at or above before (before 0 means
+// the tail window, never cut). The cutoff line itself is excluded.
+func (r *windowRing) feed(msgStr string, before uint64) bool {
+	if r.done {
+		return true
+	}
+	if before != 0 {
+		var wire WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &wire); err == nil && wire.ChainHeight != 0 && wire.ChainHeight >= before {
+			r.done = true
+			return true
+		}
+	}
+	if r.limit <= 0 {
+		return false
+	}
+	if r.n < r.limit {
+		r.buf = append(r.buf, msgStr)
+		r.n++
+	} else {
+		r.buf[r.start] = msgStr
+		r.start = (r.start + 1) % r.limit
+	}
+	return false
+}
+
+// lines drains the window oldest→newest.
+func (r *windowRing) lines() []string {
+	out := make([]string, 0, r.n)
+	for i := 0; i < r.n; i++ {
+		out = append(out, r.buf[(r.start+i)%r.limit])
+	}
+	return out
+}
+
+// selectWindow returns up to limit stored lines before the cutoff (see
+// feed). Unchained lines travel by position; an exhausted window is an
+// empty slice (the caller still terminates the stream).
+func selectWindow(lines []string, before uint64, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	r := newWindowRing(limit)
+	for _, msgStr := range lines {
+		if r.feed(msgStr, before) {
+			break
+		}
+	}
+	return r.lines()
+}
+
+// recordLine renders one disk record in RAM string form (marshaled wire
+// or raw message), mirroring InitHistoryStore. False means the record
+// holds nothing renderable and must be skipped like the loader skips it.
+func recordLine(rec historyRecord) (string, bool) {
+	if rec.Wire != nil {
+		data, _ := json.Marshal(rec.Wire)
+		return string(data), true
+	}
+	if rec.Message != "" {
+		return rec.Message, true
+	}
+	return "", false
+}
+
+// oldestChained returns the smallest chained height in stored lines, or
+// 0 when none exists. RAM holds a height-suffix of the log, so disk
+// generations only need lines below this bound: chained content
+// partitions exactly, with no overlap and no gap.
+func oldestChained(lines []string) uint64 {
+	var oldest uint64
+	found := false
+	for _, msgStr := range lines {
+		var wire WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil || wire.ChainHeight == 0 {
+			continue
+		}
+		if !found || wire.ChainHeight < oldest {
+			oldest, found = wire.ChainHeight, true
+		}
+	}
+	if !found {
+		return 0
+	}
+	return oldest
+}
+
 // SendChatSegment sends up to limit stored lines older than before in
 // replay format. before is an exclusive chain height; 0 means the tail
 // window over the whole history. Unchained lines carry no height, so
 // they travel with their neighbors by position: the cutoff is the
 // first line at or above before. An exhausted window still terminates
 // the stream (header, plain exhausted footer, trailer) so the
-// requester never hangs waiting.
+// requester never hangs waiting. Lines evicted from RAM are served
+// from disk when the lookup level allows (see windowBefore); the RAM
+// seam may repeat a few unchained lines, chained content stays exact.
 func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, limit int) {
 	if limit <= 0 {
 		return
 	}
-	c.Mu.RLock()
-	cut := len(c.History)
-	if before != 0 {
-		for i, msgStr := range c.History {
-			var wire WireMessage
-			if err := json.Unmarshal([]byte(msgStr), &wire); err == nil && wire.ChainHeight != 0 && wire.ChainHeight >= before {
-				cut = i
+	ring := newWindowRing(limit)
+	if before != 0 && c.Store != nil {
+		if level := Cfg.Dynamic.Load().HistoryDiskLookup; level > DiskLookupOff {
+			c.Mu.RLock()
+			bound := before
+			if oldest := oldestChained(c.History); oldest != 0 && oldest < bound {
+				bound = oldest
+			}
+			store := c.Store
+			c.Mu.RUnlock()
+			store.windowBefore(ring, bound, level)
+		}
+	}
+	if !ring.done {
+		c.Mu.RLock()
+		for _, msgStr := range c.History {
+			if ring.feed(msgStr, before) {
 				break
 			}
 		}
+		c.Mu.RUnlock()
 	}
-	start := 0
-	if cut > limit {
-		start = cut - limit
-	}
-	window := make([]string, cut-start)
-	copy(window, c.History[start:cut])
-	c.Mu.RUnlock()
 
-	c.sendReplay(session, window, "--- Lịch sử cũ ---", true)
+	c.sendReplay(session, ring.lines(), "--- Lịch sử cũ ---", true)
 }
 
 // sendReplay renders stored lines in replay format: header, content,

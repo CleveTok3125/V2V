@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,44 @@ type HistoryStore struct {
 	// drops counts records shed under backpressure.
 	closed bool
 	drops  uint64
+
+	// idx orders disk generations old→new for on-demand paging. The
+	// active generation sits last while it exists. Guarded by mu for
+	// writes; scanners snapshot it and release before file I/O.
+	idx []genIndex
+}
+
+// genIndex describes one disk generation for paging older segments.
+// Samples map chained heights to raw-file byte offsets (sparse, every
+// indexSampleStride lines); the archive keeps bounds only because its
+// compressed offsets are not seekable.
+type genIndex struct {
+	tier    int
+	minH    uint64
+	maxH    uint64
+	chained bool
+	samples []heightSample
+	// sinceSample counts chained lines since the last sample; only the
+	// active generation extends at runtime.
+	sinceSample int
+}
+
+type heightSample struct {
+	height uint64
+	offset int64
+}
+
+// indexSampleStride bounds the forward scan after a seek: at most this
+// many chained lines (plus whatever unchained lines interleave) are
+// read before the cutoff.
+const indexSampleStride = 256
+
+// indexedRecord pairs a parsed record with its line byte offset in a
+// raw file. Archive (zstd) offsets count decompressed bytes and are
+// recorded for uniformity but never sampled: only raw offsets seek.
+type indexedRecord struct {
+	rec    historyRecord
+	offset int64
 }
 
 type historyRecord struct {
@@ -145,7 +184,7 @@ func (h *HistoryStore) Close() error {
 	return nil
 }
 
-func (h *HistoryStore) loadZstdFile(path string) ([]historyRecord, error) {
+func (h *HistoryStore) loadZstdFile(path string) ([]indexedRecord, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -156,20 +195,22 @@ func (h *HistoryStore) loadZstdFile(path string) ([]historyRecord, error) {
 		return nil, err
 	}
 	defer r.Close()
-	var out []historyRecord
+	var out []indexedRecord
+	var offset int64
 	br := bufio.NewReader(r)
 	for {
 		line, readErr := br.ReadBytes('\n')
 		if len(line) > 0 {
-			line = bytes.TrimSuffix(line, []byte{'\n'})
-			if len(line) > 0 {
+			raw := bytes.TrimSuffix(line, []byte{'\n'})
+			if len(raw) > 0 {
 				var rec historyRecord
-				if err := json.Unmarshal(line, &rec); err != nil {
+				if err := json.Unmarshal(raw, &rec); err != nil {
 					logWarnf("⚠️ [HISTORY] Bỏ qua record lỗi trong %s: %v", path, err)
 				} else if rec.Wire != nil || rec.Message != "" {
-					out = append(out, rec)
+					out = append(out, indexedRecord{rec: rec, offset: offset})
 				}
 			}
+			offset += int64(len(line))
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
@@ -227,9 +268,41 @@ func (h *HistoryStore) writeRecord(record historyRecord) error {
 	if err != nil {
 		return err
 	}
+	offset := h.size
 	h.size += int64(written)
 	h.dirty = true
+	if record.Wire != nil && record.Wire.ChainHeight != 0 {
+		h.indexWroteLocked(record.Wire.ChainHeight, offset)
+	}
 	return nil
+}
+
+// indexWroteLocked extends the active generation after a successful
+// append: h.size before the write is the new line's byte offset.
+// Caller must hold mu (writeRecord does).
+func (h *HistoryStore) indexWroteLocked(height uint64, offset int64) {
+	var g *genIndex
+	if n := len(h.idx); n > 0 && h.idx[n-1].tier == DiskLookupActive {
+		g = &h.idx[n-1]
+	} else {
+		h.idx = append(h.idx, genIndex{tier: DiskLookupActive})
+		g = &h.idx[len(h.idx)-1]
+	}
+	if !g.chained {
+		g.chained = true
+		g.minH, g.maxH = height, height
+	} else {
+		if height < g.minH {
+			g.minH = height
+		}
+		if height > g.maxH {
+			g.maxH = height
+		}
+	}
+	if g.sinceSample%indexSampleStride == 0 {
+		g.samples = append(g.samples, heightSample{height: height, offset: offset})
+	}
+	g.sinceSample++
 }
 
 func (h *HistoryStore) rotate() error {
@@ -241,8 +314,22 @@ func (h *HistoryStore) rotate() error {
 	}
 
 	oldFile := h.Filename + ".old"
-	if err := os.Rename(h.Filename, oldFile); err != nil && !os.IsNotExist(err) {
-		return err
+	renameErr := os.Rename(h.Filename, oldFile)
+	if renameErr != nil && !os.IsNotExist(renameErr) {
+		return renameErr
+	}
+	if renameErr == nil {
+		// The rename clobbered any previous .old content and moved the
+		// active generation there intact: byte offsets stay valid, only
+		// the tier label changes. Caller holds mu (writeRecord does).
+		h.dropGenLocked(DiskLookupRaw)
+		if !h.relabelGenLocked(DiskLookupActive, DiskLookupRaw) {
+			// Active file existed but held no chained line (or no
+			// entry): still record the generation so its unchained
+			// lines stay reachable. Appending last keeps old→new
+			// order: the next write adds the new active after it.
+			h.idx = append(h.idx, genIndex{tier: DiskLookupRaw})
+		}
 	}
 	// Compress old file to .old.zst (best effort)
 	if _, err := os.Stat(oldFile); err == nil {
@@ -250,9 +337,21 @@ func (h *HistoryStore) rotate() error {
 			logWarnf("⚠️ [HISTORY] Không thể nén history cũ: %v", err)
 		} else if err := os.Remove(oldFile); err != nil {
 			// A leftover .old next to a fresh .old.zst would double-load
-			// every record on restart: fail loudly instead.
+			// every record on restart: fail loudly instead. Mirror the
+			// loader's skip (.old ignored when .zst exists): drop the
+			// old archive, then relabel the raw entry to the fresh
+			// archive bounds so paging still serves the new content.
+			// (If no raw entry exists — an unchained-only .old builds
+			// none — the archive stays unindexed until the next boot
+			// load; files stay correct, only deep paging misses it.)
+			h.dropGenLocked(DiskLookupArchive)
+			h.relabelGenLocked(DiskLookupRaw, DiskLookupArchive)
 			return fmt.Errorf("cannot remove compressed-aside %s: %w", oldFile, err)
 		} else {
+			// Archive clobbered the previous .zst; compressed offsets
+			// cannot seek, so only bounds survive.
+			h.dropGenLocked(DiskLookupArchive)
+			h.relabelGenLocked(DiskLookupRaw, DiskLookupArchive)
 			// fsync dir for durability (like webauthn_store)
 			if dir, err := os.Open(filepath.Dir(h.Filename)); err == nil {
 				_ = dir.Sync()
@@ -323,17 +422,26 @@ func (h *HistoryStore) LoadRecords() ([]historyRecord, error) {
 	if h == nil {
 		return nil, nil
 	}
+	// Rebuild the page index from scratch: LoadRecords must stay
+	// idempotent no matter how often boot or tests call it.
+	h.mu.Lock()
+	h.idx = nil
+	h.mu.Unlock()
 	var records []historyRecord
 	// Prefer .old.zst (new), fallback .old (legacy raw) for one version.
 	// When both exist the .old is a leftover of the same generation:
-	// skip it instead of double-loading every record.
+	// skip it instead of double-loading every record. The index mirrors
+	// exactly which files contribute records.
 	zstOK := false
 	paths := []string{h.Filename + ".old.zst", h.Filename + ".old", h.Filename}
 	for _, path := range paths {
 		// Try zstd if suffix matches
 		if strings.HasSuffix(path, ".zst") {
 			if recs, err := h.loadZstdFile(path); err == nil {
-				records = append(records, recs...)
+				for _, ir := range recs {
+					records = append(records, ir.rec)
+				}
+				h.indexLoaded(DiskLookupArchive, recs)
 				zstOK = true
 			} else if !os.IsNotExist(err) {
 				return nil, err
@@ -344,7 +452,14 @@ func (h *HistoryStore) LoadRecords() ([]historyRecord, error) {
 			continue
 		}
 		if recs, err := h.loadJSONLFile(path); err == nil {
-			records = append(records, recs...)
+			for _, ir := range recs {
+				records = append(records, ir.rec)
+			}
+			tier := DiskLookupActive
+			if path != h.Filename {
+				tier = DiskLookupRaw
+			}
+			h.indexLoaded(tier, recs)
 		} else if !os.IsNotExist(err) {
 			return nil, err
 		}
@@ -352,26 +467,71 @@ func (h *HistoryStore) LoadRecords() ([]historyRecord, error) {
 	return records, nil
 }
 
-func (h *HistoryStore) loadJSONLFile(path string) ([]historyRecord, error) {
+// indexLoaded records one loaded generation for paging: bounds
+// always, byte-offset samples for raw files only (archive offsets are
+// decompressed-stream positions and cannot seek). Empty files build no
+// entry, so scans never open them per request. Caller holds no lock;
+// the store takes mu for the append. LoadRecords runs before any
+// request can arrive; a racing writeRecord serializes on the same mu.
+func (h *HistoryStore) indexLoaded(tier int, recs []indexedRecord) {
+	if len(recs) == 0 {
+		return
+	}
+	var g genIndex
+	g.tier = tier
+	for _, ir := range recs {
+		var height uint64
+		if ir.rec.Wire != nil {
+			height = ir.rec.Wire.ChainHeight
+		}
+		if height == 0 {
+			continue
+		}
+		if !g.chained {
+			g.chained = true
+			g.minH, g.maxH = height, height
+		} else {
+			if height < g.minH {
+				g.minH = height
+			}
+			if height > g.maxH {
+				g.maxH = height
+			}
+		}
+		if tier != DiskLookupArchive {
+			if g.sinceSample%indexSampleStride == 0 {
+				g.samples = append(g.samples, heightSample{height: height, offset: ir.offset})
+			}
+			g.sinceSample++
+		}
+	}
+	h.mu.Lock()
+	h.idx = append(h.idx, g)
+	h.mu.Unlock()
+}
+
+func (h *HistoryStore) loadJSONLFile(path string) ([]indexedRecord, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	var out []historyRecord
+	var out []indexedRecord
+	var offset int64
 	reader := bufio.NewReader(file)
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			line = bytes.TrimSuffix(line, []byte{'\n'})
-			if len(line) > 0 {
+			raw := bytes.TrimSuffix(line, []byte{'\n'})
+			if len(raw) > 0 {
 				var rec historyRecord
-				if err := json.Unmarshal(line, &rec); err != nil {
+				if err := json.Unmarshal(raw, &rec); err != nil {
 					logWarnf("⚠️ [HISTORY] Bỏ qua record lỗi trong %s: %v", path, err)
 				} else if rec.Message != "" || rec.Wire != nil {
-					out = append(out, rec)
+					out = append(out, indexedRecord{rec: rec, offset: offset})
 				}
 			}
+			offset += int64(len(line))
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
@@ -381,4 +541,329 @@ func (h *HistoryStore) loadJSONLFile(path string) ([]historyRecord, error) {
 		}
 	}
 	return out, nil
+}
+
+// genPath resolves the current file for one tier. Rotation renames
+// files underfoot, so scanners resolve names at request time and
+// tolerate absence (stale index after external deletion).
+func (h *HistoryStore) genPath(tier int) string {
+	switch tier {
+	case DiskLookupArchive:
+		return h.Filename + ".old.zst"
+	case DiskLookupRaw:
+		return h.Filename + ".old"
+	default:
+		return h.Filename
+	}
+}
+
+// dropGenLocked removes every index entry of one tier. Caller holds mu.
+func (h *HistoryStore) dropGenLocked(tier int) {
+	kept := h.idx[:0]
+	for _, g := range h.idx {
+		if g.tier != tier {
+			kept = append(kept, g)
+		}
+	}
+	for i := len(kept); i < len(h.idx); i++ {
+		h.idx[i] = genIndex{}
+	}
+	h.idx = kept
+}
+
+// relabelGenLocked moves the first entry of one tier to another (same
+// content, new role after rotation) and reports whether one existed.
+// Samples survive Active→Raw (offsets intact); Raw→Archive drops them
+// (compressed offsets cannot seek) but keeps bounds. Caller holds mu.
+func (h *HistoryStore) relabelGenLocked(from, to int) bool {
+	for i := range h.idx {
+		if h.idx[i].tier == from {
+			h.idx[i].tier = to
+			if to == DiskLookupArchive {
+				h.idx[i].samples = nil
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// windowBefore merges disk generations old→new into ring, stopping at
+// the first chained height at or above bound (excluded). Generations
+// above level are skipped; the caller bounds disk against RAM first so
+// chained content never overlaps what RAM will feed. Unchained lines
+// travel by position, which may repeat a few across the RAM seam.
+// Files are opened per request and never locked: rotation renames
+// atomically, so a scan sees a consistent (if slightly stale) view.
+// Missing files (stale index, concurrent rotation) are skipped, never
+// fatal. Transient memory stays within generations×limit lines.
+func (h *HistoryStore) windowBefore(ring *windowRing, bound uint64, level int) {
+	if h == nil || ring == nil {
+		return
+	}
+	h.mu.Lock()
+	gens := append([]genIndex(nil), h.idx...)
+	h.mu.Unlock()
+	var temps [][]string
+	for _, g := range gens {
+		if g.tier > level || g.tier <= DiskLookupOff {
+			continue
+		}
+		t, done := h.scanGenTemp(bound, g, ring.limit)
+		temps = append(temps, t)
+		if done {
+			break
+		}
+	}
+	// Temps hold converted lines (recordLine applied once at scan);
+	// the feed re-checks the cutoff defensively but never hits it:
+	// every temp precedes it by construction.
+	for _, t := range temps {
+		for _, msgStr := range t {
+			if ring.feed(msgStr, bound) {
+				return
+			}
+		}
+	}
+}
+
+// seekOffset returns the byte offset to start scanning a raw
+// generation: the nearest sample strictly below bound, or 0. Samples
+// ascend with heights.
+func seekOffset(samples []heightSample, bound uint64) int64 {
+	i := sort.Search(len(samples), func(i int) bool { return samples[i].height >= bound })
+	if i == 0 {
+		return 0
+	}
+	return samples[i-1].offset
+}
+
+// scanGenTemp returns up to limit pre-cutoff lines (oldest→newest) from
+// one generation plus whether the cutoff was reached (newer generations
+// excluded). Raw files seek to the nearest sample, find the cutoff
+// forward, then collect backward; the archive (not seekable) streams
+// forward with a capped ring. Missing files scan as empty, never fatal.
+// A torn tail (concurrent append without its newline yet) is ignored,
+// never fed.
+func (h *HistoryStore) scanGenTemp(bound uint64, g genIndex, limit int) ([]string, bool) {
+	path := h.genPath(g.tier)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	if g.tier == DiskLookupArchive {
+		r, err := zstd.NewReader(f)
+		if err != nil {
+			logWarnf("⚠️ [HISTORY] archive %s unreadable, skipping: %v", path, err)
+			return nil, false
+		}
+		defer r.Close()
+		ring := newWindowRing(limit)
+		if streamForward(ring, bound, bufio.NewReader(r)) {
+			return ring.lines(), true
+		}
+		return ring.lines(), false
+	}
+	off, found, ok := findCutoff(f, g.samples, bound)
+	if !ok {
+		// Seek failed (stale index, replaced file): exact but slower
+		// full forward stream instead of guessing alignment.
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return nil, false
+		}
+		ring := newWindowRing(limit)
+		if streamForward(ring, bound, bufio.NewReader(f)) {
+			return ring.lines(), true
+		}
+		return ring.lines(), false
+	}
+	var end int64
+	if found {
+		end = off
+	} else {
+		fi, err := f.Stat()
+		if err != nil {
+			return nil, false
+		}
+		end = fi.Size()
+	}
+	return renderLines(collectBackward(f, end, limit)), found
+}
+
+// renderLines converts raw history lines to RAM string form, dropping
+// malformed lines exactly like the loader drops them.
+func renderLines(raw []string) []string {
+	out := make([]string, 0, len(raw))
+	for _, l := range raw {
+		if msgStr, ok := recordLine(parseRecord([]byte(l))); ok {
+			out = append(out, msgStr)
+		}
+	}
+	return out
+}
+
+// findCutoff returns the line-start offset of the first chained height
+// at or above bound in a raw file. ok=false means seeking failed (the
+// caller falls back to a full stream); found=false means the whole file
+// precedes the cutoff. Sample offsets are line starts by construction,
+// verified with a one-byte probe so a replaced file rescans from zero
+// instead of dropping a valid line.
+func findCutoff(f *os.File, samples []heightSample, bound uint64) (off int64, found, ok bool) {
+	start := seekOffset(samples, bound)
+	if start > 0 {
+		var b [1]byte
+		if _, err := f.ReadAt(b[:], start-1); err != nil || b[0] != '\n' {
+			return 0, false, false
+		}
+		if _, err := f.Seek(start, io.SeekStart); err != nil {
+			return 0, false, false
+		}
+	}
+	br := bufio.NewReader(f)
+	var cur int64 = start
+	for {
+		raw, err := br.ReadBytes('\n')
+		if len(raw) > 0 && raw[len(raw)-1] == '\n' {
+			line := bytes.TrimSuffix(raw, []byte{'\n'})
+			if len(line) > 0 {
+				if h, ok := chainedHeightOf(line); ok && h >= bound {
+					return cur, true, true
+				}
+			}
+			cur += int64(len(raw))
+		} else if len(raw) > 0 {
+			// Torn tail: no complete line follows in this pass.
+			return 0, false, true
+		}
+		if err != nil {
+			return 0, false, true
+		}
+	}
+}
+
+// streamForward feeds complete lines oldest→newest until the cutoff,
+// reporting whether it was reached. Malformed lines are skipped like
+// the loader skips them; only whole newline-terminated lines feed.
+func streamForward(ring *windowRing, bound uint64, br *bufio.Reader) bool {
+	for {
+		raw, err := br.ReadBytes('\n')
+		if len(raw) > 0 && raw[len(raw)-1] == '\n' {
+			line := bytes.TrimSuffix(raw, []byte{'\n'})
+			if len(line) > 0 {
+				if msgStr, ok := recordLine(parseRecord(line)); ok {
+					if ring.feed(msgStr, bound) {
+						return true
+					}
+				}
+			}
+		}
+		if err != nil {
+			return false
+		}
+	}
+}
+
+const backwardChunk = 32 * 1024
+const maxTornProbe = 64 * 1024
+
+// collectBackward returns up to maxLines complete lines ending at
+// endOff (exclusive), oldest→newest. endOff is a cutoff line start or
+// a file end (torn tail adjusted away). Empty lines are skipped like
+// the loader skips them; malformed lines stay raw here and drop later
+// at the recordLine merge, identically to the forward path.
+func collectBackward(f *os.File, endOff int64, maxLines int) []string {
+	if maxLines <= 0 || endOff <= 0 {
+		return nil
+	}
+	endOff = completeEnd(f, endOff)
+	var rev [][]byte // complete lines, newest→oldest
+	var carry []byte // oldest fragment, completed by the next chunk
+	pos := endOff
+outer:
+	for pos > 0 && len(rev) < maxLines {
+		n := int64(backwardChunk)
+		if n > pos {
+			n = pos
+		}
+		off := pos - n
+		buf := make([]byte, n)
+		if _, err := f.ReadAt(buf, off); err != nil {
+			break
+		}
+		// data ends at the previous pos: a line boundary on the
+		// first iteration (adjusted end), a carried seam after that.
+		// Either way only parts[0] may be partial (unless BOF).
+		data := append(buf, carry...)
+		parts := bytes.Split(data, []byte{'\n'})
+		for i := len(parts) - 1; i >= 1; i-- {
+			if len(parts[i]) == 0 {
+				continue
+			}
+			rev = append(rev, parts[i])
+			if len(rev) >= maxLines {
+				break outer
+			}
+		}
+		carry = parts[0]
+		pos = off
+	}
+	// File head is always a line start (append-only from empty), so the
+	// leftover head fragment is a complete first line.
+	if pos == 0 && len(carry) > 0 && len(rev) < maxLines {
+		rev = append(rev, carry)
+	}
+	out := make([]string, 0, len(rev))
+	for i := len(rev) - 1; i >= 0; i-- {
+		out = append(out, string(rev[i]))
+	}
+	return out
+}
+
+// completeEnd moves a file-end offset back past a torn tail (a trailing
+// fragment without its newline is a concurrent append in flight).
+// Cutoff offsets are line starts already, so the probe is a no-op for
+// them. Lines are small (chat cap ~KBs); the probe window only needs to
+// cover one maximal line.
+func completeEnd(f *os.File, end int64) int64 {
+	if end <= 0 {
+		return 0
+	}
+	n := int64(maxTornProbe)
+	if n > end {
+		n = end
+	}
+	buf := make([]byte, n)
+	if _, err := f.ReadAt(buf, end-n); err != nil {
+		return end
+	}
+	if buf[len(buf)-1] == '\n' {
+		return end
+	}
+	if i := bytes.LastIndexByte(buf, '\n'); i >= 0 {
+		return end - n + int64(i) + 1
+	}
+	return end - n
+}
+
+// parseRecord decodes one history line, mirroring the loader's
+// leniency (malformed JSON skipped, empties dropped).
+func parseRecord(line []byte) historyRecord {
+	var rec historyRecord
+	if err := json.Unmarshal(line, &rec); err != nil {
+		return historyRecord{}
+	}
+	return rec
+}
+
+// chainedHeightOf extracts the chain height for cutoff checks without
+// a full wire parse. Missing or zero means unchained: positional only.
+func chainedHeightOf(line []byte) (uint64, bool) {
+	var v struct {
+		ChainHeight uint64 `json:"chain_height"`
+	}
+	if err := json.Unmarshal(line, &v); err != nil || v.ChainHeight == 0 {
+		return 0, false
+	}
+	return v.ChainHeight, true
 }
