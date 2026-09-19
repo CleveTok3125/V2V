@@ -152,6 +152,13 @@ func isHistoryBoundaryLine(line string) bool {
 	return strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Lịch sử cũ ---") || strings.Contains(line, "--- Kết thúc lịch sử")
 }
 
+// isOlderSegmentHeader reports the on-demand segment header. Segment
+// lines render and index only: they predate the running tip, so link
+// verification and echo matching must skip them.
+func isOlderSegmentHeader(line string) bool {
+	return strings.Contains(line, "--- Lịch sử cũ ---")
+}
+
 // parseHistoryBoundary reports whether line opens (header) or closes
 // (footer) a history replay. Sync tracking must run regardless of the
 // join-display toggle: gating it on showJoin leaves inSync unset, which

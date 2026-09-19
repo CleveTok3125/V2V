@@ -25,6 +25,26 @@ func (s *Session) flushDateBannerLocked() {
 	}
 }
 
+// trackReplayWindow updates the replay window flags for one boundary
+// line. The join header raises InSync (full verification); the
+// on-demand segment header raises InOlder (render and index only —
+// older heights can never verify against the running tip); any footer
+// clears both. Caller must hold DisplayMu.
+func (s *Session) trackReplayWindow(line string, start bool) {
+	if start {
+		if isOlderSegmentHeader(line) {
+			s.Chain.InOlder = true
+		} else {
+			s.Chain.InSync = true
+		}
+		return
+	}
+	s.Chain.InOlder = false
+	s.Pending.PendingDateBanner = ""
+	s.Pending.PendingDateBannerWire = nil
+	s.Chain.InSync = false
+}
+
 // handleHistorySync consumes a replay trailer from either a whole
 // frame or a coalesced per-line blob: never rendered, only the
 // fork check runs. Caller refreshes after.
@@ -73,8 +93,7 @@ func (s *Session) runPump() {
 		var wire WireMessage
 		if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
 			s.Display.DisplayMu.Lock()
-			s.consumeEchoLocked(wire, true)
-			s.checkChainLink(wire)
+			s.verifyReplayWire(wire, true)
 			s.flushDateBannerLocked()
 			s.renderChatBlock(wire)
 			s.Display.DisplayMu.Unlock()
@@ -84,7 +103,7 @@ func (s *Session) runPump() {
 		var sysWire WireMessage
 		if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {
 			s.Display.DisplayMu.Lock()
-			s.checkChainLink(sysWire)
+			s.verifyReplayWire(sysWire, false)
 			if !isShowingJoin && isDateBanner(sysWire) {
 				s.Pending.PendingDateBannerWire = &sysWire
 				s.Display.DisplayMu.Unlock()
@@ -118,10 +137,7 @@ func (s *Session) runPump() {
 			}
 			if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
 				s.Display.DisplayMu.Lock()
-				if wl.Type == "chat" {
-					s.consumeEchoLocked(wl, !s.Chain.InSync)
-				}
-				s.checkChainLink(wl)
+				s.verifyReplayWire(wl, wl.Type == "chat" && !s.Chain.InSync)
 				if wl.Type == "system" && !isShowingJoin && isDateBanner(wl) {
 					s.Pending.PendingDateBannerWire = &wl
 					s.Display.DisplayMu.Unlock()
@@ -145,13 +161,7 @@ func (s *Session) runPump() {
 			}
 			if boundary, start := parseHistoryBoundary(line); boundary {
 				s.Display.DisplayMu.Lock()
-				if start {
-					s.Chain.InSync = true
-				} else {
-					s.Pending.PendingDateBanner = ""
-					s.Pending.PendingDateBannerWire = nil
-					s.Chain.InSync = false
-				}
+				s.trackReplayWindow(line, start)
 				s.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 				s.Display.DisplayMu.Unlock()
 				continue

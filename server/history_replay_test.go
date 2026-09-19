@@ -421,3 +421,66 @@ func TestSegment_NoticePosition(t *testing.T) {
 		t.Fatalf("segment trailer wrong: %+v", trailer)
 	}
 }
+
+// TestSegment_HoldsBroadcastMu: serveHistorySegment must hold
+// BroadcastMu for the whole segment, otherwise concurrent live chats
+// interleave between segment lines and the trailer and poison the fork
+// window. Deterministic: with the lock held by the test, the serving
+// goroutine cannot finish; after release it must complete and deliver.
+func TestSegment_HoldsBroadcastMu(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	for i := 0; i < 10; i++ {
+		s.Chain.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "segment line"))
+	}
+	sess := &ClientSession{Send: make(chan []byte, 16384), DisplayName: "New#0000", Perms: GetDefaultPermission()}
+	s.Hub.BroadcastMu.Lock()
+	segDone := make(chan struct{})
+	go func() {
+		s.serveHistorySegment(sess, 0, 10)
+		close(segDone)
+	}()
+	select {
+	case <-segDone:
+		t.Fatal("segment must block while BroadcastMu is held")
+	case <-time.After(200 * time.Millisecond):
+	}
+	s.Hub.BroadcastMu.Unlock()
+	select {
+	case <-segDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("segment never finished after unlock")
+	}
+	close(sess.Send)
+	n := 0
+	for range sess.Send {
+		n++
+	}
+	if n == 0 {
+		t.Fatal("segment delivered nothing")
+	}
+}
+
+// TestAllowHistorySegment pins the throttle: the first request passes
+// and stamps the session, an immediate second is refused, and one past
+// historySegmentCooldown passes again. The dedicated constant (not
+// MessageCooldown) is intentional: tuning chat must never retune
+// history paging.
+func TestAllowHistorySegment(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	sess := &ClientSession{}
+	now := time.Now()
+	if !s.allowHistorySegment(sess, now) {
+		t.Fatal("first request must pass")
+	}
+	if sess.LastSegmentTime != now {
+		t.Fatal("allowed request must stamp the session")
+	}
+	if s.allowHistorySegment(sess, now.Add(time.Millisecond)) {
+		t.Fatal("immediate second request must be refused")
+	}
+	if !s.allowHistorySegment(sess, now.Add(historySegmentCooldown+time.Second)) {
+		t.Fatal("request past the cooldown must pass")
+	}
+}

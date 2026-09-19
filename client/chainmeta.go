@@ -739,6 +739,19 @@ func (s *Session) initChainState() {
 		s.Chain.PersistedTip, s.Chain.PersistedHeight, s.Chain.HavePersistedTip = [32]byte{}, 0, false
 	}
 	s.Chain.InSync = false
+	s.Chain.InOlder = false
+}
+
+// verifyReplayWire runs echo matching and link verification for one
+// replayed wire, unless it belongs to an on-demand older segment: an
+// older height can never verify against the running tip, so verifying
+// would warn falsely and rewind the tip. Caller must hold DisplayMu.
+func (s *Session) verifyReplayWire(wire WireMessage, allowStash bool) {
+	if s.Chain.InOlder {
+		return
+	}
+	s.consumeEchoLocked(wire, allowStash)
+	s.checkChainLink(wire)
 }
 
 func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
