@@ -318,3 +318,106 @@ func TestAudit_LiveAndReplay(t *testing.T) {
 }
 
 func peerConn() *websocket.Conn { return &websocket.Conn{} }
+
+// drainSegment runs SendChatSegment and splits the stream into content
+// lines, footer and trailer.
+func drainSegment(t *testing.T, s *ChatServer, before uint64, limit int) (contents []string, footer string, trailer HistorySync) {
+	t.Helper()
+	sess := &ClientSession{Send: make(chan []byte, 4096), DisplayName: "T#0000", Perms: GetDefaultPermission()}
+	done := make(chan struct{})
+	go func() {
+		s.Chain.SendChatSegment(sess, before, limit)
+		close(done)
+	}()
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case msg := <-sess.Send:
+			var hs HistorySync
+			if err := json.Unmarshal(msg, &hs); err == nil && hs.Type == "history_sync" {
+				trailer = hs
+				<-done
+				return contents, footer, trailer
+			}
+			text := string(msg)
+			if strings.Contains(text, "Kết thúc lịch sử") {
+				footer = text
+				continue
+			}
+			if strings.Contains(text, "Lịch sử") {
+				continue
+			}
+			contents = append(contents, text)
+		case <-timeout:
+			t.Fatal("segment stream stalled before trailer")
+		}
+	}
+}
+
+func seedSegmentHistory(s *ChatServer) {
+	for _, h := range []uint64{1, 2, 3, 4, 5, 6} {
+		s.Chain.appendMessageToHistory(tagLine(h, "chat", "", "line"))
+	}
+}
+
+// A bounded request returns the window right below the cutoff.
+func TestSegment_Before(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	seedSegmentHistory(s)
+	contents, _, trailer := drainSegment(t, s, 4, 10)
+	if len(contents) != 3 {
+		t.Fatalf("segment before 4 = %d lines, want 3: %q", len(contents), contents)
+	}
+	if trailer.MinHeight != 1 || trailer.MaxHeight != 3 || trailer.Sent != 3 || trailer.Total != 3 {
+		t.Fatalf("segment trailer wrong: %+v", trailer)
+	}
+}
+
+// Before 0 means the tail window over the whole history.
+func TestSegment_OldestAbsolute(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	seedSegmentHistory(s)
+	contents, _, trailer := drainSegment(t, s, 0, 2)
+	if len(contents) != 2 {
+		t.Fatalf("segment before 0 limit 2 = %d lines, want 2", len(contents))
+	}
+	if trailer.MinHeight != 5 || trailer.MaxHeight != 6 {
+		t.Fatalf("segment trailer wrong: %+v", trailer)
+	}
+}
+
+// A cutoff below every height yields an empty but terminated stream.
+func TestSegment_Empty(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	seedSegmentHistory(s)
+	contents, footer, trailer := drainSegment(t, s, 1, 10)
+	if len(contents) != 0 {
+		t.Fatalf("segment before 1 must be empty, got %q", contents)
+	}
+	if !strings.Contains(footer, "(0/0)") {
+		t.Fatalf("empty segment footer missing counts: %q", footer)
+	}
+	if trailer.Sent != 0 || trailer.Total != 0 {
+		t.Fatalf("empty segment trailer wrong: %+v", trailer)
+	}
+}
+
+// Unchained notices travel with their neighbors by position.
+func TestSegment_NoticePosition(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	s.Chain.appendMessageToHistory(noticeLine("date", "day marker"))
+	s.Chain.appendMessageToHistory(tagLine(1, "chat", "", "one"))
+	s.Chain.appendMessageToHistory(noticeLine("date", "day two"))
+	s.Chain.appendMessageToHistory(tagLine(2, "chat", "", "two"))
+	contents, _, trailer := drainSegment(t, s, 2, 10)
+	if len(contents) != 3 {
+		t.Fatalf("segment must carry the two older lines plus the notice between, got %q", contents)
+	}
+	if trailer.MinHeight != 1 || trailer.MaxHeight != 1 {
+		t.Fatalf("segment trailer wrong: %+v", trailer)
+	}
+}
