@@ -447,3 +447,78 @@ func TestSeekKeepsSampleLine(t *testing.T) {
 		}
 	}
 }
+
+// TestWindowBeforeDeepPaging pins the envelope bug: the cutoff search
+// runs on raw disk lines (historyRecord envelopes), so it must unwrap
+// rec.Wire.ChainHeight. With 40 heights, before=20 and limit=5, the
+// window must be [15..19] — not an exhausted tail.
+func TestWindowBeforeDeepPaging(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history.jsonl")
+	var lines []string
+	for h := uint64(1); h <= 40; h++ {
+		lines = append(lines, string(mustRecord(t, tagLine(h, "chat", "", "line"))))
+	}
+	writeTestLines(t, path, lines)
+	store, err := NewHistoryStore(path, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.LoadRecords(); err != nil {
+		t.Fatal(err)
+	}
+	ring := newWindowRing(5)
+	store.windowBefore(ring, 20, DiskLookupActive)
+	if got := heightsOf(t, ring.lines()); !equalHeights(got, []uint64{15, 16, 17, 18, 19}) {
+		t.Fatalf("deep page = %v, want [15 16 17 18 19]", got)
+	}
+}
+
+// TestCollectBackwardSkipsGarbage pins counting on renderable lines: a
+// tail of malformed lines must not eat the quota owed to older valid
+// lines.
+func TestCollectBackwardSkipsGarbage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history.jsonl")
+	lines := []string{
+		string(mustRecord(t, tagLine(1, "chat", "", "one"))),
+		string(mustRecord(t, tagLine(2, "chat", "", "two"))),
+		"{not json}",
+		"{not json}",
+		"{not json}",
+	}
+	writeTestLines(t, path, lines)
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := collectBackward(f, fi.Size(), 2)
+	if len(got) != 2 {
+		t.Fatalf("garbage must not eat quota, got %d lines: %q", len(got), got)
+	}
+	if h := heightsOf(t, got); !equalHeights(h, []uint64{1, 2}) {
+		t.Fatalf("got heights %v, want [1 2]", h)
+	}
+}
+
+// TestFindCutoffZeroBound pins the tail contract: bound 0 never cuts,
+// so callers that only reach disk with before != 0 stay the sole path.
+func TestFindCutoffZeroBound(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history.jsonl")
+	writeTestLines(t, path, []string{string(mustRecord(t, tagLine(1, "chat", "", "one")))})
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, found, ok := findCutoff(f, nil, 0); !ok || found {
+		t.Fatalf("bound 0 = (%v,%v), want (false,true)", found, ok)
+	}
+}

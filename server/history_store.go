@@ -615,9 +615,10 @@ func (h *HistoryStore) windowBefore(ring *windowRing, bound uint64, level int) {
 			break
 		}
 	}
-	// Temps hold converted lines (recordLine applied once at scan);
-	// the feed re-checks the cutoff defensively but never hits it:
-	// every temp precedes it by construction.
+	// Temps hold converted lines (recordLine applied once at scan, so
+	// malformed lines never occupy quota); the feed re-checks the
+	// cutoff defensively but never hits it: every temp precedes it by
+	// construction.
 	for _, t := range temps {
 		for _, msgStr := range t {
 			if ring.feed(msgStr, bound) {
@@ -688,19 +689,8 @@ func (h *HistoryStore) scanGenTemp(bound uint64, g genIndex, limit int) ([]strin
 		}
 		end = fi.Size()
 	}
-	return renderLines(collectBackward(f, end, limit)), found
-}
-
-// renderLines converts raw history lines to RAM string form, dropping
-// malformed lines exactly like the loader drops them.
-func renderLines(raw []string) []string {
-	out := make([]string, 0, len(raw))
-	for _, l := range raw {
-		if msgStr, ok := recordLine(parseRecord([]byte(l))); ok {
-			out = append(out, msgStr)
-		}
-	}
-	return out
+	// collectBackward converts (malformed drops); temps feed directly.
+	return collectBackward(f, end, limit), found
 }
 
 // findCutoff returns the line-start offset of the first chained height
@@ -710,6 +700,12 @@ func renderLines(raw []string) []string {
 // verified with a one-byte probe so a replaced file rescans from zero
 // instead of dropping a valid line.
 func findCutoff(f *os.File, samples []heightSample, bound uint64) (off int64, found, ok bool) {
+	// bound 0 means the tail window (no cutoff); callers only reach
+	// disk with before != 0, but never let a direct call turn the
+	// first chained line into a bogus cutoff.
+	if bound == 0 {
+		return 0, false, true
+	}
 	start := seekOffset(samples, bound)
 	if start > 0 {
 		var b [1]byte
@@ -726,8 +722,11 @@ func findCutoff(f *os.File, samples []heightSample, bound uint64) (off int64, fo
 		raw, err := br.ReadBytes('\n')
 		if len(raw) > 0 && raw[len(raw)-1] == '\n' {
 			line := bytes.TrimSuffix(raw, []byte{'\n'})
+			// Disk lines are historyRecord envelopes: the height
+			// lives in rec.Wire, never top-level. Unwrap like the
+			// loader instead of reading the envelope itself.
 			if len(line) > 0 {
-				if h, ok := chainedHeightOf(line); ok && h >= bound {
+				if rec := parseRecord(line); rec.Wire != nil && rec.Wire.ChainHeight != 0 && rec.Wire.ChainHeight >= bound {
 					return cur, true, true
 				}
 			}
@@ -767,17 +766,31 @@ func streamForward(ring *windowRing, bound uint64, br *bufio.Reader) bool {
 const backwardChunk = 32 * 1024
 const maxTornProbe = 64 * 1024
 
-// collectBackward returns up to maxLines complete lines ending at
+// collectBackward returns up to maxLines converted lines ending at
 // endOff (exclusive), oldest→newest. endOff is a cutoff line start or
-// a file end (torn tail adjusted away). Empty lines are skipped like
-// the loader skips them; malformed lines stay raw here and drop later
-// at the recordLine merge, identically to the forward path.
+// a file end (torn tail adjusted away). Conversion (and its malformed
+// filter) happens here so maxLines counts renderable lines, exactly
+// like the forward path counts fed lines.
 func collectBackward(f *os.File, endOff int64, maxLines int) []string {
 	if maxLines <= 0 || endOff <= 0 {
 		return nil
 	}
+	// Clamp a stale end offset (file replaced smaller mid-scan) to the
+	// live EOF: backward collection degrades to the tail, never errors.
+	if fi, err := f.Stat(); err == nil && endOff > fi.Size() {
+		endOff = fi.Size()
+	}
 	endOff = completeEnd(f, endOff)
-	var rev [][]byte // complete lines, newest→oldest
+	keep := func(raw []byte) []byte {
+		if len(raw) == 0 {
+			return nil
+		}
+		if msgStr, ok := recordLine(parseRecord(raw)); ok {
+			return []byte(msgStr)
+		}
+		return nil
+	}
+	var rev [][]byte // converted lines, newest→oldest
 	var carry []byte // oldest fragment, completed by the next chunk
 	pos := endOff
 outer:
@@ -797,12 +810,11 @@ outer:
 		data := append(buf, carry...)
 		parts := bytes.Split(data, []byte{'\n'})
 		for i := len(parts) - 1; i >= 1; i-- {
-			if len(parts[i]) == 0 {
-				continue
-			}
-			rev = append(rev, parts[i])
-			if len(rev) >= maxLines {
-				break outer
+			if msg := keep(parts[i]); msg != nil {
+				rev = append(rev, msg)
+				if len(rev) >= maxLines {
+					break outer
+				}
 			}
 		}
 		carry = parts[0]
@@ -811,7 +823,9 @@ outer:
 	// File head is always a line start (append-only from empty), so the
 	// leftover head fragment is a complete first line.
 	if pos == 0 && len(carry) > 0 && len(rev) < maxLines {
-		rev = append(rev, carry)
+		if msg := keep(carry); msg != nil {
+			rev = append(rev, msg)
+		}
 	}
 	out := make([]string, 0, len(rev))
 	for i := len(rev) - 1; i >= 0; i-- {
@@ -854,16 +868,4 @@ func parseRecord(line []byte) historyRecord {
 		return historyRecord{}
 	}
 	return rec
-}
-
-// chainedHeightOf extracts the chain height for cutoff checks without
-// a full wire parse. Missing or zero means unchained: positional only.
-func chainedHeightOf(line []byte) (uint64, bool) {
-	var v struct {
-		ChainHeight uint64 `json:"chain_height"`
-	}
-	if err := json.Unmarshal(line, &v); err != nil || v.ChainHeight == 0 {
-		return 0, false
-	}
-	return v.ChainHeight, true
 }
