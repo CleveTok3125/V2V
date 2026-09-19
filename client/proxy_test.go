@@ -44,6 +44,45 @@ func TestParseProxyURL(t *testing.T) {
 	}
 }
 
+func TestParseProxyURLAuthMatrix(t *testing.T) {
+	cases := []struct {
+		raw      string
+		user     string
+		pass     string
+		hasPass  bool
+		failFast bool
+	}{
+		{"http://proxy.local:8080", "", "", false, false},
+		{"http://user@proxy.local:8080", "user", "", false, false},
+		{"http://user:pass@proxy.local:8080", "user", "pass", true, false},
+		{"http://user:@proxy.local:8080", "user", "", true, false},
+		{"http://:pass@proxy.local:8080", "", "", false, true},
+	}
+	for _, c := range cases {
+		cfg, err := parseProxyURL(c.raw)
+		if c.failFast {
+			if err == nil {
+				t.Errorf("parseProxyURL(%q) must fail fast", c.raw)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("parseProxyURL(%q): %v", c.raw, err)
+			continue
+		}
+		if cfg.User != c.user {
+			t.Errorf("parseProxyURL(%q) user = %q, want %q", c.raw, cfg.User, c.user)
+		}
+		if got := string(cfg.Pass); got != c.pass {
+			t.Errorf("parseProxyURL(%q) pass = %q, want %q", c.raw, got, c.pass)
+		}
+		if (cfg.Pass != nil) != c.hasPass {
+			t.Errorf("parseProxyURL(%q) pass presence = %v, want %v",
+				c.raw, cfg.Pass != nil, c.hasPass)
+		}
+	}
+}
+
 func TestResolveProxyPrecedence(t *testing.T) {
 	oldProxy, oldAsk := CLI.Proxy, CLI.AskProxy
 	t.Cleanup(func() { CLI.Proxy, CLI.AskProxy = oldProxy, oldAsk })

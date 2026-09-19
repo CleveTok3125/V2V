@@ -94,7 +94,9 @@ func dialSocks5WSWithDialer(wsURL string, headers http.Header, p *proxyConfig, d
 	}
 	// Fail here with the scheme named: anything past this point
 	// reports dial/handshake errors that hide a wrong-scheme caller.
-	if u == nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
+	// Hostname (not Host) also rejects "ws://:" whose Host is the
+	// bare colon.
+	if u == nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Hostname() == "" {
 		return nil, nil, fmt.Errorf("URL server phải là ws:// hoặc wss:// có host: %q", wsURL)
 	}
 	d.NetDialContext = socks5NetDialer(p)
