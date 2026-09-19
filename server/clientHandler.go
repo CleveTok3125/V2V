@@ -42,16 +42,12 @@ func (s *ChatServer) releaseIPConnection(clientIP string) {
 	}
 }
 
-// historySegmentCooldown throttles on-demand history requests per
-// session. Deliberately separate from MessageCooldown so tuning chat
-// never retunes history paging: each request scans and re-marshals up
-// to a full window, so unthrottled spam is CPU amplification.
-const historySegmentCooldown = 2 * time.Second
-
-// allowHistorySegment enforces historySegmentCooldown: true stamps the
-// session and allows the request. Only ReadPump calls it.
+// allowHistorySegment enforces the HistorySegmentCooldown knob: true
+// stamps the session and allows the request. Deliberately separate
+// from MessageCooldown so tuning chat never retunes history paging.
+// Only ReadPump calls it.
 func (s *ChatServer) allowHistorySegment(session *ClientSession, now time.Time) bool {
-	if !session.LastSegmentTime.IsZero() && now.Sub(session.LastSegmentTime) < historySegmentCooldown {
+	if cd := Cfg.Dynamic.Load().HistorySegmentCooldown; !session.LastSegmentTime.IsZero() && now.Sub(session.LastSegmentTime) < cd {
 		return false
 	}
 	session.LastSegmentTime = now

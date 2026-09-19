@@ -20,34 +20,41 @@ type DynamicConfig struct {
 	DownloadURL string `json:"downloadUrl"`
 	HomepageURL string `json:"homepageUrl"`
 
-	MaxConnectionsPerIP int           `json:"maxConnectionsPerIP"`
-	MaxMessageLength    int           `json:"maxMessageLength"`
-	MaxMessageLine      int           `json:"maxMessageLine"`
-	MessageCooldown     time.Duration `json:"messageCooldown"`
-	IdleChatTimeout     time.Duration `json:"idleChatTimeout"`
-	MaxHistoryBytes     int           `json:"maxHistoryBytes"`
-	MaxHistorySend      int           `json:"maxHistorySend"`
-	MaxUsernameLength   int           `json:"maxUsernameLength"`
-	MaxTripcodeLength   int           `json:"maxTripcodeLength"`
-	ConnectionCooldown  time.Duration `json:"connectionCooldown"`
+	MaxConnectionsPerIP    int           `json:"maxConnectionsPerIP"`
+	MaxMessageLength       int           `json:"maxMessageLength"`
+	MaxMessageLine         int           `json:"maxMessageLine"`
+	MessageCooldown        time.Duration `json:"messageCooldown"`
+	IdleChatTimeout        time.Duration `json:"idleChatTimeout"`
+	MaxHistoryBytes        int           `json:"maxHistoryBytes"`
+	MaxHistorySend         int           `json:"maxHistorySend"`
+	HistorySegmentCooldown time.Duration `json:"historySegmentCooldown"`
+	// HistoryDiskLookup tiers on-demand older-segment reads beyond
+	// RAM: 0 RAM-only, 1 +active history.jsonl, 2 +.old raw,
+	// 3 +.old.zst archive (full). Higher tiers cost more per request.
+	HistoryDiskLookup  int           `json:"historyDiskLookup"`
+	MaxUsernameLength  int           `json:"maxUsernameLength"`
+	MaxTripcodeLength  int           `json:"maxTripcodeLength"`
+	ConnectionCooldown time.Duration `json:"connectionCooldown"`
 }
 
 // DefaultDynamic returns defaults matching server template/.env.
 func DefaultDynamic() *DynamicConfig {
 	return &DynamicConfig{
-		StatusURL:           "https://example.com/status",
-		DownloadURL:         "https://example.com/download",
-		HomepageURL:         "https://example.com/",
-		MaxConnectionsPerIP: 2,
-		MaxMessageLength:    5000,
-		MaxMessageLine:      50,
-		MessageCooldown:     200 * time.Millisecond,
-		IdleChatTimeout:     30 * time.Minute,
-		MaxHistoryBytes:     10485760,
-		MaxHistorySend:      500,
-		MaxUsernameLength:   12,
-		MaxTripcodeLength:   64,
-		ConnectionCooldown:  5 * time.Second,
+		StatusURL:              "https://example.com/status",
+		DownloadURL:            "https://example.com/download",
+		HomepageURL:            "https://example.com/",
+		MaxConnectionsPerIP:    2,
+		MaxMessageLength:       5000,
+		MaxMessageLine:         50,
+		MessageCooldown:        200 * time.Millisecond,
+		IdleChatTimeout:        30 * time.Minute,
+		MaxHistoryBytes:        10485760,
+		MaxHistorySend:         500,
+		HistorySegmentCooldown: 2 * time.Second,
+		HistoryDiskLookup:      0,
+		MaxUsernameLength:      12,
+		MaxTripcodeLength:      64,
+		ConnectionCooldown:     5 * time.Second,
 	}
 }
 

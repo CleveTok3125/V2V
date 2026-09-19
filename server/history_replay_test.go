@@ -466,7 +466,7 @@ func TestSegment_HoldsBroadcastMu(t *testing.T) {
 
 // TestAllowHistorySegment pins the throttle: the first request passes
 // and stamps the session, an immediate second is refused, and one past
-// historySegmentCooldown passes again. The dedicated constant (not
+// the HistorySegmentCooldown knob passes again. The dedicated knob (not
 // MessageCooldown) is intentional: tuning chat must never retune
 // history paging.
 func TestAllowHistorySegment(t *testing.T) {
@@ -483,7 +483,7 @@ func TestAllowHistorySegment(t *testing.T) {
 	if s.allowHistorySegment(sess, now.Add(time.Millisecond)) {
 		t.Fatal("immediate second request must be refused")
 	}
-	if !s.allowHistorySegment(sess, now.Add(historySegmentCooldown+time.Second)) {
+	if !s.allowHistorySegment(sess, now.Add(Cfg.Dynamic.Load().HistorySegmentCooldown+time.Second)) {
 		t.Fatal("request past the cooldown must pass")
 	}
 }
