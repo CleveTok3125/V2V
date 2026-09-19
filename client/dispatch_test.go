@@ -154,3 +154,68 @@ func TestGracefulQuitNilPumpDone(t *testing.T) {
 		t.Fatal("gracefulQuit with nil PumpDone must not wait")
 	}
 }
+
+func seedWireIdx(sess *Session, heights ...uint64) {
+	for _, h := range heights {
+		sess.Chain.WireIdx.put(WireMessage{Type: "chat", Text: "t", ChainHeight: h, ChainHash: "ab"})
+	}
+}
+
+func TestCmdOlderSendsRequest(t *testing.T) {
+	sess := sessionForDispatch(t)
+	stub := &stubConn{}
+	sess.Conn = stub
+	seedWireIdx(sess, 5, 6, 7)
+	if !sess.cmdOlder("/older") {
+		t.Fatal("/older must match")
+	}
+	req, ok := stub.wrote.(HistoryRequest)
+	if !ok {
+		t.Fatalf("wrote = %#v, want HistoryRequest", stub.wrote)
+	}
+	if req.Type != "history_request" || req.Before != 5 || req.Limit != 50 {
+		t.Fatalf("request = %+v, want before=5 limit=50", req)
+	}
+}
+
+func TestCmdOlderCustomLimit(t *testing.T) {
+	sess := sessionForDispatch(t)
+	stub := &stubConn{}
+	sess.Conn = stub
+	seedWireIdx(sess, 9)
+	if !sess.cmdOlder("/older 10") {
+		t.Fatal("/older 10 must match")
+	}
+	req, ok := stub.wrote.(HistoryRequest)
+	if !ok || req.Before != 9 || req.Limit != 10 {
+		t.Fatalf("request = %#v", stub.wrote)
+	}
+}
+
+func TestCmdOlderRejectsBadArg(t *testing.T) {
+	sess := sessionForDispatch(t)
+	stub := &stubConn{}
+	sess.Conn = stub
+	seedWireIdx(sess, 9)
+	for _, bad := range []string{"/older abc", "/older 0", "/older -3"} {
+		stub.wrote = nil
+		if !sess.cmdOlder(bad) {
+			t.Fatalf("%q must match", bad)
+		}
+		if stub.wrote != nil {
+			t.Fatalf("%q must not send, wrote %#v", bad, stub.wrote)
+		}
+	}
+}
+
+func TestCmdOlderEmptyIndex(t *testing.T) {
+	sess := sessionForDispatch(t)
+	stub := &stubConn{}
+	sess.Conn = stub
+	if !sess.cmdOlder("/older") {
+		t.Fatal("/older must match")
+	}
+	if stub.wrote != nil {
+		t.Fatalf("empty index must not send, wrote %#v", stub.wrote)
+	}
+}

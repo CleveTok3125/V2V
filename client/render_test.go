@@ -9,6 +9,9 @@ func TestParseHistoryBoundary(t *testing.T) {
 	if b, start := parseHistoryBoundary("| --- Lịch sử chat gần đây ---"); !b || !start {
 		t.Errorf("header = (%v,%v), want (true,true)", b, start)
 	}
+	if b, start := parseHistoryBoundary("| --- Lịch sử cũ ---"); !b || !start {
+		t.Errorf("segment header = (%v,%v), want (true,true)", b, start)
+	}
 	if b, start := parseHistoryBoundary("| --- Kết thúc lịch sử (32/142) ---"); !b || start {
 		t.Errorf("footer = (%v,%v), want (true,false)", b, start)
 	}

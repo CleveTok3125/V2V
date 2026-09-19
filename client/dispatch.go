@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -41,7 +42,7 @@ func (s *Session) dispatch(text string) (string, cmdAction) {
 	}
 	for _, cmd := range []func(string) bool{
 		s.cmdMeta, s.cmdFind, s.cmdExpand, s.cmdInfo,
-		s.cmdCopy, s.cmdClearhistory,
+		s.cmdCopy, s.cmdClearhistory, s.cmdOlder,
 	} {
 		if cmd(text) {
 			// Inline /reply body intercepted by a command is never
@@ -183,6 +184,7 @@ func (s *Session) cmdHelp(text string) bool {
 	s.emitLocalFeedback("    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
 	s.emitLocalFeedback("    - /meta, /m [on|off]: Hiện/ẩn dòng meta #height:hash (mặc định hiện, chain vẫn verify)\n")
 	s.emitLocalFeedback("    - /find, /f <n>[:hash]: Tìm tin theo số height trong bộ nhớ (vd /find 1234)\n")
+	s.emitLocalFeedback("    - /older [n]   : Lấy thêm n tin cũ hơn từ server (mặc định 50)\n")
 	s.emitLocalFeedback("    - /reply <n>[:hash] text: Trả lời tin #n kèm quote (vd /reply 1234 đồng ý)\n")
 	s.emitLocalFeedback("    - /reply <n>          : Soạn reply nháp, dòng tiếp theo là nội dung\n")
 	s.emitLocalFeedback("    - Gõ @#n (vd @#1234) trong tin để nhắc tới tin khác (sáng lên khi còn trong bộ nhớ)\n")
@@ -543,5 +545,44 @@ func (s *Session) cmdClearhistory(text string) bool {
 	s.Display.DisplayMu.Lock()
 	s.emitLocalFeedback(fmt.Sprintf("🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile))
 	s.Display.DisplayMu.Unlock()
+	return true
+}
+
+// cmdOlder fetches an older history segment on demand: the request
+// carries the oldest height in memory, so the server answers with the
+// window right below it. The segment returns in replay format and the
+// pump renders it like the join burst.
+func (s *Session) cmdOlder(text string) bool {
+	if !(text == "/older" || strings.HasPrefix(text, "/older ")) {
+		return false
+	}
+	limit := 50
+	if rest := strings.TrimSpace(strings.TrimPrefix(text, "/older")); rest != "" {
+		n, err := strconv.Atoi(rest)
+		if err != nil || n <= 0 {
+			s.Display.DisplayMu.Lock()
+			s.emitLocalFeedback("| [Local]: Dùng /older [số dòng] (vd /older 50).\n")
+			s.Display.DisplayMu.Unlock()
+			s.Display.Term.Refresh()
+			return true
+		}
+		limit = n
+	}
+	s.Display.DisplayMu.Lock()
+	before, ok := s.Chain.WireIdx.oldest()
+	s.Display.DisplayMu.Unlock()
+	if !ok {
+		s.Display.DisplayMu.Lock()
+		s.emitLocalFeedback("| [Local]: Chưa có tin nào trong bộ nhớ — không có gì để lùi.\n")
+		s.Display.DisplayMu.Unlock()
+		s.Display.Term.Refresh()
+		return true
+	}
+	if err := s.Conn.WriteJSON(HistoryRequest{Type: "history_request", Before: before, Limit: limit}); err != nil {
+		s.Display.DisplayMu.Lock()
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Không gửi được yêu cầu lịch sử cũ: %v.\n", err))
+		s.Display.DisplayMu.Unlock()
+		s.Display.Term.Refresh()
+	}
 	return true
 }
