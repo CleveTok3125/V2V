@@ -104,10 +104,15 @@ type ChainState struct {
 	PersistedServer  string
 	HavePersistedTip bool
 	InSync           bool
-	SyncHashes       map[string]bool
-	TipSinceSave     uint64
-	WireIdx          *wireIndex
-	RenderCache      *renderCache
+	// InOlder marks an on-demand older segment in flight: its wires
+	// predate the running tip, so the pump renders and indexes them
+	// without link verification or echo matching. Set and cleared
+	// under DisplayMu like InSync.
+	InOlder      bool
+	SyncHashes   map[string]bool
+	TipSinceSave uint64
+	WireIdx      *wireIndex
+	RenderCache  *renderCache
 }
 
 // VerifyState is the async badge-verify worker: channel, guard,

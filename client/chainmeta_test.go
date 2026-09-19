@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -635,5 +636,105 @@ func TestForkWarning(t *testing.T) {
 	// Pre-window tip: silent.
 	if w, f := forkWarning(hs, true, [32]byte{1}, 50, full); w != "" || f {
 		t.Errorf("pre-window tip must stay silent, got %q flush=%v", w, f)
+	}
+}
+
+// TestVerifyReplayWireSkipsSegment drives the R5 fix: an older-segment
+// wire must render and index without link verification — no fork
+// warning, no tip rewind — even though its prev cannot match the tip.
+func TestVerifyReplayWireSkipsSegment(t *testing.T) {
+	sess := NewSession()
+	sess.Display.Out = io.Discard
+	sess.Display.Term = &fakeTerm{}
+	sess.Display.TabSys = newTabBuffer(100, 100000)
+	sess.Display.TabChat = newTabBuffer(100, 100000)
+	sess.Chain.TipPath = t.TempDir() + "/tip.json"
+	sess.Chain.ChainTip = [32]byte{9}
+	sess.Chain.ChainHeight = 100
+	sess.Chain.ChainHaveTip = true
+	sess.Chain.InOlder = true
+	sess.Chain.WireIdx = newWireIndex(16)
+	sess.Chain.RenderCache = newRenderCache(8)
+
+	var prev [32]byte
+	old := WireMessage{Type: "chat", Time: "12:00", DisplayName: "A", Text: "old", ChainHeight: 50, ChainVer: 2}
+	old.ChainPrev = hex.EncodeToString(prev[:])
+	h := chain.Hash(prev, 50, 0, 0, "chat", "12:00", "A", "old", "")
+	old.ChainHash = hex.EncodeToString(h[:])
+
+	sess.Display.DisplayMu.Lock()
+	sess.verifyReplayWire(old, true)
+	sess.renderChatBlock(old)
+	sess.Display.DisplayMu.Unlock()
+
+	if sess.Chain.ChainWarned {
+		t.Fatal("segment wire must not warn")
+	}
+	if sess.Chain.ChainHeight != 100 || sess.Chain.ChainTip != [32]byte{9} {
+		t.Fatalf("segment wire rewound tip to #%d", sess.Chain.ChainHeight)
+	}
+	got, ok := sess.Chain.WireIdx.get(50)
+	if !ok || got.ChainHash != old.ChainHash {
+		t.Fatal("segment wire must still render and index")
+	}
+	for _, l := range sess.Display.TabSys.lines {
+		if strings.Contains(l, "đứt") {
+			t.Fatalf("segment wire warned in tab: %q", l)
+		}
+	}
+}
+
+// TestVerifyReplayWireLiveStillVerifies pins the other side: with the
+// segment flag off, the same older wire must warn (live path keeps
+// full verification).
+func TestVerifyReplayWireLiveStillVerifies(t *testing.T) {
+	sess := NewSession()
+	sess.Display.Out = io.Discard
+	sess.Display.Term = &fakeTerm{}
+	sess.Display.TabSys = newTabBuffer(100, 100000)
+	sess.Display.TabChat = newTabBuffer(100, 100000)
+	sess.Chain.TipPath = t.TempDir() + "/tip.json"
+	sess.Chain.ChainTip = [32]byte{9}
+	sess.Chain.ChainHeight = 100
+	sess.Chain.ChainHaveTip = true
+
+	var prev [32]byte
+	old := WireMessage{Type: "chat", Time: "12:00", DisplayName: "A", Text: "old", ChainHeight: 50, ChainVer: 2}
+	old.ChainPrev = hex.EncodeToString(prev[:])
+	h := chain.Hash(prev, 50, 0, 0, "chat", "12:00", "A", "old", "")
+	old.ChainHash = hex.EncodeToString(h[:])
+
+	sess.Display.DisplayMu.Lock()
+	sess.verifyReplayWire(old, true)
+	sess.Display.DisplayMu.Unlock()
+
+	if !sess.Chain.ChainWarned {
+		t.Fatal("live path must still warn on a broken link")
+	}
+}
+
+// TestTrackReplayWindow pins the segment/join window states: the older
+// header raises InOlder without touching InSync, the join header keeps
+// the old InSync behavior, and any footer clears both.
+func TestTrackReplayWindow(t *testing.T) {
+	sess := NewSession()
+	sess.Display.DisplayMu.Lock()
+	defer sess.Display.DisplayMu.Unlock()
+
+	sess.trackReplayWindow("| --- Lịch sử cũ ---", true)
+	if !sess.Chain.InOlder || sess.Chain.InSync {
+		t.Fatalf("segment header = InOlder %v InSync %v, want true/false", sess.Chain.InOlder, sess.Chain.InSync)
+	}
+	sess.trackReplayWindow("| --- Kết thúc lịch sử (2/2) ---", false)
+	if sess.Chain.InOlder || sess.Chain.InSync {
+		t.Fatal("footer must clear both windows")
+	}
+	sess.trackReplayWindow("| --- Lịch sử chat gần đây ---", true)
+	if sess.Chain.InOlder || !sess.Chain.InSync {
+		t.Fatalf("join header = InOlder %v InSync %v, want false/true", sess.Chain.InOlder, sess.Chain.InSync)
+	}
+	sess.trackReplayWindow("| --- Kết thúc lịch sử (2/2) ---", false)
+	if sess.Chain.InOlder || sess.Chain.InSync {
+		t.Fatal("footer must clear both windows")
 	}
 }

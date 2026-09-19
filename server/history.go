@@ -232,6 +232,16 @@ func (h *Hub) BroadcastWire(wire WireMessage, sender *websocket.Conn, serverPub 
 	h.fanout(data, sender, false, true)
 }
 
+// serveHistorySegment serves one on-demand older segment under the
+// broadcast lock, so live chats cannot interleave between segment
+// lines and the trailer (same ordering contract as the join replay:
+// BroadcastMu -> Chain.Mu, never the reverse).
+func (s *ChatServer) serveHistorySegment(session *ClientSession, before uint64, limit int) {
+	s.Hub.BroadcastMu.Lock()
+	defer s.Hub.BroadcastMu.Unlock()
+	s.Chain.SendChatSegment(session, before, limit)
+}
+
 func (h *Hub) CheckAndBroadcastDate(now time.Time) {
 	currentDate := now.Format("02/01/2006")
 

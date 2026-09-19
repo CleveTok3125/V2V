@@ -42,6 +42,10 @@ type ClientSession struct {
 	// WantJoins asks for join/leave lines in the catch-up replay.
 	// Live broadcasts always carry them; only replay filters.
 	WantJoins bool
+	// LastSegmentTime throttles on-demand history requests per
+	// session. Only ReadPump touches it (single goroutine), so no
+	// lock is needed.
+	LastSegmentTime time.Time
 }
 
 type TripChain struct {
@@ -54,10 +58,10 @@ type TripChain struct {
 // every existing reference compiling while guaranteeing client and
 // server serialize identically.
 type (
-	TripMeta    = wire.TripMeta
-	WireMessage = wire.WireMessage
-	AuthPacket  = wire.AuthPacket
-	HistorySync = wire.HistorySync
+	TripMeta       = wire.TripMeta
+	WireMessage    = wire.WireMessage
+	AuthPacket     = wire.AuthPacket
+	HistorySync    = wire.HistorySync
 	HistoryRequest = wire.HistoryRequest
 )
 

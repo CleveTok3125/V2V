@@ -42,6 +42,22 @@ func (s *ChatServer) releaseIPConnection(clientIP string) {
 	}
 }
 
+// historySegmentCooldown throttles on-demand history requests per
+// session. Deliberately separate from MessageCooldown so tuning chat
+// never retunes history paging: each request scans and re-marshals up
+// to a full window, so unthrottled spam is CPU amplification.
+const historySegmentCooldown = 2 * time.Second
+
+// allowHistorySegment enforces historySegmentCooldown: true stamps the
+// session and allows the request. Only ReadPump calls it.
+func (s *ChatServer) allowHistorySegment(session *ClientSession, now time.Time) bool {
+	if !session.LastSegmentTime.IsZero() && now.Sub(session.LastSegmentTime) < historySegmentCooldown {
+		return false
+	}
+	session.LastSegmentTime = now
+	return true
+}
+
 func (h *Hub) registerClient(session *ClientSession, clientIP string) {
 	h.ClientsMu.Lock()
 	h.Clients[session.Conn] = session
@@ -216,7 +232,15 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			if limit <= 0 || limit > dynCfg.MaxHistorySend {
 				limit = dynCfg.MaxHistorySend
 			}
-			s.Chain.SendChatSegment(session, histReq.Before, limit)
+			if !s.allowHistorySegment(session, time.Now()) {
+				select {
+				case session.Send <- []byte("[Hệ thống]: Yêu cầu lịch sử cũ quá nhanh, thử lại sau."):
+				default:
+				}
+				updateReadDeadline()
+				continue
+			}
+			s.serveHistorySegment(session, histReq.Before, limit)
 			updateReadDeadline()
 			continue
 		}
