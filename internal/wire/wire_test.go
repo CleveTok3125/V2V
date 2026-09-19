@@ -85,6 +85,21 @@ func TestWireJSONKeySet(t *testing.T) {
 		}
 	}
 
+	// HistoryRequest pins its key set; Before 0 means oldest absolute.
+	req := HistoryRequest{Type: "history_request", Before: 50, Limit: 20}
+	raw, _ = json.Marshal(req)
+	var rmap map[string]any
+	_ = json.Unmarshal(raw, &rmap)
+	for _, k := range []string{"type", "before", "limit"} {
+		if _, ok := rmap[k]; !ok {
+			t.Errorf("missing history_request key %q in %s", k, raw)
+		}
+	}
+	var bareReq HistoryRequest
+	if err := json.Unmarshal([]byte(`{"type":"history_request"}`), &bareReq); err != nil || bareReq.Before != 0 || bareReq.Limit != 0 {
+		t.Fatalf("bare history_request must decode zero: %+v %v", bareReq, err)
+	}
+
 	// SysKind round-trips on system lines.
 	var sys WireMessage
 	if err := json.Unmarshal([]byte(`{"type":"system","sys_kind":"join","text":"x"}`), &sys); err != nil || sys.SysKind != "join" {

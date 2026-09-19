@@ -52,6 +52,7 @@ type (
 	TripMeta    = wire.TripMeta
 	Permission  = wire.Permission
 	HistorySync = wire.HistorySync
+	HistoryRequest = wire.HistoryRequest
 )
 
 // WebSocket message type constants (RFC 6455) so the shared chat logic does

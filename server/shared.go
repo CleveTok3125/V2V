@@ -58,6 +58,7 @@ type (
 	WireMessage = wire.WireMessage
 	AuthPacket  = wire.AuthPacket
 	HistorySync = wire.HistorySync
+	HistoryRequest = wire.HistoryRequest
 )
 
 type ServerIdentity struct {
