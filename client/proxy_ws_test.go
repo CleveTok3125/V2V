@@ -235,11 +235,12 @@ func TestDialSocks5WSRejectsBadURL(t *testing.T) {
 		"notaurl://127.0.0.1:1/ws",
 		"ws://",
 		"wss:///ws",
+		"ws://:",
 	} {
 		if _, _, err := dialSocks5WSWithDialer(u, http.Header{}, p, websocket.Dialer{}); err == nil {
 			t.Errorf("dialSocks5WS(%q) must fail fast", u)
-		} else if !strings.Contains(err.Error(), "ws") {
-			t.Errorf("dialSocks5WS(%q) error must name the ws scheme, got %v", u, err)
+		} else if !strings.Contains(err.Error(), "ws:// hoặc wss://") {
+			t.Errorf("dialSocks5WS(%q) error must name the ws schemes, got %v", u, err)
 		}
 	}
 }
