@@ -362,20 +362,20 @@ Planned work grouped by dependency, in recommended order. Each item stays self-c
 - **First audit producer** — `BroadcastAudit` (`server/history.go:214`) has tests but no callers; wire the first management action through it: rank-gated kick first (actor rank must exceed target; duration 0 = kick, longer = ban), audit text never carries IPs. — *BACKLOG*
 - **Paged history** — fetch older segments on demand over the authenticated WS (`history_request` with `before`/`limit`, answered in replay format with a `history_sync` trailer, RAM window only); the connect-time replay (`MAX_HISTORY_SEND`) stays a join burst for fast startup. Client `/older [n]` pages below the oldest height in memory. — *DONE*
 
-### Phase 2 — Blog (frontend done, backend deferred)
+### Phase 2 — Blog (frontend done, backend parked)
 
-Frontend (`server/blog/render.go`, `webterm/blog/cactus.css`) shipped; backend deferred. In order:
+Frontend (`server/blog/render.go`, `webterm/blog/cactus.css`) shipped; backend parked. In order when resumed:
 
-- **Blog permission** — `CanManageBlog` in `wire.Permission` + role template + `v2vctl` flags. — *NOT DONE*
-- **Blog store** — `DATA_DIR/blog/{slug}.md` + sidecar JSON (slug `[a-z0-9-]`, 3 fixed tags, atomic write, read cache). — *NOT DONE*
-- **Blog management auth** — mirror WS auth (ed25519/passkey + nonce/IP cooldown, ed25519 first). — *NOT DONE*
-- **Blog routes** — `GET /blog/`, `/blog/{slug}`, JSON `/api/blog/*` + rate limits. — *NOT DONE*
-- **CLI raw read** — `v2v --blog [slug]` prints raw markdown (`?format=raw`), pipes to `glow`/`mdcat`, TTY pages via `$PAGER`. — *NOT DONE*
-- **Blog toggle** — server config DEFAULT ON; OFF returns 404 and CLI reports disabled. — *NOT DONE*
+- **Blog permission** — `CanManageBlog` in `wire.Permission` + role template + `v2vctl` flags. — *BACKLOG*
+- **Blog store** — `DATA_DIR/blog/{slug}.md` + sidecar JSON (slug `[a-z0-9-]`, 3 fixed tags, atomic write, read cache). — *BACKLOG*
+- **Blog management auth** — mirror WS auth (ed25519/passkey + nonce/IP cooldown, ed25519 first). — *BACKLOG*
+- **Blog routes** — `GET /blog/`, `/blog/{slug}`, JSON `/api/blog/*` + rate limits. — *BACKLOG*
+- **CLI raw read** — `v2v --blog [slug]` prints raw markdown (`?format=raw`), pipes to `glow`/`mdcat`, TTY pages via `$PAGER`. — *BACKLOG*
+- **Blog toggle** — server config DEFAULT ON; OFF returns 404 and CLI reports disabled. — *BACKLOG*
 
 ### Phase 3 — Hardening & Coverage
 
 - **Wasm and timing tests** — js-tagged client tests run under node (`make test-wasm`, `scripts/wasm_exec_runner.js`): wasm terminal line editing and the wasm proxy error path; production sleeps replaced by bounded waits (`sendWithRetry` waits up to 20ms for buffer space, `gracefulQuit` waits for pump exit with a 500ms cap). — *DONE*
 - **Client config encryption** — guard limits load from the v3 envelope (`internal/config/config.go:15,447`, `client/config_other.go:70`); passphrase flows reused. — *DONE*
-- **Blog docs** — `TECHNICAL.md` blog section + README EN+VI + E2E for the blog feature. — *NOT DONE*
+- **Blog docs** — `TECHNICAL.md` blog section + README EN+VI + E2E for the blog feature. — *BACKLOG*
 - **Relay mesh** — a lightweight distribution network outside the server: each relay connects to one server plus many relays, and each client connects to one server plus many relays (CDN-style reads). Writes go to the server only (relays are read-only); relays share one wire protocol subset, alert each other with the client as the consumer, and serve as backup sources the client verifies against known chain tips. Not a federation: no cross-server identity or routing, one server's content only. — *NOT DONE*
