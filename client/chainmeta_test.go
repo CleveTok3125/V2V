@@ -738,3 +738,26 @@ func TestTrackReplayWindow(t *testing.T) {
 		t.Fatal("footer must clear both windows")
 	}
 }
+
+// TestTrackReplayWindowFooterFlushesBanner pins the exhausted-segment
+// fix: a date banner stashed at the window end must render on the
+// footer instead of being discarded with the window state.
+func TestTrackReplayWindowFooterFlushesBanner(t *testing.T) {
+	sess := sessionForDispatch(t)
+	sess.Chain.RenderCache = newRenderCache(8)
+	banner := WireMessage{Type: "system", Time: "12:00", SysKind: "date", Text: "day marker"}
+	sess.Display.DisplayMu.Lock()
+	defer sess.Display.DisplayMu.Unlock()
+	sess.Pending.PendingDateBannerWire = &banner
+	sess.trackReplayWindow("| --- Kết thúc lịch sử (1/2) ---", false)
+	if sess.Pending.PendingDateBannerWire != nil || sess.Pending.PendingDateBanner != "" {
+		t.Fatal("footer must clear the stashed banner")
+	}
+	for _, l := range append(sess.Display.TabChat.lines, sess.Display.TabSys.lines...) {
+		if strings.Contains(l, "day marker") {
+			return
+		}
+	}
+	t.Fatalf("footer must flush the stashed banner, chat=%q sys=%q",
+		sess.Display.TabChat.lines, sess.Display.TabSys.lines)
+}

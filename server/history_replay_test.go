@@ -389,7 +389,10 @@ func TestSegment_OldestAbsolute(t *testing.T) {
 }
 
 // A cutoff below every height yields an empty but terminated stream.
-func TestSegment_Empty(t *testing.T) {
+// An exhausted window (no chained line older than the cutoff) says so
+// plainly instead of a bare zero count, and still terminates the
+// stream with a trailer so the requester never hangs.
+func TestSegment_Exhausted(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	seedSegmentHistory(s)
@@ -397,8 +400,8 @@ func TestSegment_Empty(t *testing.T) {
 	if len(contents) != 0 {
 		t.Fatalf("segment before 1 must be empty, got %q", contents)
 	}
-	if !strings.Contains(footer, "(0/0)") {
-		t.Fatalf("empty segment footer missing counts: %q", footer)
+	if !strings.Contains(footer, "không còn tin cũ hơn") {
+		t.Fatalf("exhausted segment must say so: %q", footer)
 	}
 	if trailer.Sent != 0 || trailer.Total != 0 {
 		t.Fatalf("empty segment trailer wrong: %+v", trailer)

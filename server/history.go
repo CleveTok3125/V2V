@@ -278,16 +278,16 @@ func (c *ChainService) SendChatHistory(session *ClientSession) {
 	copy(historyCopy, c.History[startIndex:])
 	c.Mu.RUnlock()
 
-	c.sendReplay(session, historyCopy, "--- Lịch sử chat gần đây ---")
+	c.sendReplay(session, historyCopy, "--- Lịch sử chat gần đây ---", false)
 }
 
 // SendChatSegment sends up to limit stored lines older than before in
 // replay format. before is an exclusive chain height; 0 means the tail
 // window over the whole history. Unchained lines carry no height, so
 // they travel with their neighbors by position: the cutoff is the
-// first line at or above before. An empty window still terminates the
-// stream (header, zero-count footer, trailer) so the requester never
-// hangs waiting.
+// first line at or above before. An exhausted window still terminates
+// the stream (header, plain exhausted footer, trailer) so the
+// requester never hangs waiting.
 func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, limit int) {
 	if limit <= 0 {
 		return
@@ -311,14 +311,18 @@ func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, li
 	copy(window, c.History[start:cut])
 	c.Mu.RUnlock()
 
-	c.sendReplay(session, window, "--- Lịch sử cũ ---")
+	c.sendReplay(session, window, "--- Lịch sử cũ ---", true)
 }
 
 // sendReplay renders stored lines in replay format: header, content,
 // human footer with counts, and a HistorySync trailer. lines must be a
 // private copy. Sends never block (drops on a full peer buffer are
 // counted and logged); the trailer reports what was actually queued.
-func (c *ChainService) sendReplay(session *ClientSession, lines []string, header string) {
+// A segment footer is labeled as older history, and says plainly when
+// the window holds no chained line (exhausted) instead of a bare zero
+// count. Both footer variants keep the boundary substring so the
+// client still opens and closes the replay window.
+func (c *ChainService) sendReplay(session *ClientSession, lines []string, header string, segment bool) {
 	// Replay filters join/leave unless the session asked for them.
 	// Dates, audits and untagged lines always go. Filtered lines never
 	// occupied chain positions, so the replayed window has no gaps.
@@ -381,7 +385,14 @@ func (c *ChainService) sendReplay(session *ClientSession, lines []string, header
 			}
 		}
 	}
-	replaySend([]byte(fmt.Sprintf("--- Kết thúc lịch sử (%d/%d) ---", sent, len(lines))))
+	footer := fmt.Sprintf("--- Kết thúc lịch sử (%d/%d) ---", sent, len(lines))
+	if segment {
+		footer = fmt.Sprintf("--- Kết thúc lịch sử cũ (%d/%d) ---", sent, len(lines))
+		if !haveHeight {
+			footer = "--- Kết thúc lịch sử cũ: không còn tin cũ hơn ---"
+		}
+	}
+	replaySend([]byte(footer))
 	trailer, _ := json.Marshal(HistorySync{Type: "history_sync", MinHeight: minHeight, MaxHeight: maxHeight,
 		Sent: sent, Total: len(lines)})
 	replaySend(trailer)
