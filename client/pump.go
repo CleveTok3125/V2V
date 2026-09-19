@@ -29,7 +29,9 @@ func (s *Session) flushDateBannerLocked() {
 // line. The join header raises InSync (full verification); the
 // on-demand segment header raises InOlder (render and index only —
 // older heights can never verify against the running tip); any footer
-// clears both. Caller must hold DisplayMu.
+// flushes a stashed date banner first (otherwise a banner closing the
+// window is silently dropped) and then clears both. Caller must hold
+// DisplayMu.
 func (s *Session) trackReplayWindow(line string, start bool) {
 	if start {
 		if isOlderSegmentHeader(line) {
@@ -39,6 +41,7 @@ func (s *Session) trackReplayWindow(line string, start bool) {
 		}
 		return
 	}
+	s.flushDateBannerLocked()
 	s.Chain.InOlder = false
 	s.Pending.PendingDateBanner = ""
 	s.Pending.PendingDateBannerWire = nil
