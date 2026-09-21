@@ -22,7 +22,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost string) (Permission, AuthPacket, error) {
+func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost string, onion bool) (Permission, AuthPacket, error) {
 	// Allow a small grace window beyond the 10s nonce TTL so slow clients
 	// still fail cleanly instead of hanging the auth read forever.
 	const authResponseTimeout = 12 * time.Second
@@ -112,6 +112,12 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		var lastErr error
 		if !WAConfig.Enabled {
 			logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt (thiếu WEBAUTHN_RPID/ORIGIN).", clientIP)
+			return perms, resp, fmt.Errorf("%w", ErrPasskeyDisabled)
+		}
+		// Onion: passkey is off unless explicitly allowed. WebAuthn binds a
+		// single RPID/origin, so it cannot serve clearnet and onion at once.
+		if passkeyDisabledForOnion(onion) {
+			logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt trên onion (ONION_ALLOW_PASSKEY=false).", clientIP)
 			return perms, resp, fmt.Errorf("%w", ErrPasskeyDisabled)
 		}
 		s.RoleRegistryMu.RLock()
@@ -376,8 +382,8 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 	return fmt.Sprintf("%s-%d", baseDisplay, time.Now().UnixNano()%1000)
 }
 
-func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expectedHost string) (*ClientSession, error) {
-	perms, authPacket, err := s.HandleAuth(conn, clientIP, expectedHost)
+func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expectedHost string, onion bool) (*ClientSession, error) {
+	perms, authPacket, err := s.HandleAuth(conn, clientIP, expectedHost, onion)
 	if err != nil {
 		if authPacket.Role != "" {
 			s.handleAuthPenalty(clientIP)

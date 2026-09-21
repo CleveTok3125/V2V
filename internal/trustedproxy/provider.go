@@ -165,6 +165,13 @@ func (c *Chain) Resolve(r *http.Request) Outcome {
 	return Outcome{RemoteIP: remoteIP, Reject: true, Reason: "no trusted provider"}
 }
 
+// ContainsIP reports whether raw parses as an IP inside one of nets.
+// Exported for callers that load their own trust file outside the chain
+// (e.g. the onion-hop allowlist).
+func ContainsIP(nets []*net.IPNet, raw string) bool {
+	return containsIP(nets, raw)
+}
+
 // containsIP reports whether raw parses as an IP inside one of nets.
 // Unparseable input never matches (fail-closed for the claimant).
 func containsIP(nets []*net.IPNet, raw string) bool {

@@ -1,0 +1,17 @@
+# Tor/NAT hop addresses allowed to present an onion Host without TLS.
+#
+# Onion (hidden service) ingress skips REQUIRE_TLS because Tor already
+# encrypts end-to-end and authenticates the .onion address, and no CA issues
+# certs for .onion. Only add the address the tor daemon connects FROM:
+#   - tor on the host: leave this file empty or missing (loopback-only), or
+#     add 127.0.0.1/32 explicitly;
+#   - tor in another container/netns: add that hop (e.g. 172.18.0.0/16).
+#
+# Keep this list as tight as possible: any address here can bypass the TLS
+# requirement by sending a configured ONION_HOSTS Host header. Do NOT put
+# general office/LAN ranges here; direct.txt is for plain direct access.
+# One IP or CIDR per line, "#" comments, blank lines skipped.
+#
+# Examples (uncomment and adapt):
+#127.0.0.1/32
+#172.18.0.0/16

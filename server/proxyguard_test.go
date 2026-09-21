@@ -106,14 +106,16 @@ func TestIsSecuredConnectGatesForwardedProto(t *testing.T) {
 	r := proxyTestReq("198.51.100.9:1234", "")
 	r.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
-	if IsSecuredConnect(rec, r, "198.51.100.9", false) {
+	untrusted := trustedproxy.Outcome{ClientIP: "198.51.100.9", RemoteIP: "198.51.100.9"}
+	if IsSecuredConnect(rec, r, untrusted) {
 		t.Fatal("X-Forwarded-Proto from untrusted must not secure")
 	}
 	if rec.Code != http.StatusUpgradeRequired {
 		t.Fatalf("unsecured code = %d, want 426", rec.Code)
 	}
 	rec2 := httptest.NewRecorder()
-	if !IsSecuredConnect(rec2, r, "198.51.100.9", true) {
+	trusted := trustedproxy.Outcome{ClientIP: "198.51.100.9", RemoteIP: "198.51.100.9", Trusted: true, Provider: "cloudflare"}
+	if !IsSecuredConnect(rec2, r, trusted) {
 		t.Fatal("X-Forwarded-Proto from trusted proxy must secure")
 	}
 }

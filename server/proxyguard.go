@@ -3,6 +3,8 @@ package main
 import (
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/CleveTok3125/V2V/internal/trustedproxy"
@@ -44,6 +46,23 @@ func resolveClientIP(r *http.Request) trustedproxy.Outcome {
 // strict chains reject before this is called.
 func getClientIP(r *http.Request) string {
 	return resolveClientIP(r).ClientIP
+}
+
+// initOnionTrust loads the onion-hop allowlist from onion.txt next to the
+// other trust files. A missing file means loopback-only (tolerated with a
+// warning); a malformed or world-writable file fails the boot.
+func initOnionTrust(dir string) ([]*net.IPNet, error) {
+	path := filepath.Join(dir, "onion.txt")
+	set, err := trustedproxy.LoadTrustFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logWarnf("⚠️ Onion: %s missing; only loopback hops accepted", path)
+			return nil, nil
+		}
+		return nil, err
+	}
+	logInfof("🧅 Onion: %d trusted hops from %s", len(set.Nets), path)
+	return set.Nets, nil
 }
 
 // initProxyChain loads per-module trust files and builds the

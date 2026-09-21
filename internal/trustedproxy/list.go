@@ -100,6 +100,13 @@ func extraWarning(extra []string) string {
 	return fmt.Sprintf("extra trust files ignored: %d (%s%s)", len(extra), strings.Join(shown, ", "), more)
 }
 
+// LoadTrustFile parses one "<name>.txt" trust file for callers outside the
+// proxy chain (e.g. the onion-hop allowlist). Same rules as the chain's own
+// files: one IP/CIDR per line, "#" comments, world-writable refused.
+func LoadTrustFile(path string) (*Set, error) {
+	return loadTrustFile(path)
+}
+
 // loadTrustFile parses one trust file: one IP or CIDR per line,
 // "#" comments, blank lines skipped. A bare IP becomes a /32 (v4) or
 // /128 (v6) net. The first malformed line fails the file with its

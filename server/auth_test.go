@@ -68,7 +68,7 @@ func TestHandleAuth_GuestOK(t *testing.T) {
 	client, server := dialAuthPair(t, s)
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := s.HandleAuth(server, "127.0.0.1", "localhost")
+		_, _, err := s.HandleAuth(server, "127.0.0.1", "localhost", false)
 		done <- err
 	}()
 	ch := readChallenge(t, client)
@@ -113,7 +113,7 @@ func TestHandleAuth_Rejections(t *testing.T) {
 			client, server := dialAuthPair(t, s)
 			done := make(chan error, 1)
 			go func() {
-				_, _, err := s.HandleAuth(server, "127.0.0.1", "localhost")
+				_, _, err := s.HandleAuth(server, "127.0.0.1", "localhost", false)
 				done <- err
 			}()
 			ch := readChallenge(t, client)
@@ -140,7 +140,7 @@ func TestHandleAuth_ExpiredNonce(t *testing.T) {
 	client, server := dialAuthPair(t, s)
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := s.HandleAuth(server, "127.0.0.1", "localhost")
+		_, _, err := s.HandleAuth(server, "127.0.0.1", "localhost", false)
 		done <- err
 	}()
 	ch := readChallenge(t, client)
@@ -252,7 +252,7 @@ func TestWantJoinsEndToEnd(t *testing.T) {
 			client, serverConn := dialAuthPair(t, s)
 			sessDone := make(chan *ClientSession, 1)
 			go func() {
-				sess, err := s.authenticateClient(serverConn, "127.0.0.1", "localhost")
+				sess, err := s.authenticateClient(serverConn, "127.0.0.1", "localhost", false)
 				if err != nil {
 					t.Errorf("authenticate: %v", err)
 					sessDone <- nil

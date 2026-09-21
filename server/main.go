@@ -18,19 +18,54 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func IsSecuredConnect(w http.ResponseWriter, r *http.Request, clientIP string, headerTrusted bool) bool {
+// onionRequest reports whether this request targets a configured onion host.
+func onionRequest(r *http.Request) bool {
+	return Cfg.Static.OnionEnabled() && Cfg.Static.IsOnionHost(r.Host)
+}
+
+// webAllowed reports whether the WASM web client may be served. Onion
+// requests are denied unless the operator opts in.
+func webAllowed(r *http.Request) bool {
+	return !onionRequest(r) || Cfg.Static.Onion.AllowWeb
+}
+
+// passkeyAllowed reports whether the passkey ceremony may run. Onion
+// requests are denied unless the operator opts in; the master WebAuthn
+// switch is enforced separately where ceremony/assertion happens.
+func passkeyAllowed(r *http.Request) bool {
+	return !onionRequest(r) || Cfg.Static.Onion.AllowPasskey
+}
+
+// passkeyDisabledForOnion reports whether the onion restriction alone blocks
+// passkey auth. Master WebAuthn enablement is enforced separately, so this
+// can only restrict, never enable.
+func passkeyDisabledForOnion(onion bool) bool {
+	return onion && !Cfg.Static.Onion.AllowPasskey
+}
+
+func IsSecuredConnect(w http.ResponseWriter, r *http.Request, outcome trustedproxy.Outcome) bool {
 	if !Cfg.Static.RequireTLS {
 		logWarnf("⚠️ Server đang không buộc sử dụng kết nối mã hoá")
 		return true
 	}
 
+	clientIP := outcome.ClientIP
 	isTLS := r.TLS != nil
 	// X-Forwarded-Proto is only meaningful behind a trusted proxy:
 	// anyone can send that header directly.
-	isProxyTLS := headerTrusted && strings.ToLower(r.Header.Get("X-Forwarded-Proto")) == "https"
+	isProxyTLS := outcome.Trusted && strings.ToLower(r.Header.Get("X-Forwarded-Proto")) == "https"
 	isLocalhost := clientIP == "127.0.0.1" || clientIP == "::1"
+	// Onion ingress: Tor provides end-to-end encryption and authenticates
+	// the .onion address, so TLS would be redundant (and no CA issues certs
+	// for .onion). Only accept this from a loopback or onion-trusted hop,
+	// never via a header-trusting proxy whose client IP is attacker-controlled.
+	isOnion := onionRequest(r) && !outcome.Trusted &&
+		(isLocalhost || trustedproxy.ContainsIP(Cfg.Static.Onion.Trust, outcome.RemoteIP))
 
-	if isTLS || isProxyTLS || isLocalhost {
+	if isTLS || isProxyTLS || isLocalhost || isOnion {
+		if isOnion {
+			logInfof("🧅 Onion ingress accepted for %s (Tor transport encryption)", trustedproxy.Clip(r.Host, 200))
+		}
 		return true
 	}
 
@@ -51,7 +86,7 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 		logWarnf("⚠️ [PROXY] Direct connection from %s via %s (no proxy headers trusted)", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Provider)
 	}
 
-	if !IsSecuredConnect(w, r, clientIP, outcome.Trusted) {
+	if !IsSecuredConnect(w, r, outcome) {
 		return
 	}
 
@@ -74,7 +109,7 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	session, err := s.authenticateClient(conn, clientIP, clientHost(r))
+	session, err := s.authenticateClient(conn, clientIP, clientHost(r), onionRequest(r))
 	if err != nil {
 		return
 	}
@@ -150,9 +185,14 @@ func loadStaticConfig() (StaticConfig, error) {
 		instanceID = lastAfterDash(loader.Smart("INSTANCE_ID"))
 	}
 
+	onionHosts, err := parseOnionHosts(getEnvOptional("ONION_HOSTS", ""))
+	if err != nil {
+		return StaticConfig{}, err
+	}
+
 	cfg := StaticConfig{
 		AllowedOrigins:       strings.Split(env.AllowedOrigins(), ","),
-		RequireTLS:           getEnvAsBoolOptional("REQUIRE_TLS", false),
+		RequireTLS:           getEnvAsBoolOptional("REQUIRE_TLS", true),
 		Port:                 loader.Smart("PORT"),
 		InstanceID:           instanceID,
 		Timezone:             getEnvAsLocationOptional("TIMEZONE", "Asia/Ho_Chi_Minh"),
@@ -161,6 +201,11 @@ func loadStaticConfig() (StaticConfig, error) {
 		HistoryFilePath:      getEnvOptional("HISTORY_FILE_PATH", dataPath("history.jsonl")),
 		MaxHistoryFileSizeMB: loader.Int("MAX_HISTORY_FILE_SIZE_MB"),
 		TrustedProxyDir:      getEnvOptional(env.KeyTrustedProxyDir, DefaultTrustedProxyDir),
+		Onion: OnionConfig{
+			Hosts:        onionHosts,
+			AllowWeb:     getEnvAsBoolOptional("ONION_ALLOW_WEB", false),
+			AllowPasskey: getEnvAsBoolOptional("ONION_ALLOW_PASSKEY", false),
+		},
 	}
 	if err := loader.Err(); err != nil {
 		return StaticConfig{}, err
@@ -312,6 +357,14 @@ func main() {
 	}
 	ProxyChain = proxyChain
 
+	if Cfg.Static.OnionEnabled() {
+		onionTrust, err := initOnionTrust(Cfg.Static.TrustedProxyDir)
+		if err != nil {
+			log.Fatalf("❌ CRITICAL ERROR: onion trust: %v", err)
+		}
+		Cfg.Static.Onion.Trust = onionTrust
+	}
+
 	initialDynamic, err := loadDynamicConfig()
 	if err != nil {
 		log.Fatalf("❌ CRITICAL ERROR: %v", err)
@@ -344,11 +397,33 @@ func main() {
 	mux := http.NewServeMux()
 
 	mime.AddExtensionType(".wasm", "application/wasm")
-	mux.Handle("/web/", http.StripPrefix("/web/", webFilesHandler("webterm")))
+	webHandler := http.StripPrefix("/web/", webFilesHandler("webterm"))
+	mux.HandleFunc("/web/", func(w http.ResponseWriter, r *http.Request) {
+		if !webAllowed(r) {
+			logWarnf("⛔ [ONION] Chặn web client từ %s (ONION_ALLOW_WEB=false)", trustedproxy.Clip(r.Host, 200))
+			http.NotFound(w, r)
+			return
+		}
+		webHandler.ServeHTTP(w, r)
+	})
 
 	LoadWebauthnEnv()
-	mux.HandleFunc("/webauthn/enroll/begin", chatApp.handleEnrollBegin)
-	mux.HandleFunc("/webauthn/enroll/finish", chatApp.handleEnrollFinish)
+	mux.HandleFunc("/webauthn/enroll/begin", func(w http.ResponseWriter, r *http.Request) {
+		if !passkeyAllowed(r) {
+			logWarnf("⛔ [ONION] Chặn enroll từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))
+			http.NotFound(w, r)
+			return
+		}
+		chatApp.handleEnrollBegin(w, r)
+	})
+	mux.HandleFunc("/webauthn/enroll/finish", func(w http.ResponseWriter, r *http.Request) {
+		if !passkeyAllowed(r) {
+			logWarnf("⛔ [ONION] Chặn enroll từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))
+			http.NotFound(w, r)
+			return
+		}
+		chatApp.handleEnrollFinish(w, r)
+	})
 
 	mux.HandleFunc("/api/server_pubkey", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

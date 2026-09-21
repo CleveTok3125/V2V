@@ -35,6 +35,9 @@
         "HISTORY_DISK_LOOKUP",
         "PROXY_PROVIDER",
         "TRUSTED_PROXY_DIR",
+        "ONION_HOSTS",
+        "ONION_ALLOW_WEB",
+        "ONION_ALLOW_PASSKEY",
         "WEBAUTHN_RPID",
         "WEBAUTHN_ORIGIN",
         "WEBAUTHN_STORE"
@@ -86,7 +89,8 @@
         "HOMEPAGE_URL",
         "WEBAUTHN_RPID",
         "WEBAUTHN_ORIGIN",
-        "PROXY_PROVIDER"
+        "PROXY_PROVIDER",
+        "ONION_HOSTS"
       ]
     },
     "roles": {

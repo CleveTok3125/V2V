@@ -5,6 +5,9 @@
 # address is harmless (unlike the same mistake in cloudflare.txt).
 # One IP or CIDR per line, "#" comments, blank lines skipped.
 #
+# Direct-only access, no TLS bypass and no onion power: tor/onion hops
+# belong in onion.txt, never here.
+#
 # Examples (uncomment and adapt):
 #203.0.113.7/32
 #10.0.0.0/8
