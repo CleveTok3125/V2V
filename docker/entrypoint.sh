@@ -73,8 +73,8 @@ require_readable() {
 		exit 1
 	fi
 }
-require_readable "$APP_ROOT/.env" "cp template/.env .env"
-require_readable "$APP_ROOT/config/roles.json" "cp -r template/server/config config (or make config)"
+require_readable "$APP_ROOT/.env" "make v2vctl && v2vctl config sync --dir ."
+require_readable "$APP_ROOT/config/roles.json" "make v2vctl && v2vctl config sync --dir ."
 
 # Writability probe: without it the server dies on its first write
 # with a bare "permission denied". Fail here instead, with the fix.

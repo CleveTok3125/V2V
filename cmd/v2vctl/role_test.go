@@ -243,8 +243,8 @@ func TestRoleUpdateShowDeleteMerge(t *testing.T) {
 	})
 }
 
-// TestAtomicWriteFileAdmin_Permissions: role saves land with 0600 and no
-// temp files leak.
+// TestAtomicWriteFileAdmin_Permissions: role saves land with the config
+// standard 0644 and no temp files leak.
 func TestAtomicWriteFileAdmin_Permissions(t *testing.T) {
 	withTempDir(t, func() {
 		if err := (&RoleCreateCmd{Role: "sec"}).Run(); err != nil {
@@ -254,8 +254,8 @@ func TestAtomicWriteFileAdmin_Permissions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if fi.Mode().Perm() != 0o600 {
-			t.Fatalf("roles.json perm = %o, want 600", fi.Mode().Perm())
+		if fi.Mode().Perm() != 0o644 {
+			t.Fatalf("roles.json perm = %o, want 644", fi.Mode().Perm())
 		}
 		leftovers, _ := filepath.Glob(".tmp-*")
 		if len(leftovers) != 0 {

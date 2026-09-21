@@ -97,8 +97,9 @@ See `template/server/config/roles.json` and `template/.env` for server configura
 **From source:**
 
 ```bash
-cp template/.env .env          # edit PORT, ALLOWED_ORIGINS, etc.
-make config                    # bootstrap ./config from samples (fresh clone; never overwrites)
+make v2vctl                    # -> public/V2Vctl-<os>-<arch>
+./public/V2Vctl-$(go env GOOS)-$(go env GOARCH) config sync --dir .   # bootstrap .env + ./config from template (fresh clone)
+# edit .env: PORT, ALLOWED_ORIGINS, ...
 make server web                # -> public/server.bin + webterm/app.wasm
 ./public/server.bin
 # or: docker compose up -d --build   (persists ./data and ./logs)

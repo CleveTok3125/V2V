@@ -123,7 +123,7 @@ chmod 644 "$APP_ROOT/config/roles.json"
 if run_entry; then
 	bad "missing-env: must exit nonzero"
 else
-	echo "$RUN_OUT" | grep -q "missing.*cp template/.env .env" && ok "missing-env: bootstrap msg" || bad "missing-env: msg"
+	echo "$RUN_OUT" | grep -q "missing.*v2vctl config sync" && ok "missing-env: bootstrap msg" || bad "missing-env: msg"
 fi
 rm -rf "$ROOT"
 
@@ -134,7 +134,7 @@ chmod 644 "$APP_ROOT/.env"
 if run_entry; then
 	bad "missing-roles: must exit nonzero"
 else
-	echo "$RUN_OUT" | grep -q "missing.*template/server/config" && ok "missing-roles: bootstrap msg" || bad "missing-roles: msg"
+	echo "$RUN_OUT" | grep -q "missing.*v2vctl config sync" && ok "missing-roles: bootstrap msg" || bad "missing-roles: msg"
 fi
 rm -rf "$ROOT"
 

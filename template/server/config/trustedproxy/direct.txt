@@ -6,5 +6,5 @@
 # One IP or CIDR per line, "#" comments, blank lines skipped.
 #
 # Examples (uncomment and adapt):
-# 203.0.113.7/32
-# 10.0.0.0/8
+#203.0.113.7/32
+#10.0.0.0/8

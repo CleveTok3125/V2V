@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "type": "v2v-template",
+  "templateDir": "template",
+  "files": [
+    {
+      "id": "env",
+      "path": ".env",
+      "format": "env",
+      "dest": ".env",
+      "keys": [
+        "PORT",
+        "REQUIRE_TLS",
+        "ALLOWED_ORIGINS",
+        "INSTANCE_ID",
+        "TIMEZONE",
+        "LOG_FILE_PATH",
+        "MAX_LOG_SIZE_MB",
+        "HISTORY_FILE_PATH",
+        "MAX_HISTORY_FILE_SIZE_MB",
+        "STATUS_URL",
+        "DOWNLOAD_URL",
+        "HOMEPAGE_URL",
+        "MAX_CONNECTIONS_PER_IP",
+        "CONNECTION_COOLDOWN",
+        "MESSAGE_COOLDOWN",
+        "IDLE_CHAT_TIMEOUT",
+        "MAX_MESSAGE_LENGTH",
+        "MAX_MESSAGE_LINE",
+        "MAX_USERNAME_LENGTH",
+        "MAX_TRIPCODE_LENGTH",
+        "MAX_HISTORY_BYTES",
+        "MAX_HISTORY_SEND",
+        "HISTORY_SEGMENT_COOLDOWN",
+        "HISTORY_DISK_LOOKUP",
+        "PROXY_PROVIDER",
+        "TRUSTED_PROXY_DIR",
+        "WEBAUTHN_RPID",
+        "WEBAUTHN_ORIGIN",
+        "WEBAUTHN_STORE"
+      ]
+    },
+    {
+      "id": "roles",
+      "path": "server/config/roles.json",
+      "format": "json",
+      "dest": "config/roles.json",
+      "keys": [
+        "admin"
+      ]
+    },
+    {
+      "id": "trust",
+      "path": "server/config/trustedproxy",
+      "format": "trust-dir",
+      "dest": "config/trustedproxy"
+    },
+    {
+      "id": "client",
+      "path": "client/config.jsonc",
+      "format": "jsonc",
+      "dest": "config.jsonc",
+      "target": "client",
+      "keys": [
+        "defaults",
+        "network",
+        "limits",
+        "guard",
+        "channels",
+        "crypto",
+        "ui",
+        "tabs",
+        "commands",
+        "timeouts"
+      ]
+    }
+  ],
+  "add_policy": {
+    "env": {
+      "comment": [
+        "ALLOWED_ORIGINS",
+        "INSTANCE_ID",
+        "TIMEZONE",
+        "STATUS_URL",
+        "DOWNLOAD_URL",
+        "HOMEPAGE_URL",
+        "WEBAUTHN_RPID",
+        "WEBAUTHN_ORIGIN",
+        "PROXY_PROVIDER"
+      ]
+    },
+    "roles": {
+      "skip": [
+        "admin"
+      ]
+    }
+  }
+}

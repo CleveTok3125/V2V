@@ -97,8 +97,9 @@ Xem `template/server/config/roles.json` và `template/.env` để cấu hình se
 **Từ mã nguồn:**
 
 ```bash
-cp template/.env .env          # sửa PORT, ALLOWED_ORIGINS, ...
-make config                    # khởi tạo ./config từ mẫu (clone mới; không ghi đè)
+make v2vctl                    # -> public/V2Vctl-<os>-<arch>
+./public/V2Vctl-$(go env GOOS)-$(go env GOARCH) config sync --dir .   # khởi tạo .env + ./config từ template (clone mới)
+# sửa .env: PORT, ALLOWED_ORIGINS, ...
 make server web                # -> public/server.bin + webterm/app.wasm
 ./public/server.bin
 # hoặc: docker compose up -d --build   (lưu ./data và ./logs)

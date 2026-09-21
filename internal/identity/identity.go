@@ -142,6 +142,26 @@ func (f *IdentityFile) SaveEncrypted(path string, passphrase []byte, p *Params) 
 	return atomicWriteFile(path, enc, 0o600)
 }
 
+// WriteConfigFile writes a non-secret config artifact (server .env,
+// roles.json, trust files, client config) world-readable so container bind
+// mounts stay readable when host and container uids differ. Directories are
+// created 0755 and both the directory and file are normalized afterwards, so
+// an artifact created earlier with owner-only modes is fixed on next write.
+// Secrets (key.json, tripcode.json, server_identity.json, webauthn.json)
+// keep using the owner-only atomic write.
+func WriteConfigFile(path string, data []byte) error {
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		_ = os.Chmod(dir, 0o755)
+	}
+	if err := atomicWriteFile(path, data, 0o644); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o644)
+}
+
 // MergeRolesFile applies update() to a single role entry inside roles.json,
 // preserving every other top-level role. A file that exists but cannot be
 // parsed aborts the operation instead of being clobbered.
@@ -163,7 +183,7 @@ func MergeRolesFile(path, role string, update func(entry map[string]any)) error 
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(path, out, 0o600)
+	return WriteConfigFile(path, out)
 }
 
 func pad32(b []byte) []byte {

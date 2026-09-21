@@ -6,6 +6,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 ## Table of Contents
 - [Project Structure](#project-structure)
 - [Build System](#build-system)
+- [Configuration Sync](#configuration-sync)
 - [Client Configuration](#client-configuration)
 - [Client Tabs](#client-tabs)
 - [Placeholders and Server Echo](#placeholders-and-server-echo)
@@ -44,7 +45,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 │   ├── linkify/      # URL → OSC8 hyperlink
 │   └── codebg/       # inline `code` + ``` blocks → background SGR + chroma highlight (display only)
 ├── webterm/          # Browser terminal (xterm.js + WASM glue)
-├── cmd/v2vctl/       # Management tool, one file per concern (main, role, keygen, enroll, migrate, list, prompt)
+├── cmd/v2vctl/       # Management tool, one file per concern (main, role, keygen, enroll, migrate, list, prompt, config, pager)
 ├── template/         # Samples mirroring real locations
 │   ├── .env            # → copy to ./.env (project root)
 │   ├── server/config/  # roles.json + trustedproxy/ → copy to ./config/
@@ -79,6 +80,17 @@ make clean
 - Dev version stamp is always `dev-<HEAD>[-dirty]` from the working tree, never from a possibly stale `GIT_HASH` env; `make web` warns when `GIT_HASH` differs from `HEAD` (stale browser cache risk).
 - Version stamps ride `-X main.Version` for all three binaries (server included); server prints its stamp at boot, on `/` info and on `/api/version` (`{"version": ...}`, no-store).
 - Pre-dial version check is client-side policy (`ui.versionCheck {enabled, mode, expect}`): exact string match against our stamp or a pinned fork version, modes `disabled|warn|enforce` (default warn; unknown warns, enforce aborts non-zero), WASM skipped (paired with its server).
+
+## Configuration Sync
+
+`v2vctl config sync` migrates the template into a live config, preserving operator-set values. The merge is template-first: the template wins structure, order and comments; the live config wins values per key.
+
+- **Manifest:** the project root holds a tracked `v2v-template.json` (`version`, `type`, `templateDir`, `files[]`, `add_policy`). Each file entry declares `id`, `path` (template-relative), `format` (`env|json|jsonc|trust-dir`), `dest` (config-relative), optional `target: "client"` (dest is under the OS config dir) and `keys` (expected key order). `--dir` points at the directory holding the manifest (default `.`); `--to` is the config root (default `--dir`). Missing or invalid manifest fails the run; there is no fallback.
+- **Commands:** `config sync` (merge + write), `config diff` (unified diff preview, `--format text|json`), `config check` (manifest vs template drift), `config manifest --write` (regenerate `keys` while preserving `add_policy`). `--only` selects a subset of manifest ids (default `env,roles,trust`; `client` is opt-in).
+- **Render:** `.env` and trust files are walked line-by-line so comments, blank lines and quoting stay byte-identical; a commented `#KEY=value` default is activated in place when the operator enables it; template JSON is re-indented with the template's own indent unit and key order. Merging the template with itself reproduces it byte-for-byte.
+- **`add_policy`:** keys that must not inherit the template value when newly added. `env.comment` renders them commented (`#KEY=value`); `roles`/`jsonc` `skip` omits them. Only the added branch is affected.
+- **Guards:** the config root and every destination must stay outside the template root; malformed template/local JSON is refused instead of being overwritten. JSONC targets are lossy (comments and formatting are normalized), so `sync` requires `--force` for such entries after reviewing `diff`.
+- **Modes:** config artifacts are written `0644` (dirs `0755`) via `identity.WriteConfigFile`; secrets keep `0600`/`0700`.
 
 ## Client Configuration
 
@@ -336,7 +348,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - `--ask-proxy` runs an interactive wizard (huh scheme select, host, port, optional user, hidden password) that overrides all static config.
 - HTTP(S) proxies use a dedicated gorilla `Dialer`; SOCKS5 handshakes via `golang.org/x/net/proxy` (RFC 1928/1929) with the target always sent as a domain name so no local DNS leaks, plus TLS for `wss`.
 - The proxy password is the proxy's secret: no meter, no weak gate. It lives as `[]byte`, wipes after dial, and logs show `user:***@host`; prompt/URL strings at the stdlib boundary await GC as documented for all secrets.
-- **File exposure:** secrets and chat land owner-only — `key.json`, `roles.json`, `webauthn.json`, `server_identity.json` via `atomicWriteFile 0600` (dirs `0700`); `history.jsonl` and `app.log` via `0600` (`history` dir `0700`). `OpenFile` applies the mode only at creation, so pre-existing files keep theirs: re-harden once on the host with `chmod 700 data` and `chmod 600 data/history.jsonl* data/app.log* data/server_identity.json data/webauthn.json`.
+- **File exposure:** secrets and chat land owner-only — `key.json`, `webauthn.json`, `server_identity.json` via `atomicWriteFile 0600` (dirs `0700`); `history.jsonl` and `app.log` via `0600` (`history` dir `0700`). Server config artifacts (`roles.json`, `.env`, `config/trustedproxy/*.txt`, client `config.jsonc`, `v2v-template.json`) use `WriteConfigFile` `0644` (dirs `0755`) so container bind mounts stay readable when host and container uids differ; this makes `roles.json`'s `hmac_shield` host-readable, matching the `cp -n` bootstrap that always produced `0644`. `OpenFile` applies the mode only at creation, so pre-existing files keep theirs: re-harden once on the host with `chmod 700 data` and `chmod 600 data/history.jsonl* data/app.log* data/server_identity.json data/webauthn.json`.
 - Missing `config/roles.json` fails the boot (no silent default-permission fallback); a corrupt file fails too, while hot-reload keeps the old registry with a warning.
 - Trust files refuse to load when world-writable; templates ship no secrets (placeholders only).
 - **Container:** the image builds with live `data/`/`config/`/`.env` excluded (`.dockerignore`), runs the server as a non-root `app` user via `docker/entrypoint.sh` (root prepares `/app/data` idempotently, preflights the read-only mounts with actionable errors, then `exec su-exec`), drops all capabilities except `CHOWN`/`SETUID`/`SETGID` (needed by that root phase), blocks privilege escalation and mounts the rootfs read-only (`/tmp` tmpfs). No `user:` is set on purpose — the entrypoint adapts, rollback is commenting out `read_only`.

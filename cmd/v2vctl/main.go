@@ -12,7 +12,6 @@ package main
 // and the WEBAUTHN_STORE. No network, no daemon.
 
 import (
-
 	"github.com/alecthomas/kong"
 )
 
@@ -24,6 +23,7 @@ type CLI struct {
 	Enroll  EnrollCmd  `cmd:"" help:"Phát ticket enroll passkey thật (chạy trên host server)"`
 	List    ListCmd    `cmd:"" help:"Xem tickets và credentials trong store"`
 	Migrate MigrateCmd `cmd:"" help:"Đổi preset mã hóa cho key.json hiện có"`
+	Config  ConfigCmd  `cmd:"" help:"Đồng bộ config theo template manifest (v2v-template.json)"`
 }
 
 type KeygenCmd struct {
@@ -36,4 +36,3 @@ func main() {
 	ctx := kong.Parse(&cli)
 	ctx.FatalIfErrorf(ctx.Run())
 }
-
