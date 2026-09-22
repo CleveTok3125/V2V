@@ -2,7 +2,9 @@ APP_VERSION ?= $(if $(GIT_HASH),$(GIT_HASH),$(shell git describe --tags --always
 VERSION ?= $(if $(GIT_HASH),$(GIT_HASH),$(shell git rev-parse --short HEAD 2>/dev/null || echo "dev-$$(date -u +%Y%m%d%H%M)"))
 LDFLAGS := -s -w -X 'main.Version=$(APP_VERSION)'
 WEB_LDFLAGS := -s -w -X 'main.Version=$(VERSION)'
-GOCACHE ?= /tmp/gocache
+# Cache must live on a writable path: Android/Termux has no usable
+# /tmp, so prefer TMPDIR, then HOME, then /tmp. Override with GOCACHE=...
+GOCACHE ?= $(or $(TMPDIR),$(HOME),/tmp)/gocache
 # Dev builds reflect the working tree: no stripping (keeps symbols for
 # debugging) and a dev- version stamp derived from git HEAD, never from a
 # possibly stale GIT_HASH env.

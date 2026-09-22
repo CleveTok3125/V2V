@@ -12,6 +12,8 @@ COPY . .
 # empty the build falls back to git describe/short hash.
 ARG GIT_HASH=""
 ENV GIT_HASH=${GIT_HASH}
+# Pin the cache to the BuildKit cache-mount target (see --mount below).
+ENV GOCACHE=/tmp/gocache
 # Cross-compile the server for the target platform on the host-platform
 # builder: GOOS/GOARCH come from buildx, so no QEMU emulation of the Go
 # toolchain is needed. The wasm bundle is platform-independent.
@@ -27,6 +29,7 @@ COPY vendor ./vendor
 COPY . .
 ARG GIT_HASH=""
 ENV GIT_HASH=${GIT_HASH}
+ENV GOCACHE=/tmp/gocache
 RUN --mount=type=cache,target=/tmp/gocache \
   apk add --no-cache make git gzip brotli && make web
 

@@ -60,7 +60,7 @@ All builds are driven by `Makefile`:
 
 ```bash
 make help            # list targets
-make vet test        # GOCACHE=/tmp/gocache go vet/test
+make vet test        # go vet/test (GOCACHE defaults under TMPDIR, then HOME)
 make dev             # dev build: bin/v2v, bin/v2v-server, bin/v2vctl + fresh webterm (unstripped, dev-<hash> stamp)
 make -j4 all         # parallel: server + web + client + v2vctl (host only for client/v2vctl)
 make all ALL=1 -j4   # full 7-platform matrix for client/v2vctl (CI)
