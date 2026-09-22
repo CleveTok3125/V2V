@@ -36,6 +36,8 @@ make dev             # -> bin/v2v, bin/v2v-server, bin/v2vctl + webterm mới (b
 make help            # xem tất cả target
 ```
 
+Nền tảng và kiến trúc được hỗ trợ: [INSTALL.md](INSTALL.md#platform-support).
+
 **2. Vào phòng như khách**
 
 ```bash

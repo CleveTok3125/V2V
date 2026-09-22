@@ -26,6 +26,23 @@ v2v-template.json     # manifest used by `v2vctl config sync`
 docker-compose.yml    # container deployment
 ```
 
+## Platform support
+
+| Component         | Windows      | Linux        | macOS        | Android         | Web (WASM)         |
+| ----------------- | ------------ | ------------ | ------------ | --------------- | ------------------ |
+| Client `V2V`        | amd64, arm64 | amd64, arm64 | amd64, arm64 | arm64 (aarch64) | any modern browser |
+| `V2Vctl`            | amd64, arm64 | amd64, arm64 | amd64, arm64 | arm64 (aarch64) | —                  |
+| Server            | amd64, arm64 | amd64, arm64 | amd64, arm64 | —               | —                  |
+| Container image   | —            | amd64, arm64 | —            | —               | —                  |
+| `serve.py` bundle | any (Python) | any (Python) | any (Python) | any (Python)    | —                  |
+
+The table lists officially released artifacts. On Android some components
+ship no artifact but still run, with or without small changes. The WASM
+client runs in any modern browser (Android and iOS included), and the
+`serve.py` bundle is OS-independent, needing only Python 3. Client and
+`V2Vctl` ship as bare binaries; the server ships as `.tar.gz`, or `.zip`
+on Windows.
+
 ## Version coupling
 
 Pre-1.0 releases do not guarantee wire compatibility. **Update the client

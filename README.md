@@ -36,6 +36,8 @@ make dev             # -> bin/v2v, bin/v2v-server, bin/v2vctl + fresh webterm (d
 make help            # see all targets
 ```
 
+Supported platforms and architectures: [INSTALL.md](INSTALL.md#platform-support).
+
 **2. Join as guest**
 
 ```bash
