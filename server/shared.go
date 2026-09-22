@@ -163,7 +163,9 @@ type ChatServer struct {
 func NewChatServer() *ChatServer {
 	salt := make([]byte, 32)
 	if _, err := rand.Read(salt); err != nil {
-		// fallback to time-based if rand fails (should not happen)
+		// The salt protects display-name anonymity; a predictable
+		// fallback must never be silent.
+		logWarnf("⚠️ [SECURITY] crypto/rand thất bại khi sinh DisplaySalt (%v); dùng fallback time-based — hash định danh tên hiển thị trở nên dự đoán được, có thể bị đối chiếu ngược", err)
 		salt = []byte(time.Now().String())
 	}
 	s := &ChatServer{
