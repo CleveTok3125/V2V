@@ -108,7 +108,9 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 			tripForChain = rec.Wire.Trip
 			wireForVerify = rec.Wire
 		}
-		s.Chain.appendMessageToHistory(msgForHistory)
+		// A signed record is appended only after it verifies: a tampered
+		// trip line must not reach the replayed RAM history just because
+		// the disk still holds it.
 		if tripForChain != nil && tripForChain.Pub != "" && wireForVerify != nil {
 			displayName := wireForVerify.DisplayName
 			if displayName == "" {
@@ -179,6 +181,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 				s.TripChains.Store(tripForChain.Pub, next)
 			}
 		}
+		s.Chain.appendMessageToHistory(msgForHistory)
 	}
 
 	loggedCount := len(s.Chain.History)

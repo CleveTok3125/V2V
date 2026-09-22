@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -374,6 +375,48 @@ func signTripRecord(t *testing.T, priv ed25519.PrivateKey, pubHex string, seq ui
 		TmpID:       tmpID,
 	}}
 	return historyRecord{Timestamp: "2026-01-01T00:00:00Z", Wire: &wire}, next
+}
+
+// A tampered trip line must not reach the replayed RAM history: it is
+// dropped during recovery even though the disk still holds it.
+func TestInitHistoryStore_DropsTamperedTripFromReplay(t *testing.T) {
+	testCfg(t)
+	priv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x09}, 32))
+	pubHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
+
+	rec1, next1 := signTripRecord(t, priv, pubHex, 1, make([]byte, 32), "honest")
+	rec2, _ := signTripRecord(t, priv, pubHex, 2, next1, "tampered")
+	rec2.Wire.Text = "tampered-edited" // breaks msg_hash binding
+
+	path := filepath.Join(t.TempDir(), "history.jsonl")
+	var sb bytes.Buffer
+	for _, rec := range []historyRecord{rec1, rec2} {
+		line, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sb.Write(line)
+		sb.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, sb.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewChatServer()
+	if err := s.InitHistoryStore(path, 1); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Chain.Store.Close()
+
+	s.Chain.Mu.RLock()
+	history := append([]string(nil), s.Chain.History...)
+	s.Chain.Mu.RUnlock()
+	if len(history) != 1 {
+		t.Fatalf("replay history = %d lines, want 1 (tampered dropped)", len(history))
+	}
+	if !strings.Contains(history[0], "honest") {
+		t.Fatalf("valid line missing: %q", history[0])
+	}
 }
 
 // Recovery must adopt the highest verified seq across a gap (so the live
