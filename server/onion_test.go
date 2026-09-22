@@ -148,6 +148,9 @@ func TestIsSecuredConnectOnion(t *testing.T) {
 
 func TestOnionFeatureGates(t *testing.T) {
 	testCfg(t)
+	// The web master switch is on for these cases; the onion layer is
+	// what they exercise.
+	Cfg.Static.WebEnabled = true
 	onionR := onionReq("abcd.onion", "127.0.0.1:5555")
 	plainR := onionReq("example.com", "198.51.100.9:5555")
 
@@ -173,6 +176,40 @@ func TestOnionFeatureGates(t *testing.T) {
 	withOnion(t, nil, true, true)
 	if !webAllowed(onionR) || !passkeyAllowed(onionR) {
 		t.Fatal("no onion hosts means no restriction")
+	}
+}
+
+// TestWebEnabledMasterSwitch pins the two-layer web gate: WEB_ENABLED is
+// the master switch for every request, ONION_ALLOW_WEB only adds the
+// onion restriction on top. With WEB_ENABLED=false nothing is served,
+// even for a non-onion host or an onion opt-in.
+func TestWebEnabledMasterSwitch(t *testing.T) {
+	testCfg(t)
+	onionR := onionReq("abcd.onion", "127.0.0.1:5555")
+	plainR := onionReq("example.com", "198.51.100.9:5555")
+
+	withWeb := func(enabled bool) {
+		old := Cfg.Static.WebEnabled
+		Cfg.Static.WebEnabled = enabled
+		t.Cleanup(func() { Cfg.Static.WebEnabled = old })
+	}
+
+	withOnion(t, []string{"abcd.onion"}, true, true)
+
+	withWeb(false)
+	if webAllowed(plainR) {
+		t.Fatal("WEB_ENABLED=false must deny non-onion requests")
+	}
+	if webAllowed(onionR) {
+		t.Fatal("WEB_ENABLED=false must deny onion even with ONION_ALLOW_WEB=true")
+	}
+
+	withWeb(true)
+	if !webAllowed(plainR) {
+		t.Fatal("WEB_ENABLED=true must allow non-onion requests")
+	}
+	if !webAllowed(onionR) {
+		t.Fatal("WEB_ENABLED=true with ONION_ALLOW_WEB=true must allow onion")
 	}
 }
 

@@ -22,6 +22,10 @@ type StaticConfig struct {
 	MaxLogSizeMB         int
 	HistoryFilePath      string
 	MaxHistoryFileSizeMB int
+	// WebEnabled is the master switch for the WASM web client served at
+	// /web/. False denies it for every request; onion requests are
+	// additionally gated by Onion.AllowWeb.
+	WebEnabled bool
 	// Root is the instance directory (V2V_ROOT, default instances/default)
 	// that .env, config/ and data/ hang off.
 	Root string

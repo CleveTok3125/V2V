@@ -106,7 +106,16 @@ lives in `instances/prod/data/` and is untouched by image changes.
    On Windows the binary is `server.exe`. Set `WEBTERM_DIR` to serve the
    web bundle from a different directory.
 
-5. Open `http://localhost:10000/web/` for the browser client.
+5. Open `http://localhost:10000/web/` for the browser client. The WASM
+   client is served locally by the same binary, so a browser deployment
+   gets the browser sandbox without any separate web server.
+
+   Two flags gate it: `WEB_ENABLED` (default `true`) is the master switch
+   for every request, and `ONION_ALLOW_WEB` (default `false`) adds the
+   onion restriction, so an onion request needs both. Set `WEB_ENABLED=false`
+   to stop serving `/web/` entirely. From source, build the assets with
+   `make web` first; keep the client and server on the same commit, since
+   the pre-dial version check is skipped for the WASM client.
 
 ## Verify a download
 

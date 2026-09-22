@@ -25,9 +25,13 @@ func onionRequest(r *http.Request) bool {
 	return Cfg.Static.OnionEnabled() && Cfg.Static.IsOnionHost(r.Host)
 }
 
-// webAllowed reports whether the WASM web client may be served. Onion
-// requests are denied unless the operator opts in.
+// webAllowed reports whether the WASM web client may be served. WebEnabled
+// is the master switch; onion requests are then denied unless the operator
+// opts in with ONION_ALLOW_WEB.
 func webAllowed(r *http.Request) bool {
+	if !Cfg.Static.WebEnabled {
+		return false
+	}
 	return !onionRequest(r) || Cfg.Static.Onion.AllowWeb
 }
 
@@ -229,6 +233,7 @@ func loadStaticConfig() (StaticConfig, error) {
 		NoContentLogs:        noContentLogs,
 		Root:                 ServerRoot,
 		TrustedProxyDir:      trustedProxyDir,
+		WebEnabled:           getEnvAsBoolOptional("WEB_ENABLED", true),
 		Onion: OnionConfig{
 			Hosts:        onionHosts,
 			AllowWeb:     getEnvAsBoolOptional("ONION_ALLOW_WEB", false),
@@ -458,7 +463,11 @@ func main() {
 	webHandler := http.StripPrefix("/web/", webFilesHandler(webtermDir))
 	mux.HandleFunc("/web/", func(w http.ResponseWriter, r *http.Request) {
 		if !webAllowed(r) {
-			logWarnf("⛔ [ONION] Chặn web client từ %s (ONION_ALLOW_WEB=false)", trustedproxy.Clip(r.Host, 200))
+			if !Cfg.Static.WebEnabled {
+				logWarnf("⛔ [WEB] Chặn web client từ %s (WEB_ENABLED=false)", trustedproxy.Clip(r.Host, 200))
+			} else {
+				logWarnf("⛔ [ONION] Chặn web client từ %s (ONION_ALLOW_WEB=false)", trustedproxy.Clip(r.Host, 200))
+			}
 			http.NotFound(w, r)
 			return
 		}
