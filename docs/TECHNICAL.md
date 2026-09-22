@@ -29,7 +29,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 ├── server/           # WebSocket server, history, auth, WebAuthn
 ├── internal/
 │   ├── identity/     # Shared key file logic (Load/Save, encryption)
-│   ├── filter/       # Injection filter (ValidateMessage / SanitizeForDisplay)
+│   ├── filter/       # Injection filter (ValidateMessage / SanitizeForDisplay / SanitizeSingleLine)
 │   ├── trip/         # Trip verification (Verify)
 │   ├── tripcolor/    # Badge color palette + CanonicalPayload
 │   ├── chain/        # Global message hash chain (Hash/VerifyLink/genesis)
@@ -348,8 +348,11 @@ Paths below are relative to the instance root (`V2V_ROOT`, default `instances/de
 ## Security Model
 
 - **Injection:** All inbound `text` and `username` go through `internal/filter`.
-- `ValidateMessage` rejects `Cf/Mn/Me/Zl/Zp/0xFFFD/non-graphic`, `SanitizeForDisplay` keeps only whitelisted `SGR \x1b[...m` and `OSC8 \x1b]8;;...\x1b\\`; an unterminated OSC8 drops the tail instead of leaking the link target.
+- `ValidateMessage` rejects `Cf/Mn/Me/Zl/Zp/0xFFFD/non-graphic`, `SanitizeForDisplay` keeps only whitelisted `SGR \x1b[...m` and OSC8 links (`\x1b]8;...;uri\x1b\\`) whose target is `http(s)` or the client-generated `v2v://expand/`; every other OSC (clipboard write, palette/color, kitty) is dropped, and an unterminated OSC drops the tail instead of leaking the link target.
 - Client double-filters before display, so a compromised server's tampered history cannot execute `ESC[2J` etc.
+- Server-controlled fields outside message `text` are sanitized at their render sink: `time`/`display_name` through `SanitizeSingleLine`, free text (server host, auth error, dial response body, `--info` page) through `SanitizeForDisplay`, chain/trip hex only when it really is hex, and all trip-verify URL parameters percent-encoded. The same filter backs the WASM web client.
+- **Client DoS bounds:** the desktop client sets a WebSocket `SetReadLimit` of `maxHistoryBytes + 1MiB` (the server sends replay lines individually, so every legitimate frame is far smaller) and caps the `--info` body at `256KiB`; the WASM shim enforces the same per-frame budget before queueing.
+- Remaining exposure sits in the terminal emulator itself (outside the client) and in OSC8 phishing via an allowed-scheme link the user chooses to open.
 - **Phishing:** Privileged identities are pinned to `server_pubkey` (not hostname); real passkeys are pinned by `RPID`/`origin`.
 - **Spam/Abuse:** `MaxConnectionsPerIP`, `MessageCooldown`, `IdleChatTimeout`, `Trip verify 200ms/IP` rate limit, `SetReadLimit` `64KB` for auth and `MaxMessageLength*3` for chat.
 - **Transport:** `REQUIRE_TLS` option blocks `ws://` (returns `426`), `ALLOWED_ORIGINS` checked in `Upgrader.CheckOrigin`; the code default is `true` (fail-closed when the var is missing).
