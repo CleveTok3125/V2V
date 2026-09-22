@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +24,48 @@ func testCfg(t *testing.T) {
 		Cfg.Dynamic.Store(oldDyn)
 		Cfg.Static = oldStatic
 	})
+}
+
+// alertConcurrentIdentity must serialize its liveness check and send
+// with unregisterClient's remove-then-close ordering, otherwise the send
+// can race close(Send) and panic. Runs under -race.
+func TestAlertConcurrentIdentity_NoSendOnClosed(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	var panicked atomic.Bool
+	for i := 0; i < 300; i++ {
+		conn := &websocket.Conn{}
+		sess := &ClientSession{Conn: conn, Send: make(chan []byte, 4)}
+		s.Hub.ClientsMu.Lock()
+		s.Hub.Clients[conn] = sess
+		s.Hub.ClientsMu.Unlock()
+		s.Hub.ActiveIdentities.Store("pub", sess)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if recover() != nil {
+					panicked.Store(true)
+				}
+			}()
+			s.Hub.alertConcurrentIdentity("pub", "1.2.3.4")
+		}()
+		go func() {
+			defer wg.Done()
+			// Mirror unregisterClient: remove under the lock, then close.
+			s.Hub.ClientsMu.Lock()
+			delete(s.Hub.Clients, conn)
+			s.Hub.ClientsMu.Unlock()
+			close(sess.Send)
+		}()
+		wg.Wait()
+		s.Hub.ActiveIdentities.Delete("pub")
+		if panicked.Load() {
+			t.Fatal("alertConcurrentIdentity sent on a closed channel")
+		}
+	}
 }
 
 // dialAuthPair upgrades a loopback pair and returns the client side plus

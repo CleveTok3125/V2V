@@ -244,10 +244,13 @@ func (h *Hub) alertConcurrentIdentity(identityPubHex, newClientIP string) {
 	if prev == nil || prev.Conn == nil {
 		return
 	}
+	// Hold ClientsMu across the liveness check and the send: unregister
+	// removes the session under the same lock and only closes Send after
+	// releasing it, so a send outside the lock can race close(Send) and
+	// panic. The send is non-blocking, so holding the lock is safe.
 	h.ClientsMu.Lock()
-	_, alive := h.Clients[prev.Conn]
-	h.ClientsMu.Unlock()
-	if !alive {
+	defer h.ClientsMu.Unlock()
+	if _, alive := h.Clients[prev.Conn]; !alive {
 		return
 	}
 	select {
