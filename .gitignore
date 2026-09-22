@@ -40,6 +40,10 @@ roles.json
 *.log
 logs/
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Live server dirs (template/ holds the samples)
 /config/
 /data/
@@ -60,6 +64,7 @@ webterm/version.js
 # Precompressed wasm bundle variants
 webterm/app.wasm.gz
 webterm/app.wasm.br
+webterm/app.wasn.br.tmp
 
 # Build Artifacts
 bin/

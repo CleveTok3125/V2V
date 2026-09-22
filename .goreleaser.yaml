@@ -14,6 +14,15 @@ before:
     # single build is copied into every server archive below. Hooks are
     # exec'd directly, so wrap the env assignment in `sh -c`.
     - "sh -c 'GIT_HASH={{ .Tag }} make web'"
+    # Standalone browser client: the wasm bundle plus serve.py, zipped
+    # once. Platform-independent, attached by release.extra_files below
+    # (archives require a build id and would emit one copy per platform).
+    - >-
+      sh -c 'rm -f dist/V2V-webterm-{{ .Version }}.zip &&
+      mkdir -p dist/stage/webterm &&
+      cp -r webterm/. dist/stage/webterm/ &&
+      cp scripts/webterm-serve/serve.py dist/stage/webterm/serve.py &&
+      (cd dist/stage/webterm && zip -qr ../../V2V-webterm-{{ .Version }}.zip .)'
 
 builds:
   - id: client
@@ -197,3 +206,5 @@ release:
   draft: true
   prerelease: auto
   name_template: "{{ .Tag }}"
+  extra_files:
+    - glob: dist/V2V-webterm-*.zip

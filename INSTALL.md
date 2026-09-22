@@ -11,6 +11,7 @@ platform and run it.
 | `V2V-<os>-<arch>[.exe]`                      | Chat client                                                    |
 | `V2Vctl-<os>-<arch>[.exe]`                   | Admin tool (roles, keys, enrollment, instance management)      |
 | `V2V-server-<os>-<arch>.tar.gz` / `.zip`       | Self-contained server bundle (see below)                       |
+| `V2V-webterm-<version>.zip`                   | Standalone browser client (wasm + `serve.py`)                  |
 | `ghcr.io/clevetok3125/v2v:<version>`         | Multi-arch container image (`linux/amd64`, `linux/arm64`)      |
 | `SHA256SUMS`, `SHA256SUMS.sigstore.json`        | Checksums and a cosign keyless signature bundle of the checksums |
 
@@ -29,7 +30,31 @@ docker-compose.yml    # container deployment
 
 Pre-1.0 releases do not guarantee wire compatibility. **Update the client
 and the server together.** Clients query `GET /api/version` before dialing
-and warn on a mismatch.
+and warn on a mismatch. The WASM client is served by the same server
+build, so it is already paired; a standalone `V2V-webterm` bundle must be
+kept on the same commit as the server it connects to.
+
+## Standalone browser client
+
+The `V2V-webterm-<version>.zip` artifact ships the WASM client with
+`serve.py`, a small stdlib-only Python server that reproduces the V2V
+static behavior (mount at `/web/`, `application/wasm`, the pre-compressed
+`.br`/`.gz` variants). It needs no chat server build and gives the client
+the browser sandbox.
+
+```sh
+unzip V2V-webterm-<version>.zip
+python3 serve.py            # http://127.0.0.1:8080/web/
+python3 serve.py --port 9000 --bind 0.0.0.0
+```
+
+Open the printed URL and enter the chat server address in the form. On
+the server side, list the page's origin in `ALLOWED_ORIGINS` and keep
+`WEBAUTHN_RPID`/`WEBAUTHN_ORIGIN` matching the host that serves the page
+(passkey only). The server also has to allow `/web/` (`WEB_ENABLED=true`,
+the default). To serve it behind a real web server instead, point that
+server at the extracted directory with the same `/web/` prefix; the
+assets reference `/web/...` paths.
 
 ## Docker (recommended)
 
