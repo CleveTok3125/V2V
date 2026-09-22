@@ -12,22 +12,42 @@ import (
 // then the auth-challenge read. Pure session bootstrap; the chat loop
 // never re-enters here.
 
+// dialErrorBody is the most of a failed dial's response body the client
+// reads for display: it is server-supplied, so the read is bounded.
+const dialErrorBody = 256 << 10
+
+// dialBodyText reads a bounded, sanitized slice of a failed response
+// body. Nil body yields "".
+func dialBodyText(resp *http.Response) string {
+	if resp == nil || resp.Body == nil {
+		return ""
+	}
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, dialErrorBody))
+	return serverText(strings.TrimSpace(string(bodyBytes)))
+}
+
 // dialWithUpgrade dials wsURL, retrying once as wss:// when the server
 // answers 426 Upgrade Required. It returns the live connection, the
 // effective URL (upgraded or original), or a nil connection with the
 // failure already reported.
 func dialWithUpgrade(wsURL string) (wsConn, string, error) {
 	conn, resp, err := dialWS(wsURL)
+	if err == nil && conn != nil {
+		conn.SetReadLimit(clientReadLimit())
+	}
 	if err != nil {
 		// Auto-upgrade ws:// -> wss:// when server requires TLS (426)
 		if resp != nil && resp.StatusCode == http.StatusUpgradeRequired && strings.HasPrefix(wsURL, "ws://") {
 			wssURL := "wss://" + strings.TrimPrefix(wsURL, "ws://")
 			fmt.Printf("🔒 Server yêu cầu wss://, đang thử lại với %s…\n", wssURL)
-			if bodyBytes, _ := io.ReadAll(resp.Body); len(bodyBytes) > 0 {
-				fmt.Printf("📦 Server: %s\n", serverText(strings.TrimSpace(string(bodyBytes))))
+			if body := dialBodyText(resp); body != "" {
+				fmt.Printf("📦 Server: %s\n", body)
 			}
 			conn2, resp2, err2 := dialWS(wssURL)
 			if err2 == nil {
+				if conn2 != nil {
+					conn2.SetReadLimit(clientReadLimit())
+				}
 				return conn2, wssURL, nil
 			}
 			fmt.Printf("❌ Thử lại wss cũng thất bại: %v\n", err2)
@@ -39,9 +59,8 @@ func dialWithUpgrade(wsURL string) (wsConn, string, error) {
 		fmt.Println("❌ Không thể kết nối:", err)
 		if resp != nil {
 			fmt.Printf("👉 HTTP Status Code: %d\n", resp.StatusCode)
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			if len(bodyBytes) > 0 {
-				fmt.Printf("📦 Nội dung phản hồi: %s\n", serverText(strings.TrimSpace(string(bodyBytes))))
+			if body := dialBodyText(resp); body != "" {
+				fmt.Printf("📦 Nội dung phản hồi: %s\n", body)
 			}
 		}
 		return nil, wsURL, err

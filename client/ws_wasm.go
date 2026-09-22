@@ -19,9 +19,18 @@ type wasmWSConn struct {
 	ws        js.Value
 	recvCh    chan wsFrame
 	callbacks []js.Func
+	readLimit int64
 	eofOnce   sync.Once
 	relOnce   sync.Once
 }
+
+// errReadLimitExceeded fails the stream when an inbound frame is larger
+// than the configured budget. The browser buffers the frame before this
+// handler runs, but the Go side must not copy it into its own queue.
+var errReadLimitExceeded = errors.New("khung tin vượt giới hạn")
+
+// SetReadLimit stores the per-frame byte budget enforced in onMessage.
+func (c *wasmWSConn) SetReadLimit(n int64) { c.readLimit = n }
 
 type wsFrame struct {
 	msgType int
@@ -59,7 +68,15 @@ func dialWS(wsURL string) (wsConn, *http.Response, error) {
 		if !data.Truthy() {
 			return nil
 		}
-		conn.recvCh <- wsFrame{msgType: wsTextMessage, data: []byte(data.String())}
+		s := data.String()
+		if conn.readLimit > 0 && int64(len(s)) > conn.readLimit {
+			conn.eofOnce.Do(func() {
+				conn.recvCh <- wsFrame{err: errReadLimitExceeded}
+			})
+			conn.release()
+			return nil
+		}
+		conn.recvCh <- wsFrame{msgType: wsTextMessage, data: []byte(s)}
 		return nil
 	})
 	onClose := js.FuncOf(func(this js.Value, args []js.Value) any {

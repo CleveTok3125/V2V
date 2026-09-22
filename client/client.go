@@ -70,7 +70,23 @@ type wsConn interface {
 	WriteJSON(v any) error
 	ReadMessage() (messageType int, p []byte, err error)
 	WriteMessage(messageType int, data []byte) error
+	SetReadLimit(n int64)
 	Close() error
+}
+
+// clientReadLimit bounds one inbound WebSocket frame. The server sends
+// replay lines individually, so any legitimate frame is far below this;
+// the budget is the configured history byte cap plus a small margin so a
+// malicious server cannot force an unbounded allocation.
+func clientReadLimit() int64 {
+	const margin = 1 << 20
+	if ClientCfg == nil {
+		return margin
+	}
+	if v := int64(ClientCfg.Limits.MaxHistoryBytes); v > 0 {
+		return v + margin
+	}
+	return margin
 }
 
 // inputTerminal abstracts the interactive input/output the chat loop uses.

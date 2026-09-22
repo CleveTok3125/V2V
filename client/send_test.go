@@ -19,11 +19,12 @@ type stubConn struct {
 	wrote    any
 }
 
-func (c *stubConn) ReadJSON(any) error                         { return io.EOF }
-func (c *stubConn) WriteJSON(v any) error                      { c.wrote = v; return c.writeErr }
-func (c *stubConn) ReadMessage() (int, []byte, error)          { return 0, nil, io.EOF }
-func (c *stubConn) WriteMessage(int, []byte) error             { return nil }
-func (c *stubConn) Close() error                               { return nil }
+func (c *stubConn) ReadJSON(any) error                { return io.EOF }
+func (c *stubConn) WriteJSON(v any) error             { c.wrote = v; return c.writeErr }
+func (c *stubConn) ReadMessage() (int, []byte, error) { return 0, nil, io.EOF }
+func (c *stubConn) WriteMessage(int, []byte) error    { return nil }
+func (c *stubConn) SetReadLimit(int64)                {}
+func (c *stubConn) Close() error                      { return nil }
 
 // TestSendMessagePlainLoopback exercises the moved send path over a real
 // loopback websocket: the server must receive the envelope, the

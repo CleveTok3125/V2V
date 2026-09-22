@@ -274,7 +274,9 @@ func fetchServerInfoBody(client *http.Client, url string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// The info page is server-supplied: bound the read so a hostile or
+	// broken server cannot stream the client out of memory.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
 	if err != nil {
 		return "", err
 	}
