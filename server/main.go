@@ -190,16 +190,28 @@ func loadStaticConfig() (StaticConfig, error) {
 		return StaticConfig{}, err
 	}
 
+	noContentLogs := getEnvAsBoolOptional("NO_CONTENT_LOGS", false)
+	logFilePath := getEnvOptional("LOG_FILE_PATH", dataPath("app.log"))
+	historyFilePath := getEnvOptional("HISTORY_FILE_PATH", dataPath("history.jsonl"))
+	if noContentLogs {
+		if os.Getenv("LOG_FILE_PATH") != "" || os.Getenv("HISTORY_FILE_PATH") != "" {
+			logWarnf("⚠️ NO_CONTENT_LOGS=true: LOG_FILE_PATH/HISTORY_FILE_PATH bị bỏ qua (RAM-only)")
+		}
+		warnStaleContentFiles(logFilePath, historyFilePath)
+	}
+	logFilePath, historyFilePath = effectiveStoragePaths(noContentLogs, logFilePath, historyFilePath)
+
 	cfg := StaticConfig{
 		AllowedOrigins:       strings.Split(env.AllowedOrigins(), ","),
 		RequireTLS:           getEnvAsBoolOptional("REQUIRE_TLS", true),
 		Port:                 loader.Smart("PORT"),
 		InstanceID:           instanceID,
 		Timezone:             getEnvAsLocationOptional("TIMEZONE", "Asia/Ho_Chi_Minh"),
-		LogFilePath:          getEnvOptional("LOG_FILE_PATH", dataPath("app.log")),
+		LogFilePath:          logFilePath,
 		MaxLogSizeMB:         loader.Int("MAX_LOG_SIZE_MB"),
-		HistoryFilePath:      getEnvOptional("HISTORY_FILE_PATH", dataPath("history.jsonl")),
+		HistoryFilePath:      historyFilePath,
 		MaxHistoryFileSizeMB: loader.Int("MAX_HISTORY_FILE_SIZE_MB"),
+		NoContentLogs:        noContentLogs,
 		TrustedProxyDir:      getEnvOptional(env.KeyTrustedProxyDir, DefaultTrustedProxyDir),
 		Onion: OnionConfig{
 			Hosts:        onionHosts,
@@ -219,6 +231,31 @@ func loadStaticConfig() (StaticConfig, error) {
 	cfg.ProxyChain = chain
 
 	return cfg, nil
+}
+
+// effectiveStoragePaths applies the NO_CONTENT_LOGS policy: content paths
+// are cleared so the logger and history store stay off-disk.
+func effectiveStoragePaths(noContentLogs bool, logPath, historyPath string) (string, string) {
+	if noContentLogs {
+		return "", ""
+	}
+	return logPath, historyPath
+}
+
+// warnStaleContentFiles warns about pre-existing history/log artifacts when
+// NO_CONTENT_LOGS starts. It never deletes: removal stays an operator action.
+func warnStaleContentFiles(logPath, historyPath string) {
+	for _, p := range []string{
+		historyPath, historyPath + ".old", historyPath + ".old.zst",
+		logPath, logPath + ".old",
+	} {
+		if p == "" {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			logWarnf("⚠️ NO_CONTENT_LOGS: còn file %s trên đĩa; hãy tự xoá nếu muốn sạch dấu vết", p)
+		}
+	}
 }
 
 func loadDynamicConfig() (DynamicConfig, error) {

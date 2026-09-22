@@ -22,6 +22,12 @@ type StaticConfig struct {
 	MaxLogSizeMB         int
 	HistoryFilePath      string
 	MaxHistoryFileSizeMB int
+	// NoContentLogs is the content-privacy policy: chat history stays in
+	// RAM only and message content is never logged. Operational metadata
+	// (client IP, auth/identity events, admin and error lines) is still
+	// logged, and identity/auth files are still written. This is NOT
+	// "zero logs".
+	NoContentLogs bool
 	// Onion holds Tor hidden-service ingress policy. Hosts is the set of
 	// accepted "<id>.onion" names; a request to one of them from a local or
 	// direct-trusted hop is treated as already encrypted (Tor provides

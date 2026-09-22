@@ -18,6 +18,7 @@
         "MAX_LOG_SIZE_MB",
         "HISTORY_FILE_PATH",
         "MAX_HISTORY_FILE_SIZE_MB",
+        "NO_CONTENT_LOGS",
         "STATUS_URL",
         "DOWNLOAD_URL",
         "HOMEPAGE_URL",

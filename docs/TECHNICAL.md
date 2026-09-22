@@ -327,6 +327,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - Identity writes (`key.json`, `roles.json`) go through `renameio/v2/maybe`: atomic temp-file + fsync + rename on Unix, plain `os.WriteFile` fallback on Windows where atomic replace is not reliably available. The requested `0600` passes through the process umask on v2 (v1 ignored it), and an existing regular file keeps its own permissions.
 - The successful unlock secret is remembered for the session so counter saves re-encrypt instead of dropping to plaintext, and wiped at exit (`ClearLoadedPassphrase`, deferred plus the conn-drop path).
 - File-supplied argon2 costs are clamped (t 1-10, m 8-256MiB, p 1-8) and the envelope identity (v3/argon2id/xchacha20poly1305) verified, so crafted files fail closed instead of exhausting RAM.
+- **No-content-logs mode (`NO_CONTENT_LOGS=true`):** content-privacy, not "zero logs". Chat history stays in RAM only (`Chain.Store` is nil, `HISTORY_FILE_PATH`/`LOG_FILE_PATH` are ignored, no rotation and no disk lookup), and message content is never logged: the per-message line is dropped and rejected payloads are recorded by error type only. Operational metadata still goes to stdout/stderr — client IP, auth/identity events, admin and error lines — and identity/auth files (`server_identity.json`, `webauthn.json`, `config/roles.json`) are still written. Pre-existing history/log files are left untouched and only warned about; full no-content-retention also requires disabling OS-level log persistence (e.g. journald).
 
 ## Security Model
 

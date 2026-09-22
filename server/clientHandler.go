@@ -17,6 +17,23 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// contentLoggingEnabled reports whether message content may be logged.
+// NO_CONTENT_LOGS turns it off; operational metadata is unaffected.
+func contentLoggingEnabled() bool {
+	return !Cfg.Static.NoContentLogs
+}
+
+// logFilterReject records a rejected message. The validator error and the
+// sender identity stay; the raw payload is only included when content
+// logging is enabled (NO_CONTENT_LOGS=false).
+func logFilterReject(session *ClientSession, clientIP string, err error, raw string) {
+	if !contentLoggingEnabled() {
+		logWarnf("⛔ [FILTER REJECT] %s (%s): %v", session.DisplayName, clientIP, err)
+		return
+	}
+	logWarnf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
+}
+
 func (s *ChatServer) acquireIPConnection(w http.ResponseWriter, clientIP string) bool {
 	s.IpCountsMu.Lock()
 	defer s.IpCountsMu.Unlock()
@@ -302,7 +319,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 					case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
 					default:
 					}
-					logWarnf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
+					logFilterReject(session, clientIP, err, raw)
 					updateReadDeadline()
 					continue
 				}
@@ -339,7 +356,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
 				default:
 				}
-				logWarnf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
+				logFilterReject(session, clientIP, err, raw)
 				updateReadDeadline()
 				continue
 			}
@@ -457,7 +474,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
 				default:
 				}
-				logWarnf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
+				logFilterReject(session, clientIP, err, raw)
 				updateReadDeadline()
 				continue
 			}
@@ -507,7 +524,6 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			TmpID:       msgTmpID,
 			ReplyTo:     msgReplyTo,
 		}
-		logInfof("💬 [MSG từ %s] %s (%s): %s\n", clientIP, session.DisplayName, session.Tripcode, strings.ReplaceAll(text, "\n", "\\n"))
 		s.Hub.BroadcastWire(wire, session.Conn, s.serverPub())
 	}
 }
