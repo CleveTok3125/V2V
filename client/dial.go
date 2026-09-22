@@ -24,7 +24,7 @@ func dialWithUpgrade(wsURL string) (wsConn, string, error) {
 			wssURL := "wss://" + strings.TrimPrefix(wsURL, "ws://")
 			fmt.Printf("🔒 Server yêu cầu wss://, đang thử lại với %s…\n", wssURL)
 			if bodyBytes, _ := io.ReadAll(resp.Body); len(bodyBytes) > 0 {
-				fmt.Printf("📦 Server: %s\n", strings.TrimSpace(string(bodyBytes)))
+				fmt.Printf("📦 Server: %s\n", serverText(strings.TrimSpace(string(bodyBytes))))
 			}
 			conn2, resp2, err2 := dialWS(wssURL)
 			if err2 == nil {
@@ -41,7 +41,7 @@ func dialWithUpgrade(wsURL string) (wsConn, string, error) {
 			fmt.Printf("👉 HTTP Status Code: %d\n", resp.StatusCode)
 			bodyBytes, _ := io.ReadAll(resp.Body)
 			if len(bodyBytes) > 0 {
-				fmt.Printf("📦 Nội dung phản hồi: %s\n", strings.TrimSpace(string(bodyBytes)))
+				fmt.Printf("📦 Nội dung phản hồi: %s\n", serverText(strings.TrimSpace(string(bodyBytes))))
 			}
 		}
 		return nil, wsURL, err

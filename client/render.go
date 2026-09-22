@@ -41,6 +41,13 @@ func renderChatText(text string) string {
 	return markup.Span(filter.SanitizeForDisplay(text), st)
 }
 
+// serverText neutralizes terminal escapes in server-supplied free text
+// printed outside the tab buffers (dial notices, info pages, auth errors).
+func serverText(s string) string { return filter.SanitizeForDisplay(s) }
+
+// serverField is serverText for one-line fields (host, role, error).
+func serverField(s string) string { return filter.SanitizeSingleLine(s) }
+
 func parseTripBadgeLine(line string) (verifyJob, bool) {
 	// Look for OSC8 trip link (only https)
 	idx := strings.Index(line, "/api/trip/verify?")
@@ -254,7 +261,7 @@ func checkServerInfo(input string) {
 		return
 	}
 
-	fmt.Println("\n" + body)
+	fmt.Println("\n" + serverText(body))
 }
 
 // fetchServerInfoBody GETs a server info page over a caller-supplied
@@ -276,7 +283,7 @@ func fetchServerInfoBody(client *http.Client, url string) (string, error) {
 
 // Session render methods (moved from main).
 func greeting(w io.Writer, uname string) {
-	fmt.Fprintln(w, "Đã kết nối với username:", uname)
+	fmt.Fprintln(w, "Đã kết nối với username:", serverField(uname))
 	fmt.Fprint(w, "Gõ tin nhắn để chat, /help để hiện trợ giúp\n\n")
 }
 
@@ -350,7 +357,19 @@ func (s *Session) badgeForWire(wire WireMessage, av bool) (colored, urlStr strin
 		// No text= param: msg_hash suffices for verification, keeping
 		// links bounded and content out of URLs/history. Old links
 		// carrying text keep working (server checks it when present).
-		urlStr = fmt.Sprintf("https://%s/api/trip/verify?pub=%s&seq=%d&prev=%s&sig=%s&msg_hash=%s&server_pub=%s&display_name=%s&tmp_id=%d&reply_to=%d", u.Host, wire.Trip.Pub, wire.Trip.Seq, wire.Trip.Prev, wire.Trip.Sig, wire.Trip.MsgHash, wire.Trip.ServerPub, url.QueryEscape(wire.DisplayName), wire.Trip.TmpID, wire.Trip.ReplyTo)
+		// Every server-supplied field is percent-encoded so a crafted
+		// value cannot break out of the OSC8 target.
+		q := url.Values{}
+		q.Set("pub", wire.Trip.Pub)
+		q.Set("seq", strconv.FormatUint(uint64(wire.Trip.Seq), 10))
+		q.Set("prev", wire.Trip.Prev)
+		q.Set("sig", wire.Trip.Sig)
+		q.Set("msg_hash", wire.Trip.MsgHash)
+		q.Set("server_pub", wire.Trip.ServerPub)
+		q.Set("display_name", wire.DisplayName)
+		q.Set("tmp_id", strconv.FormatUint(wire.Trip.TmpID, 10))
+		q.Set("reply_to", strconv.FormatUint(wire.Trip.ReplyTo, 10))
+		urlStr = "https://" + u.Host + "/api/trip/verify?" + q.Encode()
 	}
 	return colored, urlStr
 }
@@ -398,7 +417,7 @@ func (s *Session) buildChatBlock(wire WireMessage, av, withMeta bool) (quote []s
 		return quote, head, "", classifyTab(wire.Text), wantsMeta(wire, withMeta)
 	}
 	mentionOpen, mentionClose := mentionSGR(ClientCfg.MentionColor())
-	head = fmt.Sprintf("| %s %s: %s\n", wire.Time, wire.DisplayName, renderMentions(renderChatText(wire.Text), s.resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose))
+	head = fmt.Sprintf("| %s %s: %s\n", filter.SanitizeSingleLine(wire.Time), filter.SanitizeSingleLine(wire.DisplayName), renderMentions(renderChatText(wire.Text), s.resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose))
 	if wire.ReplyTo > 0 {
 		quote = s.quoteLinesFor(wire.ReplyTo, false)
 	}

@@ -109,7 +109,7 @@ func applyWebPasskey(resp *AuthPacket, nonceHex string) bool {
 	if !webPasskey.Enabled {
 		return true // passkey not requested; continue as guest
 	}
-	fmt.Printf("🔑 Đang chờ passkey cho role [%s]...\n", webPasskey.Role)
+	fmt.Printf("🔑 Đang chờ passkey cho role [%s]...\n", serverField(webPasskey.Role))
 	setWasmStatus("Đang chờ xác thực passkey…", false)
 	resp.Role = webPasskey.Role
 	a, ok := requestAssertion(nonceHex, webPasskey.Role)

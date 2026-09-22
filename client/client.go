@@ -119,9 +119,9 @@ type verifyJob struct {
 func emitWhoami(mu *sync.Mutex, emit func(string), uname, authType, role string, unlimited bool, prefix string) {
 	mu.Lock()
 	defer mu.Unlock()
-	emit(fmt.Sprintf("| [Local]: Người dùng: %s | Xác thực: %s\n", uname, authType))
+	emit(fmt.Sprintf("| [Local]: Người dùng: %s | Xác thực: %s\n", serverField(uname), serverField(authType)))
 	if role != "" {
-		emit(fmt.Sprintf("| [Local]: Role: %s | Unlimited: %v | Prefix: %q\n", role, unlimited, prefix))
+		emit(fmt.Sprintf("| [Local]: Role: %s | Unlimited: %v | Prefix: %q\n", serverField(role), unlimited, serverField(prefix)))
 	}
 }
 

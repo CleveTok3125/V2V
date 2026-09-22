@@ -48,16 +48,44 @@ func metaLineFor(height uint64, hashHex, badgePart string) string {
 	sb.WriteString("  └─  #")
 	sb.WriteString(strconv.FormatUint(height, 10))
 	sb.WriteString(":")
-	if len(hashHex) >= 4 {
-		sb.WriteString(strings.ToLower(hashHex[:4]))
-	} else {
-		sb.WriteString(hashHex)
+	// A server-supplied hash is only shown when it really is hex: a
+	// crafted value must not smuggle escapes into the meta line.
+	if isHexString(hashHex) {
+		if len(hashHex) >= 4 {
+			sb.WriteString(strings.ToLower(hashHex[:4]))
+		} else {
+			sb.WriteString(strings.ToLower(hashHex))
+		}
 	}
 	if badgePart != "" {
 		sb.WriteString(" | ✍️ ")
 		sb.WriteString(badgePart)
 	}
 	return sb.String()
+}
+
+// isHexString reports whether s is a non-empty run of hex digits.
+func isHexString(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// hexField lowercases a hex field, returning "" when it is not hex so a
+// crafted value cannot reach the terminal.
+func hexField(s string) string {
+	t := strings.ToLower(strings.TrimSpace(s))
+	if !isHexString(t) {
+		return ""
+	}
+	return t
 }
 
 // matchPendingIndex finds the pending placeholder confirmed by a server
@@ -373,7 +401,7 @@ func formatQuoteRich(wire WireMessage, pending bool, maxRunes int) string {
 		mark = " \x1b[91m✗\x1b[39m"
 	}
 	line := fmt.Sprintf("|   ┌─  ↩ #%d | %s %s: %s%s",
-		wire.ChainHeight, wire.Time, wire.DisplayName,
+		wire.ChainHeight, filter.SanitizeSingleLine(wire.Time), filter.SanitizeSingleLine(wire.DisplayName),
 		quoteFirstLine(wire.Text, maxRunes), mark)
 	if pending {
 		return "\x1b[90m" + line + " ⏳\x1b[0m"
@@ -479,10 +507,10 @@ func formatInfoBlock(wire WireMessage) []string {
 	out = append(out, row("height:", strconv.FormatUint(wire.ChainHeight, 10)))
 	out = append(out, row("tmp_id:", strconv.FormatUint(wire.TmpID, 10)))
 	out = append(out, row("reply_to:", strconv.FormatUint(wire.ReplyTo, 10)))
-	out = append(out, row("hash:", strings.ToLower(wire.ChainHash)))
-	out = append(out, row("prev:", strings.ToLower(wire.ChainPrev)))
-	out = append(out, row("time:", wire.Time))
-	out = append(out, row("from:", wire.DisplayName))
+	out = append(out, row("hash:", hexField(wire.ChainHash)))
+	out = append(out, row("prev:", hexField(wire.ChainPrev)))
+	out = append(out, row("time:", filter.SanitizeSingleLine(wire.Time)))
+	out = append(out, row("from:", filter.SanitizeSingleLine(wire.DisplayName)))
 	if wire.Trip != nil {
 		tm := wire.Trip
 		verdict := "✗"
@@ -508,15 +536,15 @@ func formatInfoBlock(wire WireMessage) []string {
 		// Every signature input, so the verdict above is checkable by
 		// eye: sha256(text) against msg_hash, then ed25519 over the
 		// payload bytes against sig with pub.
-		out = append(out, row("trip.pub:", strings.ToLower(strings.TrimSpace(tm.Pub))))
-		out = append(out, row("trip.prev:", strings.ToLower(strings.TrimSpace(tm.Prev))))
-		out = append(out, row("trip.sig:", strings.ToLower(strings.TrimSpace(tm.Sig))))
+		out = append(out, row("trip.pub:", hexField(tm.Pub)))
+		out = append(out, row("trip.prev:", hexField(tm.Prev)))
+		out = append(out, row("trip.sig:", hexField(tm.Sig)))
 		hashMark := "✗"
-		if h := sha256.Sum256([]byte(wire.Text)); hex.EncodeToString(h[:]) == strings.ToLower(strings.TrimSpace(tm.MsgHash)) {
+		if h := sha256.Sum256([]byte(wire.Text)); hex.EncodeToString(h[:]) == hexField(tm.MsgHash) {
 			hashMark = "✓"
 		}
-		out = append(out, row("trip.hash:", strings.ToLower(strings.TrimSpace(tm.MsgHash))+" "+hashMark))
-		out = append(out, row("trip.srv:", strings.ToLower(strings.TrimSpace(tm.ServerPub))))
+		out = append(out, row("trip.hash:", hexField(tm.MsgHash)+" "+hashMark))
+		out = append(out, row("trip.srv:", hexField(tm.ServerPub)))
 		out = append(out, row("trip.payload:", fmt.Sprintf("%x", tripPayloadBytes(wire, tm))))
 	} else {
 		out = append(out, row("trip:", "(không)"))
@@ -524,7 +552,7 @@ func formatInfoBlock(wire WireMessage) []string {
 	if err := verifyWireContent(wire); err == nil {
 		out = append(out, row("chain:", "khớp ✓"))
 	} else {
-		out = append(out, row("chain:", fmt.Sprintf("lệch ✗ (%v)", err)))
+		out = append(out, row("chain:", fmt.Sprintf("lệch ✗ (%s)", filter.SanitizeSingleLine(err.Error()))))
 	}
 	out = append(out, row("raw:", rawOneLine(wire.Text)))
 	return out
@@ -572,7 +600,7 @@ func tripPayloadBytes(wire WireMessage, tm *TripMeta) []byte {
 
 // shortBadge derives the visible badge from a pubkey hex, tolerating junk.
 func shortBadge(pubHex string) string {
-	h := strings.ToLower(strings.TrimSpace(pubHex))
+	h := hexField(pubHex)
 	if len(h) >= 8 {
 		return h[:8]
 	}

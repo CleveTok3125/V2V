@@ -267,7 +267,7 @@ func (s *Session) connect() bool {
 		// Server pubkey pinning: verify server's identity before sending auth
 		if s.Challenge.ServerPubKey != "" {
 			if id.ServerPubKey != "" && !strings.EqualFold(id.ServerPubKey, s.Challenge.ServerPubKey) {
-				fmt.Printf("🚨 Server identity mismatch! Pin %s != %s — abort.\n", strutil.ShortN(id.ServerPubKey, 12), strutil.ShortN(s.Challenge.ServerPubKey, 12))
+				fmt.Printf("🚨 Server identity mismatch! Pin %s != %s — abort.\n", serverField(strutil.ShortN(id.ServerPubKey, 12)), serverField(strutil.ShortN(s.Challenge.ServerPubKey, 12)))
 				notifyQuit()
 				return false
 			}
@@ -284,7 +284,7 @@ func (s *Session) connect() bool {
 				}
 			}
 			if id.ServerPubKey == "" && s.Challenge.ServerPubKey != "" {
-				fmt.Printf("⚠️ Lần đầu kết nối tới server %s pin %s…\n", s.Challenge.ServerHost, strutil.ShortN(s.Challenge.ServerPubKey, 16))
+				fmt.Printf("⚠️ Lần đầu kết nối tới server %s pin %s…\n", serverField(s.Challenge.ServerHost), serverField(strutil.ShortN(s.Challenge.ServerPubKey, 16)))
 			}
 		}
 		// Use server's pubkey for anti-reuse (instead of host string)
@@ -354,7 +354,7 @@ func (s *Session) connect() bool {
 
 	switch authSuccess.Type {
 	case "auth_failed":
-		msg := "❌ Xác thực bị từ chối: " + authSuccess.Error
+		msg := "❌ Xác thực bị từ chối: " + serverField(authSuccess.Error)
 		fmt.Println(msg)
 		if showWasmStatus(msg, true) {
 			s.Conn.Close()
