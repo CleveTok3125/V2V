@@ -94,6 +94,19 @@ Xem `template/server/instances/default/config/roles.json` và `template/server/i
 
 ## Chạy Server
 
+Mỗi bản release phát hành kèm bundle server dựng sẵn và image container
+đa nền tảng; [INSTALL.md](INSTALL.md) là hướng dẫn triển khai đầy đủ.
+
+**Từ bản release (khuyến nghị):** tải `V2V-server-<os>-<arch>` đúng nền
+tảng, giải nén, rồi khởi tạo và chạy:
+
+```bash
+./v2vctl config sync --dir . --to instances/default   # khởi tạo từ template đi kèm
+# sửa instances/default/.env: PORT, ALLOWED_ORIGINS, ...
+V2V_ROOT=instances/default ./server
+# hoặc bằng container: xem INSTALL.md cho luồng image GHCR
+```
+
 **Từ mã nguồn:**
 
 ```bash

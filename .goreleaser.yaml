@@ -1,0 +1,174 @@
+# GoReleaser config for V2V.
+#
+# Scope split: GoReleaser owns the binary matrix, archives, checksums,
+# signing and the GitHub release. Docker images are built and pushed by
+# GitHub Actions with buildx (see .github/workflows/release.yml); the
+# Makefile still owns `dev`, `web` and `check` for local work.
+version: 2
+
+project_name: V2V
+
+before:
+  hooks:
+    # Build the wasm web bundle once. It is platform-independent, so a
+    # single build is copied into every server archive below. Hooks are
+    # exec'd directly, so wrap the env assignment in `sh -c`.
+    - "sh -c 'GIT_HASH={{ .Tag }} make web'"
+
+builds:
+  - id: client
+    main: ./client
+    binary: >-
+      V2V-{{ .Os }}-{{ if and (eq .Os "android") (eq .Arch "arm64") }}aarch64{{ else }}{{ .Arch }}{{ end }}
+    goos:
+      - windows
+      - linux
+      - android
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: android
+        goarch: amd64
+    # Distinct per-arch binary names keep these from colliding when the
+    # unique dist dir is disabled.
+    no_unique_dist_dir: true
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X main.Version={{ .Tag }}
+
+  - id: v2vctl
+    main: ./cmd/v2vctl
+    binary: >-
+      V2Vctl-{{ .Os }}-{{ if and (eq .Os "android") (eq .Arch "arm64") }}aarch64{{ else }}{{ .Arch }}{{ end }}
+    goos:
+      - windows
+      - linux
+      - android
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: android
+        goarch: amd64
+    # Predictable dist path so the server archive can bundle this binary.
+    no_unique_dist_dir: true
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X main.Version={{ .Tag }}
+    hooks:
+      # Stage a copy named `v2vctl` (or `v2vctl.exe`) per platform so the
+      # server archive can include it under a stable name: archive `dst`
+      # fields are not templated, so a conditional rename there does not
+      # work.
+      post:
+        - >-
+          sh -c 'mkdir -p "dist/stage/{{ .Os }}_{{ .Arch }}" && cp "{{ .Path }}" "dist/stage/{{ .Os }}_{{ .Arch }}/v2vctl{{ if eq .Os "windows" }}.exe{{ end }}"'
+
+  - id: server
+    main: ./server
+    binary: server
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - netgo
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X main.Version={{ .Tag }}
+
+archives:
+  # Clients and v2vctl ship as bare binaries, matching the historical
+  # `public/V2V-*` asset names.
+  - id: client
+    ids:
+      - client
+    formats:
+      - binary
+    # Bare binary assets keep the historical `V2V-<os>-<arch>` names
+    # (no version/OS/arch suffix that the binary default would add).
+    name_template: "{{ .Binary }}"
+  - id: v2vctl
+    ids:
+      - v2vctl
+    formats:
+      - binary
+    name_template: "{{ .Binary }}"
+
+  # One self-contained server bundle per platform: binary, wasm web
+  # bundle, bootstrap template, compose file and the matching v2vctl.
+  - id: server
+    ids:
+      - server
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "V2V-server-{{ .Os }}-{{ .Arch }}"
+    files:
+      - src: webterm/**
+      - src: template/**
+      - src: v2v-template.json
+      - src: docker-compose.yml
+      - src: INSTALL.md
+      - src: dist/stage/{{ .Os }}_{{ .Arch }}/v2vctl*
+        strip_parent: true
+
+checksum:
+  name_template: SHA256SUMS
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    artifacts: checksum
+    args:
+      - sign-blob
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    output: true
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: CleveTok3125
+    name: V2V
+  draft: true
+  prerelease: auto
+  name_template: "{{ .Tag }}"

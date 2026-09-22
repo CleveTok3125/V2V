@@ -94,6 +94,19 @@ See `template/server/instances/default/config/roles.json` and `template/server/i
 
 ## Running the Server
 
+Prebuilt server bundles and the multi-arch container image are published
+with each release; [INSTALL.md](INSTALL.md) is the full deployment guide.
+
+**From a release (recommended):** download `V2V-server-<os>-<arch>` for
+your platform, extract it, then bootstrap and run:
+
+```bash
+./v2vctl config sync --dir . --to instances/default   # bootstrap from the bundled template
+# edit instances/default/.env: PORT, ALLOWED_ORIGINS, ...
+V2V_ROOT=instances/default ./server
+# or via container: see INSTALL.md for the GHCR image flow
+```
+
 **From source:**
 
 ```bash

@@ -73,11 +73,13 @@ make v2vctl ALL=1    # full matrix
 make clean
 ```
 
-- Version stamping: `APP_VERSION=$(git describe --tags --always)` via `-ldflags -X 'main.Version=...'`, also `GIT_HASH` for web.
+- Version stamping: `APP_VERSION` prefers `GIT_HASH`, else `git describe --tags --always`; injected via `-ldflags -X 'main.Version=...'`. `make web` stamps `version.js` from `VERSION` (also `GIT_HASH`-first), so server, client, v2vctl and webterm share one tag.
 - Cross-compile: `CGO_ENABLED=0 GOOS=... GOARCH=... go build -trimpath`; host OS detected via `go env GOOS/GOARCH` (`HOST_GOOS/HOST_GOARCH`).
 - Default `make client`/`v2vctl` builds only host binary for fast dev; `ALL=1` builds full matrix (7 platforms) for CI.
-- CI: `.github/workflows/ci.yml` runs `make vet test` on push to `main/master` and PRs (Go 1.27, cache); `release.yml` runs `make -j4 client v2vctl ALL=1` on tag `v*` and publishes `public/*`.
-- Docker: `Dockerfile` runs `make server web` (requires `make` in builder).
+- Web assets: the server resolves the `webterm/` directory next to its executable, then falls back to `./webterm`; `WEBTERM_DIR` overrides both. The wasm page and the `/web/` statics follow it, so a release binary serves its bundle from any working directory.
+- CI: `.github/workflows/ci.yml` runs vet, tests, entrypoint tests (sudo) and the wasm tests on push to `main/master` and PRs (Go 1.27, cache).
+- Release: pushing a `v*` tag runs GoReleaser (`.goreleaser.yaml`). It builds the client and v2vctl matrix (7 platforms), the server matrix (linux/darwin/windows, amd64/arm64), and one `V2V-server-<os>-<arch>` archive per server platform bundling the server binary, the wasm bundle, the bootstrap `template/`, `docker-compose.yml` and the matching `v2vctl`. It then writes `SHA256SUMS`, generates SBOMs, signs the checksums with cosign (keyless) and creates a draft GitHub release (auto-prerelease for `-wip`/`-beta`/`-rc` tags). The same tag builds and pushes the multi-arch image (`linux/amd64`, `linux/arm64`) to GHCR with `docker/build-push-action`.
+- Docker: `Dockerfile` cross-compiles the server on the host-platform builder (`--platform=$BUILDPLATFORM`, `TARGETOS`/`TARGETARCH`) and runs `make web` once (the wasm bundle is platform-independent); the runtime image ships `server.bin` + `webterm/` and defines a `/api/version` healthcheck.
 - Dev version stamp is always `dev-<HEAD>[-dirty]` from the working tree, never from a possibly stale `GIT_HASH` env; `make web` warns when `GIT_HASH` differs from `HEAD` (stale browser cache risk).
 - Version stamps ride `-X main.Version` for all three binaries (server included); server prints its stamp at boot, on `/` info and on `/api/version` (`{"version": ...}`, no-store).
 - Pre-dial version check is client-side policy (`ui.versionCheck {enabled, mode, expect}`): exact string match against our stamp or a pinned fork version, modes `disabled|warn|enforce` (default warn; unknown warns, enforce aborts non-zero), WASM skipped (paired with its server).
