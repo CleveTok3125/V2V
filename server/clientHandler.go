@@ -23,6 +23,18 @@ func contentLoggingEnabled() bool {
 	return !Cfg.Static.NoContentLogs
 }
 
+// readLimitFor converts the configured max message length to the socket
+// read limit. The cast happens before the multiply so a large value
+// cannot overflow int, and a negative result (which gorilla treats as
+// unlimited) is clamped to zero.
+func readLimitFor(maxMessageLength int) int64 {
+	limit := int64(maxMessageLength) * 3
+	if limit < 0 {
+		return 0
+	}
+	return limit
+}
+
 // logFilterReject records a rejected message. The validator error and the
 // sender identity stay; the raw payload is only included when content
 // logging is enabled (NO_CONTENT_LOGS=false).
@@ -212,7 +224,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		session.Conn.SetReadDeadline(deadline)
 	}
 
-	session.Conn.SetReadLimit(int64(Cfg.Dynamic.Load().MaxMessageLength * 3))
+	session.Conn.SetReadLimit(readLimitFor(Cfg.Dynamic.Load().MaxMessageLength))
 	updateReadDeadline()
 	session.Conn.SetPongHandler(func(string) error {
 		updateReadDeadline()

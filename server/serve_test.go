@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,23 @@ import (
 	"github.com/CleveTok3125/V2V/internal/config"
 	"github.com/gorilla/websocket"
 )
+
+// readLimitFor must never yield a negative limit (gorilla treats a
+// negative limit as unlimited) even for an oversized configured value.
+func TestReadLimitFor(t *testing.T) {
+	if got := readLimitFor(1000); got != 3000 {
+		t.Fatalf("readLimitFor(1000) = %d, want 3000", got)
+	}
+	if got := readLimitFor(0); got != 0 {
+		t.Fatalf("readLimitFor(0) = %d, want 0", got)
+	}
+	if got := readLimitFor(-5); got != 0 {
+		t.Fatalf("readLimitFor(-5) = %d, want 0", got)
+	}
+	if got := readLimitFor(math.MaxInt); got < 0 {
+		t.Fatalf("readLimitFor(MaxInt) = %d, must not go negative", got)
+	}
+}
 
 // With a history longer than the Send buffer (600 > 256), registering
 // before WritePump blocks forever inside SendChatHistory because no reader
