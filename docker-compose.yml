@@ -7,6 +7,7 @@ services:
       network: host
       args:
         GIT_HASH: ${GIT_HASH:-}
+        VERSION: ${GIT_HASH:-}
     # No container_name: run one instance per env with a distinct project
     # name (`docker compose -p v2v-<env>`), so instances never collide.
     image: ${IMAGE_NAME:-v2v_image}
@@ -23,9 +24,20 @@ services:
       # One instance dir supplies the whole config tree. ENV_ROOT selects
       # the instance (default instances/default); each env sets its own
       # ENV_ROOT/PORT via --env-file instances/<env>/.env or the shell.
-      - ${ENV_ROOT:-instances/default}/.env:/app/.env:ro
-      - ${ENV_ROOT:-instances/default}/config:/app/config:ro
-      - ${ENV_ROOT:-instances/default}/data:/app/data
+      # Long syntax is deliberate: a bare relative source ("instances/...")
+      # is read as a named volume by Compose v2, which breaks the default
+      # and any relative ENV_ROOT.
+      - type: bind
+        source: ${ENV_ROOT:-instances/default}/.env
+        target: /app/.env
+        read_only: true
+      - type: bind
+        source: ${ENV_ROOT:-instances/default}/config
+        target: /app/config
+        read_only: true
+      - type: bind
+        source: ${ENV_ROOT:-instances/default}/data
+        target: /app/data
     # Least privilege: drop all capabilities, block privilege
     # escalation, mount the rootfs read-only (the server only writes
     # /app/data and stdout). The entrypoint's root phase needs exactly
@@ -49,3 +61,6 @@ services:
       # (instances/default) is the host-side relative layout.
       - V2V_ROOT=/app
       - TZ=${TIMEZONE:-Asia/Ho_Chi_Minh}
+      # Mirrors PORT into the image healthcheck, which cannot read the
+      # mounted /app/.env.
+      - V2V_HEALTH_PORT=${PORT:-10000}

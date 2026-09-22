@@ -1,4 +1,4 @@
-APP_VERSION ?= $(shell git describe --tags --always 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo unknown)
+APP_VERSION ?= $(if $(GIT_HASH),$(GIT_HASH),$(shell git describe --tags --always 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo unknown))
 VERSION ?= $(if $(GIT_HASH),$(GIT_HASH),$(shell git rev-parse --short HEAD 2>/dev/null || echo "dev-$$(date -u +%Y%m%d%H%M)"))
 LDFLAGS := -s -w -X 'main.Version=$(APP_VERSION)'
 WEB_LDFLAGS := -s -w -X 'main.Version=$(VERSION)'

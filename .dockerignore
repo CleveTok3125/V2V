@@ -9,5 +9,6 @@ instances/
 .tmp/
 public/
 bin/
+dist/
 secrets
 *.log
