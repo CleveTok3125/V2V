@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -86,16 +87,13 @@ func setEnvValue(path, key, value string) error {
 }
 
 type InstanceInitCmd struct {
-	Name string `arg:"" help:"Tên instance"`
-	Dir  string `help:"Thư mục dự án (chứa v2v-template.json)" default:"."`
-	Port int    `help:"Giá trị PORT ghi vào .env (1-65535; 0 = giữ template)"`
-	Bind string `help:"Giá trị BIND_ADDR ghi vào .env"`
+	Names []string `arg:"" name:"name" help:"Tên instance (một hoặc nhiều)"`
+	Dir   string   `help:"Thư mục dự án (chứa v2v-template.json)" default:"."`
+	Port  int      `help:"Giá trị PORT ghi vào .env (1-65535; 0 = giữ template)"`
+	Bind  string   `help:"Giá trị BIND_ADDR ghi vào .env"`
 }
 
 func (c *InstanceInitCmd) Run() error {
-	if err := validateInstanceName(c.Name); err != nil {
-		return err
-	}
 	if c.Port != 0 && (c.Port < 1 || c.Port > 65535) {
 		return fmt.Errorf("PORT %d không hợp lệ (1-65535)", c.Port)
 	}
@@ -103,9 +101,23 @@ func (c *InstanceInitCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	inst := instanceDir(root, c.Name)
+	var failures []string
+	for _, name := range c.Names {
+		if err := c.initOne(root, name); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", name, err))
+		}
+	}
+	return joinFailures(failures)
+}
+
+func (c *InstanceInitCmd) initOne(root, name string) error {
+	name = strings.TrimSpace(name)
+	if err := validateInstanceName(name); err != nil {
+		return err
+	}
+	inst := instanceDir(root, name)
 	if _, err := os.Stat(inst); err == nil {
-		return fmt.Errorf("instance %q đã tồn tại tại %s", c.Name, inst)
+		return fmt.Errorf("instance %q đã tồn tại tại %s", name, inst)
 	}
 	// Remove a partial instance if anything below fails, so a retry is
 	// not blocked by a half-written directory.
@@ -195,6 +207,7 @@ func defaultComposeRunner(args, env []string, dir string) error {
 // runInstanceCompose builds and runs the compose command for one instance,
 // exporting ENV_ROOT so the base compose mounts the right directory.
 func runInstanceCompose(root, name string, sub ...string) error {
+	name = strings.TrimSpace(name)
 	if err := validateInstanceName(name); err != nil {
 		return err
 	}
@@ -213,9 +226,29 @@ func runInstanceCompose(root, name string, sub ...string) error {
 	return composeRunner(args, env, root)
 }
 
+// runInstanceComposeBatch runs the same compose subcommand for every instance,
+// continuing past failures and reporting all of them together.
+func runInstanceComposeBatch(root string, names []string, sub ...string) error {
+	var failures []string
+	for _, n := range names {
+		if err := runInstanceCompose(root, n, sub...); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", n, err))
+		}
+	}
+	return joinFailures(failures)
+}
+
+// joinFailures turns per-instance errors into one error, or nil when empty.
+func joinFailures(failures []string) error {
+	if len(failures) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(failures, "; "))
+}
+
 type InstanceStatusCmd struct {
-	Name string `arg:"" optional:"" help:"Tên instance (bỏ trống = tất cả)"`
-	Dir  string `help:"Thư mục dự án" default:"."`
+	Names []string `arg:"" name:"name" optional:"" help:"Tên instance (bỏ trống = tất cả)"`
+	Dir   string   `help:"Thư mục dự án" default:"."`
 }
 
 func (c *InstanceStatusCmd) Run() error {
@@ -223,22 +256,17 @@ func (c *InstanceStatusCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	names, err := instanceNames(root, c.Name)
+	names, err := expandInstances(root, c.Names)
 	if err != nil {
 		return err
 	}
-	for _, n := range names {
-		if err := runInstanceCompose(root, n, "ps"); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runInstanceComposeBatch(root, names, "ps")
 }
 
 type InstanceUpCmd struct {
-	Name  string `arg:"" help:"Tên instance"`
-	Dir   string `help:"Thư mục dự án" default:"."`
-	Build bool   `help:"Build image trước khi chạy" default:"true"`
+	Names []string `arg:"" name:"name" help:"Tên instance (một hoặc nhiều)"`
+	Dir   string   `help:"Thư mục dự án" default:"."`
+	Build bool     `help:"Build image trước khi chạy" default:"true"`
 }
 
 func (c *InstanceUpCmd) Run() error {
@@ -250,12 +278,12 @@ func (c *InstanceUpCmd) Run() error {
 	if c.Build {
 		sub = append(sub, "--build")
 	}
-	return runInstanceCompose(root, c.Name, sub...)
+	return runInstanceComposeBatch(root, c.Names, sub...)
 }
 
 type InstanceDownCmd struct {
-	Name string `arg:"" help:"Tên instance"`
-	Dir  string `help:"Thư mục dự án" default:"."`
+	Names []string `arg:"" name:"name" help:"Tên instance (một hoặc nhiều)"`
+	Dir   string   `help:"Thư mục dự án" default:"."`
 }
 
 func (c *InstanceDownCmd) Run() error {
@@ -263,12 +291,12 @@ func (c *InstanceDownCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	return runInstanceCompose(root, c.Name, "down")
+	return runInstanceComposeBatch(root, c.Names, "down")
 }
 
 type InstanceRestartCmd struct {
-	Name string `arg:"" help:"Tên instance"`
-	Dir  string `help:"Thư mục dự án" default:"."`
+	Names []string `arg:"" name:"name" help:"Tên instance (một hoặc nhiều)"`
+	Dir   string   `help:"Thư mục dự án" default:"."`
 }
 
 func (c *InstanceRestartCmd) Run() error {
@@ -276,7 +304,7 @@ func (c *InstanceRestartCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	return runInstanceCompose(root, c.Name, "restart")
+	return runInstanceComposeBatch(root, c.Names, "restart")
 }
 
 type InstanceLogsCmd struct {
@@ -297,20 +325,27 @@ func (c *InstanceLogsCmd) Run() error {
 	return runInstanceCompose(root, c.Name, sub...)
 }
 
-// instanceNames returns the requested instance, or every instance when
-// name is empty.
-func instanceNames(root, name string) ([]string, error) {
-	if strings.TrimSpace(name) != "" {
-		if err := validateInstanceName(name); err != nil {
+// expandInstances validates the requested names, or enumerates every instance
+// when none (or only blank names) are given.
+func expandInstances(root string, requested []string) ([]string, error) {
+	names := make([]string, 0, len(requested))
+	for _, n := range requested {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if err := validateInstanceName(n); err != nil {
 			return nil, err
 		}
-		return []string{name}, nil
+		names = append(names, n)
+	}
+	if len(names) > 0 {
+		return names, nil
 	}
 	entries, err := os.ReadDir(filepath.Join(root, "instances"))
 	if err != nil {
 		return nil, fmt.Errorf("chưa có instance nào: %w", err)
 	}
-	var names []string
 	for _, e := range entries {
 		if e.IsDir() {
 			names = append(names, e.Name())

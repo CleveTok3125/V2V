@@ -35,10 +35,10 @@ func TestSetEnvValue(t *testing.T) {
 
 func TestInstanceInitRejectsBadPort(t *testing.T) {
 	dir, _ := fixture(t)
-	if err := (&InstanceInitCmd{Name: "prod", Dir: dir, Port: 99999}).Run(); err == nil {
+	if err := (&InstanceInitCmd{Names: []string{"prod"}, Dir: dir, Port: 99999}).Run(); err == nil {
 		t.Fatal("out-of-range port must be rejected")
 	}
-	if err := (&InstanceInitCmd{Name: "Prod", Dir: dir}).Run(); err == nil {
+	if err := (&InstanceInitCmd{Names: []string{"Prod"}, Dir: dir}).Run(); err == nil {
 		t.Fatal("invalid name must be rejected")
 	}
 }
@@ -46,22 +46,42 @@ func TestInstanceInitRejectsBadPort(t *testing.T) {
 func TestInstanceListAndNames(t *testing.T) {
 	dir, _ := fixture(t)
 	for _, n := range []string{"b", "a"} {
-		if err := (&InstanceInitCmd{Name: n, Dir: dir}).Run(); err != nil {
+		if err := (&InstanceInitCmd{Names: []string{n}, Dir: dir}).Run(); err != nil {
 			t.Fatal(err)
 		}
 	}
-	names, err := instanceNames(dir, "")
+	names, err := expandInstances(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(names) != 2 || names[0] != "a" || names[1] != "b" {
 		t.Fatalf("names = %v, want [a b]", names)
 	}
-	if got, err := instanceNames(dir, "a"); err != nil || len(got) != 1 {
+	if got, err := expandInstances(dir, []string{"a"}); err != nil || len(got) != 1 {
 		t.Fatalf("single name = %v %v", got, err)
 	}
-	if _, err := instanceNames(dir, "nope/../x"); err == nil {
+	if got, err := expandInstances(dir, []string{"b", "  ", "a"}); err != nil || len(got) != 2 || got[0] != "b" || got[1] != "a" {
+		t.Fatalf("multi name = %v %v", got, err)
+	}
+	if _, err := expandInstances(dir, []string{"nope/../x"}); err == nil {
 		t.Fatal("traversal name must be rejected")
+	}
+}
+
+func TestInstanceInitMultiContinuesOnFailure(t *testing.T) {
+	dir, _ := fixture(t)
+	if err := (&InstanceInitCmd{Names: []string{"prod"}, Dir: dir}).Run(); err != nil {
+		t.Fatal(err)
+	}
+	err := (&InstanceInitCmd{Names: []string{"prod", "stage"}, Dir: dir}).Run()
+	if err == nil {
+		t.Fatal("existing instance must be reported")
+	}
+	if !strings.Contains(err.Error(), "prod") {
+		t.Fatalf("error must name the failing instance, got: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "instances", "stage")); statErr != nil {
+		t.Fatalf("later instance must still be created: %v", statErr)
 	}
 }
 
@@ -105,7 +125,7 @@ func TestValidateInstanceName(t *testing.T) {
 
 func TestInstanceInitCreatesTree(t *testing.T) {
 	dir, _ := fixture(t)
-	c := &InstanceInitCmd{Name: "prod", Dir: dir, Port: 10001, Bind: "0.0.0.0"}
+	c := &InstanceInitCmd{Names: []string{"prod"}, Dir: dir, Port: 10001, Bind: "0.0.0.0"}
 	if err := c.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +149,7 @@ func TestInstanceInitCreatesTree(t *testing.T) {
 
 func TestInstanceInitRefusesExisting(t *testing.T) {
 	dir, _ := fixture(t)
-	c := &InstanceInitCmd{Name: "prod", Dir: dir}
+	c := &InstanceInitCmd{Names: []string{"prod"}, Dir: dir}
 	if err := c.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -138,9 +158,39 @@ func TestInstanceInitRefusesExisting(t *testing.T) {
 	}
 }
 
+func TestInstanceComposeBatchContinuesOnFailure(t *testing.T) {
+	dir, _ := fixture(t)
+	if err := (&InstanceInitCmd{Names: []string{"good"}, Dir: dir}).Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	var called []string
+	old := composeRunner
+	composeRunner = func(args, env []string, wd string) error {
+		for i, a := range args {
+			if a == "--project-name" && i+1 < len(args) {
+				called = append(called, args[i+1])
+			}
+		}
+		return nil
+	}
+	t.Cleanup(func() { composeRunner = old })
+
+	err := (&InstanceUpCmd{Names: []string{"missing", "good"}, Dir: dir}).Run()
+	if err == nil {
+		t.Fatal("missing instance must be reported")
+	}
+	if !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("error must name the failing instance, got: %v", err)
+	}
+	if len(called) != 1 || called[0] != "v2v-good" {
+		t.Fatalf("valid instance must still run, called = %v", called)
+	}
+}
+
 func TestInstanceComposeCommand(t *testing.T) {
 	dir, _ := fixture(t)
-	if err := (&InstanceInitCmd{Name: "prod", Dir: dir}).Run(); err != nil {
+	if err := (&InstanceInitCmd{Names: []string{"prod"}, Dir: dir}).Run(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -157,7 +207,7 @@ func TestInstanceComposeCommand(t *testing.T) {
 	}
 	t.Cleanup(func() { composeRunner = old })
 
-	if err := (&InstanceUpCmd{Name: "prod", Dir: dir, Build: true}).Run(); err != nil {
+	if err := (&InstanceUpCmd{Names: []string{"prod"}, Dir: dir, Build: true}).Run(); err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(got.args, " ")
