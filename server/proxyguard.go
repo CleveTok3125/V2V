@@ -44,8 +44,26 @@ func resolveClientIP(r *http.Request) trustedproxy.Outcome {
 // getClientIP returns the resolved client IP for rate limiting, auth
 // binding and logging. Untrusted proxy headers never reach here:
 // strict chains reject before this is called.
+//
+// Note: a rejected request resolves to the empty string. Handlers that
+// call getClientIP directly (rather than going through ServeWS) must be
+// guarded with rejectUntrustedProxy first, or every rejected request
+// shares one rate-limit bucket.
 func getClientIP(r *http.Request) string {
 	return resolveClientIP(r).ClientIP
+}
+
+// rejectUntrustedProxy answers 403 and reports true when a strict chain
+// refuses the request (no trusted claimant). It mirrors the ServeWS gate
+// for non-WebSocket endpoints that otherwise resolve an empty client IP.
+func rejectUntrustedProxy(w http.ResponseWriter, r *http.Request) bool {
+	outcome := resolveClientIP(r)
+	if !outcome.Reject {
+		return false
+	}
+	logWarnf("⛔ [PROXY] Reject %s (%s): %s", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Reason, proxyHeadersForLog(r))
+	http.Error(w, "Untrusted proxy.", http.StatusForbidden)
+	return true
 }
 
 // initOnionTrust loads the onion-hop allowlist from onion.txt next to the

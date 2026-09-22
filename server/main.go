@@ -471,12 +471,18 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
+		if rejectUntrustedProxy(w, r) {
+			return
+		}
 		chatApp.handleEnrollBegin(w, r)
 	})
 	mux.HandleFunc("/webauthn/enroll/finish", func(w http.ResponseWriter, r *http.Request) {
 		if !passkeyAllowed(r) {
 			logWarnf("⛔ [ONION] Chặn enroll từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))
 			http.NotFound(w, r)
+			return
+		}
+		if rejectUntrustedProxy(w, r) {
 			return
 		}
 		chatApp.handleEnrollFinish(w, r)
@@ -492,7 +498,12 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]string{"public_key": pub})
 	})
 
-	mux.HandleFunc("/api/trip/verify", chatApp.handleTripVerify)
+	mux.HandleFunc("/api/trip/verify", func(w http.ResponseWriter, r *http.Request) {
+		if rejectUntrustedProxy(w, r) {
+			return
+		}
+		chatApp.handleTripVerify(w, r)
+	})
 	mux.HandleFunc("/api/version", handleAPIVersion)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

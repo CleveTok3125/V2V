@@ -97,6 +97,26 @@ func TestServeWSRejectsUntrusted(t *testing.T) {
 	}
 }
 
+// Non-WebSocket endpoints must share the ServeWS proxy gate, otherwise a
+// rejected request resolves an empty client IP and pollutes one bucket.
+func TestRejectUntrustedProxy(t *testing.T) {
+	testCfg(t)
+	setupProxyChain(t, "cloudflare", map[string]string{
+		"cloudflare.txt": "173.245.48.0/20\n",
+	})
+	rec := httptest.NewRecorder()
+	if !rejectUntrustedProxy(rec, proxyTestReq("198.51.100.9:1234", "10.9.9.9")) {
+		t.Fatal("untrusted request must be rejected")
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("untrusted code = %d, want 403", rec.Code)
+	}
+	rec2 := httptest.NewRecorder()
+	if rejectUntrustedProxy(rec2, proxyTestReq("173.245.48.5:443", "198.51.100.9")) {
+		t.Fatal("trusted request must pass")
+	}
+}
+
 func TestIsSecuredConnectGatesForwardedProto(t *testing.T) {
 	testCfg(t)
 	old := Cfg.Static.RequireTLS
