@@ -15,6 +15,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/CleveTok3125/V2V/internal/env"
+	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/trustedproxy"
 	"github.com/joho/godotenv"
 )
@@ -140,10 +141,10 @@ func (s *ChatServer) StartCleanupTasks() {
 
 			s.AuthFailsMu.Lock()
 			for ip, record := range s.AuthFails {
-				// Only purge records that actually reached a ban and have
-				// expired; in-progress counters (zero UnlockTime) must survive
-				// so a slow brute-force cannot reset them every tick.
-				if !record.UnlockTime.IsZero() && now.After(record.UnlockTime) {
+				// Purge expired bans and idle in-progress counters. The
+				// idle TTL is far longer than the ban window, so a slow
+				// brute-force cannot reset its count between ticks.
+				if guard.ShouldPrune(record, now, guard.AuthFailTTL) {
 					delete(s.AuthFails, ip)
 				}
 			}

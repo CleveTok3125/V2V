@@ -61,6 +61,47 @@ func TestPenaltyAndBan(t *testing.T) {
 	}
 }
 
+func TestShouldPrune(t *testing.T) {
+	now := time.Now()
+	ttl := time.Hour
+
+	// In-progress counter, recently touched: keep.
+	rec := NextPenalty(RateLimitRecord{}, now)
+	if rec.LastSeen.IsZero() {
+		t.Fatal("NextPenalty must stamp LastSeen")
+	}
+	if ShouldPrune(rec, now, ttl) {
+		t.Fatal("fresh in-progress counter pruned")
+	}
+
+	// In-progress counter idle past TTL: prune (this is the leak fix).
+	if !ShouldPrune(rec, now.Add(ttl+time.Minute), ttl) {
+		t.Fatal("idle in-progress counter must be pruned")
+	}
+
+	// Active ban: keep.
+	var banned RateLimitRecord
+	for i := 0; i < 5; i++ {
+		banned = NextPenalty(banned, now)
+	}
+	if !IsBanned(banned, now) {
+		t.Fatal("setup: expected active ban")
+	}
+	if ShouldPrune(banned, now, ttl) {
+		t.Fatal("active ban pruned")
+	}
+
+	// Expired ban: prune.
+	if !ShouldPrune(banned, now.Add(6*time.Minute), ttl) {
+		t.Fatal("expired ban must be pruned")
+	}
+
+	// Record built outside NextPenalty (zero LastSeen) with no ban: keep.
+	if ShouldPrune(RateLimitRecord{FailCount: 1}, now.Add(10*ttl), ttl) {
+		t.Fatal("zero-LastSeen record without ban must not be pruned")
+	}
+}
+
 func TestCheckConnectionRate(t *testing.T) {
 	now := time.Now()
 	banned := NextPenalty(NextPenalty(NextPenalty(NextPenalty(NextPenalty(RateLimitRecord{}, now), now), now), now), now)
