@@ -71,7 +71,10 @@ func ValidateDisplayName(name string) error {
 }
 
 // SanitizeForDisplay strips dangerous control/format chars but keeps
-// allowed ANSI SGR (\x1b[...m) and OSC8 (\x1b]8;;...\x1b\\) that server generates.
+// allowed ANSI SGR (\x1b[...m) and OSC8 hyperlinks (\x1b]8;...;uri\x1b\\)
+// whose target uses an allowed scheme. Every other OSC (clipboard write,
+// palette/color, kitty, ...) is dropped, so a compromised server cannot
+// drive the terminal beyond color and http(s) links.
 func SanitizeForDisplay(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); {
@@ -97,28 +100,34 @@ func SanitizeForDisplay(s string) string {
 				i = j
 				continue
 			}
-			// Try OSC8: ESC ]8;; ... ESC \
+			// OSC: only OSC8 hyperlinks are allowed, and only when their
+			// target uses an allowed scheme. Anything else (ESC ]52 clipboard
+			// write, ESC ]4/10/11 palette/color, kitty protocols, ...) is
+			// dropped whole.
 			if i+1 < len(s) && s[i+1] == ']' {
 				// Look for ESC \ terminator
 				j := i + 2
 				found := false
 				for j < len(s)-1 {
 					if s[j] == 0x1b && s[j+1] == '\\' {
-						b.WriteString(s[i : j+2])
-						i = j + 2
 						found = true
 						break
 					}
 					j++
 				}
-				if found {
-					continue
+				if !found {
+					// Unterminated OSC: fail closed. Everything after was
+					// meant as escape payload (link target); emitting it as
+					// text would leak URLs, so drop the tail.
+					return b.String()
 				}
-				// Unterminated OSC8: fail closed. Everything after was
-				// meant as escape payload (link target); emitting it as
-				// text would leak URLs, so drop the tail.
-				return b.String()
+				if osc8TargetAllowed(s[i+2 : j]) {
+					b.WriteString(s[i : j+2])
+				}
+				i = j + 2
+				continue
 			}
+
 			// Unknown ESC - strip it
 			i++
 			continue
@@ -140,6 +149,49 @@ func SanitizeForDisplay(s string) string {
 		i += size
 	}
 	return b.String()
+}
+
+// osc8TargetAllowed reports whether an OSC payload is an OSC8 hyperlink
+// whose target (if any) uses an allowed scheme. The payload layout is
+// "8;params;uri", with an empty uri closing the link. Allowed schemes
+// are http(s) plus the client-generated in-app v2v://expand/ command.
+// Any control byte (C0 or DEL) inside the payload rejects it: the
+// sequence is emitted verbatim, so a byte like BEL or a nested ESC would
+// end it early and let the rest run as a fresh escape sequence.
+func osc8TargetAllowed(payload string) bool {
+	for i := 0; i < len(payload); i++ {
+		if payload[i] < 0x20 || payload[i] == 0x7f {
+			return false
+		}
+	}
+	if len(payload) < 2 || payload[0] != '8' || payload[1] != ';' {
+		return false
+	}
+	rest := payload[2:]
+	sep := strings.IndexByte(rest, ';')
+	if sep < 0 {
+		return false
+	}
+	uri := rest[sep+1:]
+	if uri == "" {
+		return true // link close
+	}
+	lower := strings.ToLower(uri)
+	return strings.HasPrefix(lower, "http://") ||
+		strings.HasPrefix(lower, "https://") ||
+		strings.HasPrefix(lower, "v2v://expand/")
+}
+
+// SanitizeSingleLine is SanitizeForDisplay for one-line fields (time,
+// display name, host): newlines are removed so a crafted field cannot
+// forge extra terminal lines.
+func SanitizeSingleLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' {
+			return -1
+		}
+		return r
+	}, SanitizeForDisplay(s))
 }
 
 // CleanHistoryMessage only strips broken replacement chars, for legacy history replay.
