@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -315,6 +316,106 @@ func TestPruneTripChains_Bounds(t *testing.T) {
 	}
 	if _, ok := s.TripChains.Load(fmt.Sprintf("k%05d", maxTripChains+49)); !ok {
 		t.Fatal("newest entry must survive")
+	}
+}
+
+// applyTripChain must classify continuity, and still adopt the higher
+// seq on a gap/fork (liveness) while never rewinding on a stale record.
+func TestApplyTripChain_Continuity(t *testing.T) {
+	prev1 := bytes.Repeat([]byte{0x11}, 32)
+	tipPrev := bytes.Repeat([]byte{0x22}, 32)
+	cur := TripChain{Seq: 2, PrevHash: tipPrev}
+	newPrev := bytes.Repeat([]byte{0x33}, 32)
+
+	cases := []struct {
+		name       string
+		has        bool
+		seq        uint32
+		prev       []byte
+		wantStatus tripChainUpdate
+		wantSeq    uint32
+	}{
+		{"first", false, 1, make([]byte, 32), tripChainExtended, 1},
+		{"contiguous", true, 3, tipPrev, tripChainExtended, 3},
+		{"gap", true, 5, tipPrev, tripChainGap, 5},
+		{"fork", true, 3, prev1, tripChainFork, 3},
+		{"stale", true, 2, prev1, tripChainStale, 2},
+	}
+	for _, tc := range cases {
+		got, status := applyTripChain(cur, tc.has, tc.seq, tc.prev, newPrev)
+		if status != tc.wantStatus {
+			t.Errorf("%s: status = %v, want %v", tc.name, status, tc.wantStatus)
+		}
+		if got.Seq != tc.wantSeq {
+			t.Errorf("%s: seq = %d, want %d", tc.name, got.Seq, tc.wantSeq)
+		}
+	}
+}
+
+// signTripRecord builds one signed history record for recovery tests.
+func signTripRecord(t *testing.T, priv ed25519.PrivateKey, pubHex string, seq uint32, prev []byte, text string) (historyRecord, []byte) {
+	t.Helper()
+	h := sha256.Sum256([]byte(text))
+	const tmpID = 9
+	payload := tripcolor.CanonicalPayload("", seq, prev, h[:], priv.Public().(ed25519.PublicKey), "Tester#eff8", tmpID, 0)
+	sig := ed25519.Sign(priv, payload)
+	ch := sha256.New()
+	ch.Write(prev)
+	ch.Write(sig)
+	ch.Write(h[:])
+	next := ch.Sum(nil)
+	wire := WireMessage{Type: "chat", Text: text, DisplayName: "Tester#eff8", Trip: &TripMeta{
+		Pub:         pubHex,
+		Seq:         seq,
+		Prev:        hex.EncodeToString(prev),
+		Sig:         hex.EncodeToString(sig),
+		MsgHash:     hex.EncodeToString(h[:]),
+		DisplayName: "Tester#eff8",
+		TmpID:       tmpID,
+	}}
+	return historyRecord{Timestamp: "2026-01-01T00:00:00Z", Wire: &wire}, next
+}
+
+// Recovery must adopt the highest verified seq across a gap (so the live
+// client keeps working) instead of rewinding to the last contiguous one.
+func TestInitHistoryStore_GapAdoptsHigherSeq(t *testing.T) {
+	testCfg(t)
+	seed := bytes.Repeat([]byte{0x07}, 32)
+	priv := ed25519.NewKeyFromSeed(seed)
+	pubHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
+
+	rec1, next1 := signTripRecord(t, priv, pubHex, 1, make([]byte, 32), "one")
+	rec2, next2 := signTripRecord(t, priv, pubHex, 2, next1, "two")
+	// seq 3 and 4 are lost; seq 5 is signed against seq 4's prev (opaque
+	// here, any 32 bytes still verifies).
+	rec5, _ := signTripRecord(t, priv, pubHex, 5, next2, "five")
+
+	path := filepath.Join(t.TempDir(), "history.jsonl")
+	var sb bytes.Buffer
+	for _, rec := range []historyRecord{rec1, rec2, rec5} {
+		line, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sb.Write(line)
+		sb.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, sb.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewChatServer()
+	if err := s.InitHistoryStore(path, 1); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Chain.Store.Close()
+
+	v, ok := s.TripChains.Load(pubHex)
+	if !ok {
+		t.Fatal("trip chain not recovered")
+	}
+	if got := v.(TripChain).Seq; got != 5 {
+		t.Fatalf("recovered seq = %d, want 5 (adopt across gap)", got)
 	}
 }
 

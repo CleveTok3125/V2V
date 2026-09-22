@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,38 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+// tripChainUpdate classifies how a recovered record relates to the tip
+// already stored for its key.
+type tripChainUpdate int
+
+const (
+	tripChainExtended tripChainUpdate = iota // seq+1 and prev matches: contiguous
+	tripChainGap                             // seq jumped ahead: missing records
+	tripChainFork                            // seq+1 but prev differs: competing history
+	tripChainStale                           // seq not newer: ignore
+)
+
+// applyTripChain folds one recovered (already signature-verified) record
+// into the tip for its key. Continuity is checked so a truncated log or a
+// forked chain is reported, but the higher seq is still adopted: the live
+// client that produced it continues from that seq, so refusing it would
+// only strand that identity. LastSeen is stamped by the caller.
+func applyTripChain(cur TripChain, has bool, seq uint32, prevBytes, newPrev []byte) (TripChain, tripChainUpdate) {
+	if !has {
+		return TripChain{Seq: seq, PrevHash: newPrev}, tripChainExtended
+	}
+	if seq <= cur.Seq {
+		return cur, tripChainStale
+	}
+	if seq == cur.Seq+1 && bytes.Equal(prevBytes, cur.PrevHash) {
+		return TripChain{Seq: seq, PrevHash: newPrev}, tripChainExtended
+	}
+	if seq == cur.Seq+1 {
+		return TripChain{Seq: seq, PrevHash: newPrev}, tripChainFork
+	}
+	return TripChain{Seq: seq, PrevHash: newPrev}, tripChainGap
+}
 
 func (c *ChainService) appendMessageToHistory(msg string) {
 	c.Mu.Lock()
@@ -125,12 +158,25 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 			h.Write(sigBytes)
 			h.Write(hashBytes)
 			newPrev := h.Sum(nil)
-			// An older duplicate later in the file must not rewind a
-			// newer tip: keep the highest sequence per key.
-			if cur, ok := s.TripChains.Load(tripForChain.Pub); !ok {
-				s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: newPrev, LastSeen: time.Now()})
-			} else if ch, ok := cur.(TripChain); ok && tripForChain.Seq > ch.Seq {
-				s.TripChains.Store(tripForChain.Pub, TripChain{Seq: tripForChain.Seq, PrevHash: newPrev, LastSeen: time.Now()})
+			// Fold the record into its key's tip. A gap or fork is
+			// reported but the higher seq is still adopted so the live
+			// client continues; an older duplicate never rewinds a newer
+			// tip.
+			cur, has := s.TripChains.Load(tripForChain.Pub)
+			var tip TripChain
+			if has {
+				tip, _ = cur.(TripChain)
+			}
+			next, status := applyTripChain(tip, has, tripForChain.Seq, prevBytes, newPrev)
+			switch status {
+			case tripChainGap:
+				logWarnf("⛔ [TRIP CHAIN GAP] %s: seq %d follows %d — missing records, adopting tip", strutil.Short(tripForChain.Pub), tripForChain.Seq, tip.Seq)
+			case tripChainFork:
+				logWarnf("⛔ [TRIP CHAIN FORK] %s: seq %d prev does not continue seq %d, adopting tip", strutil.Short(tripForChain.Pub), tripForChain.Seq, tip.Seq)
+			}
+			if status != tripChainStale {
+				next.LastSeen = time.Now()
+				s.TripChains.Store(tripForChain.Pub, next)
 			}
 		}
 	}
