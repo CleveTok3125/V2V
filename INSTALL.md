@@ -49,12 +49,20 @@ python3 serve.py --port 9000 --bind 0.0.0.0
 ```
 
 Open the printed URL and enter the chat server address in the form. On
-the server side, list the page's origin in `ALLOWED_ORIGINS` and keep
-`WEBAUTHN_RPID`/`WEBAUTHN_ORIGIN` matching the host that serves the page
-(passkey only). The server also has to allow `/web/` (`WEB_ENABLED=true`,
-the default). To serve it behind a real web server instead, point that
-server at the extracted directory with the same `/web/` prefix; the
-assets reference `/web/...` paths.
+the server side, list the page's origin in `ALLOWED_ORIGINS` (the loopback
+defaults cover `localhost` and `127.0.0.1`, which browsers treat as
+different origins). The server also has to allow `/web/`
+(`WEB_ENABLED=true`, the default). To serve it behind a real web server
+instead, point that server at the extracted directory with the same
+`/web/` prefix; the assets reference `/web/...` paths.
+
+Passkey is bound to one `WEBAUTHN_RPID` and one `WEBAUTHN_ORIGIN`
+(`RPOrigins` holds a single value), so a page served from a different host
+cannot run the ceremony. Serving this bundle from `127.0.0.1`/`localhost`
+over plain HTTP therefore disables passkey login; guest, tripcode and
+ed25519 key logins still work. Using passkey here means serving the page
+from the exact `WEBAUTHN_ORIGIN` hostname over HTTPS, which cannot also
+serve a different production origin at the same time.
 
 ## Docker (recommended)
 

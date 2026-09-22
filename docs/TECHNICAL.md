@@ -225,6 +225,7 @@ Every chat and audit message links to the previous one (`internal/chain`, `serve
 - Login verifies the counter against the managed store (clone detection); soft-key counter exemptions no longer exist because soft keys no longer exist.
 - Authenticator backup flags (BE/BS) are recorded at enrollment and replayed into login verification: the library rejects a backup-state mismatch, so zeroed stored flags would fail every synced-provider login. Store is v3; older stores are refused with a re-enroll message.
 - Breaking change: all pre-rebuild credentials (soft key.json slots, roles.json `passkeys[]`, v1 store) are rejected — re-enroll every passkey.
+- RP binding is a single pair: `RPID: WAConfig.RPID` and `RPOrigins: []string{WAConfig.Origin}`, so exactly one origin can run the ceremony. Serving the web client from a different host (e.g. the standalone `serve.py` bundle on `127.0.0.1`/`localhost` over HTTP) disables passkey there; guest, tripcode and ed25519 key logins are unaffected. Passkey on such a page requires serving it from the exact `WEBAUTHN_ORIGIN` hostname over HTTPS, which cannot also serve another production origin.
 
 ### Display name — uniform hash, serial, dynamic length, per-session salt
 `server/auth.go:generateDisplayName` validates `username` via `filter.ValidateDisplayName`, trims and caps to `MaxUsernameLength`, then **always** appends a hash suffix — even for roles with `CustomPrefix` (`roles.json`). No role is exempt:

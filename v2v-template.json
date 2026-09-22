@@ -83,7 +83,6 @@
   "add_policy": {
     "env": {
       "comment": [
-        "ALLOWED_ORIGINS",
         "INSTANCE_ID",
         "TIMEZONE",
         "STATUS_URL",
