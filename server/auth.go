@@ -139,7 +139,14 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 			switch {
 			case verr == nil && (counter == 0 || cred.SignCount == 0 || counter > cred.SignCount):
 				if counter != 0 {
-					_ = s.WebAuthn.UpdateSignCount(resp.Role, cred.CredentialID, counter)
+					// Persist the counter before granting access. A
+					// concurrent replay of the same assertion reads the
+					// same stored counter, so the loser must fail here
+					// instead of being silently accepted.
+					if uerr := s.WebAuthn.UpdateSignCount(resp.Role, cred.CredentialID, counter); uerr != nil {
+						lastErr = ErrCounterNotIncreasing
+						break
+					}
 				}
 				resp.AuthType = "passkey"
 				logInfof("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey thật, role: [%s]", clientIP, resp.Role)

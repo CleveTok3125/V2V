@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,6 +53,41 @@ func TestTicketLifecycle(t *testing.T) {
 	}
 	if err := s.UpdateSignCount("member", "cid-1", 6); err != nil {
 		t.Errorf("increasing counter rejected: %v", err)
+	}
+}
+
+// A concurrent replay of the same assertion reads the same stored
+// counter; only one UpdateSignCount may win so the passkey clone check
+// cannot be bypassed by racing two requests.
+func TestUpdateSignCount_ConcurrentReplayRejected(t *testing.T) {
+	s := newTestStore(t)
+	code, err := s.CreatePendingTicket("member", "lbl", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.BindChallenge(code, "Y2hhbGxlbmdl"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteEnrollment(code, &WAStoredCred{CredentialID: "cid-c", SignCount: 5}); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	var okCount, errCount int32
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := s.UpdateSignCount("member", "cid-c", 6); err != nil {
+				atomic.AddInt32(&errCount, 1)
+			} else {
+				atomic.AddInt32(&okCount, 1)
+			}
+		}()
+	}
+	wg.Wait()
+	if okCount != 1 || errCount != 1 {
+		t.Fatalf("ok=%d err=%d, want 1/1 so the replay loses", okCount, errCount)
 	}
 }
 
