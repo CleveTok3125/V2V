@@ -116,7 +116,6 @@ func TestRoleAddIdentityManualAndPaste(t *testing.T) {
 	})
 }
 
-
 func TestRoleImportAndEnrollWarn(t *testing.T) {
 	withTempDir(t, func() {
 		// import full roles.json via file
@@ -146,13 +145,13 @@ func TestRoleImportAndEnrollWarn(t *testing.T) {
 			t.Fatalf("force import: %v", err)
 		}
 		// enroll should warn when role missing but still create ticket
-		os.RemoveAll("data")
-		en := &EnrollCmd{Role: "notexist", Store: "data/webauthn.json"}
+		os.RemoveAll(v2vctlRoot)
+		en := &EnrollCmd{Role: "notexist"}
 		// capture output? just check it doesn't error and file created
 		if err := en.Run(); err != nil {
 			t.Fatalf("enroll: %v", err)
 		}
-		if _, err := os.Stat("data/webauthn.json"); err != nil {
+		if _, err := os.Stat(defaultWebauthnStore()); err != nil {
 			t.Fatalf("webauthn not created")
 		}
 	})
@@ -268,11 +267,10 @@ func TestAtomicWriteFileAdmin_Permissions(t *testing.T) {
 // without a TTY.
 func TestEnrollCreatesTicket(t *testing.T) {
 	withTempDir(t, func() {
-		store := filepath.Join(".", "webauthn.json")
-		if err := (&EnrollCmd{Role: "member", Label: "t", Store: store, TTL: time.Minute}).Run(); err != nil {
+		if err := (&EnrollCmd{Role: "member", Label: "t", TTL: time.Minute}).Run(); err != nil {
 			t.Fatalf("enroll: %v", err)
 		}
-		f, err := loadStore(store)
+		f, err := loadStore(defaultWebauthnStore())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -326,11 +324,11 @@ func TestEd25519KeygenRoundtrip(t *testing.T) {
 
 func TestEnrollWritesV2Store(t *testing.T) {
 	withTempDir(t, func() {
-		c := &EnrollCmd{Role: "member", Store: "webauthn.json", TTL: time.Minute}
+		c := &EnrollCmd{Role: "member", TTL: time.Minute}
 		if err := c.Run(); err != nil {
 			t.Fatal(err)
 		}
-		data, err := os.ReadFile("webauthn.json")
+		data, err := os.ReadFile(defaultWebauthnStore())
 		if err != nil {
 			t.Fatal(err)
 		}

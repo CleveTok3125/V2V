@@ -32,6 +32,7 @@ const (
 	KeyCI              = "CI"
 	KeyProxyProvider   = "PROXY_PROVIDER"
 	KeyTrustedProxyDir = "TRUSTED_PROXY_DIR"
+	KeyRoot            = "V2V_ROOT"
 )
 
 // Tripcode feeds tripcode entry without prompting (CI).
@@ -81,3 +82,9 @@ func ProxyProvider() string { return os.Getenv(KeyProxyProvider) }
 // TrustedProxyDir holds per-module "<name>.txt" trust files. Empty
 // means the caller default (./config/trustedproxy).
 func TrustedProxyDir() string { return os.Getenv(KeyTrustedProxyDir) }
+
+// Root is the instance directory the server/v2vctl operate on. Empty
+// means the caller default (instances/default). It must come from the
+// process environment (or a flag), never from the instance .env, because
+// it is what locates that .env.
+func Root() string { return os.Getenv(KeyRoot) }

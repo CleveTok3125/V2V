@@ -90,7 +90,7 @@ Web passkey enrollment (one-time link, 10 min):
 # → https://chat.example.com/web/#enroll=...
 ```
 
-See `template/server/config/roles.json` and `template/.env` for server configuration.
+See `template/server/config/roles.json` and `template/.env` for server configuration. Management commands default to the `instances/default` root; pass `--root instances/<name>` (or set `V2V_ROOT`) to target another instance.
 
 ## Running the Server
 
@@ -98,12 +98,12 @@ See `template/server/config/roles.json` and `template/.env` for server configura
 
 ```bash
 make v2vctl                    # -> public/V2Vctl-<os>-<arch>
-./public/V2Vctl-$(go env GOOS)-$(go env GOARCH) config sync --dir .   # bootstrap .env + ./config from template (fresh clone)
-# edit .env: PORT, ALLOWED_ORIGINS, ...
+./public/V2Vctl-$(go env GOOS)-$(go env GOARCH) config sync --dir . --to instances/default   # bootstrap the default instance from template
+# edit instances/default/.env: PORT, ALLOWED_ORIGINS, ...
 make server web                # -> public/server.bin + webterm/app.wasm
-./public/server.bin
-# or: docker compose up -d --build   (persists ./data and ./logs)
-# full matrix for release: make all ALL=1 -j4
+V2V_ROOT=instances/default ./public/server.bin
+# or: docker compose up -d --build   (persists instances/default/data)
+# extra instance: config sync --dir . --to instances/prod, then ENV_ROOT=instances/prod docker compose -p v2v-prod up -d --build
 ```
 
 Open `http://localhost:10000/web/` for the browser client.

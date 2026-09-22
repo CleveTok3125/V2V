@@ -7,9 +7,10 @@ services:
       network: host
       args:
         GIT_HASH: ${GIT_HASH:-}
-    image: v2v_image
-    container_name: v2v_server
-    restart: always
+    # No container_name: run one instance per env with a distinct project
+    # name (`docker compose -p v2v-<env>`), so instances never collide.
+    image: ${IMAGE_NAME:-v2v_image}
+    restart: ${RESTART_POLICY:-always}
     ports:
       # Loopback-bound by default: the app is reachable from the host
       # itself (debug) and from sibling containers by service name, but
@@ -19,9 +20,12 @@ services:
       # host firewall.
       - "${BIND_ADDR:-127.0.0.1}:${PORT:-8080}:${PORT:-8080}"
     volumes:
-      - ./.env:/app/.env:ro
-      - ./config:/app/config:ro
-      - ./data:/app/data
+      # One instance dir supplies the whole config tree. ENV_ROOT selects
+      # the instance (default instances/default); each env sets its own
+      # ENV_ROOT/PORT via --env-file instances/<env>/.env or the shell.
+      - ${ENV_ROOT:-instances/default}/.env:/app/.env:ro
+      - ${ENV_ROOT:-instances/default}/config:/app/config:ro
+      - ${ENV_ROOT:-instances/default}/data:/app/data
     # Least privilege: drop all capabilities, block privilege
     # escalation, mount the rootfs read-only (the server only writes
     # /app/data and stdout). The entrypoint's root phase needs exactly
@@ -41,4 +45,7 @@ services:
     tmpfs:
       - /tmp
     environment:
+      # Pin the instance root to the mounted /app tree; the server default
+      # (instances/default) is the host-side relative layout.
+      - V2V_ROOT=/app
       - TZ=${TIMEZONE:-Asia/Ho_Chi_Minh}

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,14 +32,14 @@ var (
 )
 
 type WAStoredCred struct {
-	CredentialID string `json:"credential_id"`
-	PublicKey    string `json:"public_key"` // COSE_Key CBOR, base64url
-	SignCount    uint32 `json:"sign_count"`
-	BackupEligible bool `json:"backup_eligible"`
-	BackupState    bool `json:"backup_state"`
-	Label        string `json:"label,omitempty"`
-	AddedAt      string `json:"added_at,omitempty"`
-	AttFormat    string `json:"att_format"`
+	CredentialID   string `json:"credential_id"`
+	PublicKey      string `json:"public_key"` // COSE_Key CBOR, base64url
+	SignCount      uint32 `json:"sign_count"`
+	BackupEligible bool   `json:"backup_eligible"`
+	BackupState    bool   `json:"backup_state"`
+	Label          string `json:"label,omitempty"`
+	AddedAt        string `json:"added_at,omitempty"`
+	AttFormat      string `json:"att_format"`
 }
 
 type WAPending struct {
@@ -47,7 +48,7 @@ type WAPending struct {
 	Label     string    `json:"label,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
 	Challenge string    `json:"challenge,omitempty"` // legacy b64url, kept for compat
-	Used      bool   `json:"used"`
+	Used      bool      `json:"used"`
 }
 
 type webauthnFile struct {
@@ -63,8 +64,11 @@ type WebAuthnStore struct {
 }
 
 func NewWebAuthnStore(path string) *WebAuthnStore {
+	path = strings.TrimSpace(path)
 	if path == "" {
 		path = dataPath(defaultWebauthnStore)
+	} else {
+		path = resolveUnderRoot(ServerRoot, path)
 	}
 	return &WebAuthnStore{path: path}
 }

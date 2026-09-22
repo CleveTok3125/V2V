@@ -22,6 +22,9 @@ type StaticConfig struct {
 	MaxLogSizeMB         int
 	HistoryFilePath      string
 	MaxHistoryFileSizeMB int
+	// Root is the instance directory (V2V_ROOT, default instances/default)
+	// that .env, config/ and data/ hang off.
+	Root string
 	// NoContentLogs is the content-privacy policy: chat history stays in
 	// RAM only and message content is never logged. Operational metadata
 	// (client IP, auth/identity events, admin and error lines) is still
@@ -85,14 +88,6 @@ type AppConfig struct {
 
 var Cfg AppConfig
 
-var (
-	// Live admin config lives in config/. No fallbacks: an unmigrated
-	// deploy fails closed on required vars instead of booting on
-	// defaults.
-	EnvFilePaths   = []string{".env"}
-	RolesFilePaths = []string{"config/roles.json"}
-)
-
 // normalizeOnionHost lowercases a Host header value, strips an optional
 // port and a trailing FQDN dot, leaving a bare hostname. Empty means
 // unusable.
@@ -131,12 +126,53 @@ func parseOnionHosts(raw string) ([]string, error) {
 	return out, nil
 }
 
-// dataPath resolves a generated-file name under DATA_DIR (default
-// ./data). Explicit per-file env still wins at the call site.
-func dataPath(name string) string {
-	dir := env.DataDir()
-	if dir == "" {
-		dir = "./data"
+// ServerRoot is the instance directory this process operates on,
+// resolved from V2V_ROOT at boot (default instances/default). Relative
+// config, data and log defaults hang off it, so the same binary serves
+// different instances by changing the root.
+var ServerRoot string
+
+// EnvFilePaths and RolesFilePaths are resolved under ServerRoot. Tests
+// override them directly.
+var (
+	EnvFilePaths   []string
+	RolesFilePaths []string
+)
+
+// DefaultServerRoot is V2V_ROOT when set, else instances/default.
+func DefaultServerRoot() string {
+	if r := strings.TrimSpace(env.Root()); r != "" {
+		return r
 	}
-	return filepath.Join(dir, name)
+	return filepath.Join("instances", "default")
+}
+
+// InitServerPaths points the process at one instance root. Must run
+// before the .env load so EnvFilePaths locates <root>/.env.
+func InitServerPaths(root string) {
+	ServerRoot = root
+	EnvFilePaths = []string{filepath.Join(root, ".env")}
+	RolesFilePaths = []string{filepath.Join(root, "config", "roles.json")}
+}
+
+func init() { InitServerPaths(DefaultServerRoot()) }
+
+// resolveUnderRoot keeps absolute overrides untouched and anchors relative
+// ones at the instance root, so one .env works for any instance and a
+// relative default such as ./data/app.log never escapes to the cwd.
+func resolveUnderRoot(root, p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(root, p)
+}
+
+// dataPath resolves a generated-file name under DATA_DIR (an explicit
+// override, absolute or root-relative) or <root>/data by default.
+func dataPath(name string) string {
+	if dir := strings.TrimSpace(env.DataDir()); dir != "" {
+		return filepath.Join(resolveUnderRoot(ServerRoot, dir), name)
+	}
+	return filepath.Join(ServerRoot, "data", name)
 }

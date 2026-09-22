@@ -58,7 +58,6 @@ func promptPassphrase() (string, error) {
 	return pass, nil
 }
 
-
 func loadContainer(path string) (*identity.IdentityFile, error) {
 	// Check if file is encrypted and need passphrase
 	if enc, _ := identity.IsEncrypted(path); enc {
@@ -140,9 +139,35 @@ func saveContainer(idf *identity.IdentityFile, path string) error {
 	return idf.Save(path)
 }
 
-// rolesPath is the single canonical location. No fallback: unmigrated
-// deploys fail closed instead of silently using defaults.
-func rolesPath() string { return filepath.Join("config", "roles.json") }
+// v2vctlRoot is the instance directory this tool operates on. Set from the
+// --root flag (V2V_ROOT env, default instances/default) at startup so
+// identity commands land in the same instance the server runs.
+var v2vctlRoot = "instances/default"
+
+// SetRoot overrides the instance root; empty keeps the default.
+func SetRoot(root string) {
+	if strings.TrimSpace(root) != "" {
+		v2vctlRoot = root
+	}
+}
+
+// rolesPath is the single canonical location under the instance root. No
+// fallback: unmigrated deploys fail closed instead of silently using
+// defaults.
+func rolesPath() string { return filepath.Join(v2vctlRoot, "config", "roles.json") }
+
+// defaultWebauthnStore is the instance-local credential store.
+func defaultWebauthnStore() string { return filepath.Join(v2vctlRoot, "data", "webauthn.json") }
+
+// resolveInstancePath anchors a relative path at the instance root and
+// leaves absolute paths untouched, mirroring the server so a relative
+// WEBAUTHN_STORE in .env lands on the same file on both sides.
+func resolveInstancePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(v2vctlRoot, p)
+}
 
 // --- keygen ed25519 -----------------------------------------------------
-

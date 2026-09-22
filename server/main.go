@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -191,15 +192,26 @@ func loadStaticConfig() (StaticConfig, error) {
 	}
 
 	noContentLogs := getEnvAsBoolOptional("NO_CONTENT_LOGS", false)
-	logFilePath := getEnvOptional("LOG_FILE_PATH", dataPath("app.log"))
-	historyFilePath := getEnvOptional("HISTORY_FILE_PATH", dataPath("history.jsonl"))
+	logFilePath := dataPath("app.log")
+	if raw := os.Getenv("LOG_FILE_PATH"); strings.TrimSpace(raw) != "" {
+		logFilePath = resolveUnderRoot(ServerRoot, raw)
+	}
+	historyFilePath := dataPath("history.jsonl")
+	if raw := os.Getenv("HISTORY_FILE_PATH"); strings.TrimSpace(raw) != "" {
+		historyFilePath = resolveUnderRoot(ServerRoot, raw)
+	}
 	if noContentLogs {
-		if os.Getenv("LOG_FILE_PATH") != "" || os.Getenv("HISTORY_FILE_PATH") != "" {
+		if strings.TrimSpace(os.Getenv("LOG_FILE_PATH")) != "" || strings.TrimSpace(os.Getenv("HISTORY_FILE_PATH")) != "" {
 			logWarnf("⚠️ NO_CONTENT_LOGS=true: LOG_FILE_PATH/HISTORY_FILE_PATH bị bỏ qua (RAM-only)")
 		}
 		warnStaleContentFiles(logFilePath, historyFilePath)
 	}
 	logFilePath, historyFilePath = effectiveStoragePaths(noContentLogs, logFilePath, historyFilePath)
+
+	trustedProxyDir := filepath.Join(ServerRoot, DefaultTrustedProxyDir)
+	if raw := os.Getenv(env.KeyTrustedProxyDir); strings.TrimSpace(raw) != "" {
+		trustedProxyDir = resolveUnderRoot(ServerRoot, raw)
+	}
 
 	cfg := StaticConfig{
 		AllowedOrigins:       strings.Split(env.AllowedOrigins(), ","),
@@ -212,7 +224,8 @@ func loadStaticConfig() (StaticConfig, error) {
 		HistoryFilePath:      historyFilePath,
 		MaxHistoryFileSizeMB: loader.Int("MAX_HISTORY_FILE_SIZE_MB"),
 		NoContentLogs:        noContentLogs,
-		TrustedProxyDir:      getEnvOptional(env.KeyTrustedProxyDir, DefaultTrustedProxyDir),
+		Root:                 ServerRoot,
+		TrustedProxyDir:      trustedProxyDir,
 		Onion: OnionConfig{
 			Hosts:        onionHosts,
 			AllowWeb:     getEnvAsBoolOptional("ONION_ALLOW_WEB", false),
@@ -375,6 +388,10 @@ func (s *ChatServer) WatchRolesFile() {
 }
 
 func main() {
+	// The instance root must be known before the .env load, since it is
+	// what locates that .env: V2V_ROOT (default instances/default).
+	InitServerPaths(DefaultServerRoot())
+
 	for _, p := range EnvFilePaths {
 		if err := godotenv.Load(p); err == nil {
 			logInfof("✅ Đã nạp cấu hình môi trường từ: %s", p)
@@ -524,6 +541,6 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	logInfof("🚀 Server đang chạy tại port %v (version %s)", Cfg.Static.Port, Version)
+	logInfof("🚀 Server đang chạy tại port %v (version %s, instance %s)", Cfg.Static.Port, Version, Cfg.Static.Root)
 	log.Fatal(server.ListenAndServe())
 }

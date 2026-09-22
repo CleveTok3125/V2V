@@ -90,7 +90,7 @@ Cấp passkey web (link dùng 1 lần, 10 phút):
 # → https://chat.example.com/web/#enroll=...
 ```
 
-Xem `template/server/config/roles.json` và `template/.env` để cấu hình server.
+Xem `template/server/config/roles.json` và `template/.env` để cấu hình server. Lệnh quản lý mặc định ở root `instances/default`; truyền `--root instances/<name>` (hoặc đặt `V2V_ROOT`) để nhắm instance khác.
 
 ## Chạy Server
 
@@ -98,12 +98,12 @@ Xem `template/server/config/roles.json` và `template/.env` để cấu hình se
 
 ```bash
 make v2vctl                    # -> public/V2Vctl-<os>-<arch>
-./public/V2Vctl-$(go env GOOS)-$(go env GOARCH) config sync --dir .   # khởi tạo .env + ./config từ template (clone mới)
-# sửa .env: PORT, ALLOWED_ORIGINS, ...
+./public/V2Vctl-$(go env GOOS)-$(go env GOARCH) config sync --dir . --to instances/default   # khởi tạo instance mặc định từ template
+# sửa instances/default/.env: PORT, ALLOWED_ORIGINS, ...
 make server web                # -> public/server.bin + webterm/app.wasm
-./public/server.bin
-# hoặc: docker compose up -d --build   (lưu ./data và ./logs)
-# full matrix: make all ALL=1 -j4
+V2V_ROOT=instances/default ./public/server.bin
+# hoặc: docker compose up -d --build   (lưu instances/default/data)
+# instance khác: config sync --dir . --to instances/prod, rồi ENV_ROOT=instances/prod docker compose -p v2v-prod up -d --build
 ```
 
 Mở `http://localhost:10000/web/` cho bản web.

@@ -1,10 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
-	"encoding/json"
 
 	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/strutil"
@@ -54,9 +55,8 @@ func str(v any) string {
 	return fmt.Sprint(v)
 }
 
-
 type ListCmd struct {
-	Store string `help:"Đường dẫn store" default:"data/webauthn.json" env:"WEBAUTHN_STORE"`
+	Store string `help:"Đường dẫn store" env:"WEBAUTHN_STORE"`
 }
 
 func saveStore(path string, f *waStoreFile) error {
@@ -68,6 +68,11 @@ func saveStore(path string, f *waStoreFile) error {
 }
 
 func (l *ListCmd) Run() error {
+	if strings.TrimSpace(l.Store) == "" {
+		l.Store = defaultWebauthnStore()
+	} else {
+		l.Store = resolveInstancePath(l.Store)
+	}
 	f, err := loadStore(l.Store)
 	if err != nil {
 		return err

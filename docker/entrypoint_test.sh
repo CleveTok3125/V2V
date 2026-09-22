@@ -177,5 +177,19 @@ else
 fi
 rm -rf "$ROOT"
 
+# T-instance-root: V2V_ROOT redirects preflight and data prep to a
+# separate instance dir (multi-instance mount).
+sandbox; ROOT=$SANDBOX_ROOT
+INST="$SANDBOX_ROOT/inst"
+mkdir -p "$INST/config" "$INST/data"
+echo "x=1" > "$INST/.env"
+echo '{}' > "$INST/config/roles.json"
+chmod 755 "$INST" && chmod 644 "$INST/.env" "$INST/config/roles.json"
+export V2V_ROOT="$INST"
+run_entry || bad "instance-root: entrypoint failed"
+[ "$(stat -c %u:%g "$INST/data")" = "$NOBODY_IDS" ] && ok "instance-root: data owned" || bad "instance-root: data owner $(stat -c %u:%g "$INST/data")"
+unset V2V_ROOT
+rm -rf "$ROOT"
+
 echo "pass=$pass fail=$fail"
 [ "$fail" = "0" ]

@@ -18,6 +18,7 @@ import (
 var Version = "dev"
 
 type CLI struct {
+	Root    string     `help:"Thư mục instance (mặc định instances/default)" default:"instances/default" env:"V2V_ROOT"`
 	Keygen  KeygenCmd  `cmd:"" help:"Tạo danh tính cá nhân vào key.json"`
 	Role    RoleCmd    `cmd:"" help:"Quản lý role trong roles.json"`
 	Enroll  EnrollCmd  `cmd:"" help:"Phát ticket enroll passkey thật (chạy trên host server)"`
@@ -34,5 +35,6 @@ var cli CLI
 
 func main() {
 	ctx := kong.Parse(&cli)
+	SetRoot(cli.Root)
 	ctx.FatalIfErrorf(ctx.Run())
 }

@@ -1,12 +1,13 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/tui"
@@ -22,7 +23,8 @@ type Ed25519Keygen struct {
 func (c *Ed25519Keygen) Run() error {
 	if tui.HasControllingTTY() {
 		if c.ServerPubKey == "" {
-			if data, err := os.ReadFile("data/server_identity.json"); err == nil {
+			identityPath := filepath.Join(v2vctlRoot, "data", "server_identity.json")
+			if data, err := os.ReadFile(identityPath); err == nil {
 				var sid map[string]any
 				if json.Unmarshal(data, &sid) == nil {
 					if pub, ok := sid["public_key"].(string); ok {
@@ -82,4 +84,3 @@ func (c *Ed25519Keygen) Run() error {
 }
 
 // --- enroll ---------------------------------------------------------------
-

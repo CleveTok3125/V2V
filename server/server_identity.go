@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 func LoadOrCreateServerIdentity(path string) (*ServerIdentity, error) {
@@ -38,7 +39,7 @@ func LoadOrCreateServerIdentity(path string) (*ServerIdentity, error) {
 		PrivateKey: hex.EncodeToString(priv),
 	}
 	data, _ := json.MarshalIndent(s, "", "  ")
-	dir := "data"
+	dir := filepath.Dir(path)
 	_ = os.MkdirAll(dir, 0o700)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {

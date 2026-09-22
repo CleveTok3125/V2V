@@ -7,6 +7,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 - [Project Structure](#project-structure)
 - [Build System](#build-system)
 - [Configuration Sync](#configuration-sync)
+- [Instances (multiple environments)](#instances-multiple-environments)
 - [Client Configuration](#client-configuration)
 - [Client Tabs](#client-tabs)
 - [Placeholders and Server Echo](#placeholders-and-server-echo)
@@ -47,9 +48,10 @@ For a friendly getting-started guide, see [README.md](../README.md).
 ├── webterm/          # Browser terminal (xterm.js + WASM glue)
 ├── cmd/v2vctl/       # Management tool, one file per concern (main, role, keygen, enroll, migrate, list, prompt, config, pager)
 ├── template/         # Samples mirroring real locations
-│   ├── .env            # → copy to ./.env (project root)
-│   ├── server/config/  # roles.json + trustedproxy/ → copy to ./config/
+│   ├── .env            # → instances/<name>/.env (via config sync)
+│   ├── server/config/  # roles.json + trustedproxy/ → instances/<name>/config/
 │   └── client/         # config.jsonc + key.json → copy to OS config dir
+├── instances/        # Gitignored: one dir per environment (default: default)
 └── docs/             # This file
 ```
 
@@ -85,12 +87,22 @@ make clean
 
 `v2vctl config sync` migrates the template into a live config, preserving operator-set values. The merge is template-first: the template wins structure, order and comments; the live config wins values per key.
 
-- **Manifest:** the project root holds a tracked `v2v-template.json` (`version`, `type`, `templateDir`, `files[]`, `add_policy`). Each file entry declares `id`, `path` (template-relative), `format` (`env|json|jsonc|trust-dir`), `dest` (config-relative), optional `target: "client"` (dest is under the OS config dir) and `keys` (expected key order). `--dir` points at the directory holding the manifest (default `.`); `--to` is the config root (default `--dir`). Missing or invalid manifest fails the run; there is no fallback.
+- **Manifest:** the project root holds a tracked `v2v-template.json` (`version`, `type`, `templateDir`, `files[]`, `add_policy`). Each file entry declares `id`, `path` (template-relative), `format` (`env|json|jsonc|trust-dir`), `dest` (config-relative), optional `target: "client"` (dest is under the OS config dir) and `keys` (expected key order). `--dir` points at the directory holding the manifest (default `.`); `--to` is the instance root (default `instances/default`, or `V2V_ROOT`). Missing or invalid manifest fails the run; there is no fallback.
 - **Commands:** `config sync` (merge + write), `config diff` (unified diff preview, `--format text|json`), `config check` (manifest vs template drift), `config manifest --write` (regenerate `keys` while preserving `add_policy`). `--only` selects a subset of manifest ids (default `env,roles,trust`; `client` is opt-in).
 - **Render:** `.env` and trust files are walked line-by-line so comments, blank lines and quoting stay byte-identical; a commented `#KEY=value` default is activated in place when the operator enables it; template JSON is re-indented with the template's own indent unit and key order. Merging the template with itself reproduces it byte-for-byte.
 - **`add_policy`:** keys that must not inherit the template value when newly added. `env.comment` renders them commented (`#KEY=value`); `roles`/`jsonc` `skip` omits them. Only the added branch is affected.
 - **Guards:** the config root and every destination must stay outside the template root; malformed template/local JSON is refused instead of being overwritten. JSONC targets are lossy (comments and formatting are normalized), so `sync` requires `--force` for such entries after reviewing `diff`.
 - **Modes:** config artifacts are written `0644` (dirs `0755`) via `identity.WriteConfigFile`; secrets keep `0600`/`0700`.
+
+## Instances (multiple environments)
+
+One binary serves many instances: an instance is a directory holding `.env`, `config/` and `data/`. The instance root is `V2V_ROOT` (default `instances/default`), resolved before the `.env` load — so the variable must come from the process environment, never from the instance `.env` itself.
+
+- Host: `v2vctl config sync --dir . --to instances/<name>` seeds an instance; run it with `V2V_ROOT=instances/<name> ./public/server.bin`. `v2vctl role`/`enroll`/`list` accept `--root` (or `V2V_ROOT`) and default to `instances/default`.
+- Each instance has its own chain, `server_identity.json`, `webauthn.json`, `roles.json`, history and logs; `V2V_ROOT` only changes which directory they hang off. Absolute per-artifact overrides (`DATA_DIR`, `LOG_FILE_PATH`, `HISTORY_FILE_PATH`, `TRUSTED_PROXY_DIR`, `WEBAUTHN_STORE`) still win.
+- Container: the compose service mounts `${ENV_ROOT:-instances/default}/.env`, `.../config`, `.../data` into `/app` and pins `V2V_ROOT=/app`. Multiple instances run from the same image with `ENV_ROOT=instances/<name> docker compose -p v2v-<name> up -d --build` (no fixed `container_name`).
+- Migration from the old root layout: `mkdir -p instances/default && mv .env instances/default/.env && mv config instances/default/config && mv data instances/default/data`.
+- **Upgrade note (layout):** `config sync` now defaults `--to` to the instance root (`instances/default`) and the server reads `<V2V_ROOT>/.env` with no root-layout fallback, so old root-layout deployments must migrate (or keep working in place with `V2V_ROOT=.` and `config sync --dir . --to .`).
 
 ## Client Configuration
 
@@ -320,6 +332,8 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 
 ## Storage & Persistence
 
+Paths below are relative to the instance root (`V2V_ROOT`, default `instances/default`); absolute per-artifact env overrides still win.
+
 - `data/server_identity.json` — server's long-term Ed25519 keypair, auto-generated, used for `serverPub` pinning.
 - `data/history.jsonl` / `.old.zst` — chat history, `zstd` compressed old generation, smart batch `Sync`.
 - `data/webauthn.json` — WebAuthn tickets and credentials, `atomicWriteFile` via `CreateTemp+Sync+Rename+dir Sync`.
@@ -354,7 +368,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - **File exposure:** secrets and chat land owner-only — `key.json`, `webauthn.json`, `server_identity.json` via `atomicWriteFile 0600` (dirs `0700`); `history.jsonl` and `app.log` via `0600` (`history` dir `0700`). Server config artifacts (`roles.json`, `.env`, `config/trustedproxy/*.txt`, client `config.jsonc`, `v2v-template.json`) use `WriteConfigFile` `0644` (dirs `0755`) so container bind mounts stay readable when host and container uids differ; this makes `roles.json`'s `hmac_shield` host-readable, matching the `cp -n` bootstrap that always produced `0644`. `OpenFile` applies the mode only at creation, so pre-existing files keep theirs: re-harden once on the host with `chmod 700 data` and `chmod 600 data/history.jsonl* data/app.log* data/server_identity.json data/webauthn.json`.
 - Missing `config/roles.json` fails the boot (no silent default-permission fallback); a corrupt file fails too, while hot-reload keeps the old registry with a warning.
 - Trust files refuse to load when world-writable; templates ship no secrets (placeholders only).
-- **Container:** the image builds with live `data/`/`config/`/`.env` excluded (`.dockerignore`), runs the server as a non-root `app` user via `docker/entrypoint.sh` (root prepares `/app/data` idempotently, preflights the read-only mounts with actionable errors, then `exec su-exec`), drops all capabilities except `CHOWN`/`SETUID`/`SETGID` (needed by that root phase), blocks privilege escalation and mounts the rootfs read-only (`/tmp` tmpfs). No `user:` is set on purpose — the entrypoint adapts, rollback is commenting out `read_only`.
+- **Container:** the image builds with live `data/`/`config/`/`.env`/`instances/` excluded (`.dockerignore`), runs the server as a non-root `app` user via `docker/entrypoint.sh` (root prepares `$V2V_ROOT/data` idempotently, preflights the read-only mounts with actionable errors, then `exec su-exec`), drops all capabilities except `CHOWN`/`SETUID`/`SETGID` (needed by that root phase), blocks privilege escalation and mounts the rootfs read-only (`/tmp` tmpfs). No `user:` is set on purpose — the entrypoint adapts, rollback is commenting out `read_only`. Compose mounts one instance (`ENV_ROOT`) into `/app` and sets `V2V_ROOT=/app`.
 
 ## Error Handling
 

@@ -13,7 +13,11 @@ APP_USER="${APP_USER:-app}"
 APP_GROUP="${APP_GROUP:-app}"
 SU_EXEC_BIN="${SU_EXEC_BIN:-su-exec}"
 SERVER_BIN="${SERVER_BIN:-$APP_ROOT/server.bin}"
-DATA_DIR="$APP_ROOT/data"
+# Instance root: .env, config/ and data/ live under it. Defaults to the
+# app root so a bare run keeps the classic /app layout; multi-instance
+# deployments mount an env dir and set V2V_ROOT to it.
+V2V_ROOT="${V2V_ROOT:-$APP_ROOT}"
+DATA_DIR="$V2V_ROOT/data"
 
 # uid_of resolves a username (or passes a numeric uid through).
 # gid_of resolves a group name via /etc/group (or passes a numeric
@@ -50,7 +54,7 @@ else
 	if ! find "$DATA_DIR" -xdev \
 		\( ! -user "$APP_USER" -o ! -group "$APP_GROUP" \) \
 		-exec chown "$APP_USER:$APP_GROUP" {} +; then
-		echo "FATAL: cannot chown $DATA_DIR (need CAP_CHOWN: check cap_add in compose; rootless docker maps uids differently). Host-side fix: chown -R $want ./data"
+		echo "FATAL: cannot chown $DATA_DIR (need CAP_CHOWN: check cap_add in compose; rootless docker maps uids differently). Host-side fix: chown -R $want <instance>/data"
 		exit 1
 	fi
 fi
@@ -67,19 +71,19 @@ require_readable() {
 		echo "FATAL: $path missing; on the host run: $bootstrap"
 		exit 1
 	fi
-	rel=${path#"$APP_ROOT"/}
+	rel=${path#"$V2V_ROOT"/}
 	if ! "$SU_EXEC_BIN" "$APP_USER:$APP_GROUP" test -r "$path"; then
 		echo "FATAL: $path unreadable by $APP_USER; on the host run: chmod o+r $rel (or chown it to the data owner)"
 		exit 1
 	fi
 }
-require_readable "$APP_ROOT/.env" "make v2vctl && v2vctl config sync --dir ."
-require_readable "$APP_ROOT/config/roles.json" "make v2vctl && v2vctl config sync --dir ."
+require_readable "$V2V_ROOT/.env" "make v2vctl && v2vctl config sync --dir . --to <instance dir>"
+require_readable "$V2V_ROOT/config/roles.json" "make v2vctl && v2vctl config sync --dir . --to <instance dir>"
 
 # Writability probe: without it the server dies on its first write
 # with a bare "permission denied". Fail here instead, with the fix.
 if ! "$SU_EXEC_BIN" "$APP_USER:$APP_GROUP" sh -c 'touch "$1/.wtest" && rm "$1/.wtest"' _ "$DATA_DIR"; then
-	echo "FATAL: $DATA_DIR not writable by $APP_USER; on the host run: chown -R $want ./data"
+	echo "FATAL: $DATA_DIR not writable by $APP_USER; on the host run: chown -R $want <instance>/data"
 	exit 1
 fi
 

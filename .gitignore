@@ -43,6 +43,8 @@ logs/
 # Live server dirs (template/ holds the samples)
 /config/
 /data/
+# Per-instance config trees (the default instance is instances/default)
+/instances/
 
 # Template
 !template/*

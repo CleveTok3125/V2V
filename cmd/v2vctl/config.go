@@ -31,7 +31,7 @@ type ConfigCmd struct {
 // ConfigCommon holds flags shared by sync/diff/check.
 type ConfigCommon struct {
 	Dir       string `help:"Thư mục chứa v2v-template.json" default:"."`
-	To        string `help:"Thư mục gốc config (mặc định = --dir)"`
+	To        string `help:"Thư mục gốc instance (mặc định theo --root/V2V_ROOT)"`
 	Only      string `help:"Tập con id trong manifest (mặc định env,roles,trust)"`
 	ClientDir string `help:"Thư mục config client cho entry target=client"`
 	NoPager   bool   `help:"In thẳng, không qua pager"`
@@ -199,7 +199,9 @@ func resolveConfigCtx(common ConfigCommon) (*configCtx, error) {
 	}
 	toRaw := strings.TrimSpace(common.To)
 	if toRaw == "" {
-		toRaw = common.Dir
+		// Fall back to the instance root (--root/V2V_ROOT), not the
+		// manifest dir, so `--root instances/x config sync` targets x.
+		toRaw = v2vctlRoot
 	}
 	cfgRoot, err := filepath.Abs(toRaw)
 	if err != nil {

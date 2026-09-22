@@ -1,12 +1,13 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"time"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/tui"
@@ -16,11 +17,16 @@ import (
 type EnrollCmd struct {
 	Role  string        `help:"Role gắn với passkey" default:"member"`
 	Label string        `help:"Nhãn thiết bị/người"`
-	Store string        `help:"Đường dẫn store" default:"data/webauthn.json" env:"WEBAUTHN_STORE"`
+	Store string        `help:"Đường dẫn store" env:"WEBAUTHN_STORE"`
 	TTL   time.Duration `help:"Thời gian hiệu lực ticket" default:"10m"`
 }
 
 func (e *EnrollCmd) Run() error {
+	if strings.TrimSpace(e.Store) == "" {
+		e.Store = defaultWebauthnStore()
+	} else {
+		e.Store = resolveInstancePath(e.Store)
+	}
 	if tui.HasControllingTTY() {
 		form := huh.NewForm(huh.NewGroup(
 			huh.NewInput().Title("Role").Value(&e.Role).Validate(nonEmpty),
@@ -64,4 +70,3 @@ func (e *EnrollCmd) Run() error {
 }
 
 // --- migrate ----------------------------------------------------------------
-
