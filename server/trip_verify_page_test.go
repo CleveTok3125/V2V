@@ -208,6 +208,26 @@ func TestTripVerify_AbuseGuards(t *testing.T) {
 	}
 }
 
+// enroll/finish must rate-limit before any store read, so a bogus ticket
+// flood cannot hammer the disk.
+func TestEnrollFinish_RateLimited(t *testing.T) {
+	setupWA(t)
+	s := NewChatServer()
+	body := `{"ticket":"x","id":"y","client_data_json":"z","attestation_object":"w"}`
+	do := func() int {
+		req := httptest.NewRequest(http.MethodPost, "/enroll/finish", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		s.handleEnrollFinish(rec, req)
+		return rec.Code
+	}
+	if code := do(); code == http.StatusTooManyRequests {
+		t.Fatal("first finish must not be rate-limited")
+	}
+	if code := do(); code != http.StatusTooManyRequests {
+		t.Fatalf("rapid repeat: code=%d, want 429", code)
+	}
+}
+
 // A missing WebAuthn store must answer 503, never nil-deref.
 func TestEnroll_NilStoreNoPanic(t *testing.T) {
 	s := NewChatServer()

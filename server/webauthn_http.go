@@ -17,8 +17,10 @@ import (
 )
 
 const enrollBeginCooldown = 30 * time.Second
+const enrollFinishCooldown = 10 * time.Second
 
 var enrollBeginCooldowns = guard.NewCooldownMap()
+var enrollFinishCooldowns = guard.NewCooldownMap()
 
 const enrollChallengeTTL = 5 * time.Minute
 
@@ -148,6 +150,12 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Rate-limit before touching the store: each finish does a pending
+	// lookup (file read) even for a bogus ticket, so spam is disk I/O.
+	if !enrollFinishCooldowns.Allow(getClientIP(r), enrollFinishCooldown) {
+		http.Error(w, "too many enroll attempts", http.StatusTooManyRequests)
 		return
 	}
 	var req finishRequest
