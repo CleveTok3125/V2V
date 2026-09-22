@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -36,6 +37,14 @@ func InitLogger(logFile string, maxSizeMB int) error {
 }
 
 func (l *RotatingLogger) open() error {
+	// Create the parent directory so a fresh source checkout (no ./data)
+	// does not fail the boot; the container entrypoint already makes it.
+	if dir := filepath.Dir(l.Filename); dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+	}
+
 	info, err := os.Stat(l.Filename)
 	if err == nil {
 		l.size = info.Size()
