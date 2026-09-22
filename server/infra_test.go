@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/CleveTok3125/V2V/internal/env"
 )
 
 // Env loader must parse ints/durations/bools and surface errors on
@@ -142,5 +144,34 @@ func TestRotatingLogger_Rotate(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("current log missing after rotate: %v", err)
+	}
+}
+
+// Web asset lookup must prefer the explicit override, then a webterm
+// dir next to the executable, then the cwd-relative default, so a
+// release binary launched from an arbitrary directory still serves its
+// bundle.
+func TestResolveWebtermDir(t *testing.T) {
+	exeDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(exeDir, "webterm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(env.KeyWebtermDir, "/custom/webterm")
+	if got := resolveWebtermDir(exeDir); got != "/custom/webterm" {
+		t.Fatalf("override = %q, want /custom/webterm", got)
+	}
+
+	t.Setenv(env.KeyWebtermDir, "   ")
+	if got := resolveWebtermDir(exeDir); got != filepath.Join(exeDir, "webterm") {
+		t.Fatalf("exe-relative = %q, want %q", got, filepath.Join(exeDir, "webterm"))
+	}
+
+	t.Setenv(env.KeyWebtermDir, "")
+	if got := resolveWebtermDir(t.TempDir()); got != "webterm" {
+		t.Fatalf("missing exe dir = %q, want webterm", got)
+	}
+	if got := resolveWebtermDir(""); got != "webterm" {
+		t.Fatalf("empty exeDir = %q, want webterm", got)
 	}
 }

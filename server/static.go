@@ -9,7 +9,45 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/CleveTok3125/V2V/internal/env"
 )
+
+// webtermDir is the directory holding the web assets, resolved once at
+// startup. It defaults to the cwd-relative "webterm" so tests and
+// source-tree runs keep working.
+var webtermDir = "webterm"
+
+// executableDir returns the directory of the running binary, or "" when
+// it cannot be determined.
+func executableDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Dir(exe)
+}
+
+// resolveWebtermDir picks the web asset directory in this order:
+//  1. WEBTERM_DIR when set (explicit operator override),
+//  2. "<exeDir>/webterm" when exeDir is non-empty and that dir exists,
+//  3. "webterm" relative to the current working directory.
+//
+// This keeps a binary launched from an arbitrary cwd (e.g. a systemd
+// unit or an extracted release tarball) able to find its assets next to
+// itself, without breaking source-tree and Docker runs.
+func resolveWebtermDir(exeDir string) string {
+	if dir := strings.TrimSpace(env.WebtermDir()); dir != "" {
+		return dir
+	}
+	if exeDir != "" {
+		candidate := filepath.Join(exeDir, "webterm")
+		if st, err := os.Stat(candidate); err == nil && st.IsDir() {
+			return candidate
+		}
+	}
+	return "webterm"
+}
 
 // webFilesHandler serves the static asset directory with transparent support
 // for precompressed variants: when the client advertises br/gzip support and

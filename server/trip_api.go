@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,9 +18,10 @@ import (
 
 var guardTripCooldown = guard.NewCooldownMap()
 
-// verifyPage is the human-readable trip verify page, served from disk
-// like the other webterm statics (Docker CWD=/app already carries it).
-const verifyPage = "webterm/verify.html"
+// verifyPagePath is the human-readable trip verify page, served from
+// disk like the other webterm statics. It follows webtermDir so the
+// page resolves next to the executable, not only from the cwd.
+func verifyPagePath() string { return filepath.Join(webtermDir, "verify.html") }
 
 // wantsVerifyPage reports whether the client navigated with a browser
 // (Accept includes text/html). API consumers (curl default */*, app.js
@@ -40,14 +42,14 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if wantsVerifyPage(r) {
-		if data, err := os.ReadFile(verifyPage); err == nil {
+		if data, err := os.ReadFile(verifyPagePath()); err == nil {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write(data)
 			return
 		}
-		logWarnf("⚠️ [TRIP VERIFY PAGE] %s missing, falling back to JSON", verifyPage)
+		logWarnf("⚠️ [TRIP VERIFY PAGE] %s missing, falling back to JSON", verifyPagePath())
 	}
 
 	// Abuse mitigation: cap query size and rate-limit per IP (ed25519 verify is cheap but still CPU)

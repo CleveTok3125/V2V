@@ -454,7 +454,8 @@ func main() {
 	mux := http.NewServeMux()
 
 	mime.AddExtensionType(".wasm", "application/wasm")
-	webHandler := http.StripPrefix("/web/", webFilesHandler("webterm"))
+	webtermDir = resolveWebtermDir(executableDir())
+	webHandler := http.StripPrefix("/web/", webFilesHandler(webtermDir))
 	mux.HandleFunc("/web/", func(w http.ResponseWriter, r *http.Request) {
 		if !webAllowed(r) {
 			logWarnf("⛔ [ONION] Chặn web client từ %s (ONION_ALLOW_WEB=false)", trustedproxy.Clip(r.Host, 200))

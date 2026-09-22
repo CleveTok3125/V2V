@@ -26,6 +26,7 @@ func TestRegistry(t *testing.T) {
 		{"CI", KeyCI, nil},
 		{"PROXY_PROVIDER", KeyProxyProvider, ProxyProvider},
 		{"TRUSTED_PROXY_DIR", KeyTrustedProxyDir, TrustedProxyDir},
+		{"WEBTERM_DIR", KeyWebtermDir, WebtermDir},
 		{"DATA_DIR", KeyDataDir, DataDir},
 	}
 	for _, c := range cases {

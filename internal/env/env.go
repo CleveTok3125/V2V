@@ -32,6 +32,7 @@ const (
 	KeyCI              = "CI"
 	KeyProxyProvider   = "PROXY_PROVIDER"
 	KeyTrustedProxyDir = "TRUSTED_PROXY_DIR"
+	KeyWebtermDir      = "WEBTERM_DIR"
 	KeyRoot            = "V2V_ROOT"
 )
 
@@ -82,6 +83,11 @@ func ProxyProvider() string { return os.Getenv(KeyProxyProvider) }
 // TrustedProxyDir holds per-module "<name>.txt" trust files. Empty
 // means the caller default (./config/trustedproxy).
 func TrustedProxyDir() string { return os.Getenv(KeyTrustedProxyDir) }
+
+// WebtermDir overrides the directory holding the web assets. Empty
+// means the caller default (a "webterm" dir next to the executable,
+// falling back to ./webterm).
+func WebtermDir() string { return os.Getenv(KeyWebtermDir) }
 
 // Root is the instance directory the server/v2vctl operate on. Empty
 // means the caller default (instances/default). It must come from the
