@@ -17,12 +17,13 @@ before:
     # Standalone browser client: the wasm bundle plus serve.py, zipped
     # once. Platform-independent, attached by release.extra_files below
     # (archives require a build id and would emit one copy per platform).
+    # Staged under a dedicated top-level directory: goreleaser requires
+    # dist/ to be empty once the before hooks finish.
     - >-
-      sh -c 'rm -f dist/V2V-webterm-{{ .Version }}.zip &&
-      mkdir -p dist/stage/webterm &&
-      cp -r webterm/. dist/stage/webterm/ &&
-      cp scripts/webterm-serve/serve.py dist/stage/webterm/serve.py &&
-      (cd dist/stage/webterm && zip -qr ../../V2V-webterm-{{ .Version }}.zip .)'
+      sh -c 'rm -rf webterm-dist && mkdir -p webterm-dist/stage &&
+      cp -r webterm/. webterm-dist/stage/ &&
+      cp scripts/webterm-serve/serve.py webterm-dist/stage/serve.py &&
+      (cd webterm-dist/stage && zip -qr ../V2V-webterm-{{ .Version }}.zip .)'
 
 builds:
   - id: client
@@ -207,4 +208,4 @@ release:
   prerelease: auto
   name_template: "{{ .Tag }}"
   extra_files:
-    - glob: dist/V2V-webterm-*.zip
+    - glob: webterm-dist/V2V-webterm-*.zip
