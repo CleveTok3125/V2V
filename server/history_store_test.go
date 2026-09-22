@@ -80,6 +80,58 @@ func TestHistoryStore_CloseThenEnqueueNoPanic(t *testing.T) {
 	}
 }
 
+// A rotate that fails after closing the active file must leave a
+// consistent fileless store (no stale handle, zero size) and the store
+// must reopen on the next write instead of stalling until restart.
+func TestHistoryStore_RotateFailureSelfHeals(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history.jsonl")
+	s, err := NewHistoryStore(path, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// Occupy the rotation target with a non-empty dir so os.Rename fails
+	// deterministically (no permission games).
+	blocker := path + ".old"
+	if err := os.Mkdir(blocker, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blocker, "x"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.Lock()
+	rotErr := s.rotate()
+	staleFile := s.file
+	staleSize := s.size
+	s.mu.Unlock()
+	if rotErr == nil {
+		t.Fatal("expected rotate to fail while .old is a non-empty dir")
+	}
+	if staleFile != nil {
+		t.Fatal("failed rotate left a stale file handle")
+	}
+	if staleSize != 0 {
+		t.Fatalf("failed rotate left size=%d, want 0", staleSize)
+	}
+
+	if err := os.RemoveAll(blocker); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.writeRecord(historyRecord{Message: "after-failure"}); err != nil {
+		t.Fatalf("write after failed rotate: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "after-failure") {
+		t.Fatalf("self-heal write missing from %s: %q", path, data)
+	}
+}
+
 // Corrupt lines and a >64KB line must be skipped/tolerated, never brick
 // the load.
 func TestLoadRecords_CorruptAndOversized(t *testing.T) {

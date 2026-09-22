@@ -254,6 +254,15 @@ func (h *HistoryStore) writeRecord(record historyRecord) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	// A prior rotate may have failed after closing the handle (rename or
+	// unlink error), leaving the store fileless. Reopen here so history
+	// writing self-heals instead of stalling until the next restart.
+	if h.file == nil {
+		if err := h.open(); err != nil {
+			h.drops++
+			return fmt.Errorf("history store reopen failed: %w", err)
+		}
+	}
 	if h.MaxSize > 0 && h.size+int64(len(line)) > h.MaxSize {
 		if err := h.rotate(); err != nil {
 			return err
@@ -308,8 +317,14 @@ func (h *HistoryStore) indexWroteLocked(height uint64, offset int64) {
 func (h *HistoryStore) rotate() error {
 	if h.file != nil {
 		_ = h.file.Sync()
-		if err := h.file.Close(); err != nil {
-			return err
+		closeErr := h.file.Close()
+		// Drop the closed handle and its size before any early return:
+		// a rotate failure must leave a consistent fileless store that
+		// writeRecord can reopen, not a stale handle into a closed file.
+		h.file = nil
+		h.size = 0
+		if closeErr != nil {
+			return closeErr
 		}
 	}
 
