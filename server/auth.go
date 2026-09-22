@@ -500,6 +500,9 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 		TripPrev: tripPrev,
 	})
 	if err != nil {
+		// The session never reaches registerClient, so release the
+		// display-name serial slot claimed above instead of leaking it.
+		s.Hub.releaseDisplayName(finalUsername)
 		return nil, err
 	}
 

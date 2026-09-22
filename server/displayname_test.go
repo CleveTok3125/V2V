@@ -179,3 +179,26 @@ func TestDisplayName_Truncate(t *testing.T) {
 		t.Fatalf("base should be truncated to 12, got %q len %d", base, len([]rune(base)))
 	}
 }
+
+// generateDisplayName claims a serial slot; releaseDisplayName must free
+// it so a failed auth handshake does not leak the name permanently.
+func TestReleaseDisplayName_FreesSerial(t *testing.T) {
+	s := NewChatServer()
+	s.DisplaySalt = []byte("test-salt-32-bytes-long-for-test!!")
+	name := s.generateDisplayName("Alice", "1.2.3.4", GetDefaultPermission())
+
+	s.Hub.DisplayNameCountMu.Lock()
+	_, held := s.Hub.DisplayNameCount[name]
+	s.Hub.DisplayNameCountMu.Unlock()
+	if !held {
+		t.Fatal("slot not registered by generateDisplayName")
+	}
+
+	s.Hub.releaseDisplayName(name)
+	s.Hub.DisplayNameCountMu.Lock()
+	_, still := s.Hub.DisplayNameCount[name]
+	s.Hub.DisplayNameCountMu.Unlock()
+	if still {
+		t.Fatal("slot not released")
+	}
+}

@@ -135,9 +135,7 @@ func (h *Hub) unregisterClient(session *ClientSession, clientIP string) {
 	}
 
 	// Release display name serial slot
-	h.DisplayNameCountMu.Lock()
-	delete(h.DisplayNameCount, session.DisplayName)
-	h.DisplayNameCountMu.Unlock()
+	h.releaseDisplayName(session.DisplayName)
 
 	close(session.Send)
 
@@ -147,6 +145,14 @@ func (h *Hub) unregisterClient(session *ClientSession, clientIP string) {
 	leaveMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã rời phòng chat.", leaveTime.Format("15:04"), session.DisplayName)
 	logInfof("🔴 [LEAVE] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
 	h.BroadcastNotice(leaveMsg, "leave", nil)
+}
+
+// releaseDisplayName frees the serial slot held by a generated display
+// name. Safe for a name that was never registered.
+func (h *Hub) releaseDisplayName(name string) {
+	h.DisplayNameCountMu.Lock()
+	delete(h.DisplayNameCount, name)
+	h.DisplayNameCountMu.Unlock()
 }
 
 func (c *ClientSession) WritePump() {
