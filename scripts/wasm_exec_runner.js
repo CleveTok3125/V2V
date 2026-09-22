@@ -13,7 +13,18 @@ require(path.join(goroot, 'lib', 'wasm', 'wasm_exec.js'));
 
 const go = new Go();
 go.argv = process.argv.slice(2);
-go.env = { ...process.env };
+// wasm_exec.js copies argv + env into a small fixed buffer ahead of the
+// Go data segment, so forwarding the whole process environment overflows
+// it on CI ("total length of command line and environment variables
+// exceeds limit"). The wasm tests are self-contained: forward only the
+// few vars they could reasonably need.
+const ENV_ALLOW = ['PATH', 'HOME', 'TMPDIR', 'V2V_NO_TTY'];
+go.env = {};
+for (const key of ENV_ALLOW) {
+	if (process.env[key] !== undefined) {
+		go.env[key] = process.env[key];
+	}
+}
 // Exit with Go's status at once: otherwise node lingers on pending
 // timers (e.g. -test.timeout) and their late firing throws
 // "Go program has already exited" after a green run.
