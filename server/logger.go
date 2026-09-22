@@ -63,7 +63,9 @@ func (l *RotatingLogger) Write(p []byte) (n int, err error) {
 	defer l.mu.Unlock()
 
 	writeLen := int64(len(p))
-	if l.size+writeLen > l.MaxSize {
+	// MaxSize <= 0 disables rotation entirely; otherwise every write
+	// would rotate because size+len is always greater than zero.
+	if l.MaxSize > 0 && l.size+writeLen > l.MaxSize {
 		// Rotate best-effort: a failed rotate keeps l.file nil and the
 		// nil guard below degrades to stdout-only.
 		_ = l.rotate()
@@ -86,14 +88,17 @@ func (l *RotatingLogger) rotate() error {
 	}
 
 	oldFile := l.Filename + ".old"
-	_ = os.Rename(l.Filename, oldFile)
+	renameErr := os.Rename(l.Filename, oldFile)
 
 	if err := l.open(); err != nil {
 		return err
 	}
-	// Reset the size only on success: a failed open keeps l.file nil
-	// (stdout-only degrade) and must not zero the accounting, or every
-	// subsequent write would retry the doomed rotate.
-	l.size = 0
+	// open() restores the real size when the file still exists (rename
+	// failed). Zero the accounting only when the active file was moved
+	// away or was already absent, otherwise a failed rename would reset
+	// the size and under-count the log.
+	if renameErr == nil || os.IsNotExist(renameErr) {
+		l.size = 0
+	}
 	return nil
 }
