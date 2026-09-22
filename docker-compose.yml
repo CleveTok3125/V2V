@@ -19,7 +19,7 @@ services:
       # ingress so trusted-proxy headers stay sound. Set BIND_ADDR=0.0.0.0
       # only for direct (non-tunnel) exposure, behind a CF-whitelisted
       # host firewall.
-      - "${BIND_ADDR:-127.0.0.1}:${PORT:-8080}:${PORT:-8080}"
+      - "${BIND_ADDR:-127.0.0.1}:${PORT:-10000}:${PORT:-10000}"
     volumes:
       # One instance dir supplies the whole config tree. ENV_ROOT selects
       # the instance (default instances/default); each env sets its own

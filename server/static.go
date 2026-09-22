@@ -19,11 +19,16 @@ import (
 var webtermDir = "webterm"
 
 // executableDir returns the directory of the running binary, or "" when
-// it cannot be determined.
+// it cannot be determined. Symlinks are resolved so a binary installed
+// via a symlink (common on macOS) still finds its assets next to the
+// real file.
 func executableDir() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
 	}
 	return filepath.Dir(exe)
 }

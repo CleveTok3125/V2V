@@ -31,8 +31,8 @@ builds:
     ignore:
       - goos: android
         goarch: amd64
-    # Distinct per-arch binary names keep these from colliding when the
-    # unique dist dir is disabled.
+    # Distinct per-arch binary names keep the dist root tidy (one file
+    # per platform) for the bare-binary assets below.
     no_unique_dist_dir: true
     env:
       - CGO_ENABLED=0
@@ -58,7 +58,8 @@ builds:
     ignore:
       - goos: android
         goarch: amd64
-    # Predictable dist path so the server archive can bundle this binary.
+    # Predictable dist path for the bare binary and the staged copy the
+    # server archive bundles.
     no_unique_dist_dir: true
     env:
       - CGO_ENABLED=0
@@ -144,15 +145,16 @@ sboms:
   - artifacts: archive
 
 signs:
+  # cosign v4 defaults to the new bundle format and ignores
+  # --output-signature/--output-certificate, so write a single
+  # .sigstore.json bundle (signature + certificate + transparency log).
   - cmd: cosign
-    signature: "${artifact}.sig"
-    certificate: "${artifact}.pem"
+    signature: "${artifact}.sigstore.json"
     artifacts: checksum
     args:
       - sign-blob
       - "--yes"
-      - "--output-signature=${signature}"
-      - "--output-certificate=${certificate}"
+      - "--bundle=${signature}"
       - "${artifact}"
     output: true
 

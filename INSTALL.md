@@ -12,7 +12,7 @@ platform and run it.
 | `V2Vctl-<os>-<arch>[.exe]`                   | Admin tool (roles, keys, enrollment, instance management)      |
 | `V2V-server-<os>-<arch>.tar.gz` / `.zip`       | Self-contained server bundle (see below)                       |
 | `ghcr.io/clevetok3125/v2v:<version>`         | Multi-arch container image (`linux/amd64`, `linux/arm64`)      |
-| `SHA256SUMS`, `SHA256SUMS.sig`, `SHA256SUMS.pem` | Checksums and a cosign keyless signature of the checksums      |
+| `SHA256SUMS`, `SHA256SUMS.sigstore.json`        | Checksums and a cosign keyless signature bundle of the checksums |
 
 The server bundle contains:
 
@@ -113,8 +113,7 @@ lives in `instances/prod/data/` and is untouched by image changes.
 ```sh
 sha256sum -c SHA256SUMS --ignore-missing
 cosign verify-blob \
-  --certificate SHA256SUMS.pem \
-  --signature SHA256SUMS.sig \
+  --bundle SHA256SUMS.sigstore.json \
   --certificate-identity-regexp 'https://github.com/CleveTok3125/V2V/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   SHA256SUMS

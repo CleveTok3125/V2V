@@ -30,7 +30,7 @@ ENV GIT_HASH=${GIT_HASH}
 RUN --mount=type=cache,target=/tmp/gocache \
   apk add --no-cache make git gzip brotli && make web
 
-FROM alpine:3
+FROM alpine:3.21
 WORKDIR /app
 RUN apk --no-cache add tzdata ca-certificates su-exec && \
     adduser -D -H -s /sbin/nologin app
