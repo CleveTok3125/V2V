@@ -63,11 +63,11 @@ make help            # list targets
 make vet test        # go vet/test (GOCACHE defaults under TMPDIR, then HOME)
 make dev             # dev build: bin/v2v, bin/v2v-server, bin/v2vctl + fresh webterm (unstripped, dev-<hash> stamp)
 make -j4 all         # parallel: server + web + client + v2vctl (host only for client/v2vctl)
-make all ALL=1 -j4   # full 7-platform matrix for client/v2vctl (CI)
+make all ALL=1 -j4   # cross 6-platform matrix for client/v2vctl (android: NDK, see below)
 make server          # public/server.bin (-tags netgo, -trimpath)
 make web             # webterm/app.wasm (+ wasm_exec.js, version.js, gzip/br)
 make client          # host only: public/V2V-$(go env GOOS)-$(go env GOARCH)
-make client ALL=1    # full matrix: public/V2V-* (7 platforms)
+make client ALL=1    # cross matrix: public/V2V-* (6 platforms)
 make v2vctl          # host only
 make v2vctl ALL=1    # full matrix
 make clean
@@ -75,10 +75,10 @@ make clean
 
 - Version stamping: `APP_VERSION` prefers `GIT_HASH`, else `git describe --tags --always`; injected via `-ldflags -X 'main.Version=...'`. `make web` stamps `version.js` from `VERSION` (also `GIT_HASH`-first), so server, client, v2vctl and webterm share one tag.
 - Cross-compile: `CGO_ENABLED=0 GOOS=... GOARCH=... go build -trimpath`; host OS detected via `go env GOOS/GOARCH` (`HOST_GOOS/HOST_GOARCH`).
-- Default `make client`/`v2vctl` builds only host binary for fast dev; `ALL=1` builds full matrix (7 platforms) for CI.
+- Default `make client`/`v2vctl` builds only host binary for fast dev; `ALL=1` builds the cross matrix (6 platforms). Android is not cross-compiled here: it needs the NDK + cgo (next bullet), so the release builds it separately.
 - Web assets: the server resolves the `webterm/` directory next to its executable, then falls back to `./webterm`; `WEBTERM_DIR` overrides both. The wasm page and the `/web/` statics follow it, so a release binary serves its bundle from any working directory.
 - CI: `.github/workflows/ci.yml` runs vet, tests, entrypoint tests (sudo) and the wasm tests on push to `main/master` and PRs (Go 1.27, cache).
-- Release: pushing a `v*` tag runs GoReleaser (`.goreleaser.yaml`). It builds the client and v2vctl matrix (7 platforms), the server matrix (linux/darwin/windows, amd64/arm64), and one `V2V-server-<os>-<arch>` archive per server platform bundling the server binary, the wasm bundle, the bootstrap `template/`, `docker-compose.yml` and the matching `v2vctl`. It then writes `SHA256SUMS`, generates SBOMs, signs the checksums with cosign (keyless) and creates a draft GitHub release (auto-prerelease for `-wip`/`-beta`/`-rc` tags). The same tag builds and pushes the multi-arch image (`linux/amd64`, `linux/arm64`) to GHCR with `docker/build-push-action`.
+- Release: pushing a `v*` tag runs GoReleaser (`.goreleaser.yaml`). It builds the client and v2vctl matrix (7 platforms), the server matrix (linux/darwin/windows, amd64/arm64), and one `V2V-server-<os>-<arch>` archive per server platform bundling the server binary, the wasm bundle, the bootstrap `template/`, `docker-compose.yml` and the matching `v2vctl`. The android client is built separately with `CGO_ENABLED=1` and the NDK toolchain (`nttld/setup-ndk`, `CC_ANDROID`): a `CGO_ENABLED=0` android build uses the pure-Go resolver, which reads `/etc/resolv.conf` (absent on Android) and falls back to `127.0.0.1:53`, so DNS fails on Termux; cgo uses the bionic resolver instead. It then writes `SHA256SUMS`, generates SBOMs, signs the checksums with cosign (keyless) and creates a draft GitHub release (auto-prerelease for `-wip`/`-beta`/`-rc` tags). The same tag builds and pushes the multi-arch image (`linux/amd64`, `linux/arm64`) to GHCR with `docker/build-push-action`.
 - Docker: `Dockerfile` cross-compiles the server on the host-platform builder (`--platform=$BUILDPLATFORM`, `TARGETOS`/`TARGETARCH`) and runs `make web` once (the wasm bundle is platform-independent); the runtime image ships `server.bin` + `webterm/` and defines a `/api/version` healthcheck.
 - Dev version stamp is always `dev-<HEAD>[-dirty]` from the working tree, never from a possibly stale `GIT_HASH` env; `make web` warns when `GIT_HASH` differs from `HEAD` (stale browser cache risk).
 - Version stamps ride `-X main.Version` for all three binaries (server included); server prints its stamp at boot, on `/` info and on `/api/version` (`{"version": ...}`, no-store).

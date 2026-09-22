@@ -45,6 +45,14 @@ jobs:
       - name: Install syft
         uses: anchore/sbom-action/download-syft@v0
 
+      # The android client is built with cgo so Go uses the bionic
+      # resolver; that needs the NDK toolchain.
+      - name: Set up Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27d
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
@@ -52,6 +60,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CC_ANDROID: ${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
 
   # Multi-arch container image on GHCR. Kept in Actions rather than
   # GoReleaser so the custom entrypoint / privilege-drop image and the

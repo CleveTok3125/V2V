@@ -31,7 +31,7 @@ Download from [releases](https://github.com/CleveTok3125/V2V/releases) or build:
 
 ```bash
 make client          # -> public/V2V-linux-amd64 (host only)
-make client ALL=1    # -> full matrix (7 platforms, for CI)
+make client ALL=1    # -> cross matrix (6 platforms; android is built with the NDK in CI)
 make dev             # -> bin/v2v, bin/v2v-server, bin/v2vctl + fresh webterm (dev build)
 make help            # see all targets
 ```

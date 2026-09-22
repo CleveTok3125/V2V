@@ -11,7 +11,7 @@ GOCACHE ?= $(or $(TMPDIR),$(HOME),/tmp)/gocache
 DEV_VERSION ?= dev-$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)$(shell git diff --quiet 2>/dev/null || echo "-dirty")
 DEV_LDFLAGS := -X 'main.Version=$(DEV_VERSION)'
 
-PLATFORMS := windows/amd64 windows/arm64 linux/amd64 linux/arm64 android/arm64 darwin/amd64 darwin/arm64
+PLATFORMS := windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 HOST_GOOS ?= $(shell go env GOOS)
 HOST_GOARCH ?= $(shell go env GOARCH)
 
@@ -145,7 +145,8 @@ help:
 	@echo "  make dev      - dev builds reflecting the working tree -> bin/v2v-server, bin/v2v, bin/v2vctl + fresh webterm/app.wasm"
 	@echo "  make all      - build server, web, client, v2vctl (parallel with -j)"
 	@echo "    default: client/v2vctl build for host OS ($(HOST_GOOS)/$(HOST_GOARCH))"
-	@echo "    ALL=1:   build full matrix for CI (e.g. make all ALL=1 -j4)"
+	@echo "    ALL=1:   build the cross matrix (6 platforms); android is built"
+	@echo "             with the NDK in CI/release, not cross-compiled here"
 	@echo "  make server   - build public/server.bin"
 	@echo "  make web      - build webterm/app.wasm + parallel gzip/brotli (atomic replace)"
 	@echo "  make web-wasm - raw wasm only: start the server immediately, compress afterwards"

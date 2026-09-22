@@ -18,24 +18,41 @@ before:
 builds:
   - id: client
     main: ./client
-    binary: >-
-      V2V-{{ .Os }}-{{ if and (eq .Os "android") (eq .Arch "arm64") }}aarch64{{ else }}{{ .Arch }}{{ end }}
+    binary: V2V-{{ .Os }}-{{ .Arch }}
     goos:
       - windows
       - linux
-      - android
       - darwin
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: android
-        goarch: amd64
     # Distinct per-arch binary names keep the dist root tidy (one file
     # per platform) for the bare-binary assets below.
     no_unique_dist_dir: true
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X main.Version={{ .Tag }}
+
+  # Android needs the cgo (bionic) resolver: a CGO_ENABLED=0 build uses the
+  # pure-Go resolver, which reads /etc/resolv.conf (absent on Android) and
+  # then falls back to 127.0.0.1:53, so every lookup fails on Termux. The
+  # NDK toolchain is provided by the release workflow (CC_ANDROID).
+  - id: client-android
+    main: ./client
+    binary: V2V-android-aarch64
+    goos:
+      - android
+    goarch:
+      - arm64
+    no_unique_dist_dir: true
+    env:
+      - CGO_ENABLED=1
+      - CC={{ .Env.CC_ANDROID }}
     flags:
       - -trimpath
     ldflags:
@@ -109,6 +126,12 @@ archives:
       - binary
     # Bare binary assets keep the historical `V2V-<os>-<arch>` names
     # (no version/OS/arch suffix that the binary default would add).
+    name_template: "{{ .Binary }}"
+  - id: client-android
+    ids:
+      - client-android
+    formats:
+      - binary
     name_template: "{{ .Binary }}"
   - id: v2vctl
     ids:

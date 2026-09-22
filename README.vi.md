@@ -31,7 +31,7 @@ Tải từ [releases](https://github.com/CleveTok3125/V2V/releases) hoặc tự 
 
 ```bash
 make client          # -> public/V2V-linux-amd64 (chỉ host)
-make client ALL=1    # -> full matrix 7 nền tảng (dành cho CI)
+make client ALL=1    # -> cross matrix 6 nền tảng (android build bằng NDK trong CI)
 make dev             # -> bin/v2v, bin/v2v-server, bin/v2vctl + webterm mới (bản dev)
 make help            # xem tất cả target
 ```
