@@ -45,8 +45,8 @@ COPY docker/entrypoint.sh ./entrypoint.sh
 # process itself is never root.
 ARG VERSION=""
 ARG REVISION=""
-LABEL org.opencontainers.image.title="V2V" \
-      org.opencontainers.image.description="Verifiable Anonymous Chat" \
+LABEL org.opencontainers.image.title="V2V Server" \
+      org.opencontainers.image.description="A command line-oriented anonymous chat system for Vietnamese users" \
       org.opencontainers.image.source="https://github.com/CleveTok3125/V2V" \
       org.opencontainers.image.url="https://github.com/CleveTok3125/V2V" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
