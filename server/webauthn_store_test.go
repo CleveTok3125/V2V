@@ -91,6 +91,25 @@ func TestUpdateSignCount_ConcurrentReplayRejected(t *testing.T) {
 	}
 }
 
+// The store version must match exactly: a fractional value such as 3.5
+// must not truncate to v3 and be accepted.
+func TestStore_RejectsNonIntegerVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "webauthn.json")
+	if err := os.WriteFile(path, []byte(`{"version":3.5,"credentials":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := NewWebAuthnStore(path)
+	if _, err := s.loadFile(); err == nil {
+		t.Fatal("fractional version accepted")
+	}
+	if err := os.WriteFile(path, []byte(`{"version":3,"credentials":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.loadFile(); err != nil {
+		t.Fatalf("exact v3 rejected: %v", err)
+	}
+}
+
 func TestExpiredTicketRejected(t *testing.T) {
 	s := newTestStore(t)
 	code, _ := s.CreatePendingTicket("member", "", -time.Minute) // already expired

@@ -97,7 +97,7 @@ func (s *WebAuthnStore) loadFile() (*webauthnFile, error) {
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return nil, fmt.Errorf("webauthn store hỏng (%w)", err)
 	}
-	if v, _ := probe["version"].(float64); int(v) != webauthnFileVersion {
+	if v, ok := probe["version"].(float64); !ok || v != float64(webauthnFileVersion) {
 		return nil, errors.New("webauthn store cũ (v2 trở xuống) không còn hỗ trợ — thiếu authenticator flags: xóa file và enroll lại toàn bộ passkey qua ticket ceremony")
 	}
 	if f.Credentials == nil {
