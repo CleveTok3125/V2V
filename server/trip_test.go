@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -285,6 +286,35 @@ func TestHistoryFileTamperDetection(t *testing.T) {
 	}
 	if verify(records[0]) {
 		t.Logf("note: sig still verifies against old msg_hash, but Text field was edited — client should treat as tampered by comparing recomputed hash")
+	}
+}
+
+// TripChains must stay bounded: stale entries are dropped and a burst
+// inside the TTL is capped by evicting the least recently seen first.
+func TestPruneTripChains_Bounds(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	now := time.Now()
+
+	s.TripChains.Store("stale", TripChain{Seq: 1, LastSeen: now.Add(-tripChainsTTL - time.Minute)})
+	for i := 0; i < maxTripChains+50; i++ {
+		s.TripChains.Store(fmt.Sprintf("k%05d", i), TripChain{Seq: 1, LastSeen: now.Add(time.Duration(i) * time.Second)})
+	}
+	s.pruneTripChains(now)
+
+	if _, ok := s.TripChains.Load("stale"); ok {
+		t.Fatal("stale trip chain not pruned")
+	}
+	count := 0
+	s.TripChains.Range(func(_, _ any) bool { count++; return true })
+	if count > maxTripChains {
+		t.Fatalf("trip chains = %d, want <= %d", count, maxTripChains)
+	}
+	if _, ok := s.TripChains.Load("k00000"); ok {
+		t.Fatal("least recently seen entry must be evicted first")
+	}
+	if _, ok := s.TripChains.Load(fmt.Sprintf("k%05d", maxTripChains+49)); !ok {
+		t.Fatal("newest entry must survive")
 	}
 }
 

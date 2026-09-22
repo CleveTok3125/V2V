@@ -438,7 +438,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				continue
 			}
 			// Success — update chain via helper in trip package result
-			s.TripChains.Store(pubHex, TripChain{Seq: tripMsg.Seq, PrevHash: res.NewPrev})
+			s.TripChains.Store(pubHex, TripChain{Seq: tripMsg.Seq, PrevHash: res.NewPrev, LastSeen: time.Now()})
 			s.TripChainsMu.Unlock()
 			// Build trip meta for history — store displayName as well for verification
 			// Use res fields (already hex) but keep consistent with verified data

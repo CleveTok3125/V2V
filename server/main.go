@@ -150,6 +150,8 @@ func (s *ChatServer) StartCleanupTasks() {
 			}
 			s.AuthFailsMu.Unlock()
 
+			s.pruneTripChains(now)
+
 			s.LastConnectMu.Lock()
 			for ip, lastTime := range s.LastConnectTime {
 				if time.Since(lastTime) > Cfg.Dynamic.Load().ConnectionCooldown {

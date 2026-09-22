@@ -52,6 +52,10 @@ type TripChain struct {
 	Seq      uint32
 	PrevHash []byte // 32 bytes
 	LastHash []byte // msgHash of last message for debugging
+	// LastSeen is the last time this trip chain advanced. Used to bound
+	// the map: guest keys are cheap to mint, so an unbounded set would be
+	// a memory amplification vector.
+	LastSeen time.Time
 }
 
 // Protocol schema lives in internal/wire (single source). Aliases keep

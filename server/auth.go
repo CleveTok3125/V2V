@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -258,6 +259,48 @@ func (h *Hub) alertConcurrentIdentity(identityPubHex, newClientIP string) {
 	default:
 	}
 	logWarnf("⚠️ [IDENTITY CONCURRENT] identity đăng nhập song song từ %s (phiên cũ còn sống)", newClientIP)
+}
+
+// Trip-chain map bounds. Any client can mint a fresh ed25519 key and send
+// one signed message, so without a bound TripChains grows forever. Entries
+// idle past the TTL are dropped, and the hard cap evicts the least
+// recently seen entries when a burst stays inside the TTL.
+const (
+	tripChainsTTL = 24 * time.Hour
+	maxTripChains = 10000
+)
+
+// pruneTripChains drops idle entries and enforces the hard cap, evicting
+// the oldest LastSeen first. Caller must not hold TripChainsMu.
+func (s *ChatServer) pruneTripChains(now time.Time) {
+	type entry struct {
+		key      string
+		lastSeen time.Time
+	}
+	s.TripChainsMu.Lock()
+	defer s.TripChainsMu.Unlock()
+	var kept []entry
+	s.TripChains.Range(func(k, v any) bool {
+		ch, ok := v.(TripChain)
+		if !ok {
+			s.TripChains.Delete(k)
+			return true
+		}
+		if !ch.LastSeen.IsZero() && now.Sub(ch.LastSeen) > tripChainsTTL {
+			s.TripChains.Delete(k)
+			return true
+		}
+		key, _ := k.(string)
+		kept = append(kept, entry{key: key, lastSeen: ch.LastSeen})
+		return true
+	})
+	if len(kept) <= maxTripChains {
+		return
+	}
+	sort.Slice(kept, func(i, j int) bool { return kept[i].lastSeen.Before(kept[j].lastSeen) })
+	for _, e := range kept[:len(kept)-maxTripChains] {
+		s.TripChains.Delete(e.key)
+	}
 }
 
 func (s *ChatServer) LoadRoles() error {
