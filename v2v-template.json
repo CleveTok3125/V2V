@@ -5,7 +5,7 @@
   "files": [
     {
       "id": "env",
-      "path": ".env",
+      "path": "server/instances/default/.env",
       "format": "env",
       "dest": ".env",
       "keys": [
@@ -46,7 +46,7 @@
     },
     {
       "id": "roles",
-      "path": "server/config/roles.json",
+      "path": "server/instances/default/config/roles.json",
       "format": "json",
       "dest": "config/roles.json",
       "keys": [
@@ -55,7 +55,7 @@
     },
     {
       "id": "trust",
-      "path": "server/config/trustedproxy",
+      "path": "server/instances/default/config/trustedproxy",
       "format": "trust-dir",
       "dest": "config/trustedproxy"
     },

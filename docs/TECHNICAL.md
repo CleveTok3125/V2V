@@ -48,8 +48,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 ├── webterm/          # Browser terminal (xterm.js + WASM glue)
 ├── cmd/v2vctl/       # Management tool, one file per concern (main, role, keygen, enroll, migrate, list, prompt, config, pager)
 ├── template/         # Samples mirroring real locations
-│   ├── .env            # → instances/<name>/.env (via config sync)
-│   ├── server/config/  # roles.json + trustedproxy/ → instances/<name>/config/
+│   ├── server/instances/default/  # instance template: .env + config/{roles.json,trustedproxy/}
 │   └── client/         # config.jsonc + key.json → copy to OS config dir
 ├── instances/        # Gitignored: one dir per environment (default: default)
 └── docs/             # This file
@@ -98,7 +97,8 @@ make clean
 
 One binary serves many instances: an instance is a directory holding `.env`, `config/` and `data/`. The instance root is `V2V_ROOT` (default `instances/default`), resolved before the `.env` load — so the variable must come from the process environment, never from the instance `.env` itself.
 
-- Host: `v2vctl config sync --dir . --to instances/<name>` seeds an instance; run it with `V2V_ROOT=instances/<name> ./public/server.bin`. `v2vctl role`/`enroll`/`list` accept `--root` (or `V2V_ROOT`) and default to `instances/default`.
+- Host: `v2vctl config sync --dir . --to instances/<name>` seeds an instance; run it with `V2V_ROOT=instances/<name> ./public/server.bin`. `v2vctl role`/`enroll`/`list` accept `--root` (or `V2V_ROOT`) and default to `instances/default`. The instance template lives at `template/server/instances/default/`.
+- Tooling: `v2vctl instance init <name> [--port N] [--bind A]` (creates `.env` + `config/` via config sync and an empty `data/`), `instance list`, `instance status`, `instance up [--build]`, `instance down`, `instance restart`, `instance logs [-f]`. The wrapper shells out to `docker compose -p v2v-<name> --env-file instances/<name>/.env` and exports `ENV_ROOT=instances/<name>`; there is no preset and no override file.
 - Each instance has its own chain, `server_identity.json`, `webauthn.json`, `roles.json`, history and logs; `V2V_ROOT` only changes which directory they hang off. Absolute per-artifact overrides (`DATA_DIR`, `LOG_FILE_PATH`, `HISTORY_FILE_PATH`, `TRUSTED_PROXY_DIR`, `WEBAUTHN_STORE`) still win.
 - Container: the compose service mounts `${ENV_ROOT:-instances/default}/.env`, `.../config`, `.../data` into `/app` and pins `V2V_ROOT=/app`. Multiple instances run from the same image with `ENV_ROOT=instances/<name> docker compose -p v2v-<name> up -d --build` (no fixed `container_name`).
 - Migration from the old root layout: `mkdir -p instances/default && mv .env instances/default/.env && mv config instances/default/config && mv data instances/default/data`.
@@ -174,7 +174,7 @@ Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `interna
 ### History persistence
 - File: `data/history.jsonl` — one JSON record per line: `{"ts":"RFC3339Nano","wire":{...}}` for chat, `{"ts","msg":"..."}` for system messages.
 - The top-level `trip` field was removed (dedup); only `wire.trip` is kept.
-- Rotation: when `size > MAX_HISTORY_FILE_SIZE_MB` (`50MB` in `template/.env`), current file is renamed to `.old` and compressed to `.old.zst` via `klauspost/compress/zstd` (`50MB → ~3MB`).
+- Rotation: when `size > MAX_HISTORY_FILE_SIZE_MB` (`50MB` in `template/server/instances/default/.env`), current file is renamed to `.old` and compressed to `.old.zst` via `klauspost/compress/zstd` (`50MB → ~3MB`).
 - At most 2 generations are kept (`~53MB` max). `LoadRecords` tries `.old.zst`, then `.old`, then current.
 - Durability: `HistoryStore.writeLoop` batches `Sync` every `1s` **only when dirty** (`dirty` flag set on `Write`, cleared on `Sync`), plus `SIGTERM` drain via `HistoryStore.Close()` in `server/main.go`.
 - Directory `fsync` after rotate (like `webauthn_store.go`).

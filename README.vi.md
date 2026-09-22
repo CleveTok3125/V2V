@@ -90,7 +90,7 @@ Cấp passkey web (link dùng 1 lần, 10 phút):
 # → https://chat.example.com/web/#enroll=...
 ```
 
-Xem `template/server/config/roles.json` và `template/.env` để cấu hình server. Lệnh quản lý mặc định ở root `instances/default`; truyền `--root instances/<name>` (hoặc đặt `V2V_ROOT`) để nhắm instance khác.
+Xem `template/server/instances/default/config/roles.json` và `template/server/instances/default/.env` để cấu hình server. Lệnh quản lý mặc định ở root `instances/default`; truyền `--root instances/<name>` (hoặc đặt `V2V_ROOT`) để nhắm instance khác.
 
 ## Chạy Server
 
@@ -104,6 +104,7 @@ make server web                # -> public/server.bin + webterm/app.wasm
 V2V_ROOT=instances/default ./public/server.bin
 # hoặc: docker compose up -d --build   (lưu instances/default/data)
 # instance khác: config sync --dir . --to instances/prod, rồi ENV_ROOT=instances/prod docker compose -p v2v-prod up -d --build
+# hoặc dùng công cụ: v2vctl instance init prod --port 10001 && v2vctl instance up prod
 ```
 
 Mở `http://localhost:10000/web/` cho bản web.
@@ -111,7 +112,7 @@ Mở `http://localhost:10000/web/` cho bản web.
 ## Tìm hiểu thêm
 
 - **Chi tiết kỹ thuật:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — kiến trúc, giao thức wire, tripcode, lưu trữ, bảo mật.
-- **Cấu hình:** `template/.env` có đủ biến môi trường với comment.
-- **Công cụ quản trị:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`).
+- **Cấu hình:** `template/server/instances/default/.env` có đủ biến môi trường với comment.
+- **Công cụ quản trị:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`, `config sync/diff/check/manifest`, `instance init/list/status/up/down/restart/logs`).
 
 Báo lỗi và PR luôn được chào đón.

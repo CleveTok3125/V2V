@@ -41,6 +41,7 @@ type ConfigSyncCmd struct {
 	ConfigCommon `embed:""`
 	DryRun       bool `help:"Xem trước, không ghi file"`
 	Force        bool `help:"Ép ghi cả entry cần can thiệp tay (vd client jsonc mất comment)"`
+	Quiet        bool `help:"Không in diff/trạng thái (dùng khi bootstrap)"`
 }
 
 type ConfigDiffCmd struct {
@@ -115,9 +116,9 @@ func defaultManifest() *templateManifest {
 		Type:        manifestType,
 		TemplateDir: "template",
 		Files: []manifestFile{
-			{ID: "env", Path: ".env", Format: "env", Dest: ".env"},
-			{ID: "roles", Path: "server/config/roles.json", Format: "json", Dest: "config/roles.json"},
-			{ID: "trust", Path: "server/config/trustedproxy", Format: "trust-dir", Dest: "config/trustedproxy"},
+			{ID: "env", Path: "server/instances/default/.env", Format: "env", Dest: ".env"},
+			{ID: "roles", Path: "server/instances/default/config/roles.json", Format: "json", Dest: "config/roles.json"},
+			{ID: "trust", Path: "server/instances/default/config/trustedproxy", Format: "trust-dir", Dest: "config/trustedproxy"},
 			{ID: "client", Path: "client/config.jsonc", Format: "jsonc", Target: "client", Dest: "config.jsonc"},
 		},
 	}
@@ -603,9 +604,13 @@ func (s *ConfigSyncCmd) Run() error {
 	if !drift {
 		text = "already in sync\n"
 	}
-	emitPaged(text, s.NoPager)
+	if !s.Quiet {
+		emitPaged(text, s.NoPager)
+	}
 	if s.DryRun {
-		fmt.Println("dry-run: no files written")
+		if !s.Quiet {
+			fmt.Println("dry-run: no files written")
+		}
 		return nil
 	}
 	if !drift {
@@ -641,7 +646,9 @@ func (s *ConfigSyncCmd) Run() error {
 		}
 		written++
 	}
-	fmt.Printf("synced (%d files)\n", written)
+	if !s.Quiet {
+		fmt.Printf("synced (%d files)\n", written)
+	}
 	return nil
 }
 

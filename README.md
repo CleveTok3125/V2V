@@ -90,7 +90,7 @@ Web passkey enrollment (one-time link, 10 min):
 # → https://chat.example.com/web/#enroll=...
 ```
 
-See `template/server/config/roles.json` and `template/.env` for server configuration. Management commands default to the `instances/default` root; pass `--root instances/<name>` (or set `V2V_ROOT`) to target another instance.
+See `template/server/instances/default/config/roles.json` and `template/server/instances/default/.env` for server configuration. Management commands default to the `instances/default` root; pass `--root instances/<name>` (or set `V2V_ROOT`) to target another instance.
 
 ## Running the Server
 
@@ -104,6 +104,7 @@ make server web                # -> public/server.bin + webterm/app.wasm
 V2V_ROOT=instances/default ./public/server.bin
 # or: docker compose up -d --build   (persists instances/default/data)
 # extra instance: config sync --dir . --to instances/prod, then ENV_ROOT=instances/prod docker compose -p v2v-prod up -d --build
+# or manage it: v2vctl instance init prod --port 10001 && v2vctl instance up prod
 ```
 
 Open `http://localhost:10000/web/` for the browser client.
@@ -111,7 +112,7 @@ Open `http://localhost:10000/web/` for the browser client.
 ## Learn More
 
 - **How it works:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — architecture, wire protocol, tripcode crypto, storage, and security model.
-- **Configuration:** `template/.env` has all env vars with comments (`PORT`, `MAX_MESSAGE_LENGTH`, `HISTORY_FILE_PATH`, `WEBAUTHN_*`, etc.).
-- **Management tool:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`).
+- **Configuration:** `template/server/instances/default/.env` has all env vars with comments (`PORT`, `MAX_MESSAGE_LENGTH`, `HISTORY_FILE_PATH`, `WEBAUTHN_*`, etc.).
+- **Management tool:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`, `config sync/diff/check/manifest`, `instance init/list/status/up/down/restart/logs`).
 
 Issues and PRs are welcome.
