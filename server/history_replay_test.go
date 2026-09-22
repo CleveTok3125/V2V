@@ -425,8 +425,25 @@ func TestSegment_NoticePosition(t *testing.T) {
 	}
 }
 
+// TestCollectSegment_NoBroadcastMu: the collection half of a segment
+// must not need BroadcastMu, so disk I/O and zstd decode never stall
+// live chat. Collection may run freely while the test holds the lock.
+func TestCollectSegment_NoBroadcastMu(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	for i := 0; i < 5; i++ {
+		s.Chain.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "collect line"))
+	}
+	s.Hub.BroadcastMu.Lock()
+	lines := s.Chain.collectSegment(0, 5)
+	s.Hub.BroadcastMu.Unlock()
+	if len(lines) == 0 {
+		t.Fatal("collectSegment returned nothing while BroadcastMu held")
+	}
+}
+
 // TestSegment_HoldsBroadcastMu: serveHistorySegment must hold
-// BroadcastMu for the whole segment, otherwise concurrent live chats
+// BroadcastMu across the send, otherwise concurrent live chats
 // interleave between segment lines and the trailer and poison the fork
 // window. Deterministic: with the lock held by the test, the serving
 // goroutine cannot finish; after release it must complete and deliver.

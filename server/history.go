@@ -275,14 +275,20 @@ func (h *Hub) BroadcastWire(wire WireMessage, sender *websocket.Conn, serverPub 
 	h.fanout(data, sender, false, true)
 }
 
-// serveHistorySegment serves one on-demand older segment under the
-// broadcast lock, so live chats cannot interleave between segment
-// lines and the trailer (same ordering contract as the join replay:
-// BroadcastMu -> Chain.Mu, never the reverse).
+// serveHistorySegment serves one on-demand older segment. The expensive
+// collection (RAM scan, raw file read, full zstd decode) runs outside
+// BroadcastMu so a paging request cannot stall live broadcasts; only the
+// send holds the lock, so segment lines and the trailer stay contiguous
+// (same ordering contract as the join replay: BroadcastMu -> Chain.Mu,
+// never the reverse).
 func (s *ChatServer) serveHistorySegment(session *ClientSession, before uint64, limit int) {
+	if limit <= 0 {
+		return
+	}
+	lines := s.Chain.collectSegment(before, limit)
 	s.Hub.BroadcastMu.Lock()
 	defer s.Hub.BroadcastMu.Unlock()
-	s.Chain.SendChatSegment(session, before, limit)
+	s.Chain.sendReplay(session, lines, "--- Lịch sử cũ ---", true)
 }
 
 func (h *Hub) CheckAndBroadcastDate(now time.Time) {
@@ -430,18 +436,18 @@ func oldestChained(lines []string) uint64 {
 	return oldest
 }
 
-// SendChatSegment sends up to limit stored lines older than before in
-// replay format. before is an exclusive chain height; 0 means the tail
-// window over the whole history. Unchained lines carry no height, so
-// they travel with their neighbors by position: the cutoff is the
-// first line at or above before. An exhausted window still terminates
-// the stream (header, plain exhausted footer, trailer) so the
-// requester never hangs waiting. Lines evicted from RAM are served
+// collectSegment gathers up to limit stored lines older than before in
+// replay order, without sending. before is an exclusive chain height; 0
+// means the tail window over the whole history. Unchained lines carry no
+// height, so they travel with their neighbors by position: the cutoff is
+// the first line at or above before. Lines evicted from RAM are served
 // from disk when the lookup level allows (see windowBefore); the RAM
 // seam may repeat a few unchained lines, chained content stays exact.
-func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, limit int) {
+// Kept separate from the send so disk I/O and zstd decode run outside
+// BroadcastMu.
+func (c *ChainService) collectSegment(before uint64, limit int) []string {
 	if limit <= 0 {
-		return
+		return nil
 	}
 	ring := newWindowRing(limit)
 	if before != 0 && c.Store != nil {
@@ -465,8 +471,17 @@ func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, li
 		}
 		c.Mu.RUnlock()
 	}
+	return ring.lines()
+}
 
-	c.sendReplay(session, ring.lines(), "--- Lịch sử cũ ---", true)
+// SendChatSegment collects and sends one on-demand segment. An exhausted
+// window still terminates the stream (header, plain exhausted footer,
+// trailer) so the requester never hangs waiting.
+func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, limit int) {
+	if limit <= 0 {
+		return
+	}
+	c.sendReplay(session, c.collectSegment(before, limit), "--- Lịch sử cũ ---", true)
 }
 
 // sendReplay renders stored lines in replay format: header, content,
