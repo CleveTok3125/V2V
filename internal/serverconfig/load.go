@@ -13,11 +13,15 @@ import (
 	"github.com/CleveTok3125/V2V/internal/trustedproxy"
 )
 
-// History disk-lookup tiers mirrored from the server history store:
-// 0 is RAM-only, 3 is the full archive. Out-of-range values clamp to 0.
+// History disk-lookup tiers for on-demand older segments beyond RAM,
+// matching HISTORY_DISK_LOOKUP levels: each tier adds one older
+// generation. Out-of-range values clamp to off. The server's history
+// store also reads these bounds, so the scale lives here once.
 const (
-	diskLookupOff     = 0
-	diskLookupArchive = 3
+	DiskLookupOff     = 0 // RAM only
+	DiskLookupActive  = 1 // +history.jsonl
+	DiskLookupRaw     = 2 // +.old raw
+	DiskLookupArchive = 3 // +.old.zst (full)
 )
 
 // ProxyEntry is one provider's trust-file resolution for boot reporting.
@@ -150,8 +154,8 @@ func LoadDynamicConfig() (config.DynamicConfig, []string, error) {
 	if cfg.HistorySegmentCooldown <= 0 {
 		cfg.HistorySegmentCooldown = 2 * time.Second
 	}
-	if cfg.HistoryDiskLookup < diskLookupOff || cfg.HistoryDiskLookup > diskLookupArchive {
-		cfg.HistoryDiskLookup = diskLookupOff
+	if cfg.HistoryDiskLookup < DiskLookupOff || cfg.HistoryDiskLookup > DiskLookupArchive {
+		cfg.HistoryDiskLookup = DiskLookupOff
 	}
 
 	return cfg, w.list, nil

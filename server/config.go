@@ -66,7 +66,3 @@ func resolveUnderRoot(root, p string) string { return serverconfig.ResolveUnderR
 
 // dataPath resolves a generated-file name under DATA_DIR or <root>/data.
 func dataPath(name string) string { return serverconfig.DataPath(ServerRoot, name) }
-
-// parseOnionHosts is retained for callers that only need normalization
-// without the loader.
-func parseOnionHosts(raw string) ([]string, error) { return serverconfig.ParseOnionHosts(raw) }

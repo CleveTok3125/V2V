@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CleveTok3125/V2V/internal/serverconfig"
 	"github.com/CleveTok3125/V2V/internal/trustedproxy"
 )
 
@@ -35,7 +36,7 @@ func onionNets(t *testing.T, cidrs ...string) []*net.IPNet {
 }
 
 func TestParseOnionHosts(t *testing.T) {
-	got, err := parseOnionHosts(" AbCd.Onion , dup.onion, ABCD.onion:8080, , trail.onion.")
+	got, err := serverconfig.ParseOnionHosts(" AbCd.Onion , dup.onion, ABCD.onion:8080, , trail.onion.")
 	if err != nil {
 		t.Fatalf("valid list must parse: %v", err)
 	}
@@ -48,13 +49,13 @@ func TestParseOnionHosts(t *testing.T) {
 			t.Fatalf("got %v, want %v", got, want)
 		}
 	}
-	if out, err := parseOnionHosts("  "); err != nil || len(out) != 0 {
+	if out, err := serverconfig.ParseOnionHosts("  "); err != nil || len(out) != 0 {
 		t.Fatalf("blank list must be empty: %v %v", out, err)
 	}
-	if _, err := parseOnionHosts("example.com"); err == nil {
+	if _, err := serverconfig.ParseOnionHosts("example.com"); err == nil {
 		t.Fatal("non-.onion entry must be a boot error")
 	}
-	if _, err := parseOnionHosts("abcd.onion,evil.com"); err == nil {
+	if _, err := serverconfig.ParseOnionHosts("abcd.onion,evil.com"); err == nil {
 		t.Fatal("mixed list must fail on the non-.onion entry")
 	}
 }

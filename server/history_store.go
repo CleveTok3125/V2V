@@ -15,19 +15,20 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+
+	"github.com/CleveTok3125/V2V/internal/serverconfig"
 )
 
 const historyQueueSize = 256
 
 // Disk lookup tiers for on-demand older segments beyond RAM, matching
-// HISTORY_DISK_LOOKUP levels: each tier adds one older generation.
-// Active is cheapest (hot indexed file), the archive costs a full
-// streaming decode per request.
+// HISTORY_DISK_LOOKUP levels. The scale lives in serverconfig so the
+// config loader and the store clamp against one definition.
 const (
-	DiskLookupOff     = iota // RAM only
-	DiskLookupActive         // +history.jsonl
-	DiskLookupRaw            // +.old raw
-	DiskLookupArchive        // +.old.zst (full)
+	DiskLookupOff     = serverconfig.DiskLookupOff     // RAM only
+	DiskLookupActive  = serverconfig.DiskLookupActive  // +history.jsonl
+	DiskLookupRaw     = serverconfig.DiskLookupRaw     // +.old raw
+	DiskLookupArchive = serverconfig.DiskLookupArchive // +.old.zst (full)
 )
 
 type HistoryStore struct {

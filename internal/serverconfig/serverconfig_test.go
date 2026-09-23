@@ -180,8 +180,8 @@ func TestLoadDynamicConfigClampsDiskLookup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.HistoryDiskLookup != diskLookupOff {
-		t.Fatalf("out-of-range tier = %d, want %d", cfg.HistoryDiskLookup, diskLookupOff)
+	if cfg.HistoryDiskLookup != DiskLookupOff {
+		t.Fatalf("out-of-range tier = %d, want %d", cfg.HistoryDiskLookup, DiskLookupOff)
 	}
 }
 

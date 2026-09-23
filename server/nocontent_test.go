@@ -1,13 +1,17 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/CleveTok3125/V2V/internal/serverconfig"
+)
 
 func TestEffectiveStoragePaths(t *testing.T) {
-	logPath, histPath := effectiveStoragePaths(false, "app.log", "history.jsonl")
+	logPath, histPath := serverconfig.EffectiveStoragePaths(false, "app.log", "history.jsonl")
 	if logPath != "app.log" || histPath != "history.jsonl" {
 		t.Fatalf("default policy must keep configured paths: %q %q", logPath, histPath)
 	}
-	logPath, histPath = effectiveStoragePaths(true, "app.log", "history.jsonl")
+	logPath, histPath = serverconfig.EffectiveStoragePaths(true, "app.log", "history.jsonl")
 	if logPath != "" || histPath != "" {
 		t.Fatalf("NO_CONTENT_LOGS must clear both paths: %q %q", logPath, histPath)
 	}

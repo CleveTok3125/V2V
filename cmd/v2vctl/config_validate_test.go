@@ -2,25 +2,49 @@ package main
 
 import (
 	"os"
-	"strings"
 	"testing"
 )
 
-// withCleanEnv empties the process environment for one test and restores it
-// afterwards, so godotenv.Load can populate every key from the fixture .env
-// without ambient values shadowing it.
+// validateEnvKeys are the variables LoadStaticConfig/LoadDynamicConfig
+// read. Clearing just these keeps the ambient environment (PATH, HOME)
+// intact while letting godotenv.Load populate each key from the fixture,
+// and stays safe if tests ever run in parallel.
+var validateEnvKeys = []string{
+	"INSTANCE_ID", "ONION_HOSTS", "NO_CONTENT_LOGS", "LOG_FILE_PATH",
+	"HISTORY_FILE_PATH", "TRUSTED_PROXY_DIR", "REQUIRE_TLS", "PORT",
+	"TIMEZONE", "MAX_LOG_SIZE_MB", "MAX_HISTORY_FILE_SIZE_MB", "WEB_ENABLED",
+	"ONION_ALLOW_WEB", "ONION_ALLOW_PASSKEY", "PROXY_PROVIDER", "STATUS_URL",
+	"DOWNLOAD_URL", "HOMEPAGE_URL", "MAX_CONNECTIONS_PER_IP",
+	"MAX_MESSAGE_LENGTH", "MAX_MESSAGE_LINE", "MESSAGE_COOLDOWN",
+	"IDLE_CHAT_TIMEOUT", "MAX_HISTORY_BYTES", "MAX_HISTORY_SEND",
+	"HISTORY_SEGMENT_COOLDOWN", "HISTORY_DISK_LOOKUP", "MAX_USERNAME_LENGTH",
+	"MAX_TRIPCODE_LENGTH", "CONNECTION_COOLDOWN", "ALLOWED_ORIGINS",
+	"DATA_DIR",
+}
+
+// withCleanEnv unsets the configuration variables for one test and
+// restores them afterwards, so godotenv.Load can populate every key from
+// the fixture .env without ambient values shadowing it.
 func withCleanEnv(t *testing.T) {
 	t.Helper()
-	old := os.Environ()
+	old := map[string]string{}
+	present := map[string]bool{}
+	for _, k := range validateEnvKeys {
+		if v, ok := os.LookupEnv(k); ok {
+			old[k] = v
+			present[k] = true
+		}
+		_ = os.Unsetenv(k)
+	}
 	t.Cleanup(func() {
-		os.Clearenv()
-		for _, kv := range old {
-			if i := strings.IndexByte(kv, '='); i >= 0 {
-				_ = os.Setenv(kv[:i], kv[i+1:])
+		for _, k := range validateEnvKeys {
+			if present[k] {
+				_ = os.Setenv(k, old[k])
+			} else {
+				_ = os.Unsetenv(k)
 			}
 		}
 	})
-	os.Clearenv()
 }
 
 const validValidateEnv = "PORT=10000\n" +

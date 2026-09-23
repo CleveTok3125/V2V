@@ -192,12 +192,6 @@ func loadStaticConfig() (StaticConfig, error) {
 	return cfg, err
 }
 
-// effectiveStoragePaths applies the NO_CONTENT_LOGS policy: content paths
-// are cleared so the logger and history store stay off-disk.
-func effectiveStoragePaths(noContentLogs bool, logPath, historyPath string) (string, string) {
-	return serverconfig.EffectiveStoragePaths(noContentLogs, logPath, historyPath)
-}
-
 // loadDynamicConfig reads the hot-reloadable configuration and logs the
 // non-fatal warnings returned by the shared loader.
 func loadDynamicConfig() (DynamicConfig, error) {
