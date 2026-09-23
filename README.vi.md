@@ -1,5 +1,11 @@
 # 🚀 V2V — Verifiable Anonymous Chat
 
+[![License](https://img.shields.io/github/license/CleveTok3125/V2V)](https://github.com/CleveTok3125/V2V/blob/main/LICENSE)
+[![Release](https://img.shields.io/github/v/release/CleveTok3125/V2V)](https://github.com/CleveTok3125/V2V/releases)
+[![CI](https://github.com/CleveTok3125/V2V/actions/workflows/ci.yml/badge.svg)](https://github.com/CleveTok3125/V2V/actions/workflows/ci.yml)
+[![Build and Release](https://github.com/CleveTok3125/V2V/actions/workflows/release.yml/badge.svg)](https://github.com/CleveTok3125/V2V/actions/workflows/release.yml)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/CleveTok3125/V2V)
+
 > [!WARNING]
 > **Pre-1.0: đang phát triển mạnh, không đảm bảo tương thích ngược.** Thay đổi lớn (giao thức wire, định dạng lưu trữ, CLI, v.v) có thể xuất hiện bất cứ lúc nào. Luôn cập nhật client và server cùng nhau.
 <p align="left">

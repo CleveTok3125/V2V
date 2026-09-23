@@ -1,5 +1,11 @@
 # 🚀 V2V — Verifiable Anonymous Chat
 
+[![License](https://img.shields.io/github/license/CleveTok3125/V2V)](https://github.com/CleveTok3125/V2V/blob/main/LICENSE)
+[![Release](https://img.shields.io/github/v/release/CleveTok3125/V2V)](https://github.com/CleveTok3125/V2V/releases)
+[![CI](https://github.com/CleveTok3125/V2V/actions/workflows/ci.yml/badge.svg)](https://github.com/CleveTok3125/V2V/actions/workflows/ci.yml)
+[![Build and Release](https://github.com/CleveTok3125/V2V/actions/workflows/release.yml/badge.svg)](https://github.com/CleveTok3125/V2V/actions/workflows/release.yml)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/CleveTok3125/V2V)
+
 > [!WARNING]
 > **Pre-1.0: active development, no backward-compat guarantee.** Significant changes (wire protocol, storage formats, CLI, etc) can land at any time. Always update client and server together.
 <p align="left">
