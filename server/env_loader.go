@@ -1,182 +1,27 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"fmt"
-	"os"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/CleveTok3125/V2V/internal/serverconfig"
 )
 
-type envLoader struct {
-	err error
-}
+// envLoader is an alias of the shared loader so server tests exercise the
+// same parser the production loaders use.
+type envLoader = serverconfig.EnvLoader
 
-func (l *envLoader) Smart(key string) string {
-	if l.err != nil {
-		return ""
-	}
-
-	val, err := getSmartEnv(key)
-	if err != nil {
-		l.err = err
-		return ""
-	}
-
-	return val
-}
-
-func (l *envLoader) Int(key string) int {
-	if l.err != nil {
-		return 0
-	}
-
-	val, err := getEnvAsInt(key)
-	if err != nil {
-		l.err = err
-		return 0
-	}
-
-	return val
-}
-
-func (l *envLoader) Duration(key string) time.Duration {
-	if l.err != nil {
-		return 0
-	}
-
-	val, err := getEnvAsDuration(key)
-	if err != nil {
-		l.err = err
-		return 0
-	}
-
-	return val
-}
-
-func (l *envLoader) Err() error {
-	return l.err
-}
-
-// Optional reads a string with Smart semantics (indirection through a
-// named variable) but a missing/empty value yields "" instead of an
-// error. Distinct from the *Fallback family, which never indirects.
-func (l *envLoader) Optional(key string) string {
-	if l.err != nil {
-		return ""
-	}
-
-	val, exists := os.LookupEnv(key)
-	if !exists || val == "" {
-		return ""
-	}
-	// Smart indirection: a value naming another variable resolves to
-	// that variable's value (e.g. STATUS_URL=SHARED_URL).
-	if sysVal := os.Getenv(val); sysVal != "" {
-		return sysVal
-	}
-	return val
-}
-
-func getEnvAsLocationFallback(key string, fallback string) *time.Location {
-	val, exists := os.LookupEnv(key)
-	if !exists || val == "" {
-		val = fallback
-	}
-	loc, err := time.LoadLocation(val)
-	if err != nil {
-		logWarnf("⚠️ Cảnh báo: Múi giờ '%s' không hợp lệ. Đang dùng mặc định (Local).", val)
-		return time.Local
-	}
-	return loc
-}
-
-func getSmartEnv(key string) (string, error) {
-	val, exists := os.LookupEnv(key)
-	if !exists || val == "" {
-		return "", fmt.Errorf("thiếu biến môi trường bắt buộc: %s", key)
-	}
-
-	sysVal := os.Getenv(val)
-	if sysVal != "" {
-		return sysVal, nil
-	}
-	return val, nil
-}
-
-func getEnvAsInt(key string) (int, error) {
-	val, exists := os.LookupEnv(key)
-	if !exists || val == "" {
-		return 0, fmt.Errorf("thiếu biến môi trường bắt buộc: %s", key)
-	}
-	parsed, err := strconv.Atoi(val)
-	if err != nil {
-		return 0, fmt.Errorf("lỗi định dạng số ở biến %s: %w", key, err)
-	}
-	return parsed, nil
-}
-
-func getEnvAsIntFallback(key string, fallback int) int {
-	val, exists := os.LookupEnv(key)
-	if !exists || val == "" {
-		return fallback
-	}
-	parsed, err := strconv.Atoi(val)
-	if err != nil {
-		logWarnf("⚠️ Lỗi định dạng số ở biến %s. Dùng mặc định: %d", key, fallback)
-		return fallback
-	}
-	return parsed
-}
+// The helpers below are thin wrappers over the shared package, retained for
+// callers that need a single value without a warning channel.
+func getEnvAsInt(key string) (int, error) { return serverconfig.GetEnvAsInt(key) }
 
 func getEnvAsDuration(key string) (time.Duration, error) {
-	val, exists := os.LookupEnv(key)
-	if !exists || val == "" {
-		return 0, fmt.Errorf("thiếu biến môi trường bắt buộc: %s", key)
-	}
-	parsed, err := time.ParseDuration(val)
-	if err != nil {
-		return 0, fmt.Errorf("lỗi định dạng thời gian ở biến %s (ví dụ đúng: 200ms, 5s): %w", key, err)
-	}
-	return parsed, nil
+	return serverconfig.GetEnvAsDuration(key)
 }
 
 func getEnvFallback(key string, fallback string) string {
-	val, exists := os.LookupEnv(key)
-	if !exists || val == "" {
-		return fallback
-	}
-	return val
-}
-
-func lastAfterDash(s string) string {
-	if i := strings.LastIndex(s, "-"); i != -1 {
-		return s[i+1:]
-	}
-	return s
+	return serverconfig.GetEnvFallback(key, fallback)
 }
 
 func getEnvAsBoolFallback(key string, fallback bool) bool {
-	val, exists := os.LookupEnv(key)
-	if !exists || val == "" {
-		return fallback
-	}
-	parsed, err := strconv.ParseBool(val)
-	if err != nil {
-		logWarnf("⚠️ Lỗi định dạng boolean ở biến %s. Dùng mặc định: %v", key, fallback)
-		return fallback
-	}
-	return parsed
-}
-
-func generateRandomID(length int) string {
-	bytesNeeded := (length + 1) / 2
-	b := make([]byte, bytesNeeded)
-	// Entropy exhaustion must not yield a zero ID: fall back to time-based.
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(b)[:length]
+	return serverconfig.GetEnvAsBoolFallback(key, fallback)
 }

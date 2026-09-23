@@ -3,17 +3,12 @@ package main
 import (
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/CleveTok3125/V2V/internal/serverconfig"
 	"github.com/CleveTok3125/V2V/internal/trustedproxy"
 )
-
-// DefaultTrustedProxyDir is the conventional trust-file directory,
-// mirroring config/roles.json. Only the listed chain members load
-// their "<name>.txt" from here.
-const DefaultTrustedProxyDir = "config/trustedproxy"
 
 // ProxyChain is the boot-built resolution chain. Tests that never
 // call initProxyChain resolve as direct (RemoteAddr), which matches
@@ -70,17 +65,18 @@ func rejectUntrustedProxy(w http.ResponseWriter, r *http.Request) bool {
 // other trust files. A missing file means loopback-only (tolerated with a
 // warning); a malformed or world-writable file fails the boot.
 func initOnionTrust(dir string) ([]*net.IPNet, error) {
-	path := filepath.Join(dir, "onion.txt")
-	set, err := trustedproxy.LoadTrustFile(path)
+	nets, warns, err := serverconfig.LoadOnionTrust(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			logWarnf("⚠️ Onion: %s missing; only loopback hops accepted", path)
-			return nil, nil
-		}
 		return nil, err
 	}
-	logInfof("🧅 Onion: %d trusted hops from %s", len(set.Nets), path)
-	return set.Nets, nil
+	if len(warns) > 0 {
+		for _, w := range warns {
+			logWarnf("%s", w)
+		}
+		return nets, nil
+	}
+	logInfof("🧅 Onion: %d trusted hops from %s", len(nets), filepath.Join(dir, "onion.txt"))
+	return nets, nil
 }
 
 // initProxyChain loads per-module trust files and builds the
@@ -88,48 +84,27 @@ func initOnionTrust(dir string) ([]*net.IPNet, error) {
 // trust is always visible in the logs. Any failure is fatal: trust
 // must never silently degrade.
 func initProxyChain(dir string, names []string) (*trustedproxy.Chain, error) {
-	required := map[string]bool{}
-	for _, name := range names {
-		if build, ok := trustedproxy.Lookup(name); ok && build(nil).NeedsFile() {
-			required[name] = true
-		}
-	}
-	sets, extraWarn, err := trustedproxy.LoadTrustDir(dir, names, required)
+	info, warns, err := serverconfig.LoadProxyChain(dir, names)
 	if err != nil {
 		return nil, err
 	}
-	nets := make(map[string][]*net.IPNet, len(sets))
-	for name, set := range sets {
-		nets[name] = set.Nets
-	}
-	chain, err := trustedproxy.NewChain(names, nets)
-	if err != nil {
-		return nil, err
-	}
-	logInfof("🛡️ Trusted proxy: providers=[%s]", strings.Join(names, ","))
-	for _, name := range names {
-		set := sets[name]
-		if set.Missing {
-			logInfof("🛡️ Trusted proxy: %s: no file (%s), empty set", name, set.Path)
+	logInfof("🛡️ Trusted proxy: providers=[%s]", strings.Join(info.Names, ","))
+	for _, e := range info.Entries {
+		if e.Missing {
+			logInfof("🛡️ Trusted proxy: %s: no file (%s), empty set", e.Name, e.Path)
 		} else {
-			logInfof("🛡️ Trusted proxy: %s: %d ranges from %s", name, len(set.Nets), set.Path)
+			logInfof("🛡️ Trusted proxy: %s: %d ranges from %s", e.Name, e.Count, e.Path)
 		}
 	}
-	allowsDirect := false
-	for _, name := range names {
-		if name == "none" || name == "direct" {
-			allowsDirect = true
-		}
-	}
-	if allowsDirect {
+	if info.AllowsDirect {
 		logInfof("🛡️ Trusted proxy: direct connections allowed (WARN per connection)")
 	} else {
 		logInfof("🛡️ Trusted proxy: direct connections rejected (403)")
 	}
-	if extraWarn != "" {
-		logWarnf("⚠️ Trusted proxy: %s", extraWarn)
+	for _, w := range warns {
+		logWarnf("%s", w)
 	}
-	return chain, nil
+	return info.Chain, nil
 }
 
 // proxyHeadersForLog renders the received proxy headers for the

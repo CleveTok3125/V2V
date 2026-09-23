@@ -8,14 +8,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata"
 
-	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/guard"
+	"github.com/CleveTok3125/V2V/internal/serverconfig"
 	"github.com/CleveTok3125/V2V/internal/trustedproxy"
 	"github.com/joho/godotenv"
 )
@@ -183,141 +182,30 @@ func (s *ChatServer) StartCleanupTasks() {
 	}()
 }
 
+// loadStaticConfig reads the static configuration for the active instance
+// root and logs the non-fatal warnings returned by the shared loader.
 func loadStaticConfig() (StaticConfig, error) {
-	loader := &envLoader{}
-	rawInstanceID := getEnvFallback("INSTANCE_ID", "AUTO")
-	var instanceID string
-	if rawInstanceID == "AUTO" {
-		instanceID = generateRandomID(6)
-	} else {
-		instanceID = lastAfterDash(loader.Smart("INSTANCE_ID"))
+	cfg, warns, err := serverconfig.LoadStaticConfig(ServerRoot)
+	for _, w := range warns {
+		logWarnf("%s", w)
 	}
-
-	onionHosts, err := parseOnionHosts(getEnvFallback("ONION_HOSTS", ""))
-	if err != nil {
-		return StaticConfig{}, err
-	}
-
-	noContentLogs := getEnvAsBoolFallback("NO_CONTENT_LOGS", false)
-	logFilePath := dataPath("app.log")
-	if raw := os.Getenv("LOG_FILE_PATH"); strings.TrimSpace(raw) != "" {
-		logFilePath = resolveUnderRoot(ServerRoot, raw)
-	}
-	historyFilePath := dataPath("history.jsonl")
-	if raw := os.Getenv("HISTORY_FILE_PATH"); strings.TrimSpace(raw) != "" {
-		historyFilePath = resolveUnderRoot(ServerRoot, raw)
-	}
-	if noContentLogs {
-		if strings.TrimSpace(os.Getenv("LOG_FILE_PATH")) != "" || strings.TrimSpace(os.Getenv("HISTORY_FILE_PATH")) != "" {
-			logWarnf("⚠️ NO_CONTENT_LOGS=true: LOG_FILE_PATH/HISTORY_FILE_PATH bị bỏ qua (RAM-only)")
-		}
-		warnStaleContentFiles(logFilePath, historyFilePath)
-	}
-	logFilePath, historyFilePath = effectiveStoragePaths(noContentLogs, logFilePath, historyFilePath)
-
-	trustedProxyDir := filepath.Join(ServerRoot, DefaultTrustedProxyDir)
-	if raw := os.Getenv(env.KeyTrustedProxyDir); strings.TrimSpace(raw) != "" {
-		trustedProxyDir = resolveUnderRoot(ServerRoot, raw)
-	}
-
-	cfg := StaticConfig{
-		AllowedOrigins:       strings.Split(env.AllowedOrigins(), ","),
-		RequireTLS:           getEnvAsBoolFallback("REQUIRE_TLS", true),
-		Port:                 loader.Smart("PORT"),
-		InstanceID:           instanceID,
-		Timezone:             getEnvAsLocationFallback("TIMEZONE", "Asia/Ho_Chi_Minh"),
-		LogFilePath:          logFilePath,
-		MaxLogSizeMB:         loader.Int("MAX_LOG_SIZE_MB"),
-		HistoryFilePath:      historyFilePath,
-		MaxHistoryFileSizeMB: loader.Int("MAX_HISTORY_FILE_SIZE_MB"),
-		NoContentLogs:        noContentLogs,
-		Root:                 ServerRoot,
-		TrustedProxyDir:      trustedProxyDir,
-		WebEnabled:           getEnvAsBoolFallback("WEB_ENABLED", true),
-		Onion: OnionConfig{
-			Hosts:        onionHosts,
-			AllowWeb:     getEnvAsBoolFallback("ONION_ALLOW_WEB", false),
-			AllowPasskey: getEnvAsBoolFallback("ONION_ALLOW_PASSKEY", false),
-		},
-	}
-	if err := loader.Err(); err != nil {
-		return StaticConfig{}, err
-	}
-	// PROXY_PROVIDER is required with no implicit default: the
-	// operator must state the proxy chain explicitly (fail-closed).
-	chain, err := trustedproxy.ParseChain(loader.Smart(env.KeyProxyProvider))
-	if err != nil {
-		return StaticConfig{}, err
-	}
-	cfg.ProxyChain = chain
-
-	return cfg, nil
+	return cfg, err
 }
 
 // effectiveStoragePaths applies the NO_CONTENT_LOGS policy: content paths
 // are cleared so the logger and history store stay off-disk.
 func effectiveStoragePaths(noContentLogs bool, logPath, historyPath string) (string, string) {
-	if noContentLogs {
-		return "", ""
-	}
-	return logPath, historyPath
+	return serverconfig.EffectiveStoragePaths(noContentLogs, logPath, historyPath)
 }
 
-// warnStaleContentFiles warns about pre-existing history/log artifacts when
-// NO_CONTENT_LOGS starts. It never deletes: removal stays an operator action.
-func warnStaleContentFiles(logPath, historyPath string) {
-	for _, p := range []string{
-		historyPath, historyPath + ".old", historyPath + ".old.zst",
-		logPath, logPath + ".old",
-	} {
-		if p == "" {
-			continue
-		}
-		if _, err := os.Stat(p); err == nil {
-			logWarnf("⚠️ NO_CONTENT_LOGS: còn file %s trên đĩa; hãy tự xoá nếu muốn sạch dấu vết", p)
-		}
-	}
-}
-
+// loadDynamicConfig reads the hot-reloadable configuration and logs the
+// non-fatal warnings returned by the shared loader.
 func loadDynamicConfig() (DynamicConfig, error) {
-	loader := &envLoader{}
-
-	cfg := DynamicConfig{
-		StatusURL:              loader.Optional("STATUS_URL"),
-		DownloadURL:            loader.Optional("DOWNLOAD_URL"),
-		HomepageURL:            loader.Optional("HOMEPAGE_URL"),
-		MaxConnectionsPerIP:    loader.Int("MAX_CONNECTIONS_PER_IP"),
-		MaxMessageLength:       loader.Int("MAX_MESSAGE_LENGTH"),
-		MaxMessageLine:         loader.Int("MAX_MESSAGE_LINE"),
-		MessageCooldown:        loader.Duration("MESSAGE_COOLDOWN"),
-		IdleChatTimeout:        loader.Duration("IDLE_CHAT_TIMEOUT"),
-		MaxHistoryBytes:        loader.Int("MAX_HISTORY_BYTES"),
-		MaxHistorySend:         loader.Int("MAX_HISTORY_SEND"),
-		HistorySegmentCooldown: loader.Duration("HISTORY_SEGMENT_COOLDOWN"),
-		HistoryDiskLookup:      loader.Int("HISTORY_DISK_LOOKUP"),
-		MaxUsernameLength:      loader.Int("MAX_USERNAME_LENGTH"),
-		MaxTripcodeLength:      getEnvAsIntFallback("MAX_TRIPCODE_LENGTH", 64),
-		ConnectionCooldown:     loader.Duration("CONNECTION_COOLDOWN"),
+	cfg, warns, err := serverconfig.LoadDynamicConfig()
+	for _, w := range warns {
+		logWarnf("%s", w)
 	}
-	if err := loader.Err(); err != nil {
-		return DynamicConfig{}, err
-	}
-	// Fail-safe floor: a zero/negative replay window would silently send
-	// empty history on every connect. Mirror the client backfill default.
-	if cfg.MaxHistorySend <= 0 {
-		cfg.MaxHistorySend = 500
-	}
-	// Fail-closed floors: a missing/zero segment throttle would let one
-	// client re-scan history unthrottled; an out-of-range disk tier must
-	// never widen reads beyond what the operator picked.
-	if cfg.HistorySegmentCooldown <= 0 {
-		cfg.HistorySegmentCooldown = 2 * time.Second
-	}
-	if cfg.HistoryDiskLookup < DiskLookupOff || cfg.HistoryDiskLookup > DiskLookupArchive {
-		cfg.HistoryDiskLookup = DiskLookupOff
-	}
-
-	return cfg, nil
+	return cfg, err
 }
 
 func ReloadDynamicConfig() {

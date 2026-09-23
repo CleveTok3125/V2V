@@ -13,6 +13,8 @@ import (
 	"github.com/CleveTok3125/V2V/internal/configdir"
 	"github.com/CleveTok3125/V2V/internal/configmerge"
 	"github.com/CleveTok3125/V2V/internal/identity"
+	"github.com/CleveTok3125/V2V/internal/serverconfig"
+	"github.com/joho/godotenv"
 	"github.com/pmezard/go-difflib/difflib"
 )
 
@@ -26,6 +28,13 @@ type ConfigCmd struct {
 	Diff     ConfigDiffCmd     `cmd:"" help:"Xem trước kết quả đồng bộ dạng unified diff"`
 	Manifest ConfigManifestCmd `cmd:"" help:"Sinh lại keys trong v2v-template.json từ template"`
 	Check    ConfigCheckCmd    `cmd:"" help:"Kiểm tra manifest khớp với template"`
+	Validate ConfigValidateCmd `cmd:"" help:"Kiểm tra cấu hình instance nạp được"`
+}
+
+type ConfigValidateCmd struct {
+	Dir    string `help:"Thư mục chứa v2v-template.json" default:"."`
+	To     string `help:"Thư mục gốc instance (mặc định theo --root/V2V_ROOT)"`
+	Format string `help:"Định dạng: text|json" default:"text"`
 }
 
 // ConfigCommon holds flags shared by sync/diff/check.
@@ -711,6 +720,87 @@ func (c *ConfigCheckCmd) Run() error {
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("manifest drift (%d); run: v2vctl config manifest --dir %s --write", len(problems), c.Dir)
+	}
+	return nil
+}
+
+func (c *ConfigValidateCmd) Run() error {
+	format, err := parseFormat(c.Format)
+	if err != nil {
+		return err
+	}
+	root := strings.TrimSpace(c.To)
+	if root == "" {
+		root = v2vctlRoot
+	}
+
+	problems := []string{}
+	warns := []string{}
+
+	envPath := filepath.Join(root, ".env")
+	if _, err := os.Stat(envPath); err != nil {
+		problems = append(problems, fmt.Sprintf("thiếu %s", envPath))
+	} else if err := godotenv.Load(envPath); err != nil {
+		problems = append(problems, fmt.Sprintf("nạp %s: %v", envPath, err))
+	}
+
+	staticCfg, staticWarns, err := serverconfig.LoadStaticConfig(root)
+	warns = append(warns, staticWarns...)
+	if err != nil {
+		problems = append(problems, err.Error())
+	} else {
+		_, proxyWarns, err := serverconfig.LoadProxyChain(staticCfg.TrustedProxyDir, staticCfg.ProxyChain)
+		warns = append(warns, proxyWarns...)
+		if err != nil {
+			problems = append(problems, err.Error())
+		}
+		if staticCfg.OnionEnabled() {
+			_, onionWarns, err := serverconfig.LoadOnionTrust(staticCfg.TrustedProxyDir)
+			warns = append(warns, onionWarns...)
+			if err != nil {
+				problems = append(problems, err.Error())
+			}
+		}
+	}
+
+	_, dynamicWarns, err := serverconfig.LoadDynamicConfig()
+	warns = append(warns, dynamicWarns...)
+	if err != nil {
+		problems = append(problems, err.Error())
+	}
+
+	rolesFile := filepath.Join(root, "config", "roles.json")
+	if data, err := os.ReadFile(rolesFile); err != nil {
+		problems = append(problems, fmt.Sprintf("đọc %s: %v", rolesFile, err))
+	} else {
+		var probe map[string]any
+		if err := json.Unmarshal(data, &probe); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: JSON không hợp lệ: %v", rolesFile, err))
+		}
+	}
+
+	if format == "json" {
+		out, _ := json.MarshalIndent(map[string]any{
+			"ok":       len(problems) == 0,
+			"problems": problems,
+			"warnings": warns,
+		}, "", "  ")
+		fmt.Println(string(out))
+	} else if len(problems) == 0 {
+		fmt.Println("ok")
+		for _, w := range warns {
+			fmt.Println(w)
+		}
+	} else {
+		for _, p := range problems {
+			fmt.Println("problem: " + p)
+		}
+		for _, w := range warns {
+			fmt.Println(w)
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("config validate: %d vấn đề", len(problems))
 	}
 	return nil
 }

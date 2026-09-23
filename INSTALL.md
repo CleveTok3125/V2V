@@ -97,7 +97,15 @@ binary from the bundle.
 
 3. Edit `instances/prod/.env` before first boot. At minimum set `PORT`,
    `ALLOWED_ORIGINS`, `PROXY_PROVIDER`, and review `REQUIRE_TLS` and the
-   `MAX_*` limits. The file is commented inline.
+   `MAX_*` limits. The file is commented inline. Check it without booting:
+
+   ```sh
+   ./v2vctl config validate --to instances/prod
+   ```
+
+   It reads the same loader the server uses, so every fail-closed check
+   (required vars, number/duration formats, proxy chain and trust files,
+   onion hosts, `roles.json`) reports here instead of at first start.
 
 4. Pull the published image and start the instance:
 
