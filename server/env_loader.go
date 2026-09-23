@@ -60,7 +60,27 @@ func (l *envLoader) Err() error {
 	return l.err
 }
 
-func getEnvAsLocationOptional(key string, fallback string) *time.Location {
+// Optional reads a string with Smart semantics (indirection through a
+// named variable) but a missing/empty value yields "" instead of an
+// error. Distinct from the *Fallback family, which never indirects.
+func (l *envLoader) Optional(key string) string {
+	if l.err != nil {
+		return ""
+	}
+
+	val, exists := os.LookupEnv(key)
+	if !exists || val == "" {
+		return ""
+	}
+	// Smart indirection: a value naming another variable resolves to
+	// that variable's value (e.g. STATUS_URL=SHARED_URL).
+	if sysVal := os.Getenv(val); sysVal != "" {
+		return sysVal
+	}
+	return val
+}
+
+func getEnvAsLocationFallback(key string, fallback string) *time.Location {
 	val, exists := os.LookupEnv(key)
 	if !exists || val == "" {
 		val = fallback
@@ -98,7 +118,7 @@ func getEnvAsInt(key string) (int, error) {
 	return parsed, nil
 }
 
-func getEnvAsIntOptional(key string, fallback int) int {
+func getEnvAsIntFallback(key string, fallback int) int {
 	val, exists := os.LookupEnv(key)
 	if !exists || val == "" {
 		return fallback
@@ -123,7 +143,7 @@ func getEnvAsDuration(key string) (time.Duration, error) {
 	return parsed, nil
 }
 
-func getEnvOptional(key string, fallback string) string {
+func getEnvFallback(key string, fallback string) string {
 	val, exists := os.LookupEnv(key)
 	if !exists || val == "" {
 		return fallback
@@ -138,7 +158,7 @@ func lastAfterDash(s string) string {
 	return s
 }
 
-func getEnvAsBoolOptional(key string, fallback bool) bool {
+func getEnvAsBoolFallback(key string, fallback bool) bool {
 	val, exists := os.LookupEnv(key)
 	if !exists || val == "" {
 		return fallback

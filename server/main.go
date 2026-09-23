@@ -185,7 +185,7 @@ func (s *ChatServer) StartCleanupTasks() {
 
 func loadStaticConfig() (StaticConfig, error) {
 	loader := &envLoader{}
-	rawInstanceID := getEnvOptional("INSTANCE_ID", "AUTO")
+	rawInstanceID := getEnvFallback("INSTANCE_ID", "AUTO")
 	var instanceID string
 	if rawInstanceID == "AUTO" {
 		instanceID = generateRandomID(6)
@@ -193,12 +193,12 @@ func loadStaticConfig() (StaticConfig, error) {
 		instanceID = lastAfterDash(loader.Smart("INSTANCE_ID"))
 	}
 
-	onionHosts, err := parseOnionHosts(getEnvOptional("ONION_HOSTS", ""))
+	onionHosts, err := parseOnionHosts(getEnvFallback("ONION_HOSTS", ""))
 	if err != nil {
 		return StaticConfig{}, err
 	}
 
-	noContentLogs := getEnvAsBoolOptional("NO_CONTENT_LOGS", false)
+	noContentLogs := getEnvAsBoolFallback("NO_CONTENT_LOGS", false)
 	logFilePath := dataPath("app.log")
 	if raw := os.Getenv("LOG_FILE_PATH"); strings.TrimSpace(raw) != "" {
 		logFilePath = resolveUnderRoot(ServerRoot, raw)
@@ -222,10 +222,10 @@ func loadStaticConfig() (StaticConfig, error) {
 
 	cfg := StaticConfig{
 		AllowedOrigins:       strings.Split(env.AllowedOrigins(), ","),
-		RequireTLS:           getEnvAsBoolOptional("REQUIRE_TLS", true),
+		RequireTLS:           getEnvAsBoolFallback("REQUIRE_TLS", true),
 		Port:                 loader.Smart("PORT"),
 		InstanceID:           instanceID,
-		Timezone:             getEnvAsLocationOptional("TIMEZONE", "Asia/Ho_Chi_Minh"),
+		Timezone:             getEnvAsLocationFallback("TIMEZONE", "Asia/Ho_Chi_Minh"),
 		LogFilePath:          logFilePath,
 		MaxLogSizeMB:         loader.Int("MAX_LOG_SIZE_MB"),
 		HistoryFilePath:      historyFilePath,
@@ -233,11 +233,11 @@ func loadStaticConfig() (StaticConfig, error) {
 		NoContentLogs:        noContentLogs,
 		Root:                 ServerRoot,
 		TrustedProxyDir:      trustedProxyDir,
-		WebEnabled:           getEnvAsBoolOptional("WEB_ENABLED", true),
+		WebEnabled:           getEnvAsBoolFallback("WEB_ENABLED", true),
 		Onion: OnionConfig{
 			Hosts:        onionHosts,
-			AllowWeb:     getEnvAsBoolOptional("ONION_ALLOW_WEB", false),
-			AllowPasskey: getEnvAsBoolOptional("ONION_ALLOW_PASSKEY", false),
+			AllowWeb:     getEnvAsBoolFallback("ONION_ALLOW_WEB", false),
+			AllowPasskey: getEnvAsBoolFallback("ONION_ALLOW_PASSKEY", false),
 		},
 	}
 	if err := loader.Err(); err != nil {
@@ -283,9 +283,9 @@ func loadDynamicConfig() (DynamicConfig, error) {
 	loader := &envLoader{}
 
 	cfg := DynamicConfig{
-		StatusURL:              loader.Smart("STATUS_URL"),
-		DownloadURL:            loader.Smart("DOWNLOAD_URL"),
-		HomepageURL:            loader.Smart("HOMEPAGE_URL"),
+		StatusURL:              loader.Optional("STATUS_URL"),
+		DownloadURL:            loader.Optional("DOWNLOAD_URL"),
+		HomepageURL:            loader.Optional("HOMEPAGE_URL"),
 		MaxConnectionsPerIP:    loader.Int("MAX_CONNECTIONS_PER_IP"),
 		MaxMessageLength:       loader.Int("MAX_MESSAGE_LENGTH"),
 		MaxMessageLine:         loader.Int("MAX_MESSAGE_LINE"),
@@ -296,7 +296,7 @@ func loadDynamicConfig() (DynamicConfig, error) {
 		HistorySegmentCooldown: loader.Duration("HISTORY_SEGMENT_COOLDOWN"),
 		HistoryDiskLookup:      loader.Int("HISTORY_DISK_LOOKUP"),
 		MaxUsernameLength:      loader.Int("MAX_USERNAME_LENGTH"),
-		MaxTripcodeLength:      getEnvAsIntOptional("MAX_TRIPCODE_LENGTH", 64),
+		MaxTripcodeLength:      getEnvAsIntFallback("MAX_TRIPCODE_LENGTH", 64),
 		ConnectionCooldown:     loader.Duration("CONNECTION_COOLDOWN"),
 	}
 	if err := loader.Err(); err != nil {
@@ -535,12 +535,18 @@ func main() {
 		fmt.Fprintf(w, "Instance ID: %s\n", Cfg.Static.InstanceID)
 		fmt.Fprintf(w, "Uptime     : %s\n", uptime.String())
 		fmt.Fprintf(w, "Múi giờ    : %s\n", Cfg.Static.Timezone)
-		fmt.Fprintf(w, "Trạng thái : %s\n", dynCfg.StatusURL)
+		if dynCfg.StatusURL != "" {
+			fmt.Fprintf(w, "Trạng thái : %s\n", dynCfg.StatusURL)
+		}
 		fmt.Fprintln(w, "------------------------------------")
 		fmt.Fprintf(w, "Blog       : /blog\n")
 		fmt.Fprintf(w, "Web Client : /web\n")
-		fmt.Fprintf(w, "Tải Client : %s\n", dynCfg.DownloadURL)
-		fmt.Fprintf(w, "Homepage   : %s\n", dynCfg.HomepageURL)
+		if dynCfg.DownloadURL != "" {
+			fmt.Fprintf(w, "Tải Client : %s\n", dynCfg.DownloadURL)
+		}
+		if dynCfg.HomepageURL != "" {
+			fmt.Fprintf(w, "Homepage   : %s\n", dynCfg.HomepageURL)
+		}
 		fmt.Fprintln(w, "------------------------------------")
 		if chatApp.ServerID != nil && chatApp.ServerID.PublicKey != "" {
 			fmt.Fprintf(w, "Server Pubkey: %s\n", chatApp.ServerID.PublicKey)

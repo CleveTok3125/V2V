@@ -28,14 +28,33 @@ func TestEnvLoader_Types(t *testing.T) {
 	if got, err := getEnvAsDuration("V2V_T_DUR"); err != nil || got != 5*time.Second {
 		t.Fatalf("duration: %v %v", got, err)
 	}
-	if !getEnvAsBoolOptional("V2V_T_BOOL", false) {
+	if !getEnvAsBoolFallback("V2V_T_BOOL", false) {
 		t.Fatal("bool true not parsed")
 	}
-	if getEnvAsBoolOptional("V2V_T_MISSING_XYZ", true) != true {
+	if getEnvAsBoolFallback("V2V_T_MISSING_XYZ", true) != true {
 		t.Fatal("missing bool must yield fallback")
 	}
-	if got := getEnvOptional("V2V_T_MISSING_XYZ", "fb"); got != "fb" {
+	if got := getEnvFallback("V2V_T_MISSING_XYZ", "fb"); got != "fb" {
 		t.Fatalf("missing string fallback: %q", got)
+	}
+	// Optional: missing/empty yields "", a value passes through, and a
+	// value naming another variable resolves through it (Smart semantics).
+	loader := &envLoader{}
+	if got := loader.Optional("V2V_T_MISSING_XYZ"); got != "" {
+		t.Fatalf("missing optional must be empty, got %q", got)
+	}
+	t.Setenv("V2V_T_EMPTY", "")
+	if got := loader.Optional("V2V_T_EMPTY"); got != "" {
+		t.Fatalf("empty optional must be empty, got %q", got)
+	}
+	t.Setenv("V2V_T_PLAIN", "value")
+	if got := loader.Optional("V2V_T_PLAIN"); got != "value" {
+		t.Fatalf("optional plain: %q", got)
+	}
+	t.Setenv("V2V_T_INDIRECT_TARGET", "resolved")
+	t.Setenv("V2V_T_INDIRECT", "V2V_T_INDIRECT_TARGET")
+	if got := loader.Optional("V2V_T_INDIRECT"); got != "resolved" {
+		t.Fatalf("optional indirection: %q", got)
 	}
 }
 
