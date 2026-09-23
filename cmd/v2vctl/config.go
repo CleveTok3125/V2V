@@ -32,9 +32,23 @@ type ConfigCmd struct {
 }
 
 type ConfigValidateCmd struct {
-	Dir    string `help:"Thư mục chứa v2v-template.json" default:"."`
 	To     string `help:"Thư mục gốc instance (mặc định theo --root/V2V_ROOT)"`
 	Format string `help:"Định dạng: text|json" default:"text"`
+}
+
+// roleProbe mirrors the server's RoleDefinition (Identities plus an
+// embedded Permission) so config validate catches type errors, not just
+// JSON syntax. Kept local: the server type lives in package main.
+type roleProbe struct {
+	Identities          []identityProbe `json:"identities"`
+	CanMessageUnlimited bool            `json:"can_message_unlimited"`
+	CustomPrefix        string          `json:"custom_prefix"`
+}
+
+type identityProbe struct {
+	PublicKey    string `json:"public_key"`
+	HmacShield   string `json:"hmac_shield"`
+	ServerPubKey string `json:"server_pubkey"`
 }
 
 // ConfigCommon holds flags shared by sync/diff/check.
@@ -773,7 +787,9 @@ func (c *ConfigValidateCmd) Run() error {
 	if data, err := os.ReadFile(rolesFile); err != nil {
 		problems = append(problems, fmt.Sprintf("đọc %s: %v", rolesFile, err))
 	} else {
-		var probe map[string]any
+		// Mirror the server's LoadRoles shape, not map[string]any: a
+		// value of the wrong type must fail here, not at first boot.
+		var probe map[string]roleProbe
 		if err := json.Unmarshal(data, &probe); err != nil {
 			problems = append(problems, fmt.Sprintf("%s: JSON không hợp lệ: %v", rolesFile, err))
 		}

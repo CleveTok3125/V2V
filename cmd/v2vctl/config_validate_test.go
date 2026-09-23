@@ -79,6 +79,22 @@ func TestConfigValidateFailsOnBadRoles(t *testing.T) {
 	}
 }
 
+// A well-formed JSON body with a wrong value type passes a map[string]any
+// probe but kills the server's LoadRoles at boot, so validate must catch
+// it by mirroring the server's role shape.
+func TestConfigValidateFailsOnWrongRoleType(t *testing.T) {
+	withCleanEnv(t)
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		".env":              validValidateEnv,
+		"config/roles.json": `{"admin": {"identities": [], "can_message_unlimited": "yes"}}` + "\n",
+	})
+	cmd := &ConfigValidateCmd{To: root, Format: "text"}
+	if err := cmd.Run(); err == nil {
+		t.Fatal("wrong role value type must fail validate")
+	}
+}
+
 func TestConfigValidateFailsOnMissingEnv(t *testing.T) {
 	withCleanEnv(t)
 	root := t.TempDir()
