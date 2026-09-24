@@ -170,11 +170,13 @@ func (s *ChatServer) serveAuthenticated(session *ClientSession, clientIP string)
 
 	s.Hub.registerClient(session, clientIP)
 	s.releaseInflight()
+	s.observeConnect(clientIP, session.DisplayName, sessionIdentityKind(session))
 
 	// Anti-race re-check: a burst that passed the pre-upgrade cap
 	// together must not all stay registered.
 	if s.overCap() {
 		s.Hub.unregisterClient(session, clientIP)
+		s.observeDisconnect(clientIP)
 		return
 	}
 
@@ -399,6 +401,8 @@ func main() {
 		logInfof("🛡️ Blocklist: %d nets from %s", len(blNets), Cfg.Static.BlocklistFile)
 	}
 	chatApp.Blocklist = blNets
+
+	chatApp.Behavior, chatApp.Screener = initBehaviorEngines()
 	sid, err := LoadOrCreateServerIdentity(dataPath("server_identity.json"))
 	if err != nil {
 		log.Fatalf("❌ CRITICAL ERROR: cannot load server identity: %v", err)
@@ -417,13 +421,14 @@ func main() {
 	chatApp.WatchRolesFile()
 	chatApp.StartCleanupTasks()
 	go chatApp.attackSampler()
+	go chatApp.behaviorScheduler()
 
 	mux := http.NewServeMux()
 
 	mime.AddExtensionType(".wasm", "application/wasm")
 	webtermDir = resolveWebtermDir(executableDir())
 	webHandler := http.StripPrefix("/web/", webFilesHandler(webtermDir))
-	mux.HandleFunc("/web/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/web/", chatApp.instrumentHTTP("web_static", func(w http.ResponseWriter, r *http.Request) {
 		if !webAllowed(r) {
 			if !Cfg.Static.WebEnabled {
 				logWarnf("⛔ [WEB] Chặn web client từ %s (WEB_ENABLED=false)", trustedproxy.Clip(r.Host, 200))
@@ -434,10 +439,10 @@ func main() {
 			return
 		}
 		webHandler.ServeHTTP(w, r)
-	})
+	}))
 
 	LoadWebauthnEnv()
-	mux.HandleFunc("/webauthn/enroll/begin", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/webauthn/enroll/begin", chatApp.instrumentHTTP("webauthn_begin", func(w http.ResponseWriter, r *http.Request) {
 		if !passkeyAllowed(r) {
 			logWarnf("⛔ [ONION] Chặn enroll từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))
 			http.NotFound(w, r)
@@ -447,8 +452,8 @@ func main() {
 			return
 		}
 		chatApp.handleEnrollBegin(w, r)
-	})
-	mux.HandleFunc("/webauthn/enroll/finish", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("/webauthn/enroll/finish", chatApp.instrumentHTTP("webauthn_finish", func(w http.ResponseWriter, r *http.Request) {
 		if !passkeyAllowed(r) {
 			logWarnf("⛔ [ONION] Chặn enroll từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))
 			http.NotFound(w, r)
@@ -458,9 +463,9 @@ func main() {
 			return
 		}
 		chatApp.handleEnrollFinish(w, r)
-	})
+	}))
 
-	mux.HandleFunc("/api/server_pubkey", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/server_pubkey", chatApp.instrumentHTTP("meta", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		pub := ""
@@ -468,21 +473,21 @@ func main() {
 			pub = chatApp.ServerID.PublicKey
 		}
 		_ = json.NewEncoder(w).Encode(map[string]string{"public_key": pub})
-	})
+	}))
 
-	mux.HandleFunc("/api/trip/verify", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/trip/verify", chatApp.instrumentHTTP("trip_verify", func(w http.ResponseWriter, r *http.Request) {
 		if rejectUntrustedProxy(w, r) {
 			return
 		}
 		chatApp.handleTripVerify(w, r)
-	})
-	mux.HandleFunc("/api/version", handleAPIVersion)
+	}))
+	mux.HandleFunc("/api/version", chatApp.instrumentHTTP("meta", handleAPIVersion))
 
-	mux.HandleFunc("/api/join-gate", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/join-gate", chatApp.instrumentHTTP("join_gate", func(w http.ResponseWriter, r *http.Request) {
 		chatApp.handleJoinGate(w, r)
-	})
+	}))
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", chatApp.instrumentHTTP("info", func(w http.ResponseWriter, r *http.Request) {
 		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
 			chatApp.ServeWS(w, r)
 			return
@@ -517,7 +522,7 @@ func main() {
 		if chatApp.ServerID != nil && chatApp.ServerID.PublicKey != "" {
 			fmt.Fprintf(w, "Server Pubkey: %s\n", chatApp.ServerID.PublicKey)
 		}
-	})
+	}))
 
 	// Graceful drain for history on SIGTERM/SIGINT to avoid losing last second of messages
 	go func() {
@@ -527,6 +532,11 @@ func main() {
 		logInfo("🛑 Nhận tín hiệu dừng, đang flush history...")
 		if chatApp.Chain.Store != nil {
 			_ = chatApp.Chain.Store.Close()
+		}
+		if chatApp.Behavior != nil {
+			if err := chatApp.Behavior.Save(); err != nil {
+				logInfof("⚠️ behavior save: %v", err)
+			}
 		}
 		os.Exit(0)
 	}()

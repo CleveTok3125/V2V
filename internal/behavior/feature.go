@@ -130,6 +130,9 @@ func intervalsCV(ts []time.Time) (float64, bool) {
 }
 
 func inNight(t time.Time, loc *time.Location, start, end int) bool {
+	if loc == nil {
+		loc = time.UTC
+	}
 	h := t.In(loc).Hour()
 	if start <= end {
 		return h >= start && h < end

@@ -438,6 +438,7 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expectedHost string, onion bool) (*ClientSession, error) {
 	perms, authPacket, err := s.HandleAuth(conn, clientIP, expectedHost, onion)
 	if err != nil {
+		s.observeAuthErr(clientIP, err)
 		if authPacket.Role != "" {
 			s.handleAuthPenalty(clientIP)
 		}
@@ -453,6 +454,7 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 		conn.WriteMessage(websocket.TextMessage, []byte(errMsg))
 		conn.Close()
 		logWarnf("⚠️ [AUTH FAIL] %s: Tripcode secret quá dài (%d bytes) - Từ chối để chống trùng lặp.", clientIP, len(authPacket.Tripcode))
+		s.observeAuthErr(clientIP, ErrTripcodeTooLong)
 		return nil, fmt.Errorf("%w", ErrTripcodeTooLong)
 	}
 
@@ -521,5 +523,9 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 		Perms:       perms,
 		WantJoins:   authPacket.HistoryJoins,
 		Send:        make(chan []byte, 256),
+		IP:          clientIP,
+		AuthType:    authPacket.AuthType,
+		IdentityPub: authPacket.IdentityPub,
+		Platform:    authPacket.Platform,
 	}, nil
 }

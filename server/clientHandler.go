@@ -72,16 +72,13 @@ func (s *ChatServer) releaseIPConnection(clientIP string) {
 	}
 }
 
-// allowHistorySegment enforces the HistorySegmentCooldown knob: true
-// stamps the session and allows the request. Deliberately separate
-// from MessageCooldown so tuning chat never retunes history paging.
-// Only ReadPump calls it.
-func (s *ChatServer) allowHistorySegment(session *ClientSession, now time.Time) bool {
-	if cd := Cfg.Dynamic.Load().HistorySegmentCooldown; !session.LastSegmentTime.IsZero() && now.Sub(session.LastSegmentTime) < cd {
-		return false
-	}
-	session.LastSegmentTime = now
-	return true
+// allowHistorySegment enforces the HistorySegmentCooldown knob per IP:
+// true allows the request. Keyed by IP (not session) so two
+// connections from one address cannot halve the effective cooldown.
+// Deliberately separate from MessageCooldown so tuning chat never
+// retunes history paging. Only ReadPump calls it.
+func (s *ChatServer) allowHistorySegment(clientIP string) bool {
+	return s.HistoryCooldown.Allow(clientIP, Cfg.Dynamic.Load().HistorySegmentCooldown)
 }
 
 func (h *Hub) registerClient(session *ClientSession, clientIP string) {
@@ -206,6 +203,11 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 	defer func() {
 		s.Hub.unregisterClient(session, clientIP)
 		session.Conn.Close()
+		s.observeDisconnect(clientIP)
+		if s.Screener != nil {
+			s.Screener.DropConn(session.Conn)
+			s.Screener.ForgetCheck(clientIP)
+		}
 	}()
 
 	pongWait := 60 * time.Second
@@ -253,26 +255,51 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			updateReadDeadline()
 			continue
 		}
-		// On-demand older segment (paged history): served in replay
-		// format, never chained, never counted as chat. A chat
-		// envelope never carries "type", so this cannot misfire on
-		// chat; a forged request only fetches the requester's own
-		// history window.
-		var histReq HistoryRequest
-		if err := json.Unmarshal([]byte(raw), &histReq); err == nil && histReq.Type == "history_request" {
-			limit := histReq.Limit
-			if limit <= 0 || limit > dynCfg.MaxHistorySend {
-				limit = dynCfg.MaxHistorySend
-			}
-			if !s.allowHistorySegment(session, time.Now()) {
-				select {
-				case session.Send <- []byte("[Hệ thống]: Yêu cầu lịch sử cũ quá nhanh, thử lại sau."):
-				default:
+		// Envelope type probe: history_request and the in-chat PoW
+		// frames carry "type"; a chat envelope never does, so a chat
+		// whose text literally reads "pow_result" is not misrouted.
+		// PoW frames bypass the mute gate: a muted client must still
+		// be able to answer or decline.
+		var env struct {
+			Type   string `json:"type"`
+			Before uint64 `json:"before"`
+			Limit  int    `json:"limit"`
+		}
+		if err := json.Unmarshal([]byte(raw), &env); err == nil && env.Type != "" {
+			switch env.Type {
+			// On-demand older segment (paged history): served in
+			// replay format, never chained, never counted as chat. A
+			// forged request only fetches the requester's own window.
+			case "history_request":
+				limit := env.Limit
+				if limit <= 0 || limit > dynCfg.MaxHistorySend {
+					limit = dynCfg.MaxHistorySend
 				}
+				if !s.allowHistorySegment(clientIP) {
+					select {
+					case session.Send <- []byte("[Hệ thống]: Yêu cầu lịch sử cũ quá nhanh, thử lại sau."):
+					default:
+					}
+					updateReadDeadline()
+					continue
+				}
+				s.serveHistorySegment(session, env.Before, limit)
+				s.observeHistory(clientIP)
+				updateReadDeadline()
+				continue
+			case "pow_result", "pow_decline":
+				s.handlePowFrame(session, raw)
 				updateReadDeadline()
 				continue
 			}
-			s.serveHistorySegment(session, histReq.Before, limit)
+		}
+		// Muted clients keep reading (history above stays open) but may
+		// not send chat until a PoW challenge passes.
+		if s.Screener != nil && s.Screener.IsMuted(session.Conn) {
+			select {
+			case session.Send <- []byte("[Hệ thống]: Chat của bạn tạm dừng chờ xác minh. Hoàn thành thử thách PoW để tiếp tục."):
+			default:
+			}
 			updateReadDeadline()
 			continue
 		}
@@ -296,6 +323,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		text := raw
 		if err := json.Unmarshal([]byte(raw), &tripMsg); err == nil && (tripMsg.Sig != "" || tripMsg.TmpID != 0 || strings.TrimSpace(tripMsg.Text+tripMsg.Msg) != "") {
 			if tripMsg.TmpID == 0 {
+				s.observeErr(clientIP, "env:tmpid-missing")
 				select {
 				case session.Send <- []byte("[Hệ thống]: Tin nhắn thiếu ID phiên (tmp_id). Hãy update client bản mới."):
 				default:
@@ -311,6 +339,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			tipReady, tipHeight := s.Chain.ready, s.Chain.height
 			s.Chain.Mu.RUnlock()
 			if msgReplyTo != 0 && tipReady && msgReplyTo > tipHeight {
+				s.observeErr(clientIP, "env:reply-future")
 				select {
 				case session.Send <- []byte("[Hệ thống]: Tin reply dẫn tới ID chưa tồn tại."):
 				default:
@@ -339,6 +368,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 					default:
 					}
 					logFilterReject(session, clientIP, err, raw)
+					s.observeErr(clientIP, "proto:filter-reject")
 					updateReadDeadline()
 					continue
 				}
@@ -376,11 +406,13 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				default:
 				}
 				logFilterReject(session, clientIP, err, raw)
+				s.observeErr(clientIP, "proto:filter-reject")
 				updateReadDeadline()
 				continue
 			}
 			// Trip verification
 			if session.TripPub != "" && !strings.EqualFold(session.TripPub, tripMsg.Pub) {
+				s.observeErr(clientIP, "proto:trip-pub")
 				select {
 				case session.Send <- []byte("[Hệ thống]: Pubkey trip không khớp phiên đăng nhập."):
 				default:
@@ -412,6 +444,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			}
 			if tripMsg.Seq != expectedSeq {
 				s.TripChainsMu.Unlock()
+				s.observeErr(clientIP, "proto:trip-seq")
 				select {
 				case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Sai thứ tự trip seq %d, mong đợi %d.", tripMsg.Seq, expectedSeq)):
 				default:
@@ -421,6 +454,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			}
 			if !strings.EqualFold(tripMsg.Prev, hex.EncodeToString(expectedPrev)) {
 				s.TripChainsMu.Unlock()
+				s.observeErr(clientIP, "proto:trip-prev")
 				select {
 				case session.Send <- []byte("[Hệ thống]: Chuỗi trip bị đứt (prev không khớp)."):
 				default:
@@ -449,6 +483,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			})
 			if err != nil {
 				s.TripChainsMu.Unlock()
+				s.observeErr(clientIP, "proto:trip-sig")
 				select {
 				case session.Send <- []byte("[Hệ thống]: Chữ ký trip không hợp lệ."):
 				default:
@@ -494,6 +529,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				default:
 				}
 				logFilterReject(session, clientIP, err, raw)
+				s.observeErr(clientIP, "proto:filter-reject")
 				updateReadDeadline()
 				continue
 			}
@@ -522,6 +558,10 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			case guard.ErrTooManyLines:
 				warn("[Hệ thống]: Tin nhắn chứa quá nhiều dòng. Vui lòng gộp lại!")
 			case guard.ErrTooFast:
+				// Refresh the stamp so an edge-spammer cannot hold the
+				// maximum allowed rate: each rejected attempt pushes the
+				// next allowed one out by a full cooldown.
+				lastMessageTime = time.Now()
 				warn(fmt.Sprintf("[Hệ thống]: Bạn đang chat quá nhanh! Vui lòng đợi %v.", dynCfg.MessageCooldown))
 			default:
 				warn(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err))
@@ -531,6 +571,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 
 		lastMessageTime = time.Now()
 
+		s.observeMessage(clientIP)
 		now := time.Now().In(Cfg.Static.Timezone)
 		s.Hub.CheckAndBroadcastDate(now)
 

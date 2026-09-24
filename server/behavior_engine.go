@@ -1,13 +1,49 @@
 package main
 
 import (
+	"encoding/json"
+	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/behavior"
+	"github.com/CleveTok3125/V2V/internal/geoip"
 	"github.com/CleveTok3125/V2V/internal/serverconfig"
 )
+
+// behaviorStoreCap bounds live profiles; beyond it the stalest goes.
+const behaviorStoreCap = 50000
+
+// initBehaviorEngines builds the scoring engine and screener when the
+// behavior feature is on. A corrupt GeoIP database fails the boot;
+// missing files only skip those grouping levels.
+func initBehaviorEngines() (*BehaviorEngine, *PowScreener) {
+	a := Cfg.Abuse.Load()
+	if a == nil || a.Behavior == nil {
+		return nil, nil
+	}
+	var geo behavior.Resolver
+	if Cfg.Static.BehaviorGeoIPDir != "" {
+		r, warns, err := geoip.Open(Cfg.Static.BehaviorGeoIPDir)
+		if err != nil {
+			log.Fatalf("❌ CRITICAL ERROR: geoip: %v", err)
+		}
+		for _, w := range warns {
+			logWarnf("%s", w)
+		}
+		if r != nil {
+			geo = r
+			logInfof("🌍 GeoIP enabled from %s", Cfg.Static.BehaviorGeoIPDir)
+		}
+	}
+	eng := NewBehaviorEngine(behavior.NewStore(behaviorStoreCap), behavior.NewStats(), geo, Cfg.Static.BehaviorFilePath)
+	if err := eng.Load(); err != nil {
+		log.Fatalf("❌ CRITICAL ERROR: behavior load: %v", err)
+	}
+	return eng, NewPowScreener(eng)
+}
 
 // BehaviorEngine scores IPs from the behavior store: feature values,
 // weighted aggregate, group combine and hysteresis tiers. Identity
@@ -98,6 +134,15 @@ func (e *BehaviorEngine) ObserveDisconnect(ip string, now time.Time) {
 	e.store.Get(ip).AddDisconnect(now)
 }
 
+// SetBlocklisted marks ip so its reputation feature scores 1 on the
+// next evaluation. ServeWS calls it before rejecting, so a blocked IP
+// that later hits an HTTP endpoint is already flagged.
+func (e *BehaviorEngine) SetBlocklisted(ip string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.store.Get(ip).SetBlocklisted()
+}
+
 // groupBeta picks the configured weight by group-key prefix.
 func groupBeta(key string, bc *serverconfig.BehaviorConfig) float64 {
 	switch {
@@ -179,9 +224,7 @@ func (e *BehaviorEngine) Score(ip string, bc *serverconfig.BehaviorConfig, now t
 		if len(memberScores) == 0 {
 			continue
 		}
-		if g := behavior.GroupAggregate(memberScores, groupBeta(k, bc)); g > s {
-			s = g
-		}
+		s = behavior.Combine(s, behavior.GroupAggregate(memberScores, groupBeta(k, bc)))
 	}
 
 	maxTier := len(bc.TierEnter) - 1
@@ -215,11 +258,49 @@ func (e *BehaviorEngine) Prune(now time.Time, retention map[int]time.Duration, d
 	}
 }
 
+// SnapshotStats appends one aggregate tier histogram line (no per-IP
+// data) for calibration. Empty path disables.
+func (e *BehaviorEngine) SnapshotStats(path string, now time.Time) error {
+	if e.stats == nil || path == "" {
+		return nil
+	}
+	snap := e.stats.SnapshotAndReset()
+	line, err := json.Marshal(map[string]any{"ts": now.Unix(), "tiers": snap})
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(line, '\n'))
+	return err
+}
+
+// Tier returns the last computed tier for ip without creating a
+// profile. False means the IP has never been scored (cold / HTTP-only),
+// which callers treat as tier 0.
+func (e *BehaviorEngine) Tier(ip string) (int, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	p, ok := e.store.Peek(ip)
+	if !ok {
+		return 0, false
+	}
+	return p.Tier, true
+}
+
 // Save persists profiles; Load restores them. Empty path disables.
 func (e *BehaviorEngine) Save() error {
 	if e.file == "" {
 		return nil
 	}
+	// Hold the engine lock: Observe* mutates profiles under e.mu, and
+	// Store.Save only guards its own map, not the shared profile
+	// contents.
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	return e.store.Save(e.file)
 }
 
@@ -228,5 +309,7 @@ func (e *BehaviorEngine) Load() error {
 	if e.file == "" {
 		return nil
 	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	return e.store.Load(e.file)
 }

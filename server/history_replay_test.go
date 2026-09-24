@@ -192,7 +192,7 @@ func TestRegister_HoldsBroadcastMu(t *testing.T) {
 	for i := 0; i < 50000; i++ {
 		s.Chain.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "bulk line"))
 	}
-	sess := &ClientSession{Send: make(chan []byte, 1 << 20), DisplayName: "New#0000", Perms: GetDefaultPermission()}
+	sess := &ClientSession{Send: make(chan []byte, 1<<20), DisplayName: "New#0000", Perms: GetDefaultPermission()}
 	regDone := make(chan struct{})
 	go func() {
 		s.Hub.registerClient(sess, "127.0.0.1")
@@ -481,26 +481,28 @@ func TestSegment_HoldsBroadcastMu(t *testing.T) {
 	}
 }
 
-// TestAllowHistorySegment pins the throttle: the first request passes
-// and stamps the session, an immediate second is refused, and one past
-// the HistorySegmentCooldown knob passes again. The dedicated knob (not
+// TestAllowHistorySegment pins the throttle: the first request from an
+// IP passes, an immediate second is refused, a different IP is
+// independent, and one past the HistorySegmentCooldown knob passes
+// again. IP-keyed (not session) so two connections from one address
+// cannot halve the effective cooldown. The dedicated knob (not
 // MessageCooldown) is intentional: tuning chat must never retune
 // history paging.
 func TestAllowHistorySegment(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
-	sess := &ClientSession{}
-	now := time.Now()
-	if !s.allowHistorySegment(sess, now) {
+	const ip = "10.2.0.1"
+	if !s.allowHistorySegment(ip) {
 		t.Fatal("first request must pass")
 	}
-	if sess.LastSegmentTime != now {
-		t.Fatal("allowed request must stamp the session")
+	if s.allowHistorySegment(ip) {
+		t.Fatal("immediate second request from the same IP must be refused")
 	}
-	if s.allowHistorySegment(sess, now.Add(time.Millisecond)) {
-		t.Fatal("immediate second request must be refused")
+	if !s.allowHistorySegment("10.2.0.2") {
+		t.Fatal("a different IP must be independent")
 	}
-	if !s.allowHistorySegment(sess, now.Add(Cfg.Dynamic.Load().HistorySegmentCooldown+time.Second)) {
+	time.Sleep(Cfg.Dynamic.Load().HistorySegmentCooldown + 20*time.Millisecond)
+	if !s.allowHistorySegment(ip) {
 		t.Fatal("request past the cooldown must pass")
 	}
 }

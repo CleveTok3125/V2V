@@ -95,6 +95,11 @@ type AuthPacket struct {
 	// catch-up replay. Absent means filtered: replay carries chats,
 	// date banners and other system lines only.
 	HistoryJoins bool `json:"history_joins,omitempty"`
+
+	// Platform declares the client runtime ("native" or "web") so the
+	// server can offer platform-fitting PoW presets. Absent means
+	// native.
+	Platform string `json:"platform,omitempty"`
 }
 
 // HistorySync is the machine-readable trailer closing a history

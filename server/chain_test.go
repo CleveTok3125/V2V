@@ -76,7 +76,7 @@ func TestChainLinkSequence(t *testing.T) {
 	s := NewChatServer()
 	var last WireMessage
 	for i := 1; i <= 3; i++ {
-		last = s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "Alice", Text: fmt.Sprintf("msg %d", i), TmpID: uint64(i)}, "")
+		last, _ = s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "Alice", Text: fmt.Sprintf("msg %d", i), TmpID: uint64(i)}, "")
 		if last.ChainHeight != uint64(i) {
 			t.Fatalf("height = %d, want %d", last.ChainHeight, i)
 		}
@@ -113,8 +113,8 @@ func TestChainResumeAfterRestart(t *testing.T) {
 	defer testChainCfg()()
 	s := NewChatServer()
 	s.Chain.History = append(s.Chain.History, "legacy raw line without chain")
-	w1 := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
-	w2 := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:05", DisplayName: "B", Text: "two", TmpID: 7}, "")
+	w1, _ := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
+	w2, _ := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:05", DisplayName: "B", Text: "two", TmpID: 7}, "")
 	if w1.ChainHeight != 1 {
 		t.Fatalf("first height = %d, want 1", w1.ChainHeight)
 	}
@@ -131,7 +131,7 @@ func TestChainResumeAfterRestart(t *testing.T) {
 	}
 	// Next message continues the chain.
 	r.Hub.BroadcastMu.Lock()
-	w3 := r.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:06", DisplayName: "C", Text: "three", TmpID: 1}, "")
+	w3, _ := r.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:06", DisplayName: "C", Text: "three", TmpID: 1}, "")
 	r.Hub.BroadcastMu.Unlock()
 	if w3.ChainHeight != 3 {
 		t.Fatalf("post-restart height = %d, want 3", w3.ChainHeight)
@@ -195,7 +195,7 @@ func TestChainConcurrentAppend(t *testing.T) {
 func TestNoticeAuditRoutes(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
-	w1 := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
+	w1, _ := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
 	if w1.ChainHeight != 1 {
 		t.Fatalf("first height = %d, want 1", w1.ChainHeight)
 	}
@@ -204,7 +204,7 @@ func TestNoticeAuditRoutes(t *testing.T) {
 		t.Fatalf("notice advanced height to %d", s.Chain.height)
 	}
 	tipAfterNotice := s.Chain.tip
-	w2 := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:05", DisplayName: "B", Text: "two", TmpID: 2}, "")
+	w2, _ := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:05", DisplayName: "B", Text: "two", TmpID: 2}, "")
 	if w2.ChainHeight != 2 {
 		t.Fatalf("chat after notice height = %d, want 2", w2.ChainHeight)
 	}
@@ -235,7 +235,7 @@ func TestChainResumeSkipsNotices(t *testing.T) {
 	s.Chain.History = append(s.Chain.History, "legacy raw line without chain")
 	notice, _ := json.Marshal(WireMessage{Type: "system", Time: "15:04", SysKind: "join", Text: "A joined"})
 	s.Chain.History = append(s.Chain.History, string(notice))
-	w1 := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
+	w1, _ := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
 	if w1.ChainHeight != 1 {
 		t.Fatalf("first height = %d, want 1", w1.ChainHeight)
 	}

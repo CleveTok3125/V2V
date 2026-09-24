@@ -262,8 +262,7 @@ func (h *Hub) BroadcastAudit(text string, sender *websocket.Conn, serverPub stri
 	now := time.Now().In(Cfg.Static.Timezone)
 	h.BroadcastMu.Lock()
 	defer h.BroadcastMu.Unlock()
-	wire := h.chain.linkAndStore(WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: "audit", Text: text}, serverPub)
-	data, _ := json.Marshal(wire)
+	_, data := h.chain.linkAndStore(WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: "audit", Text: text}, serverPub)
 
 	h.fanout(data, sender, true, false)
 }
@@ -271,8 +270,7 @@ func (h *Hub) BroadcastAudit(text string, sender *websocket.Conn, serverPub stri
 func (h *Hub) BroadcastWire(wire WireMessage, sender *websocket.Conn, serverPub string) {
 	h.BroadcastMu.Lock()
 	defer h.BroadcastMu.Unlock()
-	wire = h.chain.linkAndStore(wire, serverPub)
-	data, _ := json.Marshal(wire)
+	_, data := h.chain.linkAndStore(wire, serverPub)
 	// Echo to the sender doubles as delivery confirmation so it can
 	// replace its grey placeholder with the confirmed rendering.
 	h.fanout(data, sender, false, true)
@@ -286,6 +284,18 @@ func (h *Hub) BroadcastWire(wire WireMessage, sender *websocket.Conn, serverPub 
 // never the reverse).
 func (s *ChatServer) serveHistorySegment(session *ClientSession, before uint64, limit int) {
 	if limit <= 0 {
+		return
+	}
+	// Fail-closed on an out-of-range cursor: a before above the tip can
+	// never yield a window, and with HISTORY_DISK_LOOKUP>0 it would
+	// otherwise scan/decompress a whole disk generation per request.
+	s.Chain.Mu.RLock()
+	ready, tip := s.Chain.ready, s.Chain.height
+	s.Chain.Mu.RUnlock()
+	if before != 0 && ready && before > tip {
+		s.Hub.BroadcastMu.Lock()
+		s.Chain.sendReplay(session, nil, "--- Lịch sử cũ ---", true)
+		s.Hub.BroadcastMu.Unlock()
 		return
 	}
 	lines := s.Chain.collectSegment(before, limit)

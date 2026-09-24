@@ -34,6 +34,14 @@ type ClientSession struct {
 	Tripcode    string
 	Perms       Permission
 	Send        chan []byte
+	// IP is the resolved client address owning this session.
+	IP string
+	// AuthType names how the session authenticated
+	// ("guest", "ed25519", "passkey").
+	AuthType string
+	// Platform is the client platform ("native" default, "web" when
+	// the client declares it): PoW offers use Threads=1 for web.
+	Platform string
 	// IdentityPub pins the ed25519 identity (pubkey hex) behind this
 	// session; empty for guests and web passkey sessions.
 	IdentityPub string
@@ -43,10 +51,6 @@ type ClientSession struct {
 	// WantJoins asks for join/leave lines in the catch-up replay.
 	// Live broadcasts always carry them; only replay filters.
 	WantJoins bool
-	// LastSegmentTime throttles on-demand history requests per
-	// session. Only ReadPump touches it (single goroutine), so no
-	// lock is needed.
-	LastSegmentTime time.Time
 }
 
 type TripChain struct {
@@ -136,6 +140,10 @@ type ChatServer struct {
 	IpCounts   map[string]int
 	IpCountsMu sync.Mutex
 
+	// HistoryCooldown throttles on-demand history requests per IP, so
+	// two connections from one IP cannot halve the effective cooldown.
+	HistoryCooldown *guard.CooldownMap
+
 	// Blocklist is the operator IP/CIDR denylist matched before any
 	// rate limit. Inflight counts handshakes between the global-cap
 	// check and registration, so a burst cannot overshoot the cap.
@@ -166,6 +174,11 @@ type ChatServer struct {
 	Gate   *GateStore
 	Attack *AttackState
 
+	// Behavior scores IPs from metadata and hands out in-chat PoW
+	// challenges through Screener. Nil disables both legs.
+	Behavior *BehaviorEngine
+	Screener *PowScreener
+
 	RoleRegistry   map[string]RoleDefinition
 	RoleRegistryMu sync.RWMutex
 
@@ -184,6 +197,7 @@ func NewChatServer() *ChatServer {
 		StartTime:       time.Now(),
 		Hub:             Hub{Clients: make(map[*websocket.Conn]*ClientSession), DisplayNameCount: make(map[string]int)},
 		IpCounts:        make(map[string]int),
+		HistoryCooldown: guard.NewCooldownMap(),
 		LastConnectTime: make(map[string]time.Time),
 		AuthFails:       make(map[string]RateLimitRecord),
 		DisplaySalt:     salt,

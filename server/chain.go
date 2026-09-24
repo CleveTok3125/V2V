@@ -22,10 +22,11 @@ import (
 const chainVersion = 2
 
 // linkAndStore chains one wire message, stores it in memory + disk, and
-// returns the chained copy for broadcast. Callers must hold BroadcastMu;
-// this takes HistoryMu (Chain.Mu) internally (leaf lock, never the reverse
-// order).
-func (c *ChainService) linkAndStore(wire WireMessage, serverPub string) WireMessage {
+// returns the chained copy plus its marshaled JSON for broadcast (so
+// the caller never re-marshals under BroadcastMu). Callers must hold
+// BroadcastMu; this takes HistoryMu (Chain.Mu) internally (leaf lock,
+// never the reverse order).
+func (c *ChainService) linkAndStore(wire WireMessage, serverPub string) (WireMessage, []byte) {
 	c.Mu.Lock()
 	defer c.Mu.Unlock()
 	if !c.ready {
@@ -44,7 +45,7 @@ func (c *ChainService) linkAndStore(wire WireMessage, serverPub string) WireMess
 	if c.Store != nil {
 		c.Store.EnqueueWire(wire, time.Now().In(Cfg.Static.Timezone))
 	}
-	return wire
+	return wire, data
 }
 
 // initChainLocked resumes the tip from stored history or starts a new
