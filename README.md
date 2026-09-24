@@ -100,6 +100,8 @@ Web passkey enrollment (one-time link, 10 min):
 
 See `template/server/instances/default/config/roles.json` and `template/server/instances/default/.env` for server configuration. Management commands default to the `instances/default` root; pass `--root instances/<name>` (or set `V2V_ROOT`) to target another instance.
 
+Abuse defense is self-contained: a global connection cap, operator blocklist, under-attack mode with a PoW join gate, and behavior scoring with in-chat PoW screening — all knobs required in `.env` (see [Abuse & Proof-of-Work](docs/TECHNICAL.md#abuse--proof-of-work)).
+
 ## Running the Server
 
 Prebuilt server bundles and the multi-arch container image are published

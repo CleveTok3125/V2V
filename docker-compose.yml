@@ -12,6 +12,24 @@ services:
     # name (`docker compose -p v2v-<env>`), so instances never collide.
     image: ${IMAGE_NAME:-v2v_image}
     restart: ${RESTART_POLICY:-always}
+    # Mass-impact hardening (container layer): the application cap
+    # (MAX_TOTAL_CONNECTIONS) sheds load first; these bounds keep a
+    # flood from exhausting host fds, threads, RAM or disk via logs.
+    # Derived in the abuse plan: ~90KB/conn steady, ~125MB peak at the
+    # 500-conn cap, burst fds ≈ 4x cap.
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 8192
+    pids_limit: 512
+    mem_limit: ${MEM_LIMIT:-512m}
+    cpus: ${CPUS:-1.0}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    stop_grace_period: 30s
     ports:
       # Loopback-bound by default: the app is reachable from the host
       # itself (debug) and from sibling containers by service name, but

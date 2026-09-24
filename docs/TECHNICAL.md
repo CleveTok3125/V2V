@@ -18,6 +18,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 - [Tripcode](#tripcode)
 - [Storage & Persistence](#storage--persistence)
 - [Security Model](#security-model)
+- [Abuse & Proof-of-Work](#abuse--proof-of-work)
 - [Error Handling](#error-handling)
 - [Roadmap](#roadmap)
 
@@ -376,6 +377,97 @@ Paths below are relative to the instance root (`V2V_ROOT`, default `instances/de
 - Missing `config/roles.json` fails the boot (no silent default-permission fallback); a corrupt file fails too, while hot-reload keeps the old registry with a warning.
 - Trust files refuse to load when world-writable; templates ship no secrets (placeholders only).
 - **Container:** the image builds with live `data/`/`config/`/`.env`/`instances/` excluded (`.dockerignore`), runs the server as a non-root `app` user via `docker/entrypoint.sh` (root prepares `$V2V_ROOT/data` idempotently, preflights the read-only mounts with actionable errors, then `exec su-exec`), drops all capabilities except `CHOWN`/`SETUID`/`SETGID` (needed by that root phase), blocks privilege escalation and mounts the rootfs read-only (`/tmp` tmpfs). No `user:` is set on purpose — the entrypoint adapts, rollback is commenting out `read_only`. Compose mounts one instance (`ENV_ROOT`) into `/app` and sets `V2V_ROOT=/app`.
+
+## Abuse & Proof-of-Work
+
+Self-contained mass-impact defense (works with `PROXY_PROVIDER=none`, no
+external services): global connection cap, operator blocklist, optional
+IPv4-only, an under-attack state machine, a PoW join gate, dynamic
+behavior scoring with in-chat PoW screening, and container bounds. All
+abuse knobs are required in `.env` (group A always, group B when
+`BEHAVIOR_ENABLED=true`); `v2vctl config validate` fails naming any
+missing one. Defaults live only in `template/.env`.
+
+- **Global cap:** `MAX_TOTAL_CONNECTIONS` (default 500) counts registered
+sessions plus in-flight handshakes (`Inflight`, atomic). `ServeWS`
+answers `503+Retry-After` past it before `Upgrade`; `registerClient`
+re-checks against the same bound so a burst cannot overshoot it.
+- **Blocklist:** `BLOCKLIST_FILE` (default `./config/blocklist.txt`, one
+IP/CIDR per line, `#` comments, same parser as trust files) matches
+before any rate limit and answers `403`. A missing file only warns;
+malformed or world-writable files fail the boot.
+- **IPv4-only:** `REQUIRE_IPV4=false` rejects non-IPv4 client addresses
+(v4-mapped counts as v4) with `403`.
+- **Log clipping:** attacker-controlled payloads in reject lines are cut
+to 512 runes (`trustedproxy.Clip`), so one request stays one line.
+- **Under-attack machine** (`server/underattack.go`, 1s sampler): enters
+when the cap holds for `ATTACK_ENTER_SECS` or the 5s reject rate passes
+`ATTACK_ENTER_RPS`; holds the full `UNDER_ATTACK_TTL` with re-arm while
+hot and exits only after a quiet TTL (`UNDER_ATTACK_FORCE=auto|on|off`).
+Attack magnitude (`scale ∈ [0,1]`) folds reject ratio, connection-rate
+growth vs an EWMA baseline, new-IP growth and blocklist hits
+(`ATTACK_SCALE_MODE=max|weighted` + weights).
+- **Join gate** (`POST /api/join-gate`): `step=challenge` issues a PoW
+bundle (tier preset, bound salt, `earliest=now+rand(JOIN_WAIT_MIN,MAX)`,
+HMAC ticket, `POW_TTL` expiry, signed offer); `step=submit` verifies
+ticket, clock (early answers get `429+Retry-After` without consuming
+the bundle) and PoW (wrong answers consume it) and returns an IP-bound
+lease pass (`PASS_TTL`, reusable unless `PASS_SINGLE_USE`). `ServeWS`
+requires `?gate_pass=`/`X-V2V-Pass` when `POW_FIRST_CONNECT=always`, or
+only while under attack (`under-attack`, default). The gate check runs
+before the connection cooldown so a rejected pre-gate dial never stamps
+it. Challenge issuance is throttled per IP (2s, internal).
+- **PoW** (`internal/pow`): one argon2id (`t/m/p` per tier, memory-hard)
+plus a sha256 leading-zero search (`difficulty` bits), so the server
+verifies with one argon2id plus one hash. Presets come from
+`POW_P{n}_T/M/P/DIFF/EST_MS` (tier 0 = no PoW), clamped to `T1-10`,
+`M8-256MiB`, `P1-8` with wasm forced to `P=1`. Offers are ed25519-signed
+(`V2V-POW-v1`) over tier+preset+salt+expiry+id; clients verify against
+the pinned server pubkey before spending work.
+- **In-chat screening:** a 30s scheduler re-scores connected IPs on a
+randomized `POW_RECHECK_MIN/MAX` cadence and challenges only flagged
+sessions (tier ≥ 1): a per-session `[Hệ thống]:` notice (Tab 2) explains
+the check, then a signed `pow_offer` frame. Answers ride `pow_result`;
+`pow_decline` (or silence past `max(SCREEN_DEADLINE, IdleChatTimeout)`)
+mutes chat sends while reading stays open; overdue challenges kick only
+while under attack. Wrong solutions are consumed to bound verify cost.
+- **Behavior scoring** (`internal/behavior`, metadata timing/count only,
+never content): per-IP profiles (event rings, counters) feed 13
+normalized features — rhythm (CV of gaps), long-window throughput,
+deep-night share, continuity, connect churn, identity cost, IP
+reputation, protocol/auth/envelope anomalies, HTTP rate/errors/endpoint
+focus. `score = (Σw·f/Σw)^γ` with per-feature weight/floor/ramp
+(`W=0` disables); no evidence ⇒ clean IP scores 0 (cold start stays
+tier 0), blocklist hit scores 1. Tiers move on hysteresis
+(`ENTER_k>EXIT_k>ENTER_{k-1}`); the lowest tier needs no PoW.
+- **Grouping:** subnet (`/24`, IPv6 `/64`+`/48`), ASN, country/region keys
+combine member scores (worst + mean, weighted by level) so distributed
+rotation inside one netblock still taints. GeoIP is optional
+(`BEHAVIOR_GEOIP_DIR` with `GeoLite2-ASN/City.mmdb`, operator-supplied,
+missing files only skip those levels).
+- **Persistence & stats:** profiles persist like history (path
+`BEHAVIOR_FILE_PATH`, per-tier retention, atomic rewrite, SIGTERM
+flush); a separate aggregate tier histogram (no per-IP data) snapshots
+every `BEHAVIOR_STATS_WINDOW` for calibrating weights. `BEHAVIOR_ENABLED=false`
+disables scoring, in-chat PoW, stats and GeoIP entirely.
+- **HTTP gate:** heavy classes (`GATE_HTTP_CLASSES`, default
+trip_verify/webauthn) require the reusable lease pass while under
+attack (`GATE_HTTP_MODE`, tier mode gains per-IP checks with scoring);
+`verify.html` fetches a pass before its JSON call. `trip_api` reads the
+page only after the query cap, proxy reject and per-IP cooldown.
+- **Client** (`pow` section in `config.jsonc`): `maxTier`/`maxCostMs`
+bound what the client will solve; anything beyond is declined. The
+join flow dials, and on a 429 gate challenge solves PoW in a worker
+goroutine (desktop; WASM runs it on the main thread with the server
+notice explaining the freeze), waits out the ticket and redials with
+the pass (bounded retries). In-chat offers verify against the pinned
+server identity, clamp to platform and budget, then solve in
+background and answer over the socket (writes serialized).
+- **Container bounds** (`docker-compose.yml`): `nofile` 8192,
+`pids_limit` 512, `mem_limit` 512m, `cpus` 1.0, json-file logs
+(`10m`×3), `stop_grace_period` 30s — on top of the existing healthcheck
+and `STOPSIGNAL`. The app cap sheds load first; these keep a flood from
+exhausting host fds, threads, RAM or disk.
 
 ## Error Handling
 

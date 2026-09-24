@@ -100,6 +100,8 @@ Cấp passkey web (link dùng 1 lần, 10 phút):
 
 Xem `template/server/instances/default/config/roles.json` và `template/server/instances/default/.env` để cấu hình server. Lệnh quản lý mặc định ở root `instances/default`; truyền `--root instances/<name>` (hoặc đặt `V2V_ROOT`) để nhắm instance khác.
 
+Chống abuse tự thân: trần kết nối toàn cục, blocklist, under-attack với cửa PoW, và chấm điểm hành vi kèm PoW trong chat — mọi knob bắt buộc trong `.env` (xem [Abuse & Proof-of-Work](docs/TECHNICAL.md#abuse--proof-of-work)).
+
 ## Chạy Server
 
 Mỗi bản release phát hành kèm bundle server dựng sẵn và image container
