@@ -58,6 +58,14 @@ type StaticConfig struct {
 	ProxyChain []string
 	// TrustedProxyDir holds per-module "<name>.txt" trust files.
 	TrustedProxyDir string
+	// BehaviorGeoIPDir holds optional GeoLite2/DB-IP .mmdb files for
+	// ASN/region grouping. The directory must be declared when the
+	// behavior engine is on; absent files only skip those levels.
+	BehaviorGeoIPDir string
+	// BehaviorFilePath is the behavior profile store. It mirrors the
+	// history path convention: relative values anchor at the instance
+	// root. Required when the behavior engine is on.
+	BehaviorFilePath string
 }
 
 // OnionConfig gates Tor hidden-service ingress. Feature flags are only

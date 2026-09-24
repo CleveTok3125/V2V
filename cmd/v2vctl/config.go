@@ -783,6 +783,12 @@ func (c *ConfigValidateCmd) Run() error {
 		problems = append(problems, err.Error())
 	}
 
+	_, abuseWarns, err := serverconfig.LoadAbuseConfig()
+	warns = append(warns, abuseWarns...)
+	if err != nil {
+		problems = append(problems, err.Error())
+	}
+
 	rolesFile := filepath.Join(root, "config", "roles.json")
 	if data, err := os.ReadFile(rolesFile); err != nil {
 		problems = append(problems, fmt.Sprintf("đọc %s: %v", rolesFile, err))

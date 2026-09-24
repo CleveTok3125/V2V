@@ -30,6 +30,9 @@ func setStaticEnv(t *testing.T) {
 	t.Setenv("ONION_ALLOW_WEB", "")
 	t.Setenv("ONION_ALLOW_PASSKEY", "")
 	t.Setenv("DATA_DIR", "")
+	t.Setenv("BEHAVIOR_ENABLED", "true")
+	t.Setenv("BEHAVIOR_GEOIP_DIR", "./config/geoip")
+	t.Setenv("BEHAVIOR_FILE_PATH", "./data/behavior.jsonl")
 }
 
 // setDynamicEnv pins every dynamic variable LoadDynamicConfig reads.

@@ -21,6 +21,7 @@ type DynamicConfig = config.DynamicConfig
 type AppConfig struct {
 	Static  StaticConfig
 	Dynamic atomic.Pointer[DynamicConfig]
+	Abuse   atomic.Pointer[serverconfig.AbuseConfig]
 }
 
 var Cfg AppConfig

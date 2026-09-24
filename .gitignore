@@ -39,6 +39,8 @@ key.json
 roles.json
 *.log
 logs/
+# Operator-supplied GeoIP databases (licensed, never bundled)
+*.mmdb
 
 # Python bytecode
 __pycache__/

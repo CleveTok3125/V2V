@@ -166,6 +166,12 @@ github.com/muesli/cancelreader
 github.com/muesli/termenv
 # github.com/mvdan/xurls v1.1.0
 ## explicit
+# github.com/oschwald/geoip2-golang v1.13.0
+## explicit; go 1.21
+github.com/oschwald/geoip2-golang
+# github.com/oschwald/maxminddb-golang v1.13.0
+## explicit; go 1.21
+github.com/oschwald/maxminddb-golang
 # github.com/philhofer/fwd v1.2.0
 ## explicit; go 1.20
 github.com/philhofer/fwd

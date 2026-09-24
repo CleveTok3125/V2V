@@ -12,3 +12,5 @@ bin/
 dist/
 secrets
 *.log
+# Operator-supplied GeoIP databases stay out of the image
+*.mmdb

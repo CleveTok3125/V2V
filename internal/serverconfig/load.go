@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,6 +84,27 @@ func LoadStaticConfig(root string) (StaticConfig, []string, error) {
 		trustedProxyDir = ResolveUnderRoot(root, raw)
 	}
 
+	behaviorOn := true
+	if raw, ok := os.LookupEnv("BEHAVIOR_ENABLED"); ok && strings.TrimSpace(raw) != "" {
+		parsed, err := strconv.ParseBool(strings.TrimSpace(raw))
+		if err != nil {
+			return StaticConfig{}, w.list, fmt.Errorf("BEHAVIOR_ENABLED: %w", err)
+		}
+		behaviorOn = parsed
+	}
+	geoIPDir := ""
+	if raw := strings.TrimSpace(os.Getenv("BEHAVIOR_GEOIP_DIR")); raw != "" {
+		geoIPDir = ResolveUnderRoot(root, raw)
+	} else if behaviorOn {
+		return StaticConfig{}, w.list, fmt.Errorf("thiếu biến môi trường bắt buộc: BEHAVIOR_GEOIP_DIR")
+	}
+	behaviorFile := ""
+	if raw := strings.TrimSpace(os.Getenv("BEHAVIOR_FILE_PATH")); raw != "" {
+		behaviorFile = ResolveUnderRoot(root, raw)
+	} else if behaviorOn {
+		return StaticConfig{}, w.list, fmt.Errorf("thiếu biến môi trường bắt buộc: BEHAVIOR_FILE_PATH")
+	}
+
 	cfg := StaticConfig{
 		AllowedOrigins:       strings.Split(env.AllowedOrigins(), ","),
 		RequireTLS:           getEnvAsBoolFallback(&w, "REQUIRE_TLS", true),
@@ -96,6 +118,8 @@ func LoadStaticConfig(root string) (StaticConfig, []string, error) {
 		NoContentLogs:        noContentLogs,
 		Root:                 root,
 		TrustedProxyDir:      trustedProxyDir,
+		BehaviorGeoIPDir:     geoIPDir,
+		BehaviorFilePath:     behaviorFile,
 		WebEnabled:           getEnvAsBoolFallback(&w, "WEB_ENABLED", true),
 		Onion: OnionConfig{
 			Hosts:        onionHosts,

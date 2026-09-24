@@ -202,6 +202,16 @@ func loadDynamicConfig() (DynamicConfig, error) {
 	return cfg, err
 }
 
+// loadAbuseConfig reads the abuse/PoW/behavior knobs and logs the
+// non-fatal warnings returned by the shared loader.
+func loadAbuseConfig() (serverconfig.AbuseConfig, error) {
+	cfg, warns, err := serverconfig.LoadAbuseConfig()
+	for _, w := range warns {
+		logWarnf("%s", w)
+	}
+	return cfg, err
+}
+
 func ReloadDynamicConfig() {
 	for _, p := range EnvFilePaths {
 		if _, err := os.Stat(p); err == nil {
@@ -216,7 +226,14 @@ func ReloadDynamicConfig() {
 		return
 	}
 
+	newAbuse, err := loadAbuseConfig()
+	if err != nil {
+		logErrorf("❌ [HOT-RELOAD] Không thể nạp lại abuse config: %v", err)
+		return
+	}
+
 	Cfg.Dynamic.Store(&newDynamic)
+	Cfg.Abuse.Store(&newAbuse)
 	logInfo("🔄 [HOT-RELOAD] Đã cập nhật thành công các thông số logic!")
 }
 
@@ -314,6 +331,12 @@ func main() {
 		log.Fatalf("❌ CRITICAL ERROR: %v", err)
 	}
 	Cfg.Dynamic.Store(&initialDynamic)
+
+	initialAbuse, err := loadAbuseConfig()
+	if err != nil {
+		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+	}
+	Cfg.Abuse.Store(&initialAbuse)
 
 	if err := InitLogger(Cfg.Static.LogFilePath, Cfg.Static.MaxLogSizeMB); err != nil {
 		log.Fatalf("❌ CRITICAL ERROR: %v", err)
