@@ -13,6 +13,7 @@ import (
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/trip"
+	"github.com/CleveTok3125/V2V/internal/trustedproxy"
 
 	"github.com/gorilla/websocket"
 )
@@ -43,7 +44,7 @@ func logFilterReject(session *ClientSession, clientIP string, err error, raw str
 		logWarnf("⛔ [FILTER REJECT] %s (%s): %v", session.DisplayName, clientIP, err)
 		return
 	}
-	logWarnf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, raw)
+	logWarnf("⛔ [FILTER REJECT] %s (%s): %v | raw=%q", session.DisplayName, clientIP, err, trustedproxy.Clip(raw, 512))
 }
 
 func (s *ChatServer) acquireIPConnection(w http.ResponseWriter, clientIP string) bool {

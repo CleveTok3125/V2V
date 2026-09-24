@@ -45,6 +45,8 @@
         "WEBAUTHN_ORIGIN",
         "WEBAUTHN_STORE",
         "MAX_TOTAL_CONNECTIONS",
+        "REQUIRE_IPV4",
+        "BLOCKLIST_FILE",
         "ATTACK_ENTER_SECS",
         "ATTACK_ENTER_RPS",
         "UNDER_ATTACK_TTL",

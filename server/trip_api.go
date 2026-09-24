@@ -41,18 +41,10 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if wantsVerifyPage(r) {
-		if data, err := os.ReadFile(verifyPagePath()); err == nil {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-store")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(data)
-			return
-		}
-		logWarnf("⚠️ [TRIP VERIFY PAGE] %s missing, falling back to JSON", verifyPagePath())
-	}
-
-	// Abuse mitigation: cap query size and rate-limit per IP (ed25519 verify is cheap but still CPU)
+	// Abuse mitigation first: cap query size and rate-limit per IP
+	// (ed25519 verify is cheap but still CPU). The verify page below
+	// is served only after these gates, so a flood cannot bypass them
+	// with an Accept: text/html header.
 	if len(r.URL.RawQuery) > 2048 {
 		http.Error(w, "query too large", http.StatusRequestEntityTooLarge)
 		return
@@ -65,6 +57,19 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]any{"valid": false, "error": "rate limited, slow down"})
 		return
+	}
+	if !s.checkHTTPPass(w, r, "trip_verify", clientIP) {
+		return
+	}
+	if wantsVerifyPage(r) {
+		if data, err := os.ReadFile(verifyPagePath()); err == nil {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(data)
+			return
+		}
+		logWarnf("⚠️ [TRIP VERIFY PAGE] %s missing, falling back to JSON", verifyPagePath())
 	}
 
 	pubHex := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("pub")))

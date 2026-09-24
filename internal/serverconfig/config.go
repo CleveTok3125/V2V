@@ -58,6 +58,12 @@ type StaticConfig struct {
 	ProxyChain []string
 	// TrustedProxyDir holds per-module "<name>.txt" trust files.
 	TrustedProxyDir string
+	// RequireIPv4 rejects non-IPv4 client addresses (IPv6) with 403.
+	RequireIPv4 bool
+	// BlocklistFile is an optional operator list (one IP/CIDR per line,
+	// same format as trust files) matched before any rate limit: hits
+	// get 403. A missing file only warns; malformed fails the boot.
+	BlocklistFile string
 	// BehaviorGeoIPDir holds optional GeoLite2/DB-IP .mmdb files for
 	// ASN/region grouping. The directory must be declared when the
 	// behavior engine is on; absent files only skip those levels.

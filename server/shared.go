@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -135,6 +136,12 @@ type ChatServer struct {
 	IpCounts   map[string]int
 	IpCountsMu sync.Mutex
 
+	// Blocklist is the operator IP/CIDR denylist matched before any
+	// rate limit. Inflight counts handshakes between the global-cap
+	// check and registration, so a burst cannot overshoot the cap.
+	Blocklist []*net.IPNet
+	Inflight  int64
+
 	LastConnectTime map[string]time.Time
 	LastConnectMu   sync.Mutex
 
@@ -153,6 +160,11 @@ type ChatServer struct {
 	DisplaySalt []byte
 
 	WebAuthn *WebAuthnStore
+
+	// Gate issues PoW challenges and lease passes; Attack owns the
+	// under-attack flag and pressure signals.
+	Gate   *GateStore
+	Attack *AttackState
 
 	RoleRegistry   map[string]RoleDefinition
 	RoleRegistryMu sync.RWMutex
@@ -178,6 +190,8 @@ func NewChatServer() *ChatServer {
 		Chain:           ChainService{History: make([]string, 0)},
 		RoleRegistry:    make(map[string]RoleDefinition),
 		WebAuthn:        NewWebAuthnStore(env.WebauthnStore()),
+		Gate:            NewGateStore(),
+		Attack:          NewAttackState(),
 		Upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,

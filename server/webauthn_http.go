@@ -56,7 +56,7 @@ type algEnt struct {
 type authSel struct {
 	RequireResidentKey *bool  `json:"requireResidentKey,omitempty"`
 	ResidentKey        string `json:"residentKey,omitempty"`
-	UserVerification string `json:"userVerification"`
+	UserVerification   string `json:"userVerification"`
 }
 
 func randomB64url(n int) (string, error) {
@@ -89,6 +89,9 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !enrollBeginCooldowns.Allow(getClientIP(r), enrollBeginCooldown) {
 		http.Error(w, "too many enroll attempts", http.StatusTooManyRequests)
+		return
+	}
+	if !s.checkHTTPPass(w, r, "webauthn_begin", getClientIP(r)) {
 		return
 	}
 	s.WebAuthn.PruneExpired()
@@ -156,6 +159,9 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 	// lookup (file read) even for a bogus ticket, so spam is disk I/O.
 	if !enrollFinishCooldowns.Allow(getClientIP(r), enrollFinishCooldown) {
 		http.Error(w, "too many enroll attempts", http.StatusTooManyRequests)
+		return
+	}
+	if !s.checkHTTPPass(w, r, "webauthn_finish", getClientIP(r)) {
 		return
 	}
 	var req finishRequest

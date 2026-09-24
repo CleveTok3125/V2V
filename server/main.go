@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	_ "time/tzdata"
@@ -90,6 +91,24 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 	if outcome.Provider == "none" || outcome.Provider == "direct" {
 		logWarnf("⚠️ [PROXY] Direct connection from %s via %s (no proxy headers trusted)", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Provider)
 	}
+	if s.Attack != nil {
+		s.Attack.noteAttempt(clientIP)
+	}
+
+	if blocklisted(s.Blocklist, clientIP) {
+		if s.Attack != nil {
+			s.Attack.noteBlock()
+		}
+		logWarnf("⛔ [BLOCKLIST] Reject %s", trustedproxy.Clip(clientIP, 200))
+		http.Error(w, "Blocked.", http.StatusForbidden)
+		return
+	}
+
+	if Cfg.Static.RequireIPv4 && !isIPv4(clientIP) {
+		logWarnf("⛔ [IPV6] Reject %s (REQUIRE_IPV4)", trustedproxy.Clip(clientIP, 200))
+		http.Error(w, "IPv6 is not accepted here.", http.StatusForbidden)
+		return
+	}
 
 	if !IsSecuredConnect(w, r, outcome) {
 		return
@@ -105,10 +124,28 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 	defer s.releaseIPConnection(clientIP)
 
+	if s.overCap() {
+		if s.Attack != nil {
+			s.Attack.note503()
+		}
+		w.Header().Set("Retry-After", "5")
+		http.Error(w, "Server is full, retry later.", http.StatusServiceUnavailable)
+		return
+	}
+	atomic.AddInt64(&s.Inflight, 1)
+
+	if s.gateRequired() {
+		if !s.checkGatePass(w, r, clientIP) {
+			s.releaseInflight()
+			return
+		}
+	}
+
 	logInfof("🔌 New request | Client IP: %s | Proxy IP: %s | Via: %s trusted=%v | Upgrade: %s | %s\n", clientIP, r.RemoteAddr, outcome.Provider, outcome.Trusted, r.Header.Get("Upgrade"), proxyHeadersForLog(r))
 
 	conn, err := s.Upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		s.releaseInflight()
 		logErrorf("❌ Upgrade error: %v", err)
 		return
 	}
@@ -116,6 +153,7 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 	session, err := s.authenticateClient(conn, clientIP, clientHost(r), onionRequest(r))
 	if err != nil {
+		s.releaseInflight()
 		return
 	}
 
@@ -131,6 +169,14 @@ func (s *ChatServer) serveAuthenticated(session *ClientSession, clientIP string)
 	go session.WritePump()
 
 	s.Hub.registerClient(session, clientIP)
+	s.releaseInflight()
+
+	// Anti-race re-check: a burst that passed the pre-upgrade cap
+	// together must not all stay registered.
+	if s.overCap() {
+		s.Hub.unregisterClient(session, clientIP)
+		return
+	}
 
 	s.ReadPump(session, clientIP)
 }
@@ -343,6 +389,16 @@ func main() {
 	}
 
 	chatApp := NewChatServer()
+	blNets, blWarn, err := loadBlocklist(Cfg.Static.BlocklistFile)
+	if err != nil {
+		log.Fatalf("❌ CRITICAL ERROR: blocklist: %v", err)
+	}
+	if blWarn != "" {
+		logWarnf("%s", blWarn)
+	} else {
+		logInfof("🛡️ Blocklist: %d nets from %s", len(blNets), Cfg.Static.BlocklistFile)
+	}
+	chatApp.Blocklist = blNets
 	sid, err := LoadOrCreateServerIdentity(dataPath("server_identity.json"))
 	if err != nil {
 		log.Fatalf("❌ CRITICAL ERROR: cannot load server identity: %v", err)
@@ -360,6 +416,7 @@ func main() {
 	chatApp.WatchEnvFile()
 	chatApp.WatchRolesFile()
 	chatApp.StartCleanupTasks()
+	go chatApp.attackSampler()
 
 	mux := http.NewServeMux()
 
@@ -420,6 +477,10 @@ func main() {
 		chatApp.handleTripVerify(w, r)
 	})
 	mux.HandleFunc("/api/version", handleAPIVersion)
+
+	mux.HandleFunc("/api/join-gate", func(w http.ResponseWriter, r *http.Request) {
+		chatApp.handleJoinGate(w, r)
+	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {

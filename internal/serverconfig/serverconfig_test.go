@@ -33,6 +33,8 @@ func setStaticEnv(t *testing.T) {
 	t.Setenv("BEHAVIOR_ENABLED", "true")
 	t.Setenv("BEHAVIOR_GEOIP_DIR", "./config/geoip")
 	t.Setenv("BEHAVIOR_FILE_PATH", "./data/behavior.jsonl")
+	t.Setenv("REQUIRE_IPV4", "false")
+	t.Setenv("BLOCKLIST_FILE", "./config/blocklist.txt")
 }
 
 // setDynamicEnv pins every dynamic variable LoadDynamicConfig reads.

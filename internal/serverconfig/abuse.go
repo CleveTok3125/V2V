@@ -41,6 +41,7 @@ type AbuseConfig struct {
 	GateHTTPEnabled     bool
 	GateHTTPClasses     []string
 	GateHTTPMode        string
+	GateHTTPTierMin     int
 	PassTTL             time.Duration
 	PassSingleUse       bool
 	Behavior            *BehaviorConfig
@@ -92,6 +93,24 @@ var abuseFeatures = []struct {
 	{behavior.F_ENDPOINT_FOCUS, "ENDPOINT_FOCUS"},
 	{behavior.F_AUTH_PROBE, "AUTH_PROBE"},
 	{behavior.F_ENVELOPE, "ENVELOPE"},
+}
+
+// EffectiveScaleMode returns the attack-scale mode, defaulting to max
+// when behavior scoring is off.
+func (c *AbuseConfig) EffectiveScaleMode() string {
+	if c != nil && c.Behavior != nil {
+		return c.Behavior.ScaleMode
+	}
+	return "max"
+}
+
+// EffectiveScaleW returns the attack-scale weights, defaulting to
+// uniform when behavior scoring is off.
+func (c *AbuseConfig) EffectiveScaleW() [4]float64 {
+	if c != nil && c.Behavior != nil {
+		return c.Behavior.ScaleW
+	}
+	return [4]float64{1, 1, 1, 1}
 }
 
 // abuseLoader accumulates every missing/malformed key so one validate
@@ -231,6 +250,17 @@ func LoadAbuseConfig() (AbuseConfig, []string, error) {
 	if err := l.err(); err != nil {
 		return AbuseConfig{}, nil, err
 	}
+	// Group-A ranges: a zero/negative cap would silently disable it and
+	// a zero enter window would pin under-attack on from the first tick.
+	if cfg.MaxTotalConnections < 1 {
+		return AbuseConfig{}, nil, fmt.Errorf("abuse config: MAX_TOTAL_CONNECTIONS must be >= 1")
+	}
+	if cfg.AttackEnterSecs <= 0 {
+		return AbuseConfig{}, nil, fmt.Errorf("abuse config: ATTACK_ENTER_SECS must be positive")
+	}
+	if cfg.AttackEnterRPS < 1 {
+		return AbuseConfig{}, nil, fmt.Errorf("abuse config: ATTACK_ENTER_RPS must be >= 1")
+	}
 	if cfg.PowTierCount < 2 {
 		return AbuseConfig{}, nil, fmt.Errorf("abuse config: POW_TIER_COUNT must be >= 2")
 	}
@@ -245,7 +275,10 @@ func LoadAbuseConfig() (AbuseConfig, []string, error) {
 		pp, _ := l.reqInt(p + "P")
 		d, _ := l.reqInt(p + "DIFF")
 		e, _ := l.reqInt(p + "EST_MS")
-		cfg.PowTiers[n] = PowTier{T: t, M: m, P: pp, Difficulty: uint(max(d, 0)), EstMs: e}
+		// Negative difficulty would wrap to a huge uint and is caught
+		// by the >64 range check below, so a typo fails the boot
+		// instead of silently disabling PoW.
+		cfg.PowTiers[n] = PowTier{T: t, M: m, P: pp, Difficulty: uint(d), EstMs: e}
 	}
 	if err := l.err(); err != nil {
 		return AbuseConfig{}, nil, err
@@ -274,6 +307,13 @@ func LoadAbuseConfig() (AbuseConfig, []string, error) {
 		}
 		if len(cfg.GateHTTPClasses) == 0 {
 			return AbuseConfig{}, nil, fmt.Errorf("abuse config: GATE_HTTP_CLASSES is empty")
+		}
+		cfg.GateHTTPTierMin, _ = l.reqInt("GATE_HTTP_TIER_MIN")
+		if err := l.err(); err != nil {
+			return AbuseConfig{}, nil, err
+		}
+		if cfg.GateHTTPTierMin < 1 {
+			return AbuseConfig{}, nil, fmt.Errorf("abuse config: GATE_HTTP_TIER_MIN must be >= 1")
 		}
 	}
 

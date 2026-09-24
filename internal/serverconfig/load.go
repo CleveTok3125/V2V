@@ -84,6 +84,12 @@ func LoadStaticConfig(root string) (StaticConfig, []string, error) {
 		trustedProxyDir = ResolveUnderRoot(root, raw)
 	}
 
+	requireIPv4 := getEnvAsBoolFallback(&w, "REQUIRE_IPV4", false)
+	blocklistRaw, blocklistSet := os.LookupEnv("BLOCKLIST_FILE")
+	if !blocklistSet || strings.TrimSpace(blocklistRaw) == "" {
+		return StaticConfig{}, w.list, fmt.Errorf("thiếu biến môi trường bắt buộc: BLOCKLIST_FILE")
+	}
+
 	behaviorOn := true
 	if raw, ok := os.LookupEnv("BEHAVIOR_ENABLED"); ok && strings.TrimSpace(raw) != "" {
 		parsed, err := strconv.ParseBool(strings.TrimSpace(raw))
@@ -118,6 +124,8 @@ func LoadStaticConfig(root string) (StaticConfig, []string, error) {
 		NoContentLogs:        noContentLogs,
 		Root:                 root,
 		TrustedProxyDir:      trustedProxyDir,
+		RequireIPv4:          requireIPv4,
+		BlocklistFile:        ResolveUnderRoot(root, blocklistRaw),
 		BehaviorGeoIPDir:     geoIPDir,
 		BehaviorFilePath:     behaviorFile,
 		WebEnabled:           getEnvAsBoolFallback(&w, "WEB_ENABLED", true),
