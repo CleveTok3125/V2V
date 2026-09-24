@@ -29,8 +29,13 @@ func NewStore(cap int) *Store {
 	return &Store{items: map[string]*Profile{}, cap: cap}
 }
 
+// evictSample bounds the eviction scan: Go randomizes map iteration
+// start, so inspecting the first N entries approximates "evict one of
+// the stalest" in O(1) instead of O(n) per insert under an IP flood.
+const evictSample = 16
+
 // Get returns the profile for key, creating it on first use. Over cap,
-// the stalest LastSeen profile is evicted first.
+// the stalest of a bounded sample is evicted.
 func (s *Store) Get(key string) *Profile {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -41,9 +46,14 @@ func (s *Store) Get(key string) *Profile {
 		var oldest string
 		var oldestTime time.Time
 		first := true
+		n := 0
 		for k, p := range s.items {
 			if first || p.LastSeen.Before(oldestTime) {
 				oldest, oldestTime, first = k, p.LastSeen, false
+			}
+			n++
+			if n >= evictSample {
+				break
 			}
 		}
 		delete(s.items, oldest)
@@ -60,11 +70,22 @@ func (s *Store) Len() int {
 	return len(s.items)
 }
 
-// Prune drops profiles idle past their tier retention (tiers missing
-// from retention fall back to def).
-func (s *Store) Prune(now time.Time, retentionByTier map[int]time.Duration, def time.Duration) {
+// Peek returns an existing profile without creating one. False means
+// the key has never been seen.
+func (s *Store) Peek(key string) (*Profile, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	p, ok := s.items[key]
+	return p, ok
+}
+
+// Prune drops profiles idle past their tier retention (tiers missing
+// from retention fall back to def) and returns the pruned keys so
+// callers can clean their own indexes.
+func (s *Store) Prune(now time.Time, retentionByTier map[int]time.Duration, def time.Duration) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var pruned []string
 	for k, p := range s.items {
 		ret, ok := retentionByTier[p.Tier]
 		if !ok {
@@ -72,8 +93,10 @@ func (s *Store) Prune(now time.Time, retentionByTier map[int]time.Duration, def 
 		}
 		if now.Sub(p.LastSeen) > ret {
 			delete(s.items, k)
+			pruned = append(pruned, k)
 		}
 	}
+	return pruned
 }
 
 // Save writes every profile as one JSON line, atomically via rename.

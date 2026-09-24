@@ -120,3 +120,35 @@ type HistoryRequest struct {
 	Before uint64 `json:"before,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
 }
+
+// PowOffer is a server-issued proof-of-work challenge, signed with the
+// server key. The client verifies OfferSig against the pinned server
+// pubkey before spending work, then answers with PowResult or
+// PowDecline. Tier 0 is never offered (no PoW needed).
+type PowOffer struct {
+	Type        string `json:"type"` // "pow_offer"
+	Tier        int    `json:"tier,omitempty"`
+	T           int    `json:"t,omitempty"`
+	M           int    `json:"m,omitempty"`
+	P           int    `json:"p,omitempty"`
+	Difficulty  uint   `json:"difficulty,omitempty"`
+	Salt        string `json:"salt,omitempty"`
+	Expires     int64  `json:"expires,omitempty"`
+	ChallengeID string `json:"challenge_id,omitempty"`
+	OfferSig    string `json:"offer_sig,omitempty"`
+	ServerPub   string `json:"server_pub,omitempty"`
+}
+
+// PowResult carries a solved challenge back to the server.
+type PowResult struct {
+	Type        string `json:"type"` // "pow_result"
+	ChallengeID string `json:"challenge_id,omitempty"`
+	Nonce       uint64 `json:"nonce,omitempty"`
+}
+
+// PowDecline refuses a challenge (client over local budget). The
+// server mutes chat sends until a later challenge passes.
+type PowDecline struct {
+	Type        string `json:"type"` // "pow_decline"
+	ChallengeID string `json:"challenge_id,omitempty"`
+}
