@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"runtime"
 
-	"golang.org/x/crypto/argon2"
 	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/tripcolor"
 )
@@ -30,7 +29,10 @@ func deriveTripKey(passphrase string, serverPubHex string) (ed25519.PrivateKey, 
 	if isWASMRuntime() {
 		p = identity.PresetWASM
 	}
-	key := argon2.IDKey([]byte(passphrase), salt, p.Time, p.Memory, p.Threads, 32)
+	key := platformArgon2([]byte(passphrase), salt, p.Time, p.Memory, p.Threads)
+	if key == nil {
+		return nil, nil, ""
+	}
 	defer identity.ZeroBytes(key)
 	priv := ed25519.NewKeyFromSeed(key)
 	pub := priv.Public().(ed25519.PublicKey)
@@ -49,7 +51,6 @@ func badgeColor(badge string) string {
 	}
 	return tripcolor.BadgeColor(badge)
 }
-
 
 // TripMessage is the JSON envelope for signed chat messages.
 // TmpID is the sender's per-session counter, bound into the signature so
@@ -76,4 +77,3 @@ type PlainMessage struct {
 	Text    string `json:"text"`
 	ReplyTo uint64 `json:"reply_to,omitempty"`
 }
-

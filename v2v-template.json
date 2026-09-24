@@ -76,6 +76,7 @@
         "GATE_HTTP_ENABLED",
         "GATE_HTTP_CLASSES",
         "GATE_HTTP_MODE",
+        "GATE_HTTP_TIER_MIN",
         "PASS_TTL",
         "PASS_SINGLE_USE",
         "BEHAVIOR_ENABLED",
@@ -200,7 +201,8 @@
         "ui",
         "tabs",
         "commands",
-        "timeouts"
+        "timeouts",
+        "pow"
       ]
     }
   ],

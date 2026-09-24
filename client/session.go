@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/strutil"
@@ -56,6 +57,11 @@ type Session struct {
 	// instead of racing a fixed sleep. Nil for test-built sessions
 	// that never start a pump: gracefulQuit skips the wait then.
 	PumpDone chan struct{}
+	// SendMu serializes socket writes: the input loop owns them, and
+	// the background PoW solver must not interleave frames.
+	SendMu sync.Mutex
+	// powBusy guards against overlapping in-chat PoW solves.
+	powBusy atomic.Bool
 
 	Display DisplayState
 	Chain   ChainState
@@ -190,7 +196,7 @@ func (s *Session) connect() bool {
 	}
 
 	var err error
-	dialConn, dialURL, err := dialWithUpgrade(s.WSURL)
+	dialConn, dialURL, err := dialManaged(s.WSURL)
 	if err != nil {
 		return false
 	}
@@ -230,6 +236,7 @@ func (s *Session) connect() bool {
 	respPacket := AuthPacket{
 		Username: s.Username,
 		Nonce:    s.Challenge.Nonce,
+		Platform: clientPlatform(),
 	}
 	// Replay filtering follows the same knob as live display: -j asks
 	// for join/leave lines in catch-up history too.

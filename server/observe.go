@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bufio"
+	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -74,17 +77,42 @@ type statusWriter struct {
 	status int
 }
 
+// Compile-time guard: every wrapped route (including the WS upgrade
+// on "/") must keep hijacking.
+var _ http.Hijacker = (*statusWriter)(nil)
+
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// Hijack passes through so wrapped handlers (notably the WS upgrade
+// on "/") keep working: embedding the interface alone does not
+// promote the optional Hijacker method.
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, errors.New("hijack unsupported")
+}
+
 // instrumentHTTP records class/status/timing metadata (never query or
 // body) for behavior scoring around a handler.
 func (s *ChatServer) instrumentHTTP(class string, next http.HandlerFunc) http.HandlerFunc {
+	return s.instrumentHTTPClass(func(*http.Request) string { return class }, next)
+}
+
+// instrumentHTTPClass is instrumentHTTP with a per-request class: the
+// WS branch of "/" returns "" so ServeWS records join_ws itself (the
+// blocking handler would otherwise report at disconnect).
+func (s *ChatServer) instrumentHTTPClass(classOf func(*http.Request) string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next(sw, r)
+		class := classOf(r)
+		if class == "" {
+			return
+		}
 		if out := resolveClientIP(r); !out.Reject {
 			s.observeHTTP(out.ClientIP, class, sw.status)
 		}

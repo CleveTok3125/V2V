@@ -116,5 +116,12 @@
     "historyFlush": "1s",
     "wsHandshake": "45s",
     "enrollChallengeTTL": "5m"
+  },
+  // Proof-of-work bounds: offers above maxTier or past maxCostMs are
+  // declined instead of solved, so a malicious server cannot burn the
+  // machine. maxCostMs bounds one solve in milliseconds.
+  "pow": {
+    "maxTier": 3,
+    "maxCostMs": 120000
   }
 }

@@ -104,7 +104,9 @@ func TestVerifyPageHTML(t *testing.T) {
 		t.Fatalf("content-type = %q", ct)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Kiểm tra Trip", "application/json", "Link API gốc", "JSON thô"} {
+	// The API fetch moved into the external module; the page must wire
+	// it up rather than inline the request.
+	for _, want := range []string{"Kiểm tra Trip", "/web/verify.js", "Link API gốc", "JSON thô"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("page must contain %q", want)
 		}

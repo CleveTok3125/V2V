@@ -33,3 +33,11 @@ jobs:
         # js-tagged client tests (wasm terminal, wasm proxy path)
         # under node, which ubuntu runners provide.
         run: make test-wasm
+      - name: TypeScript toolchain
+        run: npm install -g typescript
+      - name: Web JS up to date
+        # The committed webterm/*.js must match the web/ TS sources.
+        run: make check-web-ts
+      - name: Web cross vectors
+        # Go and the vendored JS must agree on argon2id + PoW.
+        run: make test-web

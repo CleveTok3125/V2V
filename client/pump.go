@@ -131,6 +131,14 @@ func (s *Session) runPump() {
 			s.refreshCoalesced()
 			continue
 		}
+		// In-chat PoW offer: verify and solve in background so the
+		// pump never blocks on proof-of-work.
+		var offer PowOffer
+		if err := json.Unmarshal(msg, &offer); err == nil && offer.Type == "pow_offer" {
+			go s.handlePowOffer(offer)
+			s.refreshCoalesced()
+			continue
+		}
 		for _, line := range strings.Split(string(msg), "\n") {
 			// Also try per-line JSON (for history blob where each line is a WireMessage JSON)
 			var wl WireMessage

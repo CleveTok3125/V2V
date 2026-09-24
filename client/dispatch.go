@@ -120,7 +120,9 @@ func (s *Session) gracefulQuit() {
 	s.Quitting <- true
 	s.flushChainTip()
 	s.Verify.VerifyCloseOnce.Do(func() { close(s.Verify.VerifyCh) })
+	s.SendMu.Lock()
 	s.Conn.WriteMessage(wsCloseMessage, []byte{})
+	s.SendMu.Unlock()
 	if s.TripPriv != nil {
 		for i := range s.TripPriv {
 			s.TripPriv[i] = 0
@@ -578,7 +580,7 @@ func (s *Session) cmdOlder(text string) bool {
 		s.Display.Term.Refresh()
 		return true
 	}
-	if err := s.Conn.WriteJSON(HistoryRequest{Type: "history_request", Before: before, Limit: limit}); err != nil {
+	if err := s.sendJSON(HistoryRequest{Type: "history_request", Before: before, Limit: limit}); err != nil {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Không gửi được yêu cầu lịch sử cũ: %v.\n", err))
 		s.Display.DisplayMu.Unlock()

@@ -201,6 +201,13 @@ type ClientConfig struct {
 		WsHandshake       string `json:"wsHandshakeTimeout"`
 		EnrollChallengeTTL string `json:"enrollChallengeTTL"`
 	} `json:"timeouts"`
+	// Pow bounds proof-of-work the client will perform: offers above
+	// MaxTier or past MaxCostMs are declined instead of solved, so a
+	// malicious server cannot burn the machine.
+	Pow struct {
+		MaxTier   int   `json:"maxTier"`
+		MaxCostMs int64 `json:"maxCostMs"`
+	} `json:"pow"`
 }
 
 // DefaultClientConfig returns defaults matching current hardcoded values.
@@ -295,6 +302,8 @@ func DefaultClientConfig() *ClientConfig {
 	c.Tabs.ChatMaxBytes = 2097152
 	c.Tabs.SystemMaxLines = 2000
 	c.Tabs.SystemMaxBytes = 409600
+	c.Pow.MaxTier = 3
+	c.Pow.MaxCostMs = 120000
 	c.Timeouts.QuitGrace = "500ms"
 	c.Timeouts.AuthResponse = "12s"
 	c.Timeouts.WsPing = "50s"
@@ -616,6 +625,14 @@ func parse(data []byte) (*ClientConfig, error) {
 	}
 	if c.UI.CodeStyle.Operator == ([3]int{}) {
 		c.UI.CodeStyle.Operator = def.UI.CodeStyle.Operator
+	}
+	// Backfill PoW bounds: absent section must not zero out the
+	// decline guards (MaxTier 0 would decline everything).
+	if c.Pow.MaxTier <= 0 {
+		c.Pow.MaxTier = def.Pow.MaxTier
+	}
+	if c.Pow.MaxCostMs <= 0 {
+		c.Pow.MaxCostMs = def.Pow.MaxCostMs
 	}
 	return &c, nil
 }

@@ -1,0 +1,21 @@
+{
+  "note": "Cross-language parity vectors for argon2id and PoW. Go (x/crypto) and the vendored JS (@noble/hashes) must agree byte-for-byte; both tests read this file.",
+  "argon2": {
+    "passphrase": "test-pass",
+    "saltHex": "42424242424242424242424242424242",
+    "t": 1,
+    "m": 8192,
+    "p": 1,
+    "dkLen": 32,
+    "keyHex": "fecf8696a5439283d751a22180dd0f249fa11ae8eec11f3202730888843219b4"
+  },
+  "pow": {
+    "domain": "V2V-pow-v1",
+    "salt": "testsalt",
+    "t": 1,
+    "m": 8192,
+    "p": 1,
+    "difficulty": 8,
+    "nonce": 728
+  }
+}

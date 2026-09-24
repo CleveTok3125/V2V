@@ -99,26 +99,44 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 		if s.Attack != nil {
 			s.Attack.noteBlock()
 		}
+		if s.Behavior != nil {
+			s.Behavior.SetBlocklisted(clientIP)
+		}
+		s.observeHTTP(clientIP, "join_ws", http.StatusForbidden)
 		logWarnf("⛔ [BLOCKLIST] Reject %s", trustedproxy.Clip(clientIP, 200))
 		http.Error(w, "Blocked.", http.StatusForbidden)
 		return
 	}
 
 	if Cfg.Static.RequireIPv4 && !isIPv4(clientIP) {
+		s.observeHTTP(clientIP, "join_ws", http.StatusForbidden)
 		logWarnf("⛔ [IPV6] Reject %s (REQUIRE_IPV4)", trustedproxy.Clip(clientIP, 200))
 		http.Error(w, "IPv6 is not accepted here.", http.StatusForbidden)
 		return
 	}
 
 	if !IsSecuredConnect(w, r, outcome) {
+		s.observeHTTP(clientIP, "join_ws", http.StatusUpgradeRequired)
 		return
 	}
 
+	// Gate before the connection cooldown: a rejected pre-gate dial
+	// must not stamp LastConnectTime, or the post-gate redial would
+	// trip the cooldown it just earned its way past. No inflight slot
+	// is held this early, so failure returns bare.
+	if s.gateRequired() {
+		if !s.checkGatePass(w, r, clientIP) {
+			return
+		}
+	}
+
 	if !s.CheckConnectionRate(w, clientIP) {
+		s.observeHTTP(clientIP, "join_ws", http.StatusTooManyRequests)
 		return
 	}
 
 	if !s.acquireIPConnection(w, clientIP) {
+		s.observeHTTP(clientIP, "join_ws", http.StatusTooManyRequests)
 		return
 	}
 
@@ -128,18 +146,16 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 		if s.Attack != nil {
 			s.Attack.note503()
 		}
+		s.observeHTTP(clientIP, "join_ws", http.StatusServiceUnavailable)
 		w.Header().Set("Retry-After", "5")
 		http.Error(w, "Server is full, retry later.", http.StatusServiceUnavailable)
 		return
 	}
 	atomic.AddInt64(&s.Inflight, 1)
 
-	if s.gateRequired() {
-		if !s.checkGatePass(w, r, clientIP) {
-			s.releaseInflight()
-			return
-		}
-	}
+	// The handler blocks for the whole session after Upgrade, so the
+	// accepted join is recorded here rather than at disconnect.
+	s.observeHTTP(clientIP, "join_ws", http.StatusOK)
 
 	logInfof("🔌 New request | Client IP: %s | Proxy IP: %s | Via: %s trusted=%v | Upgrade: %s | %s\n", clientIP, r.RemoteAddr, outcome.Provider, outcome.Trusted, r.Header.Get("Upgrade"), proxyHeadersForLog(r))
 
@@ -487,7 +503,14 @@ func main() {
 		chatApp.handleJoinGate(w, r)
 	}))
 
-	mux.HandleFunc("/", chatApp.instrumentHTTP("info", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", chatApp.instrumentHTTPClass(func(r *http.Request) string {
+		// The WS branch records join_ws inside ServeWS (the wrapper
+		// would fire only at disconnect).
+		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
+			return ""
+		}
+		return "info"
+	}, func(w http.ResponseWriter, r *http.Request) {
 		if strings.ToLower(r.Header.Get("Upgrade")) == "websocket" {
 			chatApp.ServeWS(w, r)
 			return

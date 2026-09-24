@@ -15,7 +15,7 @@ PLATFORMS := windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 da
 HOST_GOOS ?= $(shell go env GOOS)
 HOST_GOARCH ?= $(shell go env GOARCH)
 
-.PHONY: all server web web-wasm web-compress client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test test-sh test-wasm clean help
+.PHONY: all server web web-wasm web-compress web-ts check-web-ts test-web client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test test-sh test-wasm clean help
 
 all: server web client v2vctl
 
@@ -134,6 +134,27 @@ test-wasm:
 	@if ! command -v node >/dev/null 2>&1; then echo "SKIP: node required for wasm tests"; exit 0; fi
 	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go test -exec "node $(CURDIR)/scripts/wasm_exec_runner.js" ./client/ -run 'TestWasm' -count=1 -timeout 120s
 
+# web-ts compiles the TypeScript front-end sources in web/ into the
+# committed JS bundle in webterm/. The Docker build consumes the
+# committed JS (T3), so it never needs node/tsc; CI runs check-web-ts
+# to catch stale output.
+WEB_TS_SOURCES := app.ts verify.ts pow_worker.ts pow_bridge.ts
+WEB_TS_OUTPUTS := $(addprefix webterm/,$(WEB_TS_SOURCES:.ts=.js))
+
+web-ts:
+	@if ! command -v tsc >/dev/null 2>&1; then echo "FATAL: tsc required (npm i -g typescript)"; exit 1; fi
+	tsc -p web/tsconfig.json
+	@echo "web-ts done -> $(WEB_TS_OUTPUTS)"
+
+check-web-ts:
+	$(MAKE) web-ts
+	git diff --exit-code -- $(WEB_TS_OUTPUTS)
+
+# test-web checks the vendored JS crypto against the shared vectors.
+test-web:
+	@if ! command -v node >/dev/null 2>&1; then echo "SKIP: node required"; exit 0; fi
+	node scripts/pow_vectors_test.mjs
+
 check: vet test test-sh
 	@echo "check done (vet+test+test-sh)"
 
@@ -157,5 +178,8 @@ help:
 	@echo "  make test     - go test"
 	@echo "  make test-sh  - entrypoint shell tests (skip without root)"
 	@echo "  make test-wasm - js-tagged client tests under node (skip without node)"
+	@echo "  make web-ts   - compile web/ TypeScript sources into webterm/*.js (needs tsc)"
+	@echo "  make check-web-ts - fail if committed webterm JS is stale"
+	@echo "  make test-web - Go/JS cross vectors (argon2 + PoW) under node"
 	@echo "  make check    - vet+test+test-sh"
 	@echo "  make clean    - remove build artifacts"

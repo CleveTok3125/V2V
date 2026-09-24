@@ -160,7 +160,7 @@ func (s *Session) sendMessage(text string, phRows int, phShown bool, phBufEnd in
 		newPrev := h.Sum(nil)
 		copy(s.TripPrev, newPrev)
 		tripMsg := TripMessage{Text: text, Pub: hex.EncodeToString([]byte(s.TripPub)), Seq: s.TripSeq, Prev: hex.EncodeToString(prevCopy), Sig: hex.EncodeToString(sig), DisplayName: s.Username, TmpID: s.Pending.TmpSeq, ReplyTo: s.Pending.PendingReplyTo}
-		err = s.Conn.WriteJSON(tripMsg)
+		err = s.sendJSON(tripMsg)
 		if err != nil {
 			// Rollback seq/prev on send failure to avoid permanent fork
 			s.TripSeq--
@@ -170,7 +170,7 @@ func (s *Session) sendMessage(text string, phRows int, phShown bool, phBufEnd in
 	} else {
 		// Unsigned chat always travels in an envelope carrying the
 		// session counter; raw text is rejected by the server.
-		err = s.Conn.WriteJSON(PlainMessage{TmpID: s.Pending.TmpSeq, Text: text, ReplyTo: s.Pending.PendingReplyTo})
+		err = s.sendJSON(PlainMessage{TmpID: s.Pending.TmpSeq, Text: text, ReplyTo: s.Pending.PendingReplyTo})
 		if err != nil {
 			s.Pending.TmpSeq--
 		}

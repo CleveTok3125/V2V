@@ -47,12 +47,15 @@ var CLI struct {
 // every existing reference compiling while guaranteeing client and
 // server serialize identically.
 type (
-	AuthPacket  = wire.AuthPacket
-	WireMessage = wire.WireMessage
-	TripMeta    = wire.TripMeta
-	Permission  = wire.Permission
-	HistorySync = wire.HistorySync
+	AuthPacket     = wire.AuthPacket
+	WireMessage    = wire.WireMessage
+	TripMeta       = wire.TripMeta
+	Permission     = wire.Permission
+	HistorySync    = wire.HistorySync
 	HistoryRequest = wire.HistoryRequest
+	PowOffer       = wire.PowOffer
+	PowResult      = wire.PowResult
+	PowDecline     = wire.PowDecline
 )
 
 // WebSocket message type constants (RFC 6455) so the shared chat logic does
