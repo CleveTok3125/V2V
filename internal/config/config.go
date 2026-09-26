@@ -46,7 +46,7 @@ func DefaultDynamic() *DynamicConfig {
 		MaxConnectionsPerIP:    2,
 		MaxMessageLength:       5000,
 		MaxMessageLine:         50,
-		MessageCooldown:        200 * time.Millisecond,
+		MessageCooldown:        1000 * time.Millisecond,
 		IdleChatTimeout:        30 * time.Minute,
 		MaxHistoryBytes:        10485760,
 		MaxHistorySend:         500,

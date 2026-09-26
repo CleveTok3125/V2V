@@ -31,7 +31,7 @@
   },
   // Server rate-limit and penalty knobs.
   "guard": {
-    "messageCooldown": "200ms",
+    "messageCooldown": "1000ms",
     "connectionCooldown": "5s",
     "idleTimeout": "30m",
     "authResponseTimeout": "12s",
