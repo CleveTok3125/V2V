@@ -308,10 +308,11 @@ func (s *ChatServer) issueScreenChallenge(sess *ClientSession, ip string, tier i
 	}
 	serverPub := s.serverPub()
 	salt := fmt.Sprintf("chat|%s|%s|%s", serverPub, ip, id)
+	// The deadline is exactly ScreenDeadline: never stretched by the
+	// idle timeout. A challenge that outlives the screening window
+	// suppresses re-issues (one outstanding challenge per conn) while
+	// muting nothing, so hit-and-run floods would never face mute.
 	deadline := now.Add(a.ScreenDeadline)
-	if dyn := Cfg.Dynamic.Load(); dyn != nil && dyn.IdleChatTimeout > deadline.Sub(now) {
-		deadline = now.Add(dyn.IdleChatTimeout)
-	}
 	s.Screener.Issue(sess.Conn, ip, tier, preset, salt, id, deadline)
 	s.unicast(sess, "[Hệ thống]: Máy chủ yêu cầu xác minh chống spam (mức PoW "+strconv.Itoa(tier)+"). Client đang giải nền, có thể đơ tạm thời — đây là hoạt động bình thường, không phải lỗi.")
 	offer := pow.Offer{Tier: tier, Preset: preset, Salt: salt, Expires: deadline.Unix(), ChallengeID: id}

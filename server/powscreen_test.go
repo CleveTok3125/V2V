@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"github.com/CleveTok3125/V2V/internal/config"
 	"github.com/CleveTok3125/V2V/internal/pow"
 )
 
@@ -125,4 +127,38 @@ func TestUnicastSkipsUnregistered(t *testing.T) {
 	default:
 		t.Fatal("registered session must receive")
 	}
+}
+
+func TestScreenDeadlineNotExtendedByIdle(t *testing.T) {
+	withGateAbuse(t, tickAbuse())
+	oldDyn := Cfg.Dynamic.Load()
+	Cfg.Dynamic.Store(config.DefaultDynamic()) // IdleChatTimeout 30m
+	t.Cleanup(func() { Cfg.Dynamic.Store(oldDyn) })
+	s := tickServer()
+	now := time.Now()
+	conn := &websocket.Conn{}
+	sess := &ClientSession{Conn: conn, IP: "10.0.0.21", Platform: "native", DisplayName: "bot", Send: make(chan []byte, 8)}
+	s.Hub.Clients[conn] = sess
+	a := Cfg.Abuse.Load()
+	s.issueScreenChallenge(sess, "10.0.0.21", 1, now, a)
+	ch, ok := s.Screener.Get(conn)
+	if !ok {
+		t.Fatal("challenge must be stored")
+	}
+	if ch.Expires.After(now.Add(a.ScreenDeadline).Add(time.Second)) {
+		t.Fatalf("deadline must not outlive ScreenDeadline: got %v, want ~%v", ch.Expires, now.Add(a.ScreenDeadline))
+	}
+	for _, m := range drainSend(sess) {
+		var probe struct {
+			Type    string `json:"type"`
+			Expires int64  `json:"expires"`
+		}
+		if json.Unmarshal([]byte(m), &probe) == nil && probe.Type == "pow_offer" {
+			if probe.Expires != ch.Expires.Unix() {
+				t.Fatalf("offer expiry %d must match stored %d", probe.Expires, ch.Expires.Unix())
+			}
+			return
+		}
+	}
+	t.Fatal("pow_offer frame missing")
 }
