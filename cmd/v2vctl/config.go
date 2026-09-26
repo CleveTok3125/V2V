@@ -53,11 +53,12 @@ type identityProbe struct {
 
 // ConfigCommon holds flags shared by sync/diff/check.
 type ConfigCommon struct {
-	Dir       string `help:"Thư mục chứa v2v-template.json" default:"."`
-	To        string `help:"Thư mục gốc instance (mặc định theo --root/V2V_ROOT)"`
-	Only      string `help:"Tập con id trong manifest (mặc định env,roles,trust)"`
-	ClientDir string `help:"Thư mục config client cho entry target=client"`
-	NoPager   bool   `help:"In thẳng, không qua pager"`
+	Dir            string   `help:"Thư mục chứa v2v-template.json" default:"."`
+	To             string   `help:"Thư mục gốc instance (mặc định theo --root/V2V_ROOT)"`
+	Only           string   `help:"Tập con id trong manifest (mặc định env,roles,trust)"`
+	ClientDir      string   `help:"Thư mục config client cho entry target=client"`
+	NoPager        bool     `help:"In thẳng, không qua pager"`
+	PreferTemplate []string `help:"Template thắng local cho các phần này (id hoặc id:key, cách nhau bằng dấu phẩy, lặp lại được)"`
 }
 
 type ConfigSyncCmd struct {
@@ -65,6 +66,7 @@ type ConfigSyncCmd struct {
 	DryRun       bool `help:"Xem trước, không ghi file"`
 	Force        bool `help:"Ép ghi cả entry cần can thiệp tay (vd client jsonc mất comment)"`
 	Quiet        bool `help:"Không in diff/trạng thái (dùng khi bootstrap)"`
+	Yes          bool `help:"Đã xem diff, đồng ý ghi các phần take (bắt buộc khi dùng --prefer-template)"`
 }
 
 type ConfigDiffCmd struct {
@@ -206,6 +208,114 @@ type configCtx struct {
 	cfgRoot     string
 	clientDir   string
 	files       []manifestFile
+	// take maps manifest file id to template keys the template wins
+	// for; takeFile marks whole-file take (trust only).
+	take     map[string]map[string]bool
+	takeFile map[string]bool
+}
+
+// templateKeys lists the takeable keys of one manifest file: active
+// plus commented env entries, top-level JSON/JSONC keys.
+func templateKeys(mf manifestFile, tplRoot string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(tplRoot, mf.Path))
+	if err != nil {
+		return nil, err
+	}
+	if mf.Format == "jsonc" {
+		data = stripJSONComments(data)
+	}
+	switch mf.Format {
+	case "env":
+		return configmerge.EnvAllKeys(data), nil
+	case "json", "jsonc":
+		return configmerge.JSONTopKeys(data), nil
+	}
+	return nil, fmt.Errorf("take %s: format %q has no keys", mf.ID, mf.Format)
+}
+
+// parseTakeSpec parses --prefer-template specs ("id" or "id:key",
+// comma-separated, repeatable) against the selected manifest files.
+// A bare id takes every template-known key of that file; trust-dir
+// takes whole files only. Unknown ids/keys fail closed so typos never
+// silently take nothing.
+func parseTakeSpec(specs []string, files []manifestFile, tplRoot string) (take map[string]map[string]bool, whole map[string]bool, err error) {
+	byID := map[string]manifestFile{}
+	for _, f := range files {
+		byID[f.ID] = f
+	}
+	var ids []string
+	for _, f := range files {
+		ids = append(ids, f.ID)
+	}
+	take = map[string]map[string]bool{}
+	whole = map[string]bool{}
+	add := func(id, key string, mf manifestFile, part string) error {
+		if key == "" {
+			if mf.Format == "trust-dir" {
+				whole[id] = true
+				return nil
+			}
+			keys, err := templateKeys(mf, tplRoot)
+			if err != nil {
+				return err
+			}
+			if take[id] == nil {
+				take[id] = map[string]bool{}
+			}
+			for _, k := range keys {
+				take[id][k] = true
+			}
+			whole[id] = true
+			return nil
+		}
+		if mf.Format == "trust-dir" {
+			return fmt.Errorf("take %q: trust-dir takes whole files only (use %q)", part, id)
+		}
+		keys, err := templateKeys(mf, tplRoot)
+		if err != nil {
+			return err
+		}
+		if !containsString(keys, key) {
+			return fmt.Errorf("take %q: key %q not in template %s (keys: %s)", part, key, mf.Path, strings.Join(keys, ","))
+		}
+		if take[id] == nil {
+			take[id] = map[string]bool{}
+		}
+		take[id][key] = true
+		return nil
+	}
+	for _, spec := range specs {
+		for _, part := range strings.Split(spec, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if !strings.Contains(part, ":") {
+				id := part
+				mf, ok := byID[id]
+				if !ok {
+					return nil, nil, fmt.Errorf("unknown take %q: manifest ids are %s", part, strings.Join(ids, ","))
+				}
+				if err := add(id, "", mf, part); err != nil {
+					return nil, nil, err
+				}
+				continue
+			}
+			id, key, _ := strings.Cut(part, ":")
+			id, key = strings.TrimSpace(id), strings.TrimSpace(key)
+			mf, ok := byID[id]
+			if !ok {
+				return nil, nil, fmt.Errorf("unknown take %q: manifest ids are %s", part, strings.Join(ids, ","))
+			}
+			if key == "" {
+				return nil, nil, fmt.Errorf("take %q: empty key (use %q for the whole file)", part, id)
+			}
+			if err := add(id, key, mf, part); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	return take, whole, nil
 }
 
 func resolveConfigCtx(common ConfigCommon) (*configCtx, error) {
@@ -242,6 +352,10 @@ func resolveConfigCtx(common ConfigCommon) (*configCtx, error) {
 	if err != nil {
 		return nil, err
 	}
+	take, takeFile, err := parseTakeSpec(common.PreferTemplate, files, tplRoot)
+	if err != nil {
+		return nil, err
+	}
 	return &configCtx{
 		m:           m,
 		manifestDir: dir,
@@ -249,6 +363,8 @@ func resolveConfigCtx(common ConfigCommon) (*configCtx, error) {
 		cfgRoot:     cfgRoot,
 		clientDir:   clientDir,
 		files:       files,
+		take:        take,
+		takeFile:    takeFile,
 	}, nil
 }
 
@@ -315,15 +431,17 @@ func validateJSONObject(path string, data []byte) error {
 // merged bytes are written, Current the present content. RequiresForce
 // marks a lossy merge (manual review needed before writing).
 type fileMerge struct {
-	ID            string
-	Rel           string
-	Dst           string
-	Current       []byte
-	Merged        []byte
-	Added         []string
-	Overridden    []string
-	Orphaned      []string
-	Kept          []string
+	ID         string
+	Rel        string
+	Dst        string
+	Current    []byte
+	Merged     []byte
+	Added      []string
+	Overridden []string
+	Orphaned   []string
+	Kept       []string
+	// Taken lists local keys/entries the take-set reset to template.
+	Taken         []string
 	EnvValues     map[string]string
 	JSONObject    map[string]any
 	TrustEntries  []string
@@ -343,8 +461,23 @@ func mergeAll(ctx *configCtx) ([]fileMerge, error) {
 			}
 			dst := ctx.dstFor(mf)
 			cur, _ := readFileOrEmpty(dst)
+			orig := cur
+			takeKeys := ctx.take[mf.ID]
+			var taken []string
+			if len(takeKeys) > 0 {
+				var dropped []string
+				cur, dropped = configmerge.DropEnvKeys(cur, takeKeys)
+				taken = append(taken, dropped...)
+			}
 			res := configmerge.OverlayEnv(cur, tplData)
 			comment := policySet(ctx.m.AddPolicy.Env, "comment")
+			// An explicit take beats the comment-on-add policy: a taken
+			// key renders the template value active, matching what
+			// verifyEnvOut expects (render and expectation share this
+			// same comment set).
+			for k := range takeKeys {
+				delete(comment, k)
+			}
 			merged := configmerge.RenderEnvWithPolicy(res, tplData, comment)
 			active := map[string]string{}
 			for k, v := range res.Values {
@@ -354,9 +487,10 @@ func mergeAll(ctx *configCtx) ([]fileMerge, error) {
 				active[k] = v
 			}
 			out = append(out, fileMerge{
-				ID: mf.ID, Rel: mf.Path, Dst: dst, Current: cur, Merged: merged,
+				ID: mf.ID, Rel: mf.Path, Dst: dst, Current: orig, Merged: merged,
 				Added: res.Added, Overridden: res.ChangedUpstream,
 				Orphaned: res.Orphaned, Kept: res.Kept, EnvValues: active,
+				Taken: taken,
 			})
 		case "json", "jsonc":
 			tplData, err := os.ReadFile(filepath.Join(ctx.tplRoot, mf.Path))
@@ -369,6 +503,7 @@ func mergeAll(ctx *configCtx) ([]fileMerge, error) {
 				tplData = stripJSONComments(tplData)
 				curRaw = stripJSONComments(curRaw)
 			}
+			origRaw := curRaw
 			if err := validateJSONObject(filepath.Join(ctx.tplRoot, mf.Path), tplData); err != nil {
 				return nil, err
 			}
@@ -378,16 +513,32 @@ func mergeAll(ctx *configCtx) ([]fileMerge, error) {
 			if len(bytes.TrimSpace(curRaw)) == 0 {
 				curRaw = []byte("{}")
 			}
+			takeKeys := ctx.take[mf.ID]
+			var taken []string
+			if len(takeKeys) > 0 {
+				var dropped []string
+				var err error
+				curRaw, dropped, err = configmerge.DropJSONTopKeys(curRaw, takeKeys)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", dst, err)
+				}
+				taken = append(taken, dropped...)
+			}
 			skip := policySet(addPolicyFor(ctx.m, mf), "skip")
+			// Explicit take beats add_policy skip.
+			for k := range takeKeys {
+				delete(skip, k)
+			}
 			res := configmerge.OverlayJSONWithSkip(curRaw, tplData, skip)
 			rendered, err := configmerge.RenderJSON(res, tplData)
 			if err != nil {
 				return nil, err
 			}
 			out = append(out, fileMerge{
-				ID: mf.ID, Rel: mf.Path, Dst: dst, Current: curRaw, Merged: rendered,
+				ID: mf.ID, Rel: mf.Path, Dst: dst, Current: origRaw, Merged: rendered,
 				Added: res.Added, Overridden: res.Overridden,
 				Orphaned: res.Orphaned, Kept: res.Kept, JSONObject: res.Object,
+				Taken: taken,
 				// JSONC round-trips through encoding/json, so comments and
 				// original formatting are lost: require an explicit --force.
 				RequiresForce: mf.Format == "jsonc",
@@ -413,16 +564,25 @@ func mergeAll(ctx *configCtx) ([]fileMerge, error) {
 				}
 				dst := filepath.Join(dstDir, name)
 				cur, _ := readFileOrEmpty(dst)
+				orig := cur
 				base := tplData
 				if len(base) == 0 {
 					base = cur
 				}
+				var taken []string
+				if ctx.takeFile[mf.ID] {
+					if len(configmerge.TrustEntries(tplData)) == 0 {
+						return nil, fmt.Errorf("refusing take %s: template %s has no entries; wiping local ranges", mf.ID, filepath.ToSlash(filepath.Join(mf.Path, name)))
+					}
+					taken = configmerge.TrustEntries(cur)
+					cur = nil
+				}
 				res := configmerge.OverlayTrust(cur, tplData)
 				out = append(out, fileMerge{
 					ID: mf.ID, Rel: filepath.ToSlash(filepath.Join(mf.Path, name)),
-					Dst: dst, Current: cur, Merged: configmerge.RenderTrust(res, base),
+					Dst: dst, Current: orig, Merged: configmerge.RenderTrust(res, base),
 					Added: res.Added, Orphaned: res.Orphaned, Kept: res.Kept,
-					TrustEntries: res.Entries,
+					TrustEntries: res.Entries, Taken: taken,
 				})
 			}
 		default:
@@ -442,6 +602,19 @@ func addPolicyFor(m *templateManifest, mf manifestFile) map[string][]string {
 		return m.AddPolicy.JSONC
 	}
 	return nil
+}
+
+// takenSpecs lists every local key/entry the take-set reset, as
+// "id:key" pairs for messages.
+func takenSpecs(merges []fileMerge) []string {
+	var specs []string
+	for _, fm := range merges {
+		for _, k := range fm.Taken {
+			specs = append(specs, fm.ID+":"+k)
+		}
+	}
+	sort.Strings(specs)
+	return specs
 }
 
 func unifiedFileDiff(fm fileMerge) string {
@@ -492,7 +665,7 @@ func reportFromMerges(merges []fileMerge) map[string]any {
 	for _, fm := range merges {
 		report[fm.Rel] = map[string]any{
 			"added": fm.Added, "overridden": fm.Overridden,
-			"orphaned": fm.Orphaned, "kept": fm.Kept,
+			"orphaned": fm.Orphaned, "kept": fm.Kept, "taken": fm.Taken,
 		}
 	}
 	return report
@@ -659,6 +832,15 @@ func (s *ConfigSyncCmd) Run() error {
 				strings.Join(blocked, ", "), s.Dir)
 		}
 	}
+	// Take-set writes are destructive by design (local values reset to
+	// template), so an actual reset needs an explicit --yes after the
+	// diff preview above — even with --quiet and even in a pipe.
+	// --dry-run already returned, and a take that matched nothing
+	// resets nothing, so only taken keys gate the write.
+	if specs := takenSpecs(merges); len(specs) > 0 && !s.Yes {
+		return fmt.Errorf("take-set resets %s; review the diff above, then re-run with --yes to apply",
+			strings.Join(specs, ", "))
+	}
 	written := 0
 	for _, fm := range merges {
 		if bytes.Equal(fm.Current, fm.Merged) {
@@ -671,6 +853,9 @@ func (s *ConfigSyncCmd) Run() error {
 	}
 	if !s.Quiet {
 		fmt.Printf("synced (%d files)\n", written)
+		if specs := takenSpecs(merges); len(specs) > 0 {
+			fmt.Printf("take resets: %s\n", strings.Join(specs, ", "))
+		}
 	}
 	return nil
 }

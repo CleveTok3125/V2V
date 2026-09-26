@@ -258,3 +258,48 @@ func contains(list []string, key string) bool {
 	}
 	return false
 }
+
+func TestDropEnvKeys(t *testing.T) {
+	local := []byte("# Port docs\nPORT=20000\nMESSAGE_COOLDOWN=200ms\n#OLD=1\nMY_CUSTOM=1\n")
+	out, dropped := DropEnvKeys(local, map[string]bool{"PORT": true, "OLD": true})
+	s := string(out)
+	if strings.Contains(s, "PORT=") || strings.Contains(s, "OLD=") {
+		t.Fatalf("dropped keys must vanish (active and commented), got:\n%s", s)
+	}
+	for _, want := range []string{"MESSAGE_COOLDOWN=200ms", "MY_CUSTOM=1"} {
+		if !containsLine(s, want) {
+			t.Fatalf("untaken key must survive, want %q in:\n%s", want, s)
+		}
+	}
+	if len(dropped) != 2 {
+		t.Fatalf("must report dropped keys, got %v", dropped)
+	}
+}
+
+func TestDropJSONTopKeys(t *testing.T) {
+	local := []byte(`{"admin":{"identities":[]},"member":{"x":1}}`)
+	out, dropped, err := DropJSONTopKeys(local, map[string]bool{"admin": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "admin") {
+		t.Fatalf("dropped key must vanish, got:\n%s", out)
+	}
+	if !strings.Contains(string(out), "member") {
+		t.Fatalf("untaken key must survive, got:\n%s", out)
+	}
+	if len(dropped) != 1 || dropped[0] != "admin" {
+		t.Fatalf("must report dropped keys, got %v", dropped)
+	}
+}
+
+func TestEnvAllKeys(t *testing.T) {
+	data := []byte("PORT=1\n#BIND_ADDR=2\n# just a comment\n")
+	keys := EnvAllKeys(data)
+	if !contains(keys, "PORT") || !contains(keys, "BIND_ADDR") {
+		t.Fatalf("must list active and commented keys, got %v", keys)
+	}
+	if contains(keys, "just") {
+		t.Fatalf("plain comments are not keys, got %v", keys)
+	}
+}

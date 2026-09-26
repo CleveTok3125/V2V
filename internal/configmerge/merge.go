@@ -349,6 +349,97 @@ func containsStr(list []string, key string) bool {
 	return false
 }
 
+// EnvAllKeys returns active keys plus commented "#KEY=value" defaults:
+// the full set a take-set may name.
+func EnvAllKeys(data []byte) []string {
+	f := parseEnv(data)
+	seen := map[string]bool{}
+	var out []string
+	for _, k := range f.order {
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	for k := range f.commented {
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// DropEnvKeys removes active and commented lines for keys in drop,
+// returning the surviving bytes and the dropped key names. Everything
+// else stays byte-identical.
+func DropEnvKeys(data []byte, drop map[string]bool) ([]byte, []string) {
+	if len(drop) == 0 {
+		return data, nil
+	}
+	var kept []string
+	dropped := map[string]bool{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if k, _, ok := parseEnvLine(line); ok && drop[k] {
+			dropped[k] = true
+			continue
+		}
+		if k, _, ok := parseCommentedEnvLine(line); ok && drop[k] {
+			dropped[k] = true
+			continue
+		}
+		kept = append(kept, line)
+	}
+	var names []string
+	for k := range dropped {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return []byte(strings.Join(kept, "\n")), names
+}
+
+// DropJSONTopKeys removes top-level object keys in drop from a JSON
+// document, returning the pruned bytes and the dropped key names. Only
+// the local take input is renormalized; rendering still walks the
+// template, so local formatting never leaks into output.
+func DropJSONTopKeys(data []byte, drop map[string]bool) ([]byte, []string, error) {
+	if len(drop) == 0 {
+		return data, nil, nil
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return data, nil, nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return nil, nil, err
+	}
+	var names []string
+	for k := range drop {
+		if _, ok := obj[k]; ok {
+			delete(obj, k)
+			names = append(names, k)
+		}
+	}
+	sort.Strings(names)
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, names, nil
+}
+
+// TrustEntries lists the normalized IP/CIDR entries of a trust file.
+func TrustEntries(data []byte) []string {
+	set := trustSet(data)
+	out := make([]string, 0, len(set))
+	for e := range set {
+		out = append(out, e)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func normalizeTrustLine(line string) (string, bool) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
