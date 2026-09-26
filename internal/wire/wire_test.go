@@ -75,14 +75,18 @@ func TestWireJSONKeySet(t *testing.T) {
 	}
 
 	// HistorySync trailer pins its key set as well.
-	sync := HistorySync{Type: "history_sync", MinHeight: 1, MaxHeight: 142, Sent: 32, Total: 142}
+	sync := HistorySync{Type: "history_sync", MinHeight: 1, MaxHeight: 142, Sent: 32, Total: 142, Dropped: 3}
 	raw, _ = json.Marshal(sync)
 	var smap map[string]any
 	_ = json.Unmarshal(raw, &smap)
-	for _, k := range []string{"type", "min_height", "max_height", "sent", "total"} {
+	for _, k := range []string{"type", "min_height", "max_height", "sent", "total", "dropped"} {
 		if _, ok := smap[k]; !ok {
 			t.Errorf("missing history_sync key %q in %s", k, raw)
 		}
+	}
+	var back HistorySync
+	if err := json.Unmarshal(raw, &back); err != nil || back.Dropped != 3 {
+		t.Errorf("dropped must round-trip: %+v %v", back, err)
 	}
 
 	// HistoryRequest pins its key set; Before 0 means oldest absolute.

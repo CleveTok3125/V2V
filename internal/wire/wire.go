@@ -105,15 +105,17 @@ type AuthPacket struct {
 // HistorySync is the machine-readable trailer closing a history
 // replay, sent after the human footer. Fork-check logic keys off its
 // window bounds: a persisted tip inside the window but absent from the
-// replayed lines means the log changed. There is no omission set:
-// filtered lines (join/leave notices) never occupied chain positions,
-// so a replay window has no gaps by construction.
+// replayed lines means the log changed. MinHeight/MaxHeight cover the
+// lines the replay intended to send; Dropped counts the sends a full
+// peer buffer refused, so a trailer with Dropped > 0 describes an
+// incomplete window whose holes prove nothing about the log.
 type HistorySync struct {
 	Type      string `json:"type"` // "history_sync"
 	MinHeight uint64 `json:"min_height,omitempty"`
 	MaxHeight uint64 `json:"max_height,omitempty"`
 	Sent      int    `json:"sent,omitempty"`
 	Total     int    `json:"total,omitempty"`
+	Dropped   int    `json:"dropped,omitempty"`
 }
 
 // HistoryRequest asks the server for an older segment on demand

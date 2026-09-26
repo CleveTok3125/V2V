@@ -505,6 +505,16 @@ func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, li
 // the window holds no chained line (exhausted) instead of a bare zero
 // count. Both footer variants keep the boundary substring so the
 // client still opens and closes the replay window.
+// historySyncTrailer encodes the machine-readable trailer closing a
+// replay. Dropped is the number of sends the peer's full buffer
+// refused: the client skips its fork check when it is non-zero, since
+// an incomplete window cannot prove the log changed.
+func historySyncTrailer(minHeight, maxHeight uint64, sent, total, dropped int) []byte {
+	trailer, _ := json.Marshal(HistorySync{Type: "history_sync", MinHeight: minHeight, MaxHeight: maxHeight,
+		Sent: sent, Total: total, Dropped: dropped})
+	return trailer
+}
+
 func (c *ChainService) sendReplay(session *ClientSession, lines []string, header string, segment bool) {
 	// Replay filters join/leave unless the session asked for them.
 	// Dates, audits and untagged lines always go. Filtered lines never
@@ -576,9 +586,7 @@ func (c *ChainService) sendReplay(session *ClientSession, lines []string, header
 		}
 	}
 	replaySend([]byte(footer))
-	trailer, _ := json.Marshal(HistorySync{Type: "history_sync", MinHeight: minHeight, MaxHeight: maxHeight,
-		Sent: sent, Total: len(lines)})
-	replaySend(trailer)
+	replaySend(historySyncTrailer(minHeight, maxHeight, sent, len(lines), dropped))
 	if dropped > 0 {
 		logWarnf("⚠️ [REPLAY] Dropped %d/%d lines for slow peer (buffer full)", dropped, len(lines)+3)
 	}

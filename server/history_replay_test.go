@@ -158,6 +158,19 @@ func TestReplay_LiveShape142(t *testing.T) {
 	}
 }
 
+// TestHistorySyncTrailer_Dropped: a replay that lost lines to a full
+// peer buffer must report it; the client skips its fork check on such
+// trailers because an incomplete window proves nothing.
+func TestHistorySyncTrailer_Dropped(t *testing.T) {
+	var hs HistorySync
+	if err := json.Unmarshal(historySyncTrailer(3, 6, 2, 5, 3), &hs); err != nil {
+		t.Fatalf("trailer unmarshal: %v", err)
+	}
+	if hs.Dropped != 3 || hs.MinHeight != 3 || hs.MaxHeight != 6 || hs.Sent != 2 || hs.Total != 5 {
+		t.Fatalf("trailer fields mangled: %+v", hs)
+	}
+}
+
 // TestSendChatHistory_NeverBlocks: a dead peer (WritePump gone, channel
 // full, no reader) must not wedge the replay, which runs under
 // BroadcastMu — blocking here would stall every broadcast.

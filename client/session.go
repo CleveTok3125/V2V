@@ -98,11 +98,16 @@ type DisplayState struct {
 // updates; take Mu only while holding DisplayMu, never take DisplayMu
 // while holding Mu.
 type ChainState struct {
-	Mu               sync.Mutex
-	ChainTip         [32]byte
-	ChainHeight      uint64
-	ChainHaveTip     bool
-	ChainWarned      bool
+	Mu           sync.Mutex
+	ChainTip     [32]byte
+	ChainHeight  uint64
+	ChainHaveTip bool
+	ChainWarned  bool
+	// ChainGapWarned latches the one-time slow-peer gap notice: a
+	// forward height jump means frames were dropped in transit, which
+	// must not consume the tamper latch (a later real break still
+	// warns). Like the other chain fields, written under DisplayMu.
+	ChainGapWarned   bool
 	ServerPubHex     string
 	TipPath          string
 	PersistedTip     [32]byte

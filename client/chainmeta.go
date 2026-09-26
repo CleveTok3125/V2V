@@ -708,7 +708,7 @@ func verifyWireLink(wire WireMessage, prev [32]byte) ([32]byte, error) {
 		return zero, errChainLink("malformed chain_prev")
 	}
 	if gotPrev != prev {
-		return zero, errChainLink("prev does not continue the local tip")
+		return zero, errPrevMismatch
 	}
 	want, ok := chain.ParseHex64(wire.ChainHash)
 	if !ok {
@@ -744,6 +744,11 @@ func (e *chainLinkError) Error() string { return "chain link broken: " + e.msg }
 
 func errChainLink(msg string) error { return &chainLinkError{msg} }
 
+// errPrevMismatch marks the running-tip break specifically: a forward
+// height jump with this error is a transit gap (dropped frames), while
+// other link errors stay tamper signals.
+var errPrevMismatch = &chainLinkError{msg: "prev does not continue the local tip"}
+
 // parseHistorySync decodes the machine-readable replay trailer. Anything
 // else (chat, system, legacy text) reports false so the caller falls
 // through to normal rendering.
@@ -756,11 +761,11 @@ func parseHistorySync(raw []byte) (HistorySync, bool) {
 }
 
 // shouldWarnFork decides whether a persisted tip missing from a replay
-// signals tampering. The replayed window has no gaps by construction
-// (filtered lines never occupied chain positions), so a tip inside the
-// window but absent from the received hashes means the log changed
-// under us. Tips outside the window adopt silently: older ones predate
-// the replay, newer ones mean the log grew or shrank past it.
+// signals tampering. A complete replayed window has no gaps (filtered
+// lines never occupied chain positions), so a tip inside the window
+// but absent from the received hashes means the log changed under us.
+// Tips outside the window adopt silently: older ones predate the
+// replay, newer ones mean the log grew or shrank past it.
 func shouldWarnFork(persistedHeight, syncMin, syncMax uint64, tipHex string, received map[string]bool) bool {
 	if persistedHeight < syncMin || persistedHeight > syncMax {
 		return false
@@ -770,9 +775,11 @@ func shouldWarnFork(persistedHeight, syncMin, syncMax uint64, tipHex string, rec
 
 // forkWarning evaluates the trailer fork check outside the read loop so
 // tests pin it without a TTY. It returns the warning line (or "") and
-// whether the caller should flush the tip afterwards.
+// whether the caller should flush the tip afterwards. A trailer
+// reporting dropped lines describes an incomplete window: its holes
+// prove nothing, so the check stays silent.
 func forkWarning(hs HistorySync, havePersistedTip bool, persistedTip [32]byte, persistedHeight uint64, syncHashes map[string]bool) (string, bool) {
-	if !havePersistedTip || len(syncHashes) == 0 {
+	if !havePersistedTip || len(syncHashes) == 0 || hs.Dropped > 0 {
 		return "", false
 	}
 	tipHex := strings.ToLower(hex.EncodeToString(persistedTip[:]))
@@ -938,6 +945,17 @@ func (s *Session) flushChainTip() {
 	}
 }
 
+// warnChainGap reports one transit-loss episode per session: a slow
+// peer makes the server drop live frames, so a forward height jump is
+// a lost delivery, not a rewritten log.
+func (s *Session) warnChainGap(from, to uint64) {
+	if s.Chain.ChainGapWarned {
+		return
+	}
+	s.Chain.ChainGapWarned = true
+	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Bỏ lỡ %d tin (#%d–%d) do kết nối chậm — đã nối lại chuỗi.\n", to-from-1, from+1, to-1))
+}
+
 func (s *Session) checkChainLink(wire WireMessage) {
 	if wire.ChainHash == "" {
 		return
@@ -959,6 +977,19 @@ func (s *Session) checkChainLink(wire WireMessage) {
 		newTip, err = verifyWireLink(wire, prev)
 	}
 	if err != nil {
+		// Forward height jump: the in-between frames were dropped in
+		// transit by the server's non-blocking send to a slow peer,
+		// not rewritten in the log. Re-anchor with one light notice;
+		// the tamper latch stays free so a later real break warns.
+		// Only when the received hash is well-formed: a malformed hash
+		// falls through to the tamper warning below.
+		if parsed, ok := chain.ParseHex64(wire.ChainHash); ok &&
+			s.Chain.ChainHaveTip && err == errPrevMismatch && wire.ChainHeight > s.Chain.ChainHeight+1 {
+			s.warnChainGap(s.Chain.ChainHeight, wire.ChainHeight)
+			s.noteChainTip(parsed, wire.ChainHeight)
+			s.flushChainTip()
+			return
+		}
 		if !s.Chain.ChainWarned {
 			s.Chain.ChainWarned = true
 			s.emitLocalFeedback(fmt.Sprintf("| [Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", wire.ChainHeight, err))

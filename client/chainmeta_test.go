@@ -87,7 +87,8 @@ func TestChainTipRoundtrip(t *testing.T) {
 	}
 }
 
-func chainedTestWire(prev [32]byte, height, tmpID uint64) WireMessage {	h := chain.Hash(prev, height, tmpID, 0, "chat", "15:04", "Alice", "hello", "")
+func chainedTestWire(prev [32]byte, height, tmpID uint64) WireMessage {
+	h := chain.Hash(prev, height, tmpID, 0, "chat", "15:04", "Alice", "hello", "")
 	return WireMessage{
 		Type: "chat", Time: "15:04", DisplayName: "Alice", Text: "hello",
 		TmpID:       tmpID,
@@ -159,10 +160,10 @@ func TestReapStaleEchoes(t *testing.T) {
 
 func TestParseFindArg(t *testing.T) {
 	cases := []struct {
-		in        string
-		height    uint64
-		suffix    string
-		wantErr   string
+		in      string
+		height  uint64
+		suffix  string
+		wantErr string
 	}{
 		{"1234", 1234, "", ""},
 		{"#1234", 1234, "", ""},
@@ -448,14 +449,14 @@ func TestFormatInfoBlockTripDetail(t *testing.T) {
 	payload := tripcolor.CanonicalPayload(serverPub, 9, prev[:], msgHash[:], pub, "Alice", 5, 3)
 	sig := ed25519.Sign(priv, payload)
 	tm := &TripMeta{
-		Pub:         hex.EncodeToString(pub),
-		Seq:         9,
-		Prev:        hex.EncodeToString(prev[:]),
-		Sig:         hex.EncodeToString(sig),
-		ServerPub:   serverPub,
-		MsgHash:     hex.EncodeToString(msgHash[:]),
-		TmpID:       5,
-		ReplyTo:     3,
+		Pub:       hex.EncodeToString(pub),
+		Seq:       9,
+		Prev:      hex.EncodeToString(prev[:]),
+		Sig:       hex.EncodeToString(sig),
+		ServerPub: serverPub,
+		MsgHash:   hex.EncodeToString(msgHash[:]),
+		TmpID:     5,
+		ReplyTo:   3,
 	}
 	wire := chainedTripWire(tm, text)
 	joined := strings.Join(formatInfoBlock(wire), "")
@@ -563,11 +564,11 @@ func TestQuotable(t *testing.T) {
 }
 
 func TestParseHistorySync(t *testing.T) {
-	hs, ok := parseHistorySync([]byte(`{"type":"history_sync","min_height":101,"max_height":142,"sent":32,"total":42}`))
+	hs, ok := parseHistorySync([]byte(`{"type":"history_sync","min_height":101,"max_height":142,"sent":32,"total":42,"dropped":3}`))
 	if !ok {
 		t.Fatal("valid trailer rejected")
 	}
-	if hs.MinHeight != 101 || hs.MaxHeight != 142 || hs.Sent != 32 || hs.Total != 42 {
+	if hs.MinHeight != 101 || hs.MaxHeight != 142 || hs.Sent != 32 || hs.Total != 42 || hs.Dropped != 3 {
 		t.Fatalf("trailer fields mangled: %+v", hs)
 	}
 	for _, raw := range []string{
@@ -636,6 +637,13 @@ func TestForkWarning(t *testing.T) {
 	// Pre-window tip: silent.
 	if w, f := forkWarning(hs, true, [32]byte{1}, 50, full); w != "" || f {
 		t.Errorf("pre-window tip must stay silent, got %q flush=%v", w, f)
+	}
+	// Partial replay (full peer buffer dropped lines): the window has
+	// holes, so a missing tip proves nothing -> silent, no flush.
+	partial := hs
+	partial.Dropped = 3
+	if w, f := forkWarning(partial, true, [32]byte{9}, 120, full); w != "" || f {
+		t.Errorf("partial replay must stay silent, got %q flush=%v", w, f)
 	}
 }
 
@@ -710,6 +718,110 @@ func TestVerifyReplayWireLiveStillVerifies(t *testing.T) {
 
 	if !sess.Chain.ChainWarned {
 		t.Fatal("live path must still warn on a broken link")
+	}
+}
+
+// chainTestSession builds a minimal session anchored at tip #100.
+func chainTestSession(t *testing.T, tip byte) *Session {
+	t.Helper()
+	sess := NewSession()
+	sess.Display.Out = io.Discard
+	sess.Display.Term = &fakeTerm{}
+	sess.Display.TabSys = newTabBuffer(100, 100000)
+	sess.Display.TabChat = newTabBuffer(100, 100000)
+	sess.Chain.TipPath = t.TempDir() + "/tip.json"
+	sess.Chain.ChainTip = [32]byte{tip}
+	sess.Chain.ChainHeight = 100
+	sess.Chain.ChainHaveTip = true
+	return sess
+}
+
+// chainTestWire builds a content-valid chained wire whose prev never
+// matches the session tip (#100), at the requested height.
+func chainTestWire(height uint64, seed byte) WireMessage {
+	var prev [32]byte
+	prev[0] = seed
+	wire := WireMessage{Type: "chat", Time: "12:00", DisplayName: "A", Text: "msg", ChainHeight: height, ChainVer: 2}
+	wire.ChainPrev = hex.EncodeToString(prev[:])
+	h := chain.Hash(prev, height, 0, 0, "chat", "12:00", "A", "msg", "")
+	wire.ChainHash = hex.EncodeToString(h[:])
+	return wire
+}
+
+// TestCheckChainLinkGapIsNotFork: a forward height jump means live
+// frames were dropped in transit (slow peer), so the client must
+// re-anchor with one light notice instead of the tamper warning.
+func TestCheckChainLinkGapIsNotFork(t *testing.T) {
+	sess := chainTestSession(t, 9)
+
+	sess.Display.DisplayMu.Lock()
+	sess.checkChainLink(chainTestWire(102, 0x11))
+	sess.Display.DisplayMu.Unlock()
+
+	if sess.Chain.ChainWarned {
+		t.Fatal("gap must not set ChainWarned")
+	}
+	if !sess.Chain.ChainGapWarned {
+		t.Fatal("gap must set ChainGapWarned")
+	}
+	if sess.Chain.ChainHeight != 102 {
+		t.Fatalf("tip must re-anchor to #102, got #%d", sess.Chain.ChainHeight)
+	}
+	gaps := 0
+	for _, l := range sess.Display.TabSys.lines {
+		if strings.Contains(l, "Bỏ lỡ") {
+			gaps++
+		}
+		if strings.Contains(l, "đứt") {
+			t.Fatalf("gap must not emit the tamper warning: %q", l)
+		}
+	}
+	if gaps != 1 {
+		t.Fatalf("gap notice = %d lines, want 1", gaps)
+	}
+
+	// A second gap re-anchors silently (one-shot latch per session).
+	sess.Display.DisplayMu.Lock()
+	sess.checkChainLink(chainTestWire(105, 0x22))
+	sess.Display.DisplayMu.Unlock()
+	if sess.Chain.ChainHeight != 105 {
+		t.Fatalf("second gap must re-anchor to #105, got #%d", sess.Chain.ChainHeight)
+	}
+	gaps = 0
+	for _, l := range sess.Display.TabSys.lines {
+		if strings.Contains(l, "Bỏ lỡ") {
+			gaps++
+		}
+	}
+	if gaps != 1 {
+		t.Fatalf("gap notice repeated (%d lines), want 1", gaps)
+	}
+}
+
+// TestCheckChainLinkAdjacentMismatchWarns pins the other side: an
+// adjacent mismatch (#101 after tip #100) is a rewrite signal, not a
+// transit gap, so the tamper warning still fires.
+func TestCheckChainLinkAdjacentMismatchWarns(t *testing.T) {
+	sess := chainTestSession(t, 9)
+
+	sess.Display.DisplayMu.Lock()
+	sess.checkChainLink(chainTestWire(101, 0x11))
+	sess.Display.DisplayMu.Unlock()
+
+	if !sess.Chain.ChainWarned {
+		t.Fatal("adjacent mismatch must warn")
+	}
+	if sess.Chain.ChainGapWarned {
+		t.Fatal("adjacent mismatch must not count as a gap")
+	}
+	warned := false
+	for _, l := range sess.Display.TabSys.lines {
+		if strings.Contains(l, "đứt") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatal("adjacent mismatch must emit the tamper warning")
 	}
 }
 
