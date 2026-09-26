@@ -68,12 +68,16 @@ type BehaviorConfig struct {
 	TierExit     []float64
 	RecheckMin   time.Duration
 	RecheckMax   time.Duration
-	ScaleMode    string
-	ScaleW       [4]float64
-	BumpMax      int
-	Retention    []time.Duration
-	StatsEnabled bool
-	StatsWindow  time.Duration
+	// ScoreEveryNMsgs re-arms scoring after this many messages since
+	// the last score, so short bursty sessions are re-scored instead
+	// of evaluated once at connect time.
+	ScoreEveryNMsgs int
+	ScaleMode       string
+	ScaleW          [4]float64
+	BumpMax         int
+	Retention       []time.Duration
+	StatsEnabled    bool
+	StatsWindow     time.Duration
 }
 
 var abuseFeatures = []struct {
@@ -358,6 +362,7 @@ func LoadAbuseConfig() (AbuseConfig, []string, error) {
 	b.TierExit = append([]float64{0}, exitVals...)
 	b.RecheckMin, _ = l.reqDuration("POW_RECHECK_MIN")
 	b.RecheckMax, _ = l.reqDuration("POW_RECHECK_MAX")
+	b.ScoreEveryNMsgs, _ = l.reqInt("BEHAVIOR_SCORE_EVERY_N_MSGS")
 	b.ScaleMode, _ = l.reqEnum("ATTACK_SCALE_MODE", "max", "weighted")
 	b.ScaleW[0], _ = l.reqFloat("ATTACK_SCALE_W_REJECT")
 	b.ScaleW[1], _ = l.reqFloat("ATTACK_SCALE_W_CONNRATE")
@@ -417,6 +422,9 @@ func LoadAbuseConfig() (AbuseConfig, []string, error) {
 	}
 	if b.RecheckMin <= 0 || b.RecheckMax < b.RecheckMin {
 		return AbuseConfig{}, nil, fmt.Errorf("abuse config: POW_RECHECK_MIN/MAX must satisfy 0<MIN<=MAX")
+	}
+	if b.ScoreEveryNMsgs < 1 {
+		return AbuseConfig{}, nil, fmt.Errorf("abuse config: BEHAVIOR_SCORE_EVERY_N_MSGS must be >= 1")
 	}
 	if b.BumpMax < 0 || b.BumpMax >= cfg.PowTierCount {
 		return AbuseConfig{}, nil, fmt.Errorf("abuse config: ATTACK_TIER_BUMP_MAX out of range")

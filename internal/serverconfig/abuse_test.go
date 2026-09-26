@@ -67,6 +67,7 @@ func setAbuseEnv(t *testing.T, enabled bool) {
 	t.Setenv("BEHAVIOR_TIER3_EXIT", "0.7")
 	t.Setenv("POW_RECHECK_MIN", "5m")
 	t.Setenv("POW_RECHECK_MAX", "15m")
+	t.Setenv("BEHAVIOR_SCORE_EVERY_N_MSGS", "20")
 	t.Setenv("ATTACK_SCALE_MODE", "max")
 	t.Setenv("ATTACK_SCALE_W_REJECT", "1")
 	t.Setenv("ATTACK_SCALE_W_CONNRATE", "1")

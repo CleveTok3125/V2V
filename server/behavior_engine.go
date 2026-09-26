@@ -58,6 +58,9 @@ type BehaviorEngine struct {
 	members  map[string]map[string]bool
 	ipGroups map[string][]string
 	names    map[string]map[string]bool
+	// scoredAt records TotalMsgs at the last Score per IP, so message
+	// volume can re-arm scoring between the slow periodic re-checks.
+	scoredAt map[string]int64
 	file     string
 }
 
@@ -72,6 +75,7 @@ func NewBehaviorEngine(store *behavior.Store, stats *behavior.Stats, geo behavio
 		members:  map[string]map[string]bool{},
 		ipGroups: map[string][]string{},
 		names:    map[string]map[string]bool{},
+		scoredAt: map[string]int64{},
 		file:     file,
 	}
 }
@@ -231,10 +235,44 @@ func (e *BehaviorEngine) Score(ip string, bc *serverconfig.BehaviorConfig, now t
 	tier := behavior.NextTier(s, p.Tier, bc.TierEnter, bc.TierExit, maxTier)
 	p.Tier = tier
 	e.scores[ip] = s
+	e.scoredAt[ip] = p.TotalMsgs
 	if e.stats != nil {
 		e.stats.Observe(tier)
 	}
 	return tier, s
+}
+
+// ObserveMessageAndDue records one accepted chat message and reports in
+// the same critical section whether the IP crossed its message budget,
+// so the message hot path takes one lock instead of two. See
+// DueForRescore for the counter semantics.
+func (e *BehaviorEngine) ObserveMessageAndDue(ip string, now time.Time, every int) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	p := e.store.Get(ip)
+	p.AddMessage(now)
+	prev := e.scoredAt[ip]
+	if p.TotalMsgs < prev {
+		return true
+	}
+	return p.TotalMsgs-prev >= int64(every)
+}
+
+// DueForRescore reports whether ip has produced at least every messages
+// since its last Score. The scheduler uses it to re-arm scoring for
+// chatty sessions instead of waiting out the slow periodic re-check. A
+// profile dropped by the store cap resets TotalMsgs while scoredAt
+// survives, so a smaller counter counts as due to re-establish the
+// baseline on the next tick.
+func (e *BehaviorEngine) DueForRescore(ip string, every int) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	p := e.store.Get(ip)
+	prev := e.scoredAt[ip]
+	if p.TotalMsgs < prev {
+		return true
+	}
+	return p.TotalMsgs-prev >= int64(every)
 }
 
 // Prune drops idle profiles past tier retention and cleans every
@@ -246,6 +284,7 @@ func (e *BehaviorEngine) Prune(now time.Time, retention map[int]time.Duration, d
 	for _, ip := range e.store.Prune(now, retention, def) {
 		delete(e.scores, ip)
 		delete(e.names, ip)
+		delete(e.scoredAt, ip)
 		for _, k := range e.ipGroups[ip] {
 			if set := e.members[k]; set != nil {
 				delete(set, ip)

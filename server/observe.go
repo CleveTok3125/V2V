@@ -25,7 +25,21 @@ func (s *ChatServer) observeMessage(ip string) {
 	if s.Behavior == nil {
 		return
 	}
-	s.Behavior.ObserveMessage(ip, time.Now())
+	now := time.Now()
+	a := Cfg.Abuse.Load()
+	if s.Screener == nil || a == nil || a.Behavior == nil || a.Behavior.ScoreEveryNMsgs < 1 {
+		s.Behavior.ObserveMessage(ip, now)
+		return
+	}
+	// One critical section for both the record and the budget check:
+	// this is the chat hot path.
+	if s.Behavior.ObserveMessageAndDue(ip, now, a.Behavior.ScoreEveryNMsgs) {
+		// Flag the IP for the next scheduler tick once it has produced
+		// ScoreEveryNMsgs messages since its last score, so short
+		// bursty sessions are re-scored instead of evaluated once at
+		// connect time.
+		s.Screener.Defer(ip, now)
+	}
 }
 
 func (s *ChatServer) observeHistory(ip string) {
