@@ -145,6 +145,10 @@ type PendingState struct {
 
 	PendingPlaceholders []pendingMsg
 	PendingEchoes       []pendingEcho
+	// SeenTmpIDs holds recently consumed message IDs so a late or
+	// duplicate echo can be dropped instead of stashed (which would
+	// age into a false "ID altered" warning). Bounded; oldest evicted.
+	SeenTmpIDs []uint64
 
 	PendingDateBanner     string
 	PendingDateBannerWire *WireMessage

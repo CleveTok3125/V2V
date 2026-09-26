@@ -209,6 +209,9 @@ func (s *Session) sendMessage(text string, phRows int, phShown bool, phBufEnd in
 		var haveStashed bool
 		s.Pending.PendingEchoes, _, haveStashed = takeStashedEcho(s.Pending.PendingEchoes, pm.tmpID)
 		if haveStashed {
+			// The raced echo is consumed here: record its ID so a
+			// later duplicate is dropped instead of stashed.
+			s.Pending.SeenTmpIDs = noteConsumedTmpID(s.Pending.SeenTmpIDs, pm.tmpID)
 			for i, p := range s.Pending.PendingPlaceholders {
 				if p.tmpID == pm.tmpID {
 					s.Pending.PendingPlaceholders = append(s.Pending.PendingPlaceholders[:i], s.Pending.PendingPlaceholders[i+1:]...)

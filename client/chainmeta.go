@@ -143,6 +143,34 @@ func takeStashedEcho(stash []pendingEcho, tmpID uint64) ([]pendingEcho, WireMess
 	return stash, WireMessage{}, false
 }
 
+// maxSeenTmpIDs bounds the consumed-ID set: 64 entries cost ~512 bytes
+// and cover far more history than the 16-entry echo stash, so a
+// duplicate arriving after eviction (a rare false warning) is accepted.
+const maxSeenTmpIDs = 64
+
+// seenTmpID reports whether a tmp_id was already consumed.
+func seenTmpID(seen []uint64, tmpID uint64) bool {
+	for _, id := range seen {
+		if id == tmpID {
+			return true
+		}
+	}
+	return false
+}
+
+// noteConsumedTmpID records a consumed tmp_id, evicting the oldest when
+// over capacity. Caller must hold PendingMu.
+func noteConsumedTmpID(seen []uint64, tmpID uint64) []uint64 {
+	if tmpID == 0 || seenTmpID(seen, tmpID) {
+		return seen
+	}
+	seen = append(seen, tmpID)
+	for len(seen) > maxSeenTmpIDs {
+		seen = seen[1:]
+	}
+	return seen
+}
+
 // reapStaleEchoes drops entries older than maxAge and returns them so the
 // caller can warn: an echo from us that never matched a placeholder means
 // the server may have altered its ID.
@@ -773,12 +801,15 @@ func (s *Session) initChainState() {
 // verifyReplayWire runs echo matching and link verification for one
 // replayed wire, unless it belongs to an on-demand older segment: an
 // older height can never verify against the running tip, so verifying
-// would warn falsely and rewind the tip. Caller must hold DisplayMu.
+// would warn falsely and rewind the tip. Stashing is disabled during a
+// catch-up replay too: historical echoes can never match a future
+// placeholder, so stashing them would only age into false "ID altered"
+// warnings. Caller must hold DisplayMu.
 func (s *Session) verifyReplayWire(wire WireMessage, allowStash bool) {
 	if s.Chain.InOlder {
 		return
 	}
-	s.consumeEchoLocked(wire, allowStash)
+	s.consumeEchoLocked(wire, allowStash && !s.Chain.InSync)
 	s.checkChainLink(wire)
 }
 
@@ -826,14 +857,22 @@ func (s *Session) planEchoConsume(wire WireMessage, allowStash bool) echoConsume
 	var out echoConsume
 	s.Pending.PendingEchoes, out.stale = reapStaleEchoes(s.Pending.PendingEchoes, 10*time.Second)
 	if wire.DisplayName != s.Username || len(s.Pending.PendingPlaceholders) == 0 {
-		if allowStash && wire.DisplayName == s.Username && wire.TmpID != 0 {
+		// Stash only unseen IDs: the pre-placeholder race needs it,
+		// but a duplicate of a consumed message must drop instead of
+		// re-entering the stash.
+		if allowStash && wire.DisplayName == s.Username && wire.TmpID != 0 && !seenTmpID(s.Pending.SeenTmpIDs, wire.TmpID) {
 			s.Pending.PendingEchoes = stashEcho(s.Pending.PendingEchoes, wire, 16)
 		}
 		return out
 	}
 	idx := matchPendingIndex(s.Pending.PendingPlaceholders, wire.TmpID, wire.ReplyTo, wire.Text, s.Username, wire.DisplayName)
 	if idx == -1 {
-		if allowStash && wire.TmpID != 0 {
+		// No placeholder matches. A tmp_id this session already
+		// consumed is a late or duplicate copy: drop it, otherwise
+		// every duplicate would stash and age into a false "ID
+		// altered" warning burst. An unseen ID may be a server
+		// rewrite, so it still stashes and warns on staleness.
+		if wire.TmpID != 0 && allowStash && !seenTmpID(s.Pending.SeenTmpIDs, wire.TmpID) {
 			s.Pending.PendingEchoes = stashEcho(s.Pending.PendingEchoes, wire, 16)
 		}
 		return out
@@ -841,6 +880,7 @@ func (s *Session) planEchoConsume(wire WireMessage, allowStash bool) echoConsume
 	out.matched = true
 	out.pm = s.Pending.PendingPlaceholders[idx]
 	s.Pending.PendingPlaceholders = append(s.Pending.PendingPlaceholders[:idx], s.Pending.PendingPlaceholders[idx+1:]...)
+	s.Pending.SeenTmpIDs = noteConsumedTmpID(s.Pending.SeenTmpIDs, wire.TmpID)
 	return out
 }
 

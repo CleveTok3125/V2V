@@ -148,7 +148,7 @@ func (s *Session) runPump() {
 			}
 			if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
 				s.Display.DisplayMu.Lock()
-				s.verifyReplayWire(wl, wl.Type == "chat" && !s.Chain.InSync)
+				s.verifyReplayWire(wl, wl.Type == "chat")
 				if wl.Type == "system" && !isShowingJoin && isDateBanner(wl) {
 					s.Pending.PendingDateBannerWire = &wl
 					s.Display.DisplayMu.Unlock()
