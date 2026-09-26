@@ -28,6 +28,7 @@ type ConfigCmd struct {
 	Diff     ConfigDiffCmd     `cmd:"" help:"Xem trước kết quả đồng bộ dạng unified diff"`
 	Manifest ConfigManifestCmd `cmd:"" help:"Sinh lại keys trong v2v-template.json từ template"`
 	Check    ConfigCheckCmd    `cmd:"" help:"Kiểm tra manifest khớp với template"`
+	Take     ConfigTakeCmd     `cmd:"" help:"Chọn các giá trị khác local-remote rồi áp vào local (template thắng)"`
 	Validate ConfigValidateCmd `cmd:"" help:"Kiểm tra cấu hình instance nạp được"`
 }
 
