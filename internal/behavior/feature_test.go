@@ -201,3 +201,29 @@ func TestEmptyProfileInvalid(t *testing.T) {
 		}
 	}
 }
+
+func TestChallengePersistence(t *testing.T) {
+	now := time.Now()
+	param := fp(0.12, 1, 1, 8, true)
+	empty := &Profile{}
+	if _, ok := FeatureValue(empty, F_CHALLENGE, param, testCtx(now)); ok {
+		t.Fatal("zero challenges must be insufficient sample")
+	}
+	once := &Profile{}
+	once.AddChallenge(now)
+	if v, ok := FeatureValue(once, F_CHALLENGE, param, testCtx(now)); !ok || v != 0 {
+		t.Fatalf("one challenge must score 0 (false-positive shield), got %v ok=%v", v, ok)
+	}
+	steady := &Profile{}
+	for i := 0; i < 8; i++ {
+		steady.AddChallenge(now.Add(-time.Duration(i) * time.Minute))
+	}
+	if v, ok := FeatureValue(steady, F_CHALLENGE, param, testCtx(now)); !ok || v != 1 {
+		t.Fatalf("eight challenges must saturate, got %v ok=%v", v, ok)
+	}
+	stale := &Profile{}
+	stale.AddChallenge(now.Add(-2 * time.Hour))
+	if _, ok := FeatureValue(stale, F_CHALLENGE, param, testCtx(now)); ok {
+		t.Fatal("challenges outside the window must not count")
+	}
+}

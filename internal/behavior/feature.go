@@ -25,6 +25,12 @@ const (
 	F_ENDPOINT_FOCUS FeatureID = "endpoint_focus"
 	F_AUTH_PROBE     FeatureID = "auth_probe"
 	F_ENVELOPE       FeatureID = "envelope"
+	// F_CHALLENGE counts failed or ignored PoW challenges (declined
+	// or expired), not mere re-issues: the recheck cadence is shared
+	// by every flagged IP, so counting issuance would penalise
+	// cooperative users. One failure scores nothing (false-positive
+	// shield); sustained non-compliance escalates the tier.
+	F_CHALLENGE FeatureID = "challenge"
 )
 
 // Err-family prefixes. The server tags anomaly codes with one of these;
@@ -255,6 +261,12 @@ func FeatureValue(p *Profile, id FeatureID, fp FeatureParam, ctx FeatureCtx) (fl
 		return Ramp(float64(n), fp.Lo, fp.Hi, true), true
 	case F_ENVELOPE:
 		n := countErrPrefix(p.Errs, now.Add(-ctx.LongWindow), ErrEnvPrefix)
+		if n < fp.NMin {
+			return 0, false
+		}
+		return Ramp(float64(n), fp.Lo, fp.Hi, true), true
+	case F_CHALLENGE:
+		n := len(since(p.Challenges, now.Add(-ctx.LongWindow)))
 		if n < fp.NMin {
 			return 0, false
 		}

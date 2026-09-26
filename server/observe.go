@@ -49,6 +49,13 @@ func (s *ChatServer) observeHistory(ip string) {
 	s.Behavior.ObserveHistory(ip, time.Now())
 }
 
+func (s *ChatServer) observeChallenge(ip string) {
+	if s.Behavior == nil {
+		return
+	}
+	s.Behavior.ObserveChallenge(ip, time.Now())
+}
+
 func (s *ChatServer) observeHTTP(ip, class string, status int) {
 	if s.Behavior == nil {
 		return

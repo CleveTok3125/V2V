@@ -50,9 +50,12 @@ type Profile struct {
 	Discs     []time.Time
 	Msgs      []time.Time
 	HistReq   []time.Time
-	HTTP      []HTTPEvent
-	Errs      []ErrEvent
-	Identity  IdentityKind
+	// Challenges records failed or ignored PoW challenges: repeated
+	// non-compliance is the persistence signal (not mere re-issues).
+	Challenges []time.Time
+	HTTP       []HTTPEvent
+	Errs       []ErrEvent
+	Identity   IdentityKind
 	// IdentityCount tracks distinct display/identity keys seen from
 	// this IP: many cheap identities on one IP is itself a signal.
 	IdentityCount int
@@ -102,6 +105,12 @@ func (p *Profile) AddMessage(t time.Time) {
 func (p *Profile) AddHistoryReq(t time.Time) {
 	p.touch(t)
 	p.HistReq = appendCappedTime(p.HistReq, t)
+}
+
+// AddChallenge records one failed or ignored PoW challenge (time only).
+func (p *Profile) AddChallenge(t time.Time) {
+	p.touch(t)
+	p.Challenges = appendCappedTime(p.Challenges, t)
 }
 
 // AddHTTP records one non-chat request (class/status/time only).

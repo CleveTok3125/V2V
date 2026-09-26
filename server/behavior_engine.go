@@ -117,6 +117,14 @@ func (e *BehaviorEngine) ObserveHistory(ip string, now time.Time) {
 	e.store.Get(ip).AddHistoryReq(now)
 }
 
+// ObserveChallenge records one failed or ignored PoW challenge (time
+// only): sustained non-compliance is the persistence signal.
+func (e *BehaviorEngine) ObserveChallenge(ip string, now time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.store.Get(ip).AddChallenge(now)
+}
+
 // ObserveHTTP records one non-chat request (class/status/time only).
 func (e *BehaviorEngine) ObserveHTTP(ip, class string, status int, now time.Time) {
 	e.mu.Lock()

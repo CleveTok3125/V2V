@@ -144,6 +144,11 @@ type ChatServer struct {
 	// two connections from one IP cannot halve the effective cooldown.
 	HistoryCooldown *guard.CooldownMap
 
+	// SlowCooldown throttles chat per IP at tier 2+: base cooldown
+	// times the tier multiplier. Per-IP (not per-session) so opening
+	// another connection cannot halve it.
+	SlowCooldown *guard.CooldownMap
+
 	// Blocklist is the operator IP/CIDR denylist matched before any
 	// rate limit. Inflight counts handshakes between the global-cap
 	// check and registration, so a burst cannot overshoot the cap.
@@ -198,6 +203,7 @@ func NewChatServer() *ChatServer {
 		Hub:             Hub{Clients: make(map[*websocket.Conn]*ClientSession), DisplayNameCount: make(map[string]int)},
 		IpCounts:        make(map[string]int),
 		HistoryCooldown: guard.NewCooldownMap(),
+		SlowCooldown:    guard.NewCooldownMap(),
 		LastConnectTime: make(map[string]time.Time),
 		AuthFails:       make(map[string]RateLimitRecord),
 		DisplaySalt:     salt,

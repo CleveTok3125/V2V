@@ -59,7 +59,7 @@ func TestCandidateBehaviorMatchesTemplate(t *testing.T) {
 	for _, name := range []string{
 		"RHYTHM", "THROUGHPUT", "NIGHT", "CONTINUITY", "CHURN", "IDENTITY",
 		"IPREP", "PROTOERR", "HTTP_RATE", "HTTP_ERROR", "ENDPOINT_FOCUS",
-		"AUTH_PROBE", "ENVELOPE",
+		"AUTH_PROBE", "ENVELOPE", "CHALLENGE",
 	} {
 		fp, ok := bc.Features[behavior.FeatureID(strings.ToLower(name))]
 		if !ok {
@@ -130,6 +130,7 @@ func candidateBehaviorConfig() *serverconfig.BehaviorConfig {
 	set(behavior.F_ENDPOINT_FOCUS, 0.10, 5, 0, 1, true)
 	set(behavior.F_AUTH_PROBE, 0.10, 1, 0, 5, true)
 	set(behavior.F_ENVELOPE, 0.10, 1, 0, 5, true)
+	set(behavior.F_CHALLENGE, 0.20, 1, 1, 8, true)
 	return bc
 }
 
@@ -216,5 +217,51 @@ func TestBehaviorCalibration(t *testing.T) {
 			}
 		}
 		checkTier(t, "busyLegit", "10.1.0.6", gaps, nil, 0)
+	})
+}
+
+// Challenge non-compliance: repeated failed/ignored challenges escalate
+// a defiant flood, a lone failure forgives legit profiles, and full
+// quiet recovers to tier 0.
+func challengeTier(t *testing.T, name, ip string, gaps []time.Duration, nChal int, scoreAfter time.Duration, want int) {
+	t.Helper()
+	eng := NewBehaviorEngine(behavior.NewStore(500), behavior.NewStats(), stubGeo{}, "")
+	base := calibDay()
+	eng.ObserveConnect(ip, "u", behavior.IdGuest, base)
+	end := feedMsgs(eng, ip, base, gaps)
+	for i := 0; i < nChal; i++ {
+		eng.ObserveChallenge(ip, end.Add(time.Duration(i)*30*time.Second))
+	}
+	tier, s := eng.Score(ip, candidateBehaviorConfig(), end.Add(scoreAfter), time.UTC)
+	t.Logf("%s: score=%.3f tier=%d (want %d)", name, s, tier, want)
+	if tier != want {
+		t.Errorf("%s: got tier %d score %.3f, want tier %d", name, tier, s, want)
+	}
+}
+
+func TestChallengeEscalation(t *testing.T) {
+	flood100 := floodGaps(100, 1100*time.Millisecond, 0, 0)
+	sustain := floodGaps(600, 1100*time.Millisecond, 0, 0)
+	humanBurst := floodGaps(15, 1100*time.Millisecond, 0, 0)
+	busy := make([]time.Duration, 0, 60)
+	for i := 0; i < 60; i++ {
+		if i%2 == 0 {
+			busy = append(busy, 20*time.Second)
+		} else {
+			busy = append(busy, 100*time.Second)
+		}
+	}
+	t.Run("defiantEscalates", func(t *testing.T) {
+		challengeTier(t, "defiantEscalates", "10.2.0.1", flood100, 8, 8*30*time.Second+time.Second, 2)
+	})
+	t.Run("sustainedStaysTier2", func(t *testing.T) {
+		challengeTier(t, "sustainedStaysTier2", "10.2.0.2", sustain, 8, 8*30*time.Second+time.Second, 2)
+	})
+	t.Run("singleChallengeForgiven", func(t *testing.T) {
+		challengeTier(t, "humanBurst", "10.2.0.3", humanBurst, 1, 31*time.Second, 0)
+		challengeTier(t, "busyLegit", "10.2.0.4", busy, 3, 3*30*time.Second+time.Second, 0)
+	})
+	t.Run("quietRecovers", func(t *testing.T) {
+		challengeTier(t, "quietRecovers", "10.2.0.5", flood100, 8, 3*time.Hour, 0)
 	})
 }

@@ -199,6 +199,41 @@ func (c *ClientSession) WritePump() {
 	}
 }
 
+// allowSlowSend enforces the tier slowmode for non-unlimited
+// sessions: tier 2+ may only send once per base×mult (per IP, so a
+// second connection cannot halve it). Unlimited keeps the existing
+// bypass and tiers below 2 cost nothing (no map record). A drop warns
+// best-effort and never touches lastMessageTime: the window stays
+// anchored at the last allowed send.
+func (s *ChatServer) allowSlowSend(session *ClientSession, clientIP string, base time.Duration) bool {
+	if session.Perms.CanMessageUnlimited {
+		return true
+	}
+	if s.Behavior == nil || s.SlowCooldown == nil {
+		return true
+	}
+	tier, ok := s.Behavior.Tier(clientIP)
+	if !ok || tier < 2 {
+		return true
+	}
+	mult := 1
+	if a := Cfg.Abuse.Load(); a != nil && a.Behavior != nil {
+		mult = a.Behavior.SlowMult(tier)
+	}
+	if mult <= 1 {
+		return true
+	}
+	d := base * time.Duration(mult)
+	if !s.SlowCooldown.Allow(clientIP, d) {
+		select {
+		case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Kênh đang ở chế độ chậm (tier %d). Vui lòng đợi %v.", tier, d)):
+		default:
+		}
+		return false
+	}
+	return true
+}
+
 func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 	defer func() {
 		s.Hub.unregisterClient(session, clientIP)
@@ -566,6 +601,14 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			default:
 				warn(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err))
 			}
+			continue
+		}
+
+		// Slowmode drops must not reach the observation/broadcast path,
+		// and do not stamp lastMessageTime: the SlowCooldown window is
+		// the authority while a session is throttled.
+		if !s.allowSlowSend(session, clientIP, dynCfg.MessageCooldown) {
+			updateReadDeadline()
 			continue
 		}
 

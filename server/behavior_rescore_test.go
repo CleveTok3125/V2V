@@ -81,3 +81,13 @@ func TestDueForRescoreAfterEviction(t *testing.T) {
 		t.Fatal("evicted profile must be due to re-establish its baseline")
 	}
 }
+
+func TestObserveChallengeRecords(t *testing.T) {
+	eng := NewBehaviorEngine(behavior.NewStore(100), behavior.NewStats(), stubGeo{}, "")
+	now := time.Now()
+	eng.ObserveChallenge("10.0.0.12", now)
+	eng.ObserveChallenge("10.0.0.12", now.Add(time.Minute))
+	if got := len(eng.store.Get("10.0.0.12").Challenges); got != 2 {
+		t.Fatalf("two challenges must ring twice, got %d", got)
+	}
+}

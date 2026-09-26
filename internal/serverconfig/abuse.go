@@ -66,6 +66,10 @@ type BehaviorConfig struct {
 	GroupMinMemb int
 	TierEnter    []float64
 	TierExit     []float64
+	// SlowmodeMult holds the message-cooldown multiplier per tier
+	// (slot 0 unused like the thresholds; tiers below 2 always map
+	// to 1). A tier-2+ session may only send once per base×mult.
+	SlowmodeMult []int
 	RecheckMin   time.Duration
 	RecheckMax   time.Duration
 	// ScoreEveryNMsgs re-arms scoring after this many messages since
@@ -78,6 +82,18 @@ type BehaviorConfig struct {
 	Retention       []time.Duration
 	StatsEnabled    bool
 	StatsWindow     time.Duration
+}
+
+// SlowMult returns the message-cooldown multiplier for a tier: 1
+// (no slowmode) below tier 2 or outside the configured table.
+func (b *BehaviorConfig) SlowMult(tier int) int {
+	if b == nil || tier < 2 || tier >= len(b.SlowmodeMult) {
+		return 1
+	}
+	if b.SlowmodeMult[tier] < 1 {
+		return 1
+	}
+	return b.SlowmodeMult[tier]
 }
 
 var abuseFeatures = []struct {
@@ -97,6 +113,7 @@ var abuseFeatures = []struct {
 	{behavior.F_ENDPOINT_FOCUS, "ENDPOINT_FOCUS"},
 	{behavior.F_AUTH_PROBE, "AUTH_PROBE"},
 	{behavior.F_ENVELOPE, "ENVELOPE"},
+	{behavior.F_CHALLENGE, "CHALLENGE"},
 }
 
 // EffectiveScaleMode returns the attack-scale mode, defaulting to max
@@ -360,6 +377,12 @@ func LoadAbuseConfig() (AbuseConfig, []string, error) {
 	}
 	b.TierEnter = append([]float64{0}, enterVals...)
 	b.TierExit = append([]float64{0}, exitVals...)
+	multVals := []int{0, 0}
+	for n := 2; n < cfg.PowTierCount; n++ {
+		m, _ := l.reqInt(fmt.Sprintf("TIER%d_SLOWMODE_MULT", n))
+		multVals = append(multVals, m)
+	}
+	b.SlowmodeMult = multVals
 	b.RecheckMin, _ = l.reqDuration("POW_RECHECK_MIN")
 	b.RecheckMax, _ = l.reqDuration("POW_RECHECK_MAX")
 	b.ScoreEveryNMsgs, _ = l.reqInt("BEHAVIOR_SCORE_EVERY_N_MSGS")
@@ -422,6 +445,11 @@ func LoadAbuseConfig() (AbuseConfig, []string, error) {
 	}
 	if b.RecheckMin <= 0 || b.RecheckMax < b.RecheckMin {
 		return AbuseConfig{}, nil, fmt.Errorf("abuse config: POW_RECHECK_MIN/MAX must satisfy 0<MIN<=MAX")
+	}
+	for n := 2; n < cfg.PowTierCount; n++ {
+		if b.SlowmodeMult[n] < 1 {
+			return AbuseConfig{}, nil, fmt.Errorf("abuse config: TIER%d_SLOWMODE_MULT must be >= 1", n)
+		}
 	}
 	if b.ScoreEveryNMsgs < 1 {
 		return AbuseConfig{}, nil, fmt.Errorf("abuse config: BEHAVIOR_SCORE_EVERY_N_MSGS must be >= 1")

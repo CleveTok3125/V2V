@@ -48,7 +48,7 @@ func setAbuseEnv(t *testing.T, enabled bool) {
 	t.Setenv("BEHAVIOR_IDENTITY_GUEST", "1")
 	t.Setenv("BEHAVIOR_IDENTITY_TRIP", "0.4")
 	t.Setenv("BEHAVIOR_IDENTITY_KEY", "0.15")
-	for _, f := range []string{"RHYTHM", "THROUGHPUT", "NIGHT", "CONTINUITY", "CHURN", "IDENTITY", "IPREP", "PROTOERR", "HTTP_RATE", "HTTP_ERROR", "ENDPOINT_FOCUS", "AUTH_PROBE", "ENVELOPE"} {
+	for _, f := range []string{"RHYTHM", "THROUGHPUT", "NIGHT", "CONTINUITY", "CHURN", "IDENTITY", "IPREP", "PROTOERR", "HTTP_RATE", "HTTP_ERROR", "ENDPOINT_FOCUS", "AUTH_PROBE", "ENVELOPE", "CHALLENGE"} {
 		t.Setenv("BEHAVIOR_W_"+f, "0.1")
 		t.Setenv("BEHAVIOR_NMIN_"+f, "5")
 		t.Setenv("BEHAVIOR_RAMP_"+f+"_LO", "0")
@@ -67,6 +67,8 @@ func setAbuseEnv(t *testing.T, enabled bool) {
 	t.Setenv("BEHAVIOR_TIER3_EXIT", "0.7")
 	t.Setenv("POW_RECHECK_MIN", "5m")
 	t.Setenv("POW_RECHECK_MAX", "15m")
+	t.Setenv("TIER2_SLOWMODE_MULT", "10")
+	t.Setenv("TIER3_SLOWMODE_MULT", "60")
 	t.Setenv("BEHAVIOR_SCORE_EVERY_N_MSGS", "20")
 	t.Setenv("ATTACK_SCALE_MODE", "max")
 	t.Setenv("ATTACK_SCALE_W_REJECT", "1")
@@ -100,8 +102,8 @@ func TestLoadAbuseHappyPath(t *testing.T) {
 	if len(cfg.PowTiers) != 4 || len(cfg.Behavior.TierEnter) != 4 || len(cfg.Behavior.TierExit) != 4 {
 		t.Fatalf("tier slices wrong: %+v", cfg)
 	}
-	if len(cfg.Behavior.Features) != 13 {
-		t.Fatalf("want 13 features, got %d", len(cfg.Behavior.Features))
+	if len(cfg.Behavior.Features) != 14 {
+		t.Fatalf("want 14 features, got %d", len(cfg.Behavior.Features))
 	}
 }
 
@@ -186,5 +188,35 @@ func TestLoadAbuseBadGroupARanges(t *testing.T) {
 		if _, _, err := LoadAbuseConfig(); err == nil {
 			t.Fatalf("%s=%s must fail", tc.key, tc.val)
 		}
+	}
+}
+
+func TestSlowmodeMult(t *testing.T) {
+	setAbuseEnv(t, true)
+	t.Setenv("TIER2_SLOWMODE_MULT", "10")
+	t.Setenv("TIER3_SLOWMODE_MULT", "60")
+	cfg, _, err := LoadAbuseConfig()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Behavior == nil {
+		t.Fatal("behavior must load when enabled")
+	}
+	for tier, want := range map[int]int{0: 1, 1: 1, 2: 10, 3: 60} {
+		if got := cfg.Behavior.SlowMult(tier); got != want {
+			t.Fatalf("tier %d mult = %d, want %d", tier, got, want)
+		}
+	}
+	if got := cfg.Behavior.SlowMult(99); got != 1 {
+		t.Fatalf("out-of-range tier must not slowmode, got %d", got)
+	}
+}
+
+func TestSlowmodeMultRejectsZero(t *testing.T) {
+	setAbuseEnv(t, true)
+	t.Setenv("TIER2_SLOWMODE_MULT", "0")
+	t.Setenv("TIER3_SLOWMODE_MULT", "60")
+	if _, _, err := LoadAbuseConfig(); err == nil {
+		t.Fatal("zero mult must fail")
 	}
 }

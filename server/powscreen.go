@@ -264,11 +264,14 @@ func (s *ChatServer) behaviorTick(now time.Time, lastSave, lastStats *time.Time)
 	kick, mute := s.Screener.CheckDeadline(now, under)
 	for _, c := range mute {
 		if sess, ok := byConn[c]; ok {
+			// Letting the challenge expire is non-compliance too.
+			s.observeChallenge(sess.IP)
 			s.unicast(sess, "[Hệ thống]: Quá hạn xác minh, chat tạm dừng cho tới khi bạn hoàn thành thử thách PoW mới.")
 		}
 	}
 	for _, c := range kick {
 		if sess, ok := byConn[c]; ok {
+			s.observeChallenge(sess.IP)
 			// unregisterClient closes the conn, so ReadPump's defer
 			// runs observeDisconnect; calling it here would double-count.
 			s.Hub.unregisterClient(sess, sess.IP)
@@ -362,6 +365,9 @@ func (s *ChatServer) handlePowFrame(session *ClientSession, raw string) {
 			return
 		}
 		if _, ok := s.Screener.Decline(dec.ChallengeID); ok {
+			// Declining a challenge is non-compliance: feed the
+			// challenge feature so sustained refusal escalates.
+			s.observeChallenge(session.IP)
 			unicast("[Hệ thống]: Đã ghi nhận từ chối, chat tạm dừng cho tới khi xác minh.")
 		}
 	}
