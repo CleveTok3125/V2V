@@ -136,6 +136,6 @@ Mở `http://localhost:10000/web/` cho bản web.
 
 - **Chi tiết kỹ thuật:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — kiến trúc, giao thức wire, tripcode, lưu trữ, bảo mật.
 - **Cấu hình:** `template/server/instances/default/.env` có đủ biến môi trường với comment.
-- **Công cụ quản trị:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`, `config sync/diff/check/manifest`, `instance init/list/status/up/down/restart/logs`).
+- **Công cụ quản trị:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`, `config sync/diff/check/manifest/take`, `instance init/list/status/up/down/restart/logs`).
 
 Báo lỗi và PR luôn được chào đón.

@@ -90,11 +90,12 @@ make clean
 `v2vctl config sync` migrates the template into a live config, preserving operator-set values. The merge is template-first: the template wins structure, order and comments; the live config wins values per key.
 
 - **Manifest:** the project root holds a tracked `v2v-template.json` (`version`, `type`, `templateDir`, `files[]`, `add_policy`). Each file entry declares `id`, `path` (template-relative), `format` (`env|json|jsonc|trust-dir`), `dest` (config-relative), optional `target: "client"` (dest is under the OS config dir) and `keys` (expected key order). `--dir` points at the directory holding the manifest (default `.`); `--to` is the instance root (default `instances/default`, or `V2V_ROOT`). Missing or invalid manifest fails the run; there is no fallback.
-- **Commands:** `config sync` (merge + write), `config diff` (unified diff preview, `--format text|json`), `config check` (manifest vs template drift), `config manifest --write` (regenerate `keys` while preserving `add_policy`). `--only` selects a subset of manifest ids (default `env,roles,trust`; `client` is opt-in).
+- **Commands:** `config sync` (merge + write), `config diff` (unified diff preview, `--format text|json`), `config check` (manifest vs template drift), `config take` (pick drifted values to reset, see below), `config manifest --write` (regenerate `keys` while preserving `add_policy`). `--only` selects a subset of manifest ids (default `env,roles,trust`; `client` is opt-in).
 - **Render:** `.env` and trust files are walked line-by-line so comments, blank lines and quoting stay byte-identical; a commented `#KEY=value` default is activated in place when the operator enables it; template JSON is re-indented with the template's own indent unit and key order. Merging the template with itself reproduces it byte-for-byte.
 - **`add_policy`:** keys that must not inherit the template value when newly added. `env.comment` renders them commented (`#KEY=value`); `roles`/`jsonc` `skip` omits them. Only the added branch is affected. The list is for operator-supplied values only: a key whose shipped value is a handled sentinel (e.g. `PROXY_PROVIDER=false`, which fails the boot with an actionable message) stays active, and listing it here would hide that message behind a comment.
 - **Guards:** the config root and every destination must stay outside the template root; malformed template/local JSON is refused instead of being overwritten. JSONC targets are lossy (comments and formatting are normalized), so `sync` requires `--force` for such entries after reviewing `diff`.
 - **Take (`--prefer-template`):** inverts the merge for designated parts only: the template wins values for `id` (whole file: every template-known key) or `id:key` (single key), comma-separated and repeatable (e.g. `--prefer-template env:PORT,env:BIND_ADDR`). Unknown ids/keys fail closed. Local-only keys are never dropped. Trust-dir takes whole files verbatim and refuses when the template file has no entries. An explicit take beats `add_policy` skip/comment. Writes with a non-empty take need `--yes` after the mandatory diff preview (`diff`/`--dry-run` preview without writing); the report lists reset keys under `taken`.
+- **Take picker (`config take`):** lists every drifted value (`Overridden` env/json keys, trust files with local-only entries) with local and template values side by side, preselected. A TTY session picks entries in a multi-select form plus a bottom confirmation, then applies through the sync write path (same backups and `--force` gating). `--list` prints `id:key` lines for piping; `--yes` takes everything without prompting. No TTY and no `--yes`/`--list` fails closed.
 - **Modes:** config artifacts are written `0644` (dirs `0755`) via `identity.WriteConfigFile`; secrets keep `0600`/`0700`.
 
 ## Instances (multiple environments)
@@ -429,15 +430,21 @@ the pinned server pubkey before spending work.
 randomized `POW_RECHECK_MIN/MAX` cadence and challenges only flagged
 sessions (tier ≥ 1): a per-session `[Hệ thống]:` notice (Tab 2) explains
 the check, then a signed `pow_offer` frame. Answers ride `pow_result`;
-`pow_decline` (or silence past `max(SCREEN_DEADLINE, IdleChatTimeout)`)
-mutes chat sends while reading stays open; overdue challenges kick only
-while under attack. Wrong solutions are consumed to bound verify cost.
+`pow_decline` (or silence past `SCREEN_DEADLINE`) mutes chat sends while
+reading stays open; overdue challenges kick only while under attack.
+Wrong solutions are consumed to bound verify cost.
+- **Tier slowmode:** a session whose IP reaches tier 2 or 3 may only
+send one chat message per `MESSAGE_COOLDOWN × TIER{n}_SLOWMODE_MULT`
+(`10×`/`60×` by default), enforced per IP so a second connection cannot
+halve it; tiers 0/1 are unthrottled beyond the normal cooldown and
+`can_message_unlimited` keeps its existing bypass.
 - **Behavior scoring** (`internal/behavior`, metadata timing/count only,
-never content): per-IP profiles (event rings, counters) feed 13
+never content): per-IP profiles (event rings, counters) feed 14
 normalized features — rhythm (CV of gaps), long-window throughput,
 deep-night share, continuity, connect churn, identity cost, IP
 reputation, protocol/auth/envelope anomalies, HTTP rate/errors/endpoint
-focus. `score = (Σw·f/Σw)^γ` with per-feature weight/floor/ramp
+focus, and PoW-challenge non-compliance (declined/expired, count in the
+long window). `score = (Σw·f/Σw)^γ` with per-feature weight/floor/ramp
 (`W=0` disables); no evidence ⇒ clean IP scores 0 (cold start stays
 tier 0), blocklist hit scores 1. Tiers move on hysteresis
 (`ENTER_k>EXIT_k>ENTER_{k-1}`); the lowest tier needs no PoW.
