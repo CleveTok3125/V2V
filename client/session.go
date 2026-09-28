@@ -31,7 +31,7 @@ import (
 // atomic); ChainMu serializes tip updates between the pump and the
 // input loop; PendingMu guards the placeholder/echo queues at the
 // two threads that share them. Pump-side chain reads (InSync,
-// SyncHashes, HaveTip in checkChainLink and handleHistorySync) stay
+// SyncHeights, HaveTip in checkChainLink and handleHistorySync) stay
 // under caller-held DisplayMu with no ChainMu: the pump is their
 // only writer, so a second lock would add nothing.
 type Session struct {
@@ -135,8 +135,35 @@ type ChainState struct {
 	// predate the running tip, so the pump renders and indexes them
 	// without link verification or echo matching. Set and cleared
 	// under DisplayMu like InSync.
-	InOlder      bool
-	SyncHashes   map[string]bool
+	InOlder bool
+	// InRecover marks a recovery window in flight: the server is
+	// refilling missed heights at or above the running tip's past.
+	// Recovery wires verify against their own anchor (the tip at
+	// detection time), never the running tip. Set on the recovery
+	// header; cleared by any footer, the trailer, or a wire newer
+	// than the pending window. Under DisplayMu like InSync.
+	InRecover bool
+	// RecoverRendered is set by checkRecoverWire when it renders a
+	// recovered wire itself: the pump must then skip its own
+	// renderChatBlock, otherwise recovered messages duplicate on
+	// screen. Reset per wire by verifyReplayWire. Caller holds
+	// DisplayMu.
+	RecoverRendered bool
+	// RecoverPending is the outstanding refill: the missed [From, To]
+	// heights plus the anchor they must continue. Nil when idle.
+	// Written under DisplayMu by the pump.
+	RecoverPending *recoverWindow
+	// SyncHeights maps chained heights received during the join replay
+	// to their hashes. Reset when the join window opens; the trailer
+	// uses it both to refill dropped heights and to judge a fork by
+	// comparing the persisted tip's height. Under DisplayMu like the
+	// other sync fields.
+	SyncHeights map[uint64][32]byte
+	// SyncClosed marks that a join window's footer just closed, so the
+	// next trailer can settle its drops (the footer clears InSync
+	// before the trailer arrives). Cleared by any window start and by
+	// the trailer itself.
+	SyncClosed   bool
 	TipSinceSave uint64
 	WireIdx      *wireIndex
 	RenderCache  *renderCache
@@ -189,7 +216,7 @@ func NewSession() *Session {
 			PendingPlaceholders: []pendingMsg{},
 		},
 		Chain: ChainState{
-			SyncHashes: map[string]bool{},
+			SyncHeights: map[uint64][32]byte{},
 		},
 	}
 }

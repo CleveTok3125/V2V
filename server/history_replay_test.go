@@ -373,6 +373,115 @@ func seedSegmentHistory(s *ChatServer) {
 	}
 }
 
+// drainRange runs serveHistoryRange and splits the stream into the
+// recovery header, content lines, footer and trailer.
+func drainRange(t *testing.T, s *ChatServer, after uint64, limit int) (header string, contents []string, footer string, trailer HistorySync) {
+	t.Helper()
+	sess := &ClientSession{Send: make(chan []byte, 4096), DisplayName: "T#0000", Perms: GetDefaultPermission()}
+	done := make(chan struct{})
+	go func() {
+		s.serveHistoryRange(sess, after, limit)
+		close(done)
+	}()
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case msg := <-sess.Send:
+			var hs HistorySync
+			if err := json.Unmarshal(msg, &hs); err == nil && hs.Type == "history_sync" {
+				trailer = hs
+				<-done
+				return header, contents, footer, trailer
+			}
+			text := string(msg)
+			if strings.Contains(text, "Kết thúc lịch sử bù") {
+				footer = text
+				continue
+			}
+			if strings.Contains(text, "Lịch sử bù") {
+				header = text
+				continue
+			}
+			contents = append(contents, text)
+		case <-timeout:
+			t.Fatal("range stream stalled before trailer")
+		}
+	}
+}
+
+func seedRangeHistory(s *ChatServer) {
+	for _, h := range []uint64{1, 2, 3, 4, 5, 6} {
+		if h == 4 {
+			s.Chain.appendMessageToHistory(noticeLine("date", "day marker"))
+		}
+		s.Chain.appendMessageToHistory(tagLine(h, "chat", "", "line"))
+	}
+}
+
+// A recovery window carries chained lines at or above the cursor in
+// ascending order, with notices left out of the window.
+func TestRange_Ascending(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	seedRangeHistory(s)
+	header, contents, footer, trailer := drainRange(t, s, 4, 10)
+	if header != "--- Lịch sử bù ---" {
+		t.Fatalf("range header = %q", header)
+	}
+	if len(contents) != 3 {
+		t.Fatalf("range from 4 = %d lines, want 3 (4,5,6): %q", len(contents), contents)
+	}
+	var heights []uint64
+	for _, c := range contents {
+		var wire WireMessage
+		if err := json.Unmarshal([]byte(c), &wire); err != nil {
+			t.Fatalf("range line not a wire: %q", c)
+		}
+		heights = append(heights, wire.ChainHeight)
+	}
+	if fmt.Sprint(heights) != "[4 5 6]" {
+		t.Fatalf("range heights = %v, want [4 5 6]", heights)
+	}
+	if !strings.Contains(footer, "Kết thúc lịch sử bù (3/3)") {
+		t.Fatalf("range footer wrong: %q", footer)
+	}
+	if trailer.MinHeight != 4 || trailer.MaxHeight != 6 || trailer.Sent != 3 || trailer.Total != 3 {
+		t.Fatalf("range trailer wrong: %+v", trailer)
+	}
+}
+
+// The limit caps the window; notices never occupy chain positions.
+func TestRange_Limit(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	seedRangeHistory(s)
+	_, contents, _, trailer := drainRange(t, s, 1, 2)
+	if len(contents) != 2 {
+		t.Fatalf("range limit 2 = %d lines, want 2", len(contents))
+	}
+	if trailer.MinHeight != 1 || trailer.MaxHeight != 2 {
+		t.Fatalf("range trailer wrong: %+v", trailer)
+	}
+}
+
+// A cursor past every stored height yields an empty but terminated
+// stream, so the requester cancels its recovery instead of hanging.
+func TestRange_PastTip(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	seedRangeHistory(s)
+	_, contents, footer, trailer := drainRange(t, s, 100, 10)
+	if len(contents) != 0 {
+		t.Fatalf("range past tip must be empty, got %q", contents)
+	}
+	if !strings.Contains(footer, "không còn tin trong bộ nhớ") {
+		t.Fatalf("exhausted range must say so: %q", footer)
+	}
+	if trailer.Sent != 0 || trailer.Total != 0 {
+		t.Fatalf("empty range trailer wrong: %+v", trailer)
+	}
+}
+
 // A bounded request returns the window right below the cutoff.
 func TestSegment_Before(t *testing.T) {
 	testCfg(t)

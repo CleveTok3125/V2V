@@ -208,7 +208,20 @@ type ClientConfig struct {
 		MaxTier   int   `json:"maxTier"`
 		MaxCostMs int64 `json:"maxCostMs"`
 	} `json:"pow"`
+	// History controls recovery of missed lines. RecoverCap bounds how
+	// many missing lines the client auto-requests to fill a detected
+	// chain gap; larger gaps only warn. Zero disables auto-recovery;
+	// absent backfills to the default. The server still caps each
+	// request at maxHistorySend.
+	History struct {
+		RecoverCap *int `json:"recoverCap"`
+	} `json:"history"`
 }
+
+// DefaultHistoryRecoverCap is the auto-recovery cap when the history
+// section is absent: a single request burst stays under the server's
+// per-session send queue, so recovery cannot drop its own lines.
+const DefaultHistoryRecoverCap = 200
 
 // DefaultClientConfig returns defaults matching current hardcoded values.
 func DefaultClientConfig() *ClientConfig {
@@ -257,6 +270,7 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.Reply.Enabled = boolPtr(true)
 	c.UI.Reply.QuoteMaxRunes = 80
 	c.UI.Clipboard.ClearAfterSec = intPtr(30)
+	c.History.RecoverCap = intPtr(DefaultHistoryRecoverCap)
 	// Code highlight palette (dark, matching the trip palette hues).
 	// A [0,0,0] entry means "use this default".
 	c.UI.CodeStyle.Background = [3]int{48, 48, 48}
@@ -457,6 +471,16 @@ func (c *ClientConfig) ClipboardClearAfterSec() int {
 	return *c.UI.Clipboard.ClearAfterSec
 }
 
+// HistoryRecoverCap returns the auto-recovery cap: how many missing
+// lines the client requests to fill a detected chain gap. Zero
+// disables auto-recovery; absent or negative means the default.
+func (c *ClientConfig) HistoryRecoverCap() int {
+	if c == nil || c.History.RecoverCap == nil || *c.History.RecoverCap < 0 {
+		return DefaultHistoryRecoverCap
+	}
+	return *c.History.RecoverCap
+}
+
 // Load reads a client config file. The config is read-only input: a
 // missing file yields in-memory defaults and nothing is ever written
 // back. Mutable state lives in separate cache files.
@@ -553,6 +577,10 @@ func parse(data []byte) (*ClientConfig, error) {
 	// Backfill meta visibility (absent section means default: shown).
 	if c.UI.Meta.Show == nil {
 		c.UI.Meta.Show = def.UI.Meta.Show
+	}
+	// Backfill recovery cap (absent means default: 200 auto lines).
+	if c.History.RecoverCap == nil {
+		c.History.RecoverCap = def.History.RecoverCap
 	}
 	// Backfill version-check knobs (absent means default: enabled warn).
 	if c.UI.VersionCheck.Enabled == nil {

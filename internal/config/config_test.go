@@ -232,6 +232,54 @@ func TestClipboardBackfill(t *testing.T) {
 
 // History paging knobs pin their defaults: 2s segment throttle,
 // disk lookup off (opt-in per deployment cost).
+func TestHistoryRecoverCap(t *testing.T) {
+	if got := DefaultClientConfig().HistoryRecoverCap(); got != 200 {
+		t.Fatalf("default recoverCap = %d, want 200", got)
+	}
+	var nilCfg *ClientConfig
+	if got := nilCfg.HistoryRecoverCap(); got != 200 {
+		t.Fatalf("nil config recoverCap = %d, want 200", got)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.jsonc")
+	// Old config without the history section backfills to the default.
+	raw, _ := json.Marshal(map[string]any{"defaults": map[string]any{"username": "A"}})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.HistoryRecoverCap(); got != 200 {
+		t.Fatalf("absent section recoverCap = %d, want 200", got)
+	}
+	// Explicit zero disables auto-recovery instead of backfilling.
+	raw, _ = json.Marshal(map[string]any{"history": map[string]any{"recoverCap": 0}})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.HistoryRecoverCap(); got != 0 {
+		t.Fatalf("explicit zero recoverCap = %d, want 0 (disabled)", got)
+	}
+	// A positive value is honored as-is.
+	raw, _ = json.Marshal(map[string]any{"history": map[string]any{"recoverCap": 50}})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.HistoryRecoverCap(); got != 50 {
+		t.Fatalf("explicit recoverCap = %d, want 50", got)
+	}
+}
+
 func TestHistoryPagingDefaults(t *testing.T) {
 	d := DefaultDynamic()
 	if d.HistorySegmentCooldown != 2*time.Second {

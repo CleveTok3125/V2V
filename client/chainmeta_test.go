@@ -584,65 +584,43 @@ func TestParseHistorySync(t *testing.T) {
 	}
 }
 
-func TestShouldWarnFork(t *testing.T) {
-	received := map[string]bool{"aa": true}
-	// Tip inside window but unseen -> warn (real fork: the window has no
-	// gaps by construction, so absence means the log changed).
-	if !shouldWarnFork(120, 101, 142, "zz", received) {
-		t.Error("in-window missing tip must warn")
-	}
-	// Tip seen in replay -> silent.
-	if shouldWarnFork(120, 101, 142, "aa", received) {
-		t.Error("replayed tip must not warn")
-	}
-	// Tip older than window -> silent adopt.
-	if shouldWarnFork(50, 101, 142, "zz", received) {
-		t.Error("pre-window tip must not warn")
-	}
-	// Tip newer than window (log shrank past it) -> silent adopt.
-	if shouldWarnFork(200, 101, 142, "zz", received) {
-		t.Error("post-window tip must not warn")
-	}
-	// Empty window (nothing chained replayed) -> silent.
-	if shouldWarnFork(5, 0, 0, "zz", map[string]bool{}) {
-		t.Error("empty window must not warn")
-	}
-}
-
 func TestForkWarning(t *testing.T) {
 	hs := HistorySync{Type: "history_sync", MinHeight: 101, MaxHeight: 142, Sent: 40, Total: 42}
-	full := map[string]bool{"aa": true, "bb": true}
+	var tip [32]byte
+	tip[0] = 0xaa
+	heights := map[uint64][32]byte{120: {0xbb}}
 	// No persisted tip: silent, no flush.
-	if w, f := forkWarning(hs, false, [32]byte{}, 120, full); w != "" || f {
+	if w, f := forkWarning(hs, false, [32]byte{}, 120, heights); w != "" || f {
 		t.Errorf("no persisted tip must stay silent, got %q flush=%v", w, f)
 	}
-	// Empty hash set: silent, no flush.
-	if w, f := forkWarning(hs, true, [32]byte{1}, 120, map[string]bool{}); w != "" || f {
-		t.Errorf("empty hashes must stay silent, got %q flush=%v", w, f)
-	}
-	// Missing in-window tip: warns and flushes.
-	w, f := forkWarning(hs, true, [32]byte{9}, 120, full)
+	// Same height, different hash: warns and flushes.
+	w, f := forkWarning(hs, true, tip, 120, heights)
 	if w == "" || !f {
-		t.Errorf("missing tip must warn+flush, got %q flush=%v", w, f)
+		t.Errorf("same-height different-hash must warn+flush, got %q flush=%v", w, f)
 	}
-	if !strings.Contains(w, "#120") || !strings.Contains(w, "101") {
-		t.Errorf("warning must name heights, got %q", w)
+	if !strings.Contains(w, "#120") {
+		t.Errorf("warning must name the height, got %q", w)
 	}
-	// Present tip: silent.
-	var present [32]byte
-	present[0] = 0xaa
-	if w, f := forkWarning(hs, true, present, 120, map[string]bool{hex.EncodeToString(present[:]): true}); w != "" || f {
-		t.Errorf("present tip must stay silent, got %q flush=%v", w, f)
+	// Same height, same hash: silent.
+	if w, f := forkWarning(hs, true, tip, 120, map[uint64][32]byte{120: tip}); w != "" || f {
+		t.Errorf("matching tip must stay silent, got %q flush=%v", w, f)
+	}
+	// Height absent from the replay (dropped in transit): silent.
+	if w, f := forkWarning(hs, true, tip, 120, map[uint64][32]byte{}); w != "" || f {
+		t.Errorf("absent height must stay silent, got %q flush=%v", w, f)
 	}
 	// Pre-window tip: silent.
-	if w, f := forkWarning(hs, true, [32]byte{1}, 50, full); w != "" || f {
+	if w, f := forkWarning(hs, true, tip, 50, heights); w != "" || f {
 		t.Errorf("pre-window tip must stay silent, got %q flush=%v", w, f)
 	}
-	// Partial replay (full peer buffer dropped lines): the window has
-	// holes, so a missing tip proves nothing -> silent, no flush.
+	// Post-window tip (log shrank past it): silent.
+	if w, f := forkWarning(hs, true, tip, 200, heights); w != "" || f {
+		t.Errorf("post-window tip must stay silent, got %q flush=%v", w, f)
+	}
+	// Partial replay: the window has holes, so nothing is proven.
 	partial := hs
 	partial.Dropped = 3
-	if w, f := forkWarning(partial, true, [32]byte{9}, 120, full); w != "" || f {
+	if w, f := forkWarning(partial, true, tip, 120, heights); w != "" || f {
 		t.Errorf("partial replay must stay silent, got %q flush=%v", w, f)
 	}
 }

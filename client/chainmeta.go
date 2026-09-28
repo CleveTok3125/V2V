@@ -760,33 +760,26 @@ func parseHistorySync(raw []byte) (HistorySync, bool) {
 	return hs, true
 }
 
-// shouldWarnFork decides whether a persisted tip missing from a replay
-// signals tampering. A complete replayed window has no gaps (filtered
-// lines never occupied chain positions), so a tip inside the window
-// but absent from the received hashes means the log changed under us.
-// Tips outside the window adopt silently: older ones predate the
-// replay, newer ones mean the log grew or shrank past it.
-func shouldWarnFork(persistedHeight, syncMin, syncMax uint64, tipHex string, received map[string]bool) bool {
-	if persistedHeight < syncMin || persistedHeight > syncMax {
-		return false
-	}
-	return !received[tipHex]
-}
-
-// forkWarning evaluates the trailer fork check outside the read loop so
-// tests pin it without a TTY. It returns the warning line (or "") and
-// whether the caller should flush the tip afterwards. A trailer
-// reporting dropped lines describes an incomplete window: its holes
-// prove nothing, so the check stays silent.
-func forkWarning(hs HistorySync, havePersistedTip bool, persistedTip [32]byte, persistedHeight uint64, syncHashes map[string]bool) (string, bool) {
-	if !havePersistedTip || len(syncHashes) == 0 || hs.Dropped > 0 {
+// forkWarning evaluates the join-replay trailer fork check outside the
+// read loop so tests pin it without a TTY. A persisted tip is a fork
+// only when the same height was replayed with a different hash: an
+// absent height means the frame was dropped in transit, not that the
+// log changed. Heights outside the window adopt silently (older ones
+// predate the replay, newer ones mean the log grew or shrank past it),
+// and a trailer reporting drops cannot judge anything. It returns the
+// warning line (or "") and whether the caller should flush the tip.
+func forkWarning(hs HistorySync, havePersistedTip bool, persistedTip [32]byte, persistedHeight uint64, syncHeights map[uint64][32]byte) (string, bool) {
+	if !havePersistedTip || hs.Dropped > 0 {
 		return "", false
 	}
-	tipHex := strings.ToLower(hex.EncodeToString(persistedTip[:]))
-	if !shouldWarnFork(persistedHeight, hs.MinHeight, hs.MaxHeight, tipHex, syncHashes) {
+	if persistedHeight < hs.MinHeight || persistedHeight > hs.MaxHeight {
 		return "", false
 	}
-	return fmt.Sprintf("| [Local]: Lịch sử server không chứa tip đã lưu #%d (replay #%d–#%d) — log có thể đã phân nhánh (fork).\n", persistedHeight, hs.MinHeight, hs.MaxHeight), true
+	got, ok := syncHeights[persistedHeight]
+	if !ok || got == persistedTip {
+		return "", false
+	}
+	return fmt.Sprintf("| [Local]: Lịch sử server khác tip đã lưu ở #%d — log có thể đã phân nhánh (fork).\n", persistedHeight), true
 }
 
 // Session echo tracking and chain verification (moved from main).
@@ -808,16 +801,203 @@ func (s *Session) initChainState() {
 // verifyReplayWire runs echo matching and link verification for one
 // replayed wire, unless it belongs to an on-demand older segment: an
 // older height can never verify against the running tip, so verifying
-// would warn falsely and rewind the tip. Stashing is disabled during a
+// would warn falsely and rewind the tip. Recovery windows verify
+// against their own anchor instead. Stashing is disabled during a
 // catch-up replay too: historical echoes can never match a future
 // placeholder, so stashing them would only age into false "ID altered"
-// warnings. Caller must hold DisplayMu.
-func (s *Session) verifyReplayWire(wire WireMessage, allowStash bool) {
+// warnings. It reports whether a recovery window already rendered the
+// wire, in which case the caller must not render it again. Caller must
+// hold DisplayMu.
+func (s *Session) verifyReplayWire(wire WireMessage, allowStash bool) bool {
+	s.Chain.RecoverRendered = false
 	if s.Chain.InOlder {
-		return
+		return false
+	}
+	if s.Chain.InRecover {
+		s.checkRecoverWire(wire)
+		return s.Chain.RecoverRendered
 	}
 	s.consumeEchoLocked(wire, allowStash && !s.Chain.InSync)
 	s.checkChainLink(wire)
+	return false
+}
+
+// recoverWindow is one outstanding gap refill: the missed [From, To]
+// heights plus the anchor (height and hash of the running tip at
+// detection time) the first recovered wire must continue. Next and
+// LastHash advance with each verified wire. Missing, when non-nil,
+// marks which heights in the span were actually lost: the server
+// returns the whole span, and already-received heights are verified
+// and skipped instead of rendered. FollowUp holds a newer gap detected
+// while this window was in flight; finishRecovery promotes it so the
+// extra heights still get refilled.
+type recoverWindow struct {
+	From, To     uint64
+	AnchorHeight uint64
+	AnchorHash   [32]byte
+	Next         uint64
+	LastHash     [32]byte
+	Received     int
+	Failed       bool
+	RequestedAt  time.Time
+	Missing      map[uint64]bool
+	FollowUp     *recoverWindow
+}
+
+// recoverTimeout bounds one refill attempt: a gap detected after it
+// replaces the window and retries.
+const recoverTimeout = 5 * time.Second
+
+// maybeRequestRecovery files a history_request for a detected gap and
+// reports whether a refill is now active. Gaps beyond the configured
+// cap (or a disabled/unsendable request) keep the light notice only.
+// At most one request flies at a time. A newer gap inside the timeout
+// cannot extend the in-flight window — the server already capped the
+// reply at the requested limit — so it is queued as a follow-up refill
+// that fires when the current window settles. Caller must hold
+// DisplayMu.
+func (s *Session) maybeRequestRecovery(from, to, anchorHeight uint64, anchorHash [32]byte) bool {
+	return s.requestRecovery(from, to, anchorHeight, anchorHash, nil)
+}
+
+// requestRecovery is maybeRequestRecovery with an explicit missing set
+// for join-replay refills: the request spans the whole window, but only
+// heights in missing are rendered. A nil set means every height in the
+// span is missing (live gap). Caller must hold DisplayMu.
+func (s *Session) requestRecovery(from, to, anchorHeight uint64, anchorHash [32]byte, missing map[uint64]bool) bool {
+	capN := ClientCfg.HistoryRecoverCap()
+	if ClientCfg != nil && ClientCfg.Limits.MaxHistorySend > 0 && capN > ClientCfg.Limits.MaxHistorySend {
+		capN = ClientCfg.Limits.MaxHistorySend
+	}
+	gap := int(to - from + 1)
+	if capN <= 0 || gap > capN || s.Conn == nil {
+		return false
+	}
+	if p := s.Chain.RecoverPending; p != nil && time.Since(p.RequestedAt) < recoverTimeout {
+		p.FollowUp = &recoverWindow{
+			From: from, To: to, AnchorHeight: anchorHeight, AnchorHash: anchorHash,
+			Missing: missing,
+		}
+		return true
+	}
+	if err := s.sendJSON(HistoryRequest{Type: "history_request", After: from, Limit: gap}); err != nil {
+		s.Chain.RecoverPending = nil
+		return false
+	}
+	s.Chain.RecoverPending = &recoverWindow{
+		From: from, To: to, AnchorHeight: anchorHeight, AnchorHash: anchorHash,
+		Next: from, LastHash: anchorHash, RequestedAt: time.Now(), Missing: missing,
+	}
+	count := gap
+	if missing != nil {
+		count = len(missing)
+	}
+	s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Đang bù %d tin (#%d–#%d)…\n", count, from, to))
+	return true
+}
+
+// recoverMissedFromTrailer turns a join-replay trailer that lost lines
+// into one bounded refill: heights in the intended window with no
+// recorded hash are the drops, and the first drop's predecessor anchors
+// the request. The whole span is fetched (the server cannot return
+// disjoint ranges), and received heights inside it are verified but not
+// re-rendered. Caller must hold DisplayMu.
+func (s *Session) recoverMissedFromTrailer(hs HistorySync) {
+	if hs.Dropped <= 0 || hs.MinHeight == 0 || hs.MaxHeight < hs.MinHeight {
+		return
+	}
+	missing := map[uint64]bool{}
+	var first, last uint64
+	for h := hs.MinHeight; h <= hs.MaxHeight; h++ {
+		if _, ok := s.Chain.SyncHeights[h]; !ok {
+			missing[h] = true
+			if first == 0 {
+				first = h
+			}
+			last = h
+		}
+	}
+	if first == 0 {
+		return
+	}
+	anchor, ok := s.Chain.SyncHeights[first-1]
+	if !ok {
+		// The predecessor never arrived either, so the refill's first
+		// link cannot be verified; leave a plain notice.
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Bỏ lỡ %d tin khi tải lịch sử (#%d–#%d).\n", len(missing), first, last))
+		return
+	}
+	if !s.requestRecovery(first, hs.MaxHeight, first-1, anchor, missing) {
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Bỏ lỡ %d tin khi tải lịch sử (#%d–#%d).\n", len(missing), first, last))
+	}
+}
+
+// checkRecoverWire consumes one wire of a recovery window. Wires
+// linking contiguously from the anchor verify and advance the window;
+// those in the Missing set (or all, for a live gap) render and index
+// exactly like live ones, while already-received heights are verified
+// and skipped. RecoverRendered is set for every handled wire so the
+// pump never draws it twice. Anything that breaks the chain fails the
+// window at the trailer. A wire newer than the window — or any wire
+// with no pending refill, from a dropped footer — is live traffic: the
+// window closes and the wire takes the normal path. Caller must hold
+// DisplayMu.
+func (s *Session) checkRecoverWire(wire WireMessage) {
+	p := s.Chain.RecoverPending
+	if p == nil || wire.ChainHeight > p.To || wire.ChainHash == "" {
+		s.Chain.InRecover = false
+		s.consumeEchoLocked(wire, false)
+		s.checkChainLink(wire)
+		return
+	}
+	if wire.ChainHeight != p.Next {
+		// Out-of-window height (duplicate or hole): skip without
+		// failing; the trailer settles completeness. RecoverRendered
+		// stays false so the pump draws it normally — dropping it
+		// silently would hide a genuine duplicate.
+		return
+	}
+	s.Chain.RecoverRendered = true
+	if _, err := verifyWireLink(wire, p.LastHash); err != nil {
+		// A failed wire is deliberately not rendered or indexed: it
+		// does not continue the anchor, so drawing it would present
+		// unverified content as recovered history.
+		p.Failed = true
+		return
+	}
+	if p.Missing == nil || p.Missing[wire.ChainHeight] {
+		s.renderChatBlock(wire)
+		p.Received++
+	}
+	p.Next++
+	if h, ok := chain.ParseHex64(wire.ChainHash); ok {
+		p.LastHash = h
+	}
+}
+
+// finishRecovery settles the pending refill at its trailer: a fully
+// received window confirms, anything else reports what landed. A
+// follow-up gap queued meanwhile is then started against its own
+// anchor, so an extended loss still gets refilled. Caller must hold
+// DisplayMu.
+func (s *Session) finishRecovery() {
+	p := s.Chain.RecoverPending
+	s.Chain.RecoverPending = nil
+	if p == nil {
+		return
+	}
+	total := int(p.To - p.From + 1)
+	if p.Missing != nil {
+		total = len(p.Missing)
+	}
+	if !p.Failed && p.Next == p.To+1 {
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Đã bù %d/%d tin.\n", p.Received, total))
+	} else {
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Không bù đủ tin (#%d–#%d, nhận %d/%d).\n", p.From, p.To, p.Received, total))
+	}
+	if f := p.FollowUp; f != nil {
+		s.requestRecovery(f.From, f.To, f.AnchorHeight, f.AnchorHash, f.Missing)
+	}
 }
 
 func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
@@ -965,7 +1145,9 @@ func (s *Session) checkChainLink(wire WireMessage) {
 		return
 	}
 	if s.Chain.InSync {
-		s.Chain.SyncHashes[strings.ToLower(wire.ChainHash)] = true
+		if h, ok := chain.ParseHex64(wire.ChainHash); ok {
+			s.Chain.SyncHeights[wire.ChainHeight] = h
+		}
 	}
 	newTip, err := verifyWireLink(wire, s.Chain.ChainTip)
 	if err != nil && !s.Chain.ChainHaveTip {
@@ -989,7 +1171,14 @@ func (s *Session) checkChainLink(wire WireMessage) {
 		// falls through to the tamper warning below.
 		if parsed, ok := chain.ParseHex64(wire.ChainHash); ok &&
 			s.Chain.ChainHaveTip && err == errPrevMismatch && wire.ChainHeight > s.Chain.ChainHeight+1 {
-			s.warnChainGap(s.Chain.ChainHeight, wire.ChainHeight)
+			oldH, oldTip := s.Chain.ChainHeight, s.Chain.ChainTip
+			if s.Chain.InSync {
+				// Join replay: drops are settled once from its trailer
+				// (which knows the intended window), so per-gap requests
+				// here would duplicate that work. Just re-anchor.
+			} else if !s.maybeRequestRecovery(oldH+1, wire.ChainHeight-1, oldH, oldTip) {
+				s.warnChainGap(oldH, wire.ChainHeight)
+			}
 			s.noteChainTip(parsed, wire.ChainHeight)
 			s.flushChainTip()
 			return

@@ -120,12 +120,16 @@ type HistorySync struct {
 
 // HistoryRequest asks the server for an older segment on demand
 // (paged history): the last Limit lines below Before. Before 0 means
-// the oldest absolute segment. The response reuses the replay format
-// (lines plus a HistorySync trailer), so no new parser is needed.
+// the oldest absolute segment. After asks the opposite direction: up
+// to Limit lines at or above After (ascending, RAM only), to fill
+// heights a slow peer missed; After wins when both are set. The
+// response reuses the replay format (lines plus a HistorySync
+// trailer), so no new parser is needed.
 type HistoryRequest struct {
 	Type   string `json:"type"` // "history_request"
 	Before uint64 `json:"before,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
+	After  uint64 `json:"after,omitempty"`
 }
 
 // PowOffer is a server-issued proof-of-work challenge, signed with the

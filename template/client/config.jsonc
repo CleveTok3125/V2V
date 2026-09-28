@@ -123,5 +123,12 @@
   "pow": {
     "maxTier": 3,
     "maxCostMs": 120000
+  },
+  // History recovery behavior. recoverCap bounds how many missing lines
+  // the client auto-requests to fill a detected chain gap; larger gaps
+  // only warn. 0 disables auto-recovery. The server still caps each
+  // request at limits.maxHistorySend.
+  "history": {
+    "recoverCap": 200
   }
 }

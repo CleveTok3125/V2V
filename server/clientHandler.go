@@ -299,12 +299,16 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			Type   string `json:"type"`
 			Before uint64 `json:"before"`
 			Limit  int    `json:"limit"`
+			After  uint64 `json:"after"`
 		}
 		if err := json.Unmarshal([]byte(raw), &env); err == nil && env.Type != "" {
 			switch env.Type {
 			// On-demand older segment (paged history): served in
 			// replay format, never chained, never counted as chat. A
 			// forged request only fetches the requester's own window.
+			// After (recovery) asks the same format upward from a
+			// height instead of downward from a cutoff; After wins
+			// when both are set.
 			case "history_request":
 				limit := env.Limit
 				if limit <= 0 || limit > dynCfg.MaxHistorySend {
@@ -318,7 +322,11 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 					updateReadDeadline()
 					continue
 				}
-				s.serveHistorySegment(session, env.Before, limit)
+				if env.After > 0 {
+					s.serveHistoryRange(session, env.After, limit)
+				} else {
+					s.serveHistorySegment(session, env.Before, limit)
+				}
 				s.observeHistory(clientIP)
 				updateReadDeadline()
 				continue

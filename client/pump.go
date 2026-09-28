@@ -28,37 +28,76 @@ func (s *Session) flushDateBannerLocked() {
 // trackReplayWindow updates the replay window flags for one boundary
 // line. The join header raises InSync (full verification); the
 // on-demand segment header raises InOlder (render and index only —
-// older heights can never verify against the running tip); any footer
-// flushes a stashed date banner first (otherwise a banner closing the
-// window is silently dropped) and then clears both. Caller must hold
+// older heights can never verify against the running tip); the
+// recovery header raises InRecover (render, index, and verify against
+// the refill anchor in RecoverPending). Any footer flushes a stashed
+// date banner first (otherwise a banner closing the window is
+// silently dropped) and then clears all three. Caller must hold
 // DisplayMu.
 func (s *Session) trackReplayWindow(line string, start bool) {
 	if start {
+		// A new window supersedes any join whose trailer never came.
+		s.Chain.SyncClosed = false
 		if isOlderSegmentHeader(line) {
 			s.Chain.InOlder = true
+		} else if isRecoveryHeader(line) {
+			s.Chain.InRecover = true
 		} else {
 			s.Chain.InSync = true
+			// A fresh join window: heights from any earlier replay are
+			// stale and must not mask drops in this one.
+			s.Chain.SyncHeights = map[uint64][32]byte{}
 		}
 		return
 	}
+	wasJoin := s.Chain.InSync
 	s.flushDateBannerLocked()
 	s.Chain.InOlder = false
+	s.Chain.InRecover = false
 	s.Pending.PendingDateBanner = ""
 	s.Pending.PendingDateBannerWire = nil
 	s.Chain.InSync = false
+	// A join footer precedes its trailer: remember it so the trailer
+	// can refill the heights the replay dropped.
+	if wasJoin {
+		s.Chain.SyncClosed = true
+	}
 }
 
 // handleHistorySync consumes a replay trailer from either a whole
-// frame or a coalesced per-line blob: never rendered, only the
-// fork check runs. Caller refreshes after.
+// frame or a coalesced per-line blob. Only the join replay records its
+// received heights (SyncHeights), so only its trailer can judge a fork;
+// segment and recovery trailers carry no such set. A recovery trailer
+// settles its refill instead. Caller refreshes after.
 func (s *Session) handleHistorySync(hs HistorySync) {
 	s.Display.DisplayMu.Lock()
 	s.Chain.InSync = false
-	if warn, flush := forkWarning(hs, s.Chain.HavePersistedTip, s.Chain.PersistedTip, s.Chain.PersistedHeight, s.Chain.SyncHashes); warn != "" {
-		s.emitLocalFeedback(warn)
-		if flush {
-			s.flushChainTip()
+	if s.Chain.InRecover {
+		// The recovery footer never arrived; settle at the trailer.
+		s.Chain.InRecover = false
+		s.finishRecovery()
+		s.Display.DisplayMu.Unlock()
+		return
+	}
+	if s.Chain.SyncClosed {
+		s.Chain.SyncClosed = false
+		// The join replay reports how many lines it lost; recover those
+		// heights before the fork check (which also skips on drops).
+		s.recoverMissedFromTrailer(hs)
+		if warn, flush := forkWarning(hs, s.Chain.HavePersistedTip, s.Chain.PersistedTip, s.Chain.PersistedHeight, s.Chain.SyncHeights); warn != "" {
+			s.emitLocalFeedback(warn)
+			if flush {
+				s.flushChainTip()
+			}
 		}
+		s.Chain.SyncHeights = map[uint64][32]byte{}
+		s.Display.DisplayMu.Unlock()
+		return
+	}
+	// Non-join trailer: a recovery whose footer was dropped is still
+	// pending (a present footer settles it at the pump, after its line).
+	if s.Chain.RecoverPending != nil {
+		s.finishRecovery()
 	}
 	s.Display.DisplayMu.Unlock()
 }
@@ -99,9 +138,10 @@ func (s *Session) runPump() {
 		var wire WireMessage
 		if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
 			s.Display.DisplayMu.Lock()
-			s.verifyReplayWire(wire, true)
-			s.flushDateBannerLocked()
-			s.renderChatBlock(wire)
+			if rendered := s.verifyReplayWire(wire, true); !rendered {
+				s.flushDateBannerLocked()
+				s.renderChatBlock(wire)
+			}
 			s.Display.DisplayMu.Unlock()
 			s.refreshCoalesced()
 			continue
@@ -109,20 +149,22 @@ func (s *Session) runPump() {
 		var sysWire WireMessage
 		if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {
 			s.Display.DisplayMu.Lock()
-			s.verifyReplayWire(sysWire, false)
-			if !isShowingJoin && isDateBanner(sysWire) {
+			rendered := s.verifyReplayWire(sysWire, false)
+			if !rendered && !isShowingJoin && isDateBanner(sysWire) {
 				s.Pending.PendingDateBannerWire = &sysWire
 				s.Display.DisplayMu.Unlock()
 				s.refreshCoalesced()
 				continue
 			}
-			if !isShowingJoin && isJoinLeave(sysWire) {
+			if !rendered && !isShowingJoin && isJoinLeave(sysWire) {
 				s.Display.DisplayMu.Unlock()
 				s.refreshCoalesced()
 				continue
 			}
-			s.flushDateBannerLocked()
-			s.renderChatBlock(sysWire)
+			if !rendered {
+				s.flushDateBannerLocked()
+				s.renderChatBlock(sysWire)
+			}
 			s.Display.DisplayMu.Unlock()
 			s.refreshCoalesced()
 			continue
@@ -151,18 +193,20 @@ func (s *Session) runPump() {
 			}
 			if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
 				s.Display.DisplayMu.Lock()
-				s.verifyReplayWire(wl, wl.Type == "chat")
-				if wl.Type == "system" && !isShowingJoin && isDateBanner(wl) {
+				rendered := s.verifyReplayWire(wl, wl.Type == "chat")
+				if !rendered && wl.Type == "system" && !isShowingJoin && isDateBanner(wl) {
 					s.Pending.PendingDateBannerWire = &wl
 					s.Display.DisplayMu.Unlock()
 					continue
 				}
-				if wl.Type == "system" && !isShowingJoin && isJoinLeave(wl) {
+				if !rendered && wl.Type == "system" && !isShowingJoin && isJoinLeave(wl) {
 					s.Display.DisplayMu.Unlock()
 					continue
 				}
-				s.flushDateBannerLocked()
-				s.renderChatBlock(wl)
+				if !rendered {
+					s.flushDateBannerLocked()
+					s.renderChatBlock(wl)
+				}
 				s.Display.DisplayMu.Unlock()
 				continue
 			}
@@ -177,6 +221,12 @@ func (s *Session) runPump() {
 				s.Display.DisplayMu.Lock()
 				s.trackReplayWindow(line, start)
 				s.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
+				// A recovery footer settles its refill after the footer
+				// line, so the confirmation reads as a result of the
+				// window instead of preceding its own footer.
+				if !start && isRecoveryFooter(line) {
+					s.finishRecovery()
+				}
 				s.Display.DisplayMu.Unlock()
 				continue
 			}

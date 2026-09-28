@@ -294,14 +294,14 @@ func (s *ChatServer) serveHistorySegment(session *ClientSession, before uint64, 
 	s.Chain.Mu.RUnlock()
 	if before != 0 && ready && before > tip {
 		s.Hub.BroadcastMu.Lock()
-		s.Chain.sendReplay(session, nil, "--- Lịch sử cũ ---", true)
+		s.Chain.sendReplay(session, nil, "--- Lịch sử cũ ---", replaySegment)
 		s.Hub.BroadcastMu.Unlock()
 		return
 	}
 	lines := s.Chain.collectSegment(before, limit)
 	s.Hub.BroadcastMu.Lock()
 	defer s.Hub.BroadcastMu.Unlock()
-	s.Chain.sendReplay(session, lines, "--- Lịch sử cũ ---", true)
+	s.Chain.sendReplay(session, lines, "--- Lịch sử cũ ---", replaySegment)
 }
 
 func (h *Hub) CheckAndBroadcastDate(now time.Time) {
@@ -340,7 +340,7 @@ func (c *ChainService) SendChatHistory(session *ClientSession) {
 	copy(historyCopy, c.History[startIndex:])
 	c.Mu.RUnlock()
 
-	c.sendReplay(session, historyCopy, "--- Lịch sử chat gần đây ---", false)
+	c.sendReplay(session, historyCopy, "--- Lịch sử chat gần đây ---", replayJoin)
 }
 
 // windowRing keeps the last n fed lines oldest→newest: a full forward
@@ -494,17 +494,72 @@ func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, li
 	if limit <= 0 {
 		return
 	}
-	c.sendReplay(session, c.collectSegment(before, limit), "--- Lịch sử cũ ---", true)
+	c.sendReplay(session, c.collectSegment(before, limit), "--- Lịch sử cũ ---", replaySegment)
+}
+
+// collectRange returns up to limit chained lines at or above after,
+// in ascending stored order. RAM only: heights evicted from RAM yield
+// an empty window, never a disk scan. Unchained notices carry no
+// height and travel only with the windows that contain them by
+// position; a recovery window is purely the missed chain positions.
+func (c *ChainService) collectRange(after uint64, limit int) []string {
+	if limit <= 0 || after == 0 {
+		return nil
+	}
+	c.Mu.RLock()
+	defer c.Mu.RUnlock()
+	var out []string
+	for _, msgStr := range c.History {
+		var wire WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil {
+			continue
+		}
+		if wire.ChainHeight >= after {
+			out = append(out, msgStr)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// serveHistoryRange answers a recovery request for lines at or above
+// after (ascending). The expensive collection runs outside
+// BroadcastMu; only the send holds it, like segments. A cursor past
+// the tip (or with nothing left in RAM) answers with the exhausted
+// window, so the requester cancels its recovery instead of hanging.
+func (s *ChatServer) serveHistoryRange(session *ClientSession, after uint64, limit int) {
+	if limit <= 0 || after == 0 {
+		return
+	}
+	s.Chain.Mu.RLock()
+	ready, tip := s.Chain.ready, s.Chain.height
+	s.Chain.Mu.RUnlock()
+	if ready && after > tip {
+		s.Hub.BroadcastMu.Lock()
+		s.Chain.sendReplay(session, nil, "--- Lịch sử bù ---", replayRecovery)
+		s.Hub.BroadcastMu.Unlock()
+		return
+	}
+	// Collect before taking BroadcastMu: the RAM scan can span the whole
+	// history, and holding the global broadcast lock through it would
+	// stall every live broadcast (same contract as segments).
+	lines := s.Chain.collectRange(after, limit)
+	s.Hub.BroadcastMu.Lock()
+	defer s.Hub.BroadcastMu.Unlock()
+	s.Chain.sendReplay(session, lines, "--- Lịch sử bù ---", replayRecovery)
 }
 
 // sendReplay renders stored lines in replay format: header, content,
 // human footer with counts, and a HistorySync trailer. lines must be a
 // private copy. Sends never block (drops on a full peer buffer are
 // counted and logged); the trailer reports what was actually queued.
-// A segment footer is labeled as older history, and says plainly when
-// the window holds no chained line (exhausted) instead of a bare zero
-// count. Both footer variants keep the boundary substring so the
-// client still opens and closes the replay window.
+// A segment footer is labeled as older history, a recovery footer
+// as refill history; both say plainly when the window holds no
+// chained line (exhausted) instead of a bare zero count. All footer
+// variants keep the boundary substring so the client still opens and
+// closes the replay window.
 // historySyncTrailer encodes the machine-readable trailer closing a
 // replay. Dropped is the number of sends the peer's full buffer
 // refused: the client skips its fork check when it is non-zero, since
@@ -515,7 +570,18 @@ func historySyncTrailer(minHeight, maxHeight uint64, sent, total, dropped int) [
 	return trailer
 }
 
-func (c *ChainService) sendReplay(session *ClientSession, lines []string, header string, segment bool) {
+// replayMode selects the replay footer label: the connect-time join
+// burst, an on-demand older segment, or a recovery window answering
+// missed heights. Only the label changes; the format is identical.
+type replayMode int
+
+const (
+	replayJoin replayMode = iota
+	replaySegment
+	replayRecovery
+)
+
+func (c *ChainService) sendReplay(session *ClientSession, lines []string, header string, mode replayMode) {
 	// Replay filters join/leave unless the session asked for them.
 	// Dates, audits and untagged lines always go. Filtered lines never
 	// occupied chain positions, so the replayed window has no gaps.
@@ -579,10 +645,16 @@ func (c *ChainService) sendReplay(session *ClientSession, lines []string, header
 		}
 	}
 	footer := fmt.Sprintf("--- Kết thúc lịch sử (%d/%d) ---", sent, len(lines))
-	if segment {
-		footer = fmt.Sprintf("--- Kết thúc lịch sử cũ (%d/%d) ---", sent, len(lines))
+	if mode != replayJoin {
+		noun := "lịch sử cũ"
+		exhausted := "--- Kết thúc lịch sử cũ: không còn tin cũ hơn ---"
+		if mode == replayRecovery {
+			noun = "lịch sử bù"
+			exhausted = "--- Kết thúc lịch sử bù: không còn tin trong bộ nhớ ---"
+		}
+		footer = fmt.Sprintf("--- Kết thúc %s (%d/%d) ---", noun, sent, len(lines))
 		if !haveHeight {
-			footer = "--- Kết thúc lịch sử cũ: không còn tin cũ hơn ---"
+			footer = exhausted
 		}
 	}
 	replaySend([]byte(footer))

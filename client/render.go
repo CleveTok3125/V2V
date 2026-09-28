@@ -156,7 +156,7 @@ func isDateBanner(wire WireMessage) bool {
 }
 
 func isHistoryBoundaryLine(line string) bool {
-	return strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Lịch sử cũ ---") || strings.Contains(line, "--- Kết thúc lịch sử")
+	return strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Lịch sử cũ ---") || isRecoveryHeader(line) || strings.Contains(line, "--- Kết thúc lịch sử")
 }
 
 // isOlderSegmentHeader reports the on-demand segment header. Segment
@@ -166,12 +166,25 @@ func isOlderSegmentHeader(line string) bool {
 	return strings.Contains(line, "--- Lịch sử cũ ---")
 }
 
+// isRecoveryHeader reports the recovery window header. Recovery lines
+// refill heights the running tip already passed, so they verify
+// against their own anchor instead of the running tip.
+func isRecoveryHeader(line string) bool {
+	return strings.Contains(line, "--- Lịch sử bù ---")
+}
+
+// isRecoveryFooter reports the recovery window footer, which settles
+// its refill at arrival (content frames precede it in order).
+func isRecoveryFooter(line string) bool {
+	return strings.Contains(line, "Kết thúc lịch sử bù")
+}
+
 // parseHistoryBoundary reports whether line opens (header) or closes
 // (footer) a history replay. Sync tracking must run regardless of the
 // join-display toggle: gating it on showJoin leaves inSync unset, which
 // both disables the fork check and feeds replay lines to echo matching.
 func parseHistoryBoundary(line string) (boundary bool, start bool) {
-	if strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Lịch sử cũ ---") {
+	if strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Lịch sử cũ ---") || isRecoveryHeader(line) {
 		return true, true
 	}
 	// No trailing " ---": counted footers read "(sent/total) ---".
