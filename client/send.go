@@ -88,7 +88,7 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 	for range typedLinesCount {
 		wipe.WriteString("\033[1A\033[2K\r")
 	}
-	s.enqueueOutput(wipe.String())
+	s.holdOrEnqueue(wipe.String())
 
 	// Render markup on the whole text first so fenced blocks
 	// keep their state across lines; phRows then counts rendered

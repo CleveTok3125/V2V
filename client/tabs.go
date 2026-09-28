@@ -131,6 +131,29 @@ func (b *tabBuffer) spliceOut(start, end int) {
 	b.lines = b.lines[:len(b.lines)-(end-start)]
 }
 
+// insertAt splices block into the buffer at idx, keeping byte accounting
+// and caps. Used to place a recovered message at its chain position
+// during a held catch-up instead of appending it at the end.
+func (b *tabBuffer) insertAt(idx int, block []string) {
+	if len(block) == 0 {
+		return
+	}
+	if idx < 0 {
+		idx = 0
+	}
+	if idx > len(b.lines) {
+		idx = len(b.lines)
+	}
+	n := len(block)
+	b.lines = append(b.lines, make([]string, n)...)
+	copy(b.lines[idx+n:], b.lines[idx:])
+	copy(b.lines[idx:], block)
+	for _, l := range block {
+		b.size += len(l)
+	}
+	b.evict()
+}
+
 // tabCaps resolves buffer caps from config: chat lines derive from the
 // existing ui.web.scrollback field so the hidden buffer exactly matches the
 // visible xterm capacity; byte caps come from the tabs section.

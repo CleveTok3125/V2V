@@ -501,6 +501,9 @@ func (s *Session) switchTab(n int) {
 	if n == s.Display.ActiveTab {
 		return
 	}
+	// A tab switch repaints from the buffers; a held catch-up must
+	// print first or the switch would hide it.
+	s.releaseCatchupLocked()
 	s.Display.ActiveTab = n
 	s.Display.PrintGen++
 	// Queued like every other screen write: a full tab dump is large,

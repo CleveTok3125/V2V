@@ -128,6 +128,10 @@ func (s *Session) gracefulQuit() {
 			s.TripPriv[i] = 0
 		}
 	}
+	s.Display.DisplayMu.Lock()
+	s.releaseCatchupLocked()
+	s.flushPendingGreetingLocked()
+	s.Display.DisplayMu.Unlock()
 	s.enqueueOutput("👋 Đang ngắt kết nối... Tạm biệt!\n")
 	// Let the goodbye flush and the pump tear down instead of racing
 	// them: return as soon as the pump exits, same 500ms cap as the
@@ -269,6 +273,10 @@ func (s *Session) cmdClear(text string) bool {
 	if !(text == "/clear" || text == "/c") {
 		return false
 	}
+	s.Display.DisplayMu.Lock()
+	s.releaseCatchupLocked()
+	s.Display.PendingGreeting = ""
+	s.Display.DisplayMu.Unlock()
 	s.enqueueOutput("\033[H\033[2J")
 	s.enqueueOutput("Đã kết nối với username: " + serverField(s.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n")
 	return true

@@ -177,10 +177,11 @@ func main() {
 	defer ClearLoadedPassphrase()
 	go sess.runVerify()
 
-	// Enqueue the greeting before the pump starts: the join replay
-	// arrives on the same ordered queue, so starting the pump first
-	// lets its header overtake the greeting.
-	sess.enqueueOutput("Đã kết nối với username: " + serverField(sess.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n")
+	// The welcome line is held, not printed yet: it is released after
+	// the join replay so it lands at the bottom of the loaded history
+	// instead of above it. A short timer in the pump releases it when
+	// no replay arrives.
+	sess.Display.PendingGreeting = "Đã kết nối với username: " + serverField(sess.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n"
 
 	go sess.runPump()
 

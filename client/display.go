@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"strings"
 )
 
 // Session display funnel (moved from main): tab buffers plus the single
@@ -116,6 +117,49 @@ func (s *Session) flushOutputNow() {
 	}
 }
 
+// holdOrEnqueue routes one rendered line to the terminal, or to the
+// catch-up hold buffer while a join replay is being merged. Caller
+// must hold DisplayMu.
+func (s *Session) holdOrEnqueue(line string) {
+	if s.Display.CatchupHold {
+		s.Display.HoldLines = append(s.Display.HoldLines, line)
+		return
+	}
+	s.enqueueOutput(line)
+}
+
+// releaseCatchupLocked prints everything accumulated during a held
+// catch-up in one ordered chunk and clears the hold. Caller must hold
+// DisplayMu.
+func (s *Session) releaseCatchupLocked() {
+	if !s.Display.CatchupHold {
+		return
+	}
+	s.Display.CatchupHold = false
+	s.Display.HoldGen++
+	if s.Display.HoldTimer != nil {
+		s.Display.HoldTimer.Stop()
+		s.Display.HoldTimer = nil
+	}
+	if len(s.Display.HoldLines) > 0 {
+		s.enqueueOutput(strings.Join(s.Display.HoldLines, ""))
+		s.Display.HoldLines = nil
+	}
+	// The welcome line lands after the history it was waiting behind.
+	s.flushPendingGreetingLocked()
+}
+
+// flushPendingGreetingLocked prints the held welcome line unless a
+// catch-up is still running (then it waits for that release). Caller
+// must hold DisplayMu.
+func (s *Session) flushPendingGreetingLocked() {
+	if s.Display.PendingGreeting == "" || s.Display.CatchupHold {
+		return
+	}
+	s.enqueueOutput(s.Display.PendingGreeting)
+	s.Display.PendingGreeting = ""
+}
+
 func (s *Session) emitTab(tab int, line string) {
 	if tab == TabChat {
 		s.Display.TabChat.append(line)
@@ -125,7 +169,7 @@ func (s *Session) emitTab(tab int, line string) {
 	// Tab 1 shows the full legacy stream, so it is unaffected by tabs.
 	// Tab 2 is purely additive and shows only its own lines.
 	if tab == s.Display.ActiveTab || s.Display.ActiveTab == TabChat {
-		s.enqueueOutput(line)
+		s.holdOrEnqueue(line)
 		s.Display.PrintGen++
 	}
 }
@@ -138,6 +182,6 @@ func (s *Session) emitTab(tab int, line string) {
 // leaves it incomplete. Caller must hold DisplayMu.
 func (s *Session) emitLocalFeedback(line string) {
 	s.Display.TabSys.append(line)
-	s.enqueueOutput(line)
+	s.holdOrEnqueue(line)
 	s.Display.PrintGen++
 }

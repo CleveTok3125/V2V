@@ -127,8 +127,8 @@ func TestRecoveryRequestOnGap(t *testing.T) {
 	if p == nil || p.From != 101 || p.To != 102 || p.AnchorHeight != 100 || p.AnchorHash != [32]byte{9} {
 		t.Fatalf("pending wrong: %+v", p)
 	}
-	if !strings.Contains(tabSysText(sess), "Đang bù 2 tin") {
-		t.Fatalf("missing refill notice: %q", tabSysText(sess))
+	if strings.Contains(tabSysText(sess), "Đang bù") {
+		t.Fatalf("in-progress notice must stay hidden: %q", tabSysText(sess))
 	}
 	if sess.Chain.ChainGapWarned {
 		t.Fatal("requested gap must not latch the tamper notice")
@@ -175,7 +175,7 @@ func TestRecoveryWindowFlow(t *testing.T) {
 		t.Fatal("recovery must not move the running tip")
 	}
 	sys := tabSysText(sess)
-	if !strings.Contains(sys, "Đã bù 2/2 tin") {
+	if !strings.Contains(sys, "Đã bù 2 tin bị lỡ") {
 		t.Fatalf("missing refill confirmation: %q", sys)
 	}
 	if strings.Contains(sys, "đứt") {
@@ -569,10 +569,15 @@ func TestRecoveryFromJoinTrailerRendersOnlyMissing(t *testing.T) {
 	}
 	sess.flushOutputNow()
 	text := out.String()
-	fi := strings.Index(text, "Kết thúc lịch sử bù")
+	// The recovery boundaries stay hidden; the confirmation follows the
+	// refilled content.
+	if strings.Contains(text, "Lịch sử bù") {
+		t.Fatalf("recovery boundaries must stay hidden: %q", text)
+	}
+	mi := strings.Index(text, "msg")
 	ci := strings.Index(text, "Đã bù")
-	if fi < 0 || ci < 0 || fi > ci {
-		t.Fatalf("recovery footer must precede the confirmation: %q", text)
+	if mi < 0 || ci < 0 || mi > ci {
+		t.Fatalf("refilled content must precede the confirmation: %q", text)
 	}
 }
 
@@ -634,6 +639,152 @@ func TestHandleHistorySyncForkScope(t *testing.T) {
 	join.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 130, Sent: 2, Total: 2})
 	if !strings.Contains(tabSysText(join), "phân nhánh") {
 		t.Fatalf("join trailer must warn on a rewritten height: %q", tabSysText(join))
+	}
+}
+
+// TestRecoveryMergesJoinReplayInOrder drives the full catch-up: a join
+// replay with a mid gap must print the refilled message between its
+// neighbours, not appended at the bottom.
+func TestRecoveryMergesJoinReplayInOrder(t *testing.T) {
+	conn := &captureConn{frames: make(chan []byte, 16)}
+	sess := recoverTestSession(t, 9, conn)
+	sess.Display.TabSys = newTabBuffer(100, 100000)
+	sess.Display.TabChat = newTabBuffer(100, 100000)
+	var out bytes.Buffer
+	sess.Display.Out = &out
+	sess.Display.ActiveTab = TabChat
+	sess.Display.ShowMeta = true
+	anchor := [32]byte{9}
+	wires := recoverTestChain(anchor, 100, 4) // heights 100..103
+	frame := func(v any) []byte {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return raw
+	}
+	conn.frames <- []byte("--- Lịch sử chat gần đây ---\n")
+	conn.frames <- frame(wires[0]) // 100
+	conn.frames <- frame(wires[1]) // 101
+	conn.frames <- frame(wires[3]) // 103, 102 dropped
+	conn.frames <- []byte("--- Kết thúc lịch sử (3/4) ---\n")
+	conn.frames <- frame(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 103, Sent: 3, Total: 4, Dropped: 1})
+	conn.frames <- []byte("--- Lịch sử bù ---\n")
+	conn.frames <- frame(wires[2]) // 102 (refill)
+	conn.frames <- frame(wires[3]) // 103 (already had)
+	conn.frames <- []byte("--- Kết thúc lịch sử bù (2/2) ---\n")
+	conn.frames <- frame(HistorySync{Type: "history_sync", MinHeight: 102, MaxHeight: 103, Sent: 2, Total: 2})
+
+	done := make(chan struct{})
+	go func() { sess.runPump(); close(done) }()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		sess.Display.DisplayMu.Lock()
+		held := sess.Display.CatchupHold
+		sess.Display.DisplayMu.Unlock()
+		if !held {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("catch-up hold never released")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(conn.frames)
+	close(sess.Quitting)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("pump did not stop")
+	}
+	sess.flushOutputNow()
+
+	text := out.String()
+	order := []string{"#100:", "#101:", "#102:", "#103:"}
+	prev := -1
+	for _, needle := range order {
+		i := strings.Index(text, needle)
+		if i < 0 {
+			t.Fatalf("missing %s in output: %q", needle, text)
+		}
+		if i < prev {
+			t.Fatalf("output out of order at %s: %q", needle, text)
+		}
+		prev = i
+	}
+}
+
+// TestDateBannerDedup: a repeated date banner (server announce right
+// after the replay's own banner) prints once; a different date still
+// prints.
+func TestDateBannerDedup(t *testing.T) {
+	sess := chainTestSession(t, 9)
+	sess.Display.TabSys = newTabBuffer(100, 100000)
+	sess.Display.DisplayMu.Lock()
+	sess.emitDateBannerLocked("--- Ngày 28/09/2026 ---")
+	sess.emitDateBannerLocked("--- Ngày 28/09/2026 ---")
+	sess.emitDateBannerLocked("--- Ngày 29/09/2026 ---")
+	sess.Display.DisplayMu.Unlock()
+
+	got := tabSysText(sess)
+	if n := strings.Count(got, "Ngày 28/09/2026"); n != 1 {
+		t.Fatalf("duplicate date banner printed %d times: %q", n, got)
+	}
+	if !strings.Contains(got, "Ngày 29/09/2026") {
+		t.Fatalf("new date banner must print: %q", got)
+	}
+}
+
+// TestGreetingAfterCatchup: the held welcome line prints after the
+// loaded history, not above it.
+func TestGreetingAfterCatchup(t *testing.T) {
+	conn := &captureConn{frames: make(chan []byte, 16)}
+	sess := recoverTestSession(t, 9, conn)
+	sess.Display.TabSys = newTabBuffer(100, 100000)
+	sess.Display.TabChat = newTabBuffer(100, 100000)
+	var out bytes.Buffer
+	sess.Display.Out = &out
+	sess.Display.ActiveTab = TabChat
+	sess.Display.PendingGreeting = "GREETING\n"
+	anchor := [32]byte{9}
+	wires := recoverTestChain(anchor, 100, 2)
+	frame := func(v any) []byte {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return raw
+	}
+	conn.frames <- []byte("--- Lịch sử chat gần đây ---\n")
+	conn.frames <- frame(wires[0])
+	conn.frames <- frame(wires[1])
+	conn.frames <- []byte("--- Kết thúc lịch sử (2/2) ---\n")
+	conn.frames <- frame(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 101, Sent: 2, Total: 2})
+
+	go sess.runPump()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		sess.Display.DisplayMu.Lock()
+		held := sess.Display.CatchupHold
+		sess.Display.DisplayMu.Unlock()
+		if !held {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("catch-up hold never released")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(conn.frames)
+	close(sess.Quitting)
+	<-sess.PumpDone
+	sess.flushOutputNow()
+
+	text := out.String()
+	gi := strings.Index(text, "GREETING")
+	mi := strings.LastIndex(text, "msg")
+	if gi < 0 || mi < 0 || gi < mi {
+		t.Fatalf("greeting must follow the history: %q", text)
 	}
 }
 

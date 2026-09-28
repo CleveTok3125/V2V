@@ -888,11 +888,6 @@ func (s *Session) requestRecovery(from, to, anchorHeight uint64, anchorHash [32]
 		From: from, To: to, AnchorHeight: anchorHeight, AnchorHash: anchorHash,
 		Next: from, LastHash: anchorHash, RequestedAt: time.Now(), Missing: missing,
 	}
-	count := gap
-	if missing != nil {
-		count = len(missing)
-	}
-	s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Đang bù %d tin (#%d–#%d)…\n", count, from, to))
 	return true
 }
 
@@ -907,14 +902,13 @@ func (s *Session) recoverMissedFromTrailer(hs HistorySync) {
 		return
 	}
 	missing := map[uint64]bool{}
-	var first, last uint64
+	var first uint64
 	for h := hs.MinHeight; h <= hs.MaxHeight; h++ {
 		if _, ok := s.Chain.SyncHeights[h]; !ok {
 			missing[h] = true
 			if first == 0 {
 				first = h
 			}
-			last = h
 		}
 	}
 	if first == 0 {
@@ -924,11 +918,11 @@ func (s *Session) recoverMissedFromTrailer(hs HistorySync) {
 	if !ok {
 		// The predecessor never arrived either, so the refill's first
 		// link cannot be verified; leave a plain notice.
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Bỏ lỡ %d tin khi tải lịch sử (#%d–#%d).\n", len(missing), first, last))
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Bỏ lỡ %d tin khi tải lịch sử.\n", len(missing)))
 		return
 	}
 	if !s.requestRecovery(first, hs.MaxHeight, first-1, anchor, missing) {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Bỏ lỡ %d tin khi tải lịch sử (#%d–#%d).\n", len(missing), first, last))
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Bỏ lỡ %d tin khi tải lịch sử.\n", len(missing)))
 	}
 }
 
@@ -966,13 +960,76 @@ func (s *Session) checkRecoverWire(wire WireMessage) {
 		return
 	}
 	if p.Missing == nil || p.Missing[wire.ChainHeight] {
-		s.renderChatBlock(wire)
+		if s.Display.CatchupHold {
+			s.renderRecoveredInPlace(wire)
+		} else {
+			s.renderChatBlock(wire)
+		}
 		p.Received++
 	}
 	p.Next++
 	if h, ok := chain.ParseHex64(wire.ChainHash); ok {
 		p.LastHash = h
 	}
+}
+
+// metaHeightIndex returns the index just after the last meta line
+// naming height h in lines, or -1 when none matches (meta hidden or the
+// predecessor was dropped). Meta lines carry the "└─  #h:hash" shape.
+func metaHeightIndex(lines []string, h uint64) int {
+	needle := fmt.Sprintf("#%d:", h)
+	idx := -1
+	for i, l := range lines {
+		if strings.Contains(l, "└─") && strings.Contains(l, needle) {
+			idx = i + 1
+		}
+	}
+	return idx
+}
+
+// insertStrings splices block into lines at idx.
+func insertStrings(lines []string, idx int, block []string) []string {
+	if len(block) == 0 {
+		return lines
+	}
+	if idx < 0 {
+		idx = 0
+	}
+	if idx > len(lines) {
+		idx = len(lines)
+	}
+	n := len(block)
+	lines = append(lines, make([]string, n)...)
+	copy(lines[idx+n:], lines[idx:])
+	copy(lines[idx:], block)
+	return lines
+}
+
+// renderRecoveredInPlace renders one recovered wire and splices its
+// block right after its chain predecessor inside both the held output
+// and the chat buffer, so a merged catch-up prints in height order
+// instead of appending refilled lines at the bottom. Caller must hold
+// DisplayMu.
+func (s *Session) renderRecoveredInPlace(wire WireMessage) {
+	beforeHold := len(s.Display.HoldLines)
+	beforeChat := len(s.Display.TabChat.lines)
+	s.renderChatBlock(wire)
+	blockHold := append([]string{}, s.Display.HoldLines[beforeHold:]...)
+	blockChat := append([]string{}, s.Display.TabChat.lines[beforeChat:]...)
+	s.Display.HoldLines = s.Display.HoldLines[:beforeHold]
+	s.Display.TabChat.spliceOut(beforeChat, beforeChat+len(blockChat))
+
+	holdIdx := metaHeightIndex(s.Display.HoldLines, wire.ChainHeight-1)
+	if holdIdx < 0 {
+		holdIdx = len(s.Display.HoldLines)
+	}
+	s.Display.HoldLines = insertStrings(s.Display.HoldLines, holdIdx, blockHold)
+
+	chatIdx := metaHeightIndex(s.Display.TabChat.lines, wire.ChainHeight-1)
+	if chatIdx < 0 {
+		chatIdx = len(s.Display.TabChat.lines)
+	}
+	s.Display.TabChat.insertAt(chatIdx, blockChat)
 }
 
 // finishRecovery settles the pending refill at its trailer: a fully
@@ -991,13 +1048,15 @@ func (s *Session) finishRecovery() {
 		total = len(p.Missing)
 	}
 	if !p.Failed && p.Next == p.To+1 {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Đã bù %d/%d tin.\n", p.Received, total))
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Đã bù %d tin bị lỡ.\n", p.Received))
 	} else {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Không bù đủ tin (#%d–#%d, nhận %d/%d).\n", p.From, p.To, p.Received, total))
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Không bù đủ tin (nhận %d/%d).\n", p.Received, total))
 	}
 	if f := p.FollowUp; f != nil {
 		s.requestRecovery(f.From, f.To, f.AnchorHeight, f.AnchorHash, f.Missing)
 	}
+	// A catch-up hold ends with the refill it was waiting for.
+	s.releaseCatchupLocked()
 }
 
 func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
@@ -1027,7 +1086,7 @@ func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
 	for _, l := range intervening {
 		sb.WriteString(l)
 	}
-	s.enqueueOutput(sb.String())
+	s.holdOrEnqueue(sb.String())
 	s.Display.PrintGen++
 }
 

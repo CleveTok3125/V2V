@@ -102,6 +102,28 @@ type DisplayState struct {
 	// OutSkipped counts rendered chunks dropped at the queue cap: their
 	// data stays in the tab buffers, so switching tabs replays them.
 	OutSkipped int
+	// CatchupHold defers terminal output during the join replay and any
+	// refill of its dropped lines: lines accumulate in HoldLines in
+	// emission order, recovered wires are spliced in at their chain
+	// position, and the whole stream is printed once at release. This
+	// keeps a gapped replay from reaching scrollback, where it could
+	// not be merged afterwards. Under DisplayMu.
+	CatchupHold bool
+	HoldLines   []string
+	// HoldGen invalidates the release timer of a superseded hold.
+	HoldGen uint64
+	// HoldTimer is the release timer for the current hold; stopped when
+	// the hold ends so no stale timer lingers.
+	HoldTimer *time.Timer
+	// LastDateBanner is the most recent date banner text, so a repeat
+	// (e.g. a connect announcement right after the replay's own banner)
+	// is not printed twice.
+	LastDateBanner string
+	// PendingGreeting is the startup welcome line. It is held until the
+	// catch-up history prints so it lands at the bottom of the loaded
+	// history (or a short timer releases it when no replay arrives).
+	// Under DisplayMu.
+	PendingGreeting string
 
 	// Coalesced repaint state.
 	RefreshMu      sync.Mutex

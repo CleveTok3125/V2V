@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/trip"
@@ -12,17 +13,44 @@ import (
 
 // Session read pump and async verify worker (moved from main).
 
+// catchupHoldMax bounds how long a join-replay catch-up may defer
+// output while waiting for its refill: past it the held stream prints
+// with whatever arrived, so a lost recovery reply cannot blank the
+// session indefinitely.
+const catchupHoldMax = 5 * time.Second
+
+// greetingGrace releases the held welcome line when no join replay
+// arrives shortly after connect.
+const greetingGrace = 400 * time.Millisecond
+
 // flushDateBannerLocked prints a stashed date banner to TabSystem
 // before the block that follows it. Caller must hold s.Display.DisplayMu.
 func (s *Session) flushDateBannerLocked() {
 	if s.Pending.PendingDateBanner != "" {
-		s.emitTab(TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(s.Pending.PendingDateBanner)))
+		text := s.Pending.PendingDateBanner
 		s.Pending.PendingDateBanner = ""
+		s.emitDateBannerLocked(text)
 	}
 	if s.Pending.PendingDateBannerWire != nil {
-		s.renderChatBlock(*s.Pending.PendingDateBannerWire)
+		wire := s.Pending.PendingDateBannerWire
 		s.Pending.PendingDateBannerWire = nil
+		if wire.Text != s.Display.LastDateBanner {
+			s.Display.LastDateBanner = wire.Text
+			s.renderChatBlock(*wire)
+		}
 	}
+}
+
+// emitDateBannerLocked prints one date banner unless it repeats the
+// previous one: a server may announce the current date on connect right
+// after the replay already carried it, and two identical banners read
+// as noise. Caller must hold DisplayMu.
+func (s *Session) emitDateBannerLocked(text string) {
+	if text == "" || text == s.Display.LastDateBanner {
+		return
+	}
+	s.Display.LastDateBanner = text
+	s.emitTab(TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(text)))
 }
 
 // trackReplayWindow updates the replay window flags for one boundary
@@ -47,6 +75,20 @@ func (s *Session) trackReplayWindow(line string, start bool) {
 			// A fresh join window: heights from any earlier replay are
 			// stale and must not mask drops in this one.
 			s.Chain.SyncHeights = map[uint64][32]byte{}
+			// Hold the replay until its trailer says whether lines were
+			// dropped: merging refills into an already-printed stream
+			// is impossible, and a gapped print would linger in
+			// scrollback. The timer releases a stuck hold.
+			s.Display.CatchupHold = true
+			s.Display.HoldGen++
+			gen := s.Display.HoldGen
+			s.Display.HoldTimer = time.AfterFunc(catchupHoldMax, func() {
+				s.Display.DisplayMu.Lock()
+				if s.Display.HoldGen == gen {
+					s.releaseCatchupLocked()
+				}
+				s.Display.DisplayMu.Unlock()
+			})
 		}
 		return
 	}
@@ -84,6 +126,10 @@ func (s *Session) handleHistorySync(hs HistorySync) {
 		// The join replay reports how many lines it lost; recover those
 		// heights before the fork check (which also skips on drops).
 		s.recoverMissedFromTrailer(hs)
+		if s.Chain.RecoverPending == nil {
+			// Nothing to refill: print the replay now.
+			s.releaseCatchupLocked()
+		}
 		if warn, flush := forkWarning(hs, s.Chain.HavePersistedTip, s.Chain.PersistedTip, s.Chain.PersistedHeight, s.Chain.SyncHeights); warn != "" {
 			s.emitLocalFeedback(warn)
 			if flush {
@@ -108,6 +154,13 @@ func (s *Session) runPump() {
 	if s.PumpDone != nil {
 		defer close(s.PumpDone)
 	}
+	// Release the held welcome line when no join replay follows it (an
+	// empty or replay-less server), so it never waits forever.
+	time.AfterFunc(greetingGrace, func() {
+		s.Display.DisplayMu.Lock()
+		s.flushPendingGreetingLocked()
+		s.Display.DisplayMu.Unlock()
+	})
 
 	for {
 		_, msg, err := s.Conn.ReadMessage()
@@ -116,6 +169,12 @@ func (s *Session) runPump() {
 			case <-s.Quitting:
 				return
 			default:
+				// A held catch-up must print before the exit path so
+				// its buffered history is not lost with the process.
+				s.Display.DisplayMu.Lock()
+				s.releaseCatchupLocked()
+				s.flushPendingGreetingLocked()
+				s.Display.DisplayMu.Unlock()
 				// Lost-connection line rides the same queue so it never
 				// interleaves with (or jumps ahead of) queued chat lines.
 				s.enqueueOutput("\r\033[K\n ❌ Mất kết nối server\n")
@@ -220,7 +279,12 @@ func (s *Session) runPump() {
 			if boundary, start := parseHistoryBoundary(line); boundary {
 				s.Display.DisplayMu.Lock()
 				s.trackReplayWindow(line, start)
-				s.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
+				// Recovery boundaries are internal plumbing: the merge
+				// places the refilled lines inline and one notice
+				// reports the outcome, so the markers stay hidden.
+				if !isRecoveryHeader(line) && !isRecoveryFooter(line) {
+					s.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
+				}
 				// A recovery footer settles its refill after the footer
 				// line, so the confirmation reads as a result of the
 				// window instead of preceding its own footer.
