@@ -14,21 +14,21 @@ import (
 )
 
 type RoleCmd struct {
-	Create     RoleCreateCmd     `cmd:"" help:"Tạo role mới (báo ghi đè nếu đã tồn tại)"`
-	List       RoleListCmd       `cmd:"" help:"Liệt kê roles"`
-	Show       RoleShowCmd       `cmd:"" help:"Hiển thị cấu hình role"`
-	Update     RoleUpdateCmd     `cmd:"" help:"Cập nhật prefix/quyền của role"`
-	Delete     RoleDeleteCmd     `cmd:"" help:"Xóa role"`
-	AddIdentity RoleAddIdentityCmd `cmd:"" name:"add-identity" help:"Thêm identity ed25519 vào role"`
-	Import     RoleImportCmd     `cmd:"" help:"Import roles từ file hoặc paste JSON"`
+	Create      RoleCreateCmd      `cmd:"" aliases:"new" help:"Tạo role mới (báo ghi đè nếu đã tồn tại)"`
+	List        RoleListCmd        `cmd:"" aliases:"ls" help:"Liệt kê roles"`
+	Show        RoleShowCmd        `cmd:"" aliases:"sh" help:"Hiển thị cấu hình role"`
+	Update      RoleUpdateCmd      `cmd:"" aliases:"set" help:"Cập nhật prefix/quyền của role"`
+	Delete      RoleDeleteCmd      `cmd:"" aliases:"rm" help:"Xóa role"`
+	AddIdentity RoleAddIdentityCmd `cmd:"" name:"add-identity" aliases:"add" help:"Thêm identity ed25519 vào role"`
+	Import      RoleImportCmd      `cmd:"" aliases:"imp" help:"Import roles từ file hoặc paste JSON"`
 }
 
 
 type RoleCreateCmd struct {
 	Role      string `arg:"" optional:"" help:"Tên role"`
-	Prefix    string `help:"Prefix hiển thị" default:"[Member] "`
-	Unlimited bool   `help:"Quyền chat không giới hạn"`
-	Force     bool   `help:"Ghi đè nếu role đã tồn tại"`
+	Prefix    string `help:"Prefix hiển thị" default:"[Member] " short:"p"`
+	Unlimited bool   `help:"Quyền chat không giới hạn" short:"u"`
+	Force     bool   `help:"Ghi đè nếu role đã tồn tại" short:"f"`
 }
 
 type RoleListCmd struct{}
@@ -39,14 +39,14 @@ type RoleShowCmd struct {
 
 type RoleUpdateCmd struct {
 	Role      string `arg:"" help:"Tên role"`
-	Prefix    string `help:"Prefix hiển thị"`
-	Unlimited *bool  `help:"Quyền chat không giới hạn (true/false)"`
-	Force     bool   `help:"Ghi đè"`
+	Prefix    string `help:"Prefix hiển thị" short:"p"`
+	Unlimited *bool  `help:"Quyền chat không giới hạn (true/false)" short:"u"`
+	Force     bool   `help:"Ghi đè" short:"f"`
 }
 
 type RoleDeleteCmd struct {
 	Role  string `arg:"" help:"Tên role"`
-	Force bool   `help:"Không hỏi xác nhận"`
+	Force bool   `help:"Không hỏi xác nhận" short:"f"`
 }
 
 func loadRolesMap() (map[string]any, error) {

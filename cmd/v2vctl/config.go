@@ -24,17 +24,17 @@ const (
 )
 
 type ConfigCmd struct {
-	Sync     ConfigSyncCmd     `cmd:"" help:"Đồng bộ template vào config, giữ giá trị operator đã đặt"`
-	Diff     ConfigDiffCmd     `cmd:"" help:"Xem trước kết quả đồng bộ dạng unified diff"`
-	Manifest ConfigManifestCmd `cmd:"" help:"Sinh lại keys trong v2v-template.json từ template"`
-	Check    ConfigCheckCmd    `cmd:"" help:"Kiểm tra manifest khớp với template"`
-	Take     ConfigTakeCmd     `cmd:"" help:"Chọn các giá trị khác local-remote rồi áp vào local (template thắng)"`
-	Validate ConfigValidateCmd `cmd:"" help:"Kiểm tra cấu hình instance nạp được"`
+	Sync     ConfigSyncCmd     `cmd:"" aliases:"sy" help:"Đồng bộ template vào config, giữ giá trị operator đã đặt"`
+	Diff     ConfigDiffCmd     `cmd:"" aliases:"df" help:"Xem trước kết quả đồng bộ dạng unified diff"`
+	Manifest ConfigManifestCmd `cmd:"" aliases:"mf" help:"Sinh lại keys trong v2v-template.json từ template"`
+	Check    ConfigCheckCmd    `cmd:"" aliases:"ck" help:"Kiểm tra manifest khớp với template"`
+	Take     ConfigTakeCmd     `cmd:"" aliases:"tk" help:"Chọn các giá trị khác local-remote rồi áp vào local (template thắng)"`
+	Validate ConfigValidateCmd `cmd:"" aliases:"val" help:"Kiểm tra cấu hình instance nạp được"`
 }
 
 type ConfigValidateCmd struct {
 	To     string `help:"Thư mục gốc instance (mặc định theo --root/V2V_ROOT)"`
-	Format string `help:"Định dạng: text|json" default:"text"`
+	Format string `help:"Định dạng: text|json" default:"text" short:"F"`
 }
 
 // roleProbe mirrors the server's RoleDefinition (Identities plus an
@@ -56,33 +56,33 @@ type identityProbe struct {
 type ConfigCommon struct {
 	Dir            string   `help:"Thư mục chứa v2v-template.json" default:"."`
 	To             string   `help:"Thư mục gốc instance (mặc định theo --root/V2V_ROOT)"`
-	Only           string   `help:"Tập con id trong manifest (mặc định env,roles,trust)"`
-	ClientDir      string   `help:"Thư mục config client cho entry target=client"`
-	NoPager        bool     `help:"In thẳng, không qua pager"`
-	PreferTemplate []string `help:"Template thắng local cho các phần này (id hoặc id:key, cách nhau bằng dấu phẩy, lặp lại được)"`
+	Only           string   `help:"Tập con id trong manifest (mặc định env,roles,trust)" short:"o"`
+	ClientDir      string   `help:"Thư mục config client cho entry target=client" short:"C"`
+	NoPager        bool     `help:"In thẳng, không qua pager" short:"N"`
+	PreferTemplate []string `help:"Template thắng local cho các phần này (id hoặc id:key, cách nhau bằng dấu phẩy, lặp lại được)" short:"T"`
 }
 
 type ConfigSyncCmd struct {
 	ConfigCommon `embed:""`
-	DryRun       bool `help:"Xem trước, không ghi file"`
-	Force        bool `help:"Ép ghi cả entry cần can thiệp tay (vd client jsonc mất comment)"`
-	Quiet        bool `help:"Không in diff/trạng thái (dùng khi bootstrap)"`
+	DryRun       bool `help:"Xem trước, không ghi file" short:"n"`
+	Force        bool `help:"Ép ghi cả entry cần can thiệp tay (vd client jsonc mất comment)" short:"f"`
+	Quiet        bool `help:"Không in diff/trạng thái (dùng khi bootstrap)" short:"q"`
 	Yes          bool `help:"Đã xem diff, đồng ý ghi các phần take (bắt buộc khi dùng --prefer-template)"`
 }
 
 type ConfigDiffCmd struct {
 	ConfigCommon `embed:""`
-	Format       string `help:"Định dạng: text|json" default:"text"`
+	Format       string `help:"Định dạng: text|json" default:"text" short:"F"`
 }
 
 type ConfigCheckCmd struct {
 	ConfigCommon `embed:""`
-	Format       string `help:"Định dạng: text|json" default:"text"`
+	Format       string `help:"Định dạng: text|json" default:"text" short:"F"`
 }
 
 type ConfigManifestCmd struct {
 	Dir   string `help:"Thư mục chứa v2v-template.json" default:"."`
-	Write bool   `help:"Ghi manifest thay vì in ra"`
+	Write bool   `help:"Ghi manifest thay vì in ra" short:"w"`
 }
 
 // manifestFile is one managed template file: template-relative Source, the

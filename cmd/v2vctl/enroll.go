@@ -15,9 +15,9 @@ import (
 )
 
 type EnrollCmd struct {
-	Role  string        `help:"Role gắn với passkey" default:"member"`
-	Label string        `help:"Nhãn thiết bị/người"`
-	Store string        `help:"Đường dẫn store" env:"WEBAUTHN_STORE"`
+	Role  string        `help:"Role gắn với passkey" default:"member" short:"r"`
+	Label string        `help:"Nhãn thiết bị/người" short:"l"`
+	Store string        `help:"Đường dẫn store" env:"WEBAUTHN_STORE" short:"s"`
 	TTL   time.Duration `help:"Thời gian hiệu lực ticket" default:"10m"`
 }
 

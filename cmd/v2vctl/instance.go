@@ -17,13 +17,13 @@ import (
 // instances/ holding .env, config/ and data/, run from the same image with
 // a distinct compose project name. No preset, no override file.
 type InstanceCmd struct {
-	Init    InstanceInitCmd    `cmd:"" help:"Tạo instance mới từ template (roles để trống, thêm bằng v2vctl role)"`
-	List    InstanceListCmd    `cmd:"" help:"Liệt kê các instance"`
-	Status  InstanceStatusCmd  `cmd:"" help:"Trạng thái compose của instance"`
+	Init    InstanceInitCmd    `cmd:"" aliases:"new" help:"Tạo instance mới từ template (roles để trống, thêm bằng v2vctl role)"`
+	List    InstanceListCmd    `cmd:"" aliases:"ls" help:"Liệt kê các instance"`
+	Status  InstanceStatusCmd  `cmd:"" aliases:"st" help:"Trạng thái compose của instance"`
 	Up      InstanceUpCmd      `cmd:"" help:"Khởi động instance (docker compose up)"`
-	Down    InstanceDownCmd    `cmd:"" help:"Dừng instance"`
-	Restart InstanceRestartCmd `cmd:"" help:"Khởi động lại instance"`
-	Logs    InstanceLogsCmd    `cmd:"" help:"Xem log instance"`
+	Down    InstanceDownCmd    `cmd:"" aliases:"dn" help:"Dừng instance"`
+	Restart InstanceRestartCmd `cmd:"" aliases:"rs" help:"Khởi động lại instance"`
+	Logs    InstanceLogsCmd    `cmd:"" aliases:"log" help:"Xem log instance"`
 }
 
 var instanceNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
@@ -89,8 +89,8 @@ func setEnvValue(path, key, value string) error {
 type InstanceInitCmd struct {
 	Names []string `arg:"" name:"name" help:"Tên instance (một hoặc nhiều)"`
 	Dir   string   `help:"Thư mục dự án (chứa v2v-template.json)" default:"."`
-	Port  int      `help:"Giá trị PORT ghi vào .env (1-65535; 0 = giữ template)"`
-	Bind  string   `help:"Giá trị BIND_ADDR ghi vào .env"`
+	Port  int      `help:"Giá trị PORT ghi vào .env (1-65535; 0 = giữ template)" short:"p"`
+	Bind  string   `help:"Giá trị BIND_ADDR ghi vào .env" short:"b"`
 }
 
 func (c *InstanceInitCmd) Run() error {
@@ -266,7 +266,7 @@ func (c *InstanceStatusCmd) Run() error {
 type InstanceUpCmd struct {
 	Names []string `arg:"" name:"name" help:"Tên instance (một hoặc nhiều)"`
 	Dir   string   `help:"Thư mục dự án" default:"."`
-	Build bool     `help:"Build image trước khi chạy" default:"true"`
+	Build bool     `help:"Build image trước khi chạy" default:"true" short:"b"`
 }
 
 func (c *InstanceUpCmd) Run() error {

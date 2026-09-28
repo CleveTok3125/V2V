@@ -56,7 +56,7 @@ func str(v any) string {
 }
 
 type ListCmd struct {
-	Store string `help:"Đường dẫn store" env:"WEBAUTHN_STORE"`
+	Store string `help:"Đường dẫn store" env:"WEBAUTHN_STORE" short:"s"`
 }
 
 func saveStore(path string, f *waStoreFile) error {

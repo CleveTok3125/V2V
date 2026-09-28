@@ -15,19 +15,19 @@ import (
 
 type RoleAddIdentityCmd struct {
 	Role         string `arg:"" help:"Tên role"`
-	PublicKey    string `help:"Public key hex (64 chars)"`
-	HmacShield   string `help:"HMAC shield hex (32 chars)"`
-	ServerPubKey string `help:"Server public key hex"`
-	Paste        bool   `help:"Đọc JSON snippet từ stdin (paste)"`
-	File         string `help:"Đọc JSON từ file"`
-	Force        bool   `help:"Ghi đè nếu identity đã tồn tại"`
+	PublicKey    string `help:"Public key hex (64 chars)" short:"k"`
+	HmacShield   string `help:"HMAC shield hex (32 chars)" short:"H"`
+	ServerPubKey string `help:"Server public key hex" short:"S"`
+	Paste        bool   `help:"Đọc JSON snippet từ stdin (paste)" short:"p"`
+	File         string `help:"Đọc JSON từ file" short:"f"`
+	Force        bool   `help:"Ghi đè nếu identity đã tồn tại" short:"F"`
 }
 
 
 type RoleImportCmd struct {
 	File  string `help:"File JSON roles để import" short:"f"`
-	Paste bool   `help:"Đọc JSON từ stdin (paste)"`
-	Force bool   `help:"Ghi đè roles đã tồn tại"`
+	Paste bool   `help:"Đọc JSON từ stdin (paste)" short:"p"`
+	Force bool   `help:"Ghi đè roles đã tồn tại" short:"F"`
 }
 
 func (c *RoleAddIdentityCmd) Run() error {

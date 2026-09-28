@@ -18,18 +18,18 @@ import (
 var Version = "dev"
 
 type CLI struct {
-	Root     string      `help:"Thư mục instance (mặc định instances/default)" default:"instances/default" env:"V2V_ROOT"`
-	Keygen   KeygenCmd   `cmd:"" help:"Tạo danh tính cá nhân vào key.json"`
-	Role     RoleCmd     `cmd:"" help:"Quản lý role trong roles.json"`
-	Enroll   EnrollCmd   `cmd:"" help:"Phát ticket enroll passkey thật (chạy trên host server)"`
-	List     ListCmd     `cmd:"" help:"Xem tickets và credentials trong store"`
-	Migrate  MigrateCmd  `cmd:"" help:"Đổi preset mã hóa cho key.json hiện có"`
-	Config   ConfigCmd   `cmd:"" help:"Đồng bộ config theo template manifest (v2v-template.json)"`
-	Instance InstanceCmd `cmd:"" help:"Quản lý instance (deploy nhiều môi trường)"`
+	Root     string      `help:"Thư mục instance (mặc định instances/default)" default:"instances/default" env:"V2V_ROOT" short:"R"`
+	Keygen   KeygenCmd   `cmd:"" aliases:"kg" help:"Tạo danh tính cá nhân vào key.json"`
+	Role     RoleCmd     `cmd:"" aliases:"r" help:"Quản lý role trong roles.json"`
+	Enroll   EnrollCmd   `cmd:"" aliases:"en" help:"Phát ticket enroll passkey thật (chạy trên host server)"`
+	List     ListCmd     `cmd:"" aliases:"ls" help:"Xem tickets và credentials trong store"`
+	Migrate  MigrateCmd  `cmd:"" aliases:"mg" help:"Đổi preset mã hóa cho key.json hiện có"`
+	Config   ConfigCmd   `cmd:"" aliases:"c" help:"Đồng bộ config theo template manifest (v2v-template.json)"`
+	Instance InstanceCmd `cmd:"" aliases:"i" help:"Quản lý instance (deploy nhiều môi trường)"`
 }
 
 type KeygenCmd struct {
-	Ed25519 Ed25519Keygen `cmd:"" name:"ed25519" help:"Danh tính ed25519 key-file"`
+	Ed25519 Ed25519Keygen `cmd:"" name:"ed25519" aliases:"ed" help:"Danh tính ed25519 key-file"`
 }
 
 var cli CLI

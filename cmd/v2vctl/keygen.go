@@ -15,9 +15,9 @@ import (
 )
 
 type Ed25519Keygen struct {
-	Role         string `help:"Role gắn với danh tính" default:"admin"`
+	Role         string `help:"Role gắn với danh tính" default:"admin" short:"r"`
 	Out          string `help:"Nơi ghi container" default:"key.json"`
-	ServerPubKey string `help:"Server public key hex (chống phishing, thay thế host pin)"`
+	ServerPubKey string `help:"Server public key hex (chống phishing, thay thế host pin)" short:"s"`
 }
 
 func (c *Ed25519Keygen) Run() error {

@@ -18,9 +18,9 @@ import (
 // so preview, force-gating and backups behave identically.
 type ConfigTakeCmd struct {
 	ConfigCommon `embed:""`
-	List         bool `help:"Chỉ in id:key mỗi dòng, không hỏi, không ghi"`
+	List         bool `help:"Chỉ in id:key mỗi dòng, không hỏi, không ghi" short:"l"`
 	Yes          bool `help:"Áp dụng mọi mục drift mà không hỏi (scriptable)"`
-	Force        bool `help:"Chuyển tiếp cho sync khi entry lossy (vd jsonc)"`
+	Force        bool `help:"Chuyển tiếp cho sync khi entry lossy (vd jsonc)" short:"f"`
 }
 
 // takeCandidate is one resettable drift: a key whose local value

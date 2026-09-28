@@ -17,8 +17,8 @@ import (
 type MigrateCmd struct {
 	In     string `help:"File nguồn" default:"key.json"`
 	Out    string `help:"File đích (mặc định ghi đè In, backup .old)"`
-	Preset string `help:"Preset đích: native, wasm, custom" default:"native"`
-	Force  bool   `help:"Ghi đè không hỏi khi .old đã tồn tại"`
+	Preset string `help:"Preset đích: native, wasm, custom" default:"native" short:"p"`
+	Force  bool   `help:"Ghi đè không hỏi khi .old đã tồn tại" short:"f"`
 }
 
 func (m *MigrateCmd) Run() error {

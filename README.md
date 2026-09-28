@@ -136,6 +136,6 @@ Open `http://localhost:10000/web/` for the browser client.
 
 - **How it works:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — architecture, wire protocol, tripcode crypto, storage, and security model.
 - **Configuration:** `template/server/instances/default/.env` has all env vars with comments (`PORT`, `MAX_MESSAGE_LENGTH`, `HISTORY_FILE_PATH`, `WEBAUTHN_*`, etc.).
-- **Management tool:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`, `config sync/diff/check/manifest/take`, `instance init/list/status/up/down/restart/logs`).
+- **Management tool:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`, `config sync/diff/check/manifest/take`, `instance init/list/status/up/down/restart/logs`). Commands longer than three characters have short aliases (`r`=`role`, `i`=`instance`, `c`=`config`, `ls`=`list`, `r new`=`role create`, `c sy`=`config sync`, `i rs`=`instance restart`), and long flags have short forms (`-R`=`--root`, `-p`=`--port`/`--preset`, `-s`=`--store`). Run `v2vctl <command> --help` for the full set.
 
 Issues and PRs are welcome.
