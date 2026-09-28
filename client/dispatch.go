@@ -128,7 +128,7 @@ func (s *Session) gracefulQuit() {
 			s.TripPriv[i] = 0
 		}
 	}
-	fmt.Fprintf(s.Display.Out, "👋 Đang ngắt kết nối... Tạm biệt!\n")
+	s.enqueueOutput("👋 Đang ngắt kết nối... Tạm biệt!\n")
 	// Let the goodbye flush and the pump tear down instead of racing
 	// them: return as soon as the pump exits, same 500ms cap as the
 	// old fixed sleep when it never does.
@@ -138,6 +138,8 @@ func (s *Session) gracefulQuit() {
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
+	// Drain the terminal queue so no queued line is lost on exit.
+	s.flushOutputNow()
 	notifyQuit()
 }
 
@@ -267,8 +269,8 @@ func (s *Session) cmdClear(text string) bool {
 	if !(text == "/clear" || text == "/c") {
 		return false
 	}
-	fmt.Fprint(s.Display.Out, "\033[H\033[2J")
-	greeting(s.Display.Out, s.Username)
+	s.enqueueOutput("\033[H\033[2J")
+	s.enqueueOutput("Đã kết nối với username: " + serverField(s.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n")
 	return true
 }
 

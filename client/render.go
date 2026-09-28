@@ -284,10 +284,6 @@ func fetchServerInfoBody(client *http.Client, url string) (string, error) {
 }
 
 // Session render methods (moved from main).
-func greeting(w io.Writer, uname string) {
-	fmt.Fprintln(w, "Đã kết nối với username:", serverField(uname))
-	fmt.Fprint(w, "Gõ tin nhắn để chat, /help để hiện trợ giúp\n\n")
-}
 
 // refreshCoalesced repaints at most every 100ms under burst; a
 // trailing timer guarantees the last update is never swallowed, so
@@ -494,7 +490,11 @@ func (s *Session) switchTab(n int) {
 	}
 	s.Display.ActiveTab = n
 	s.Display.PrintGen++
-	fmt.Fprint(s.Display.Out, "\033[H\033[2J")
+	// Queued like every other screen write: a full tab dump is large,
+	// and a synchronous write would stall the pump behind a slow
+	// terminal. The dump is one ordered chunk (never dropped by the
+	// queue cap) so a tab switch always replays the buffer faithfully.
+	s.enqueueOutput("\033[H\033[2J")
 	var buf *tabBuffer
 	if n == TabChat {
 		buf = s.Display.TabChat
@@ -505,6 +505,6 @@ func (s *Session) switchTab(n int) {
 	for _, l := range buf.lines {
 		sb.WriteString(l)
 	}
-	fmt.Fprint(s.Display.Out, sb.String())
+	s.enqueueOutputKeep(sb.String(), true)
 	s.Display.Term.Refresh()
 }

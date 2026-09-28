@@ -177,9 +177,12 @@ func main() {
 	defer ClearLoadedPassphrase()
 	go sess.runVerify()
 
-	go sess.runPump()
+	// Enqueue the greeting before the pump starts: the join replay
+	// arrives on the same ordered queue, so starting the pump first
+	// lets its header overtake the greeting.
+	sess.enqueueOutput("Đã kết nối với username: " + serverField(sess.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n")
 
-	greeting(sess.Display.Out, sess.Username)
+	go sess.runPump()
 
 	for {
 		text, err := sess.Display.Term.ReadLine()

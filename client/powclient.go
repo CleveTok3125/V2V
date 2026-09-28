@@ -292,22 +292,32 @@ func (s *Session) handlePowOffer(offer wire.PowOffer) {
 	}
 	preset, err := verifyPowOffer(offer, pin, isWASMRuntime())
 	if err != nil {
-		fmt.Printf("\n| [Local]: Offer PoW không hợp lệ (%v) — bỏ qua.\n", err)
+		s.Display.DisplayMu.Lock()
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Offer PoW không hợp lệ (%v) — bỏ qua.\n", err))
+		s.Display.DisplayMu.Unlock()
 		return
 	}
 	if !decideOffer(offer.Tier, maxTier) {
-		fmt.Printf("\n| [Local]: Từ chối PoW tier %d (vượt cap %d).\n", offer.Tier, maxTier)
+		s.Display.DisplayMu.Lock()
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Từ chối PoW tier %d (vượt cap %d).\n", offer.Tier, maxTier))
+		s.Display.DisplayMu.Unlock()
 		_ = s.sendJSON(wire.PowDecline{Type: "pow_decline", ChallengeID: offer.ChallengeID})
 		return
 	}
-	fmt.Printf("\n| [Local]: Đang giải PoW (tier %d)…\n", offer.Tier)
+	s.Display.DisplayMu.Lock()
+	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Đang giải PoW (tier %d)…\n", offer.Tier))
+	s.Display.DisplayMu.Unlock()
 	nonce, err := solveWithBudget(preset, offer.Salt, maxCostMs)
 	if err != nil {
-		fmt.Printf("\n| [Local]: Bỏ PoW (%v).\n", err)
+		s.Display.DisplayMu.Lock()
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Bỏ PoW (%v).\n", err))
+		s.Display.DisplayMu.Unlock()
 		_ = s.sendJSON(wire.PowDecline{Type: "pow_decline", ChallengeID: offer.ChallengeID})
 		return
 	}
 	if err := s.sendJSON(wire.PowResult{Type: "pow_result", ChallengeID: offer.ChallengeID, Nonce: nonce}); err != nil {
-		fmt.Printf("\n| [Local]: Gửi đáp án PoW thất bại: %v\n", err)
+		s.Display.DisplayMu.Lock()
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Gửi đáp án PoW thất bại: %v\n", err))
+		s.Display.DisplayMu.Unlock()
 	}
 }

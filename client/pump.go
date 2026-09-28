@@ -77,11 +77,14 @@ func (s *Session) runPump() {
 			case <-s.Quitting:
 				return
 			default:
-				fmt.Fprintf(s.Display.Out, "\r\033[K\n ❌ Mất kết nối server\n")
+				// Lost-connection line rides the same queue so it never
+				// interleaves with (or jumps ahead of) queued chat lines.
+				s.enqueueOutput("\r\033[K\n ❌ Mất kết nối server\n")
 				// Flush before exit: os.Exit skips deferred
 				// s.Display.Term.Close/flushChainTip, losing the newest tip and
 				// leaving the terminal raw.
 				s.flushChainTip()
+				s.flushOutputNow()
 				s.Display.Term.Close()
 				ClearLoadedPassphrase()
 				os.Exit(1)

@@ -82,9 +82,13 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 	phShown = s.Display.ActiveTab == TabChat
 	phBufEnd = 0
 	s.Display.DisplayMu.Lock()
+	// Wipe the input line as one ordered chunk: queued like every other
+	// screen write so a slow terminal never stalls the sender.
+	var wipe strings.Builder
 	for range typedLinesCount {
-		fmt.Fprint(s.Display.Out, "\033[1A\033[2K\r")
+		wipe.WriteString("\033[1A\033[2K\r")
 	}
+	s.enqueueOutput(wipe.String())
 
 	// Render markup on the whole text first so fenced blocks
 	// keep their state across lines; phRows then counts rendered

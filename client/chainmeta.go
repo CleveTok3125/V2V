@@ -839,11 +839,15 @@ func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
 	intervening := append([]string{}, s.Display.TabChat.lines[pm.bufEnd:]...)
 	s.Display.TabChat.spliceOut(start, pm.bufEnd)
 	// Rows on screen: placeholder block plus intervening lines printed after it.
-	fmt.Fprintf(s.Display.Out, "\x1b[%dA", pm.rows+len(intervening))
-	fmt.Fprint(s.Display.Out, "\x1b[J")
+	// Enqueued (not written) so a slow terminal never stalls the caller;
+	// the order against previously queued lines keeps the erase math valid.
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "\x1b[%dA", pm.rows+len(intervening))
+	sb.WriteString("\x1b[J")
 	for _, l := range intervening {
-		fmt.Fprint(s.Display.Out, l)
+		sb.WriteString(l)
 	}
+	s.enqueueOutput(sb.String())
 	s.Display.PrintGen++
 }
 

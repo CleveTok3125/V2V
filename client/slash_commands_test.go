@@ -13,13 +13,46 @@ import (
 // through dispatch on a stubbed session and its visible effect is
 // asserted (output text or session state).
 
-func behaviorSession(t *testing.T) (*Session, *bytes.Buffer) {
+// flushBuffer captures terminal output and drains the async terminal
+// queue before exposing it, so command tests asserting Out stay
+// deterministic without a flush after every handler call. Reads take
+// the terminal write token like every writer, so a background flush
+// can never interleave with an assertion.
+type flushBuffer struct {
+	sess *Session
+	buf  *bytes.Buffer
+}
+
+func (f *flushBuffer) Write(p []byte) (int, error) { return f.buf.Write(p) }
+
+func (f *flushBuffer) String() string {
+	f.sess.flushOutputNow()
+	f.sess.Display.OutWriteMu.Lock()
+	defer f.sess.Display.OutWriteMu.Unlock()
+	return f.buf.String()
+}
+
+func (f *flushBuffer) Len() int {
+	f.sess.flushOutputNow()
+	f.sess.Display.OutWriteMu.Lock()
+	defer f.sess.Display.OutWriteMu.Unlock()
+	return f.buf.Len()
+}
+
+func (f *flushBuffer) Reset() {
+	f.sess.flushOutputNow()
+	f.sess.Display.OutWriteMu.Lock()
+	defer f.sess.Display.OutWriteMu.Unlock()
+	f.buf.Reset()
+}
+
+func behaviorSession(t *testing.T) (*Session, *flushBuffer) {
 	t.Helper()
 	sess := sessionForDispatch(t)
-	var out bytes.Buffer
-	sess.Display.Out = &out
+	out := &flushBuffer{sess: sess, buf: &bytes.Buffer{}}
+	sess.Display.Out = out
 	sess.Display.ActiveTab = TabChat
-	return sess, &out
+	return sess, out
 }
 
 func TestCmdWhoamiLines(t *testing.T) {

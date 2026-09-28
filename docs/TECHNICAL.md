@@ -130,8 +130,9 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 - Tab 1 shows the full legacy stream even when Tab 2 is active (`emitTab` prints when `tab == activeTab || activeTab == TabChat`), so tabs never change Tab 1 behavior.
 - Tab 2 is purely additive and lazyloads (buffered always, rendered on switch).
 - Buffers (`tabBuffer`) are FIFO rings with dual-limit eviction (lines + bytes), mirroring server `ChatHistory`; `spliceOut` removes resolved placeholders.
-- `/tab`, `/tab 1|2`, `/t` switch with a single-lock clear + replay; the bar shows `[1:chat] 2:system` with the active tab bracketed (`tabBarLine`, columns padded so labels never shift).
-- Local command responses (`/help`, `/status`, …) print on the active tab immediately via `emitLocalFeedback` while also buffering into Tab 2 for review.
+- `/tab`, `/tab 1|2`, `/t` switch with a single-lock clear + queued replay; the bar shows `[1:chat] 2:system` with the active tab bracketed (`tabBarLine`, columns padded so labels never shift).
+- Local command responses (`/help`, `/status`, …) queue into the active tab via `emitLocalFeedback` while also buffering into Tab 2 for review.
+- Terminal output is queued, never written inline: the read loop, input path and background jobs append ordered chunks under a leaf lock, and a single flusher drains them outside every lock, so a slow terminal never stalls socket reads (which is what used to fill the server's per-session queue until live frames dropped). The queue caps at 512KiB — oldest rendered chunks drop (counted in `OutSkipped`) while their data stays in the tab buffers, so switching tabs replays them; full tab dumps enqueue whole and are exempt.
 
 ## Placeholders and Server Echo
 

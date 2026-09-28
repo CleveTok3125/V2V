@@ -87,6 +87,22 @@ type DisplayState struct {
 	Term inputTerminal
 	Out  io.Writer
 
+	// Async terminal queue. Producers (the socket read loop, the input
+	// loop, background jobs) append ordered chunks under OutMu and
+	// return immediately; a single flusher drains the queue outside
+	// every lock, so a slow terminal never stalls the socket read.
+	// OutMu is a leaf lock: never take DisplayMu while holding it.
+	OutMu       sync.Mutex
+	OutBuf      []byte
+	OutFlushing bool
+	// OutWriteMu serializes terminal writes between the async flusher
+	// and synchronous flushes, keeping every batch contiguous. Like
+	// OutMu, a leaf lock held only around Out.Write.
+	OutWriteMu sync.Mutex
+	// OutSkipped counts rendered chunks dropped at the queue cap: their
+	// data stays in the tab buffers, so switching tabs replays them.
+	OutSkipped int
+
 	// Coalesced repaint state.
 	RefreshMu      sync.Mutex
 	LastRefresh    time.Time
