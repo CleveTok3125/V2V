@@ -13,6 +13,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 - [Placeholders and Server Echo](#placeholders-and-server-echo)
 - [Slash Commands](#slash-commands)
 - [Wire Protocol & History](#wire-protocol--history)
+- [History Sync Protocol](HISTORY_SYNC.md)
 - [Message Chain](#message-chain)
 - [Authentication](#authentication)
 - [Tripcode](#tripcode)
@@ -191,6 +192,7 @@ Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `interna
 - Join/leave lines carry `sys_kind` set at broadcast; catch-up replay filters them unless the session asked (`AuthPacket.history_joins`, wired to the client `-j` flag, which also seeds live join display — `/showjoin` only toggles live display afterwards). Dates, audits and untagged lines always go, including audits when joins are filtered. Live broadcasts always carry every line; only replay filters. The web client exposes the same knob as its show-join checkbox.
 - Each replay closes with a counted human footer (`--- Kết thúc lịch sử (sent/total) ---`, opened by `--- Lịch sử chat gần đây ---`) plus a machine `history_sync` trailer for the fork check: `{"type":"history_sync","min_height":H,"max_height":H,"sent":S,"total":T,"dropped":D}`. `sent < total` is normal (filtered lines), so the client keys the incomplete-window signal off `dropped > 0` instead. Filtered lines never held chain positions, so a complete replayed window has no gaps. Notices carry `chain_height == 0` and never widen the trailer window.
 - System broadcasts (`join/leave/date`) retry once after `20ms` before dropping (`sendWithRetry`), so a chat burst filling the per-client `Send` queue (256) does not silently swallow system lines; chat itself stays best-effort.
+- The connect-time push replay and the `history_request{after}` height cursor above are the current implementation. The target replacement — a client-driven, `seq`-cursor protocol for the initial load, `/older`, refills and relay mirroring — is specified in [History Sync Protocol](HISTORY_SYNC.md).
 
 ## Message Chain
 
