@@ -143,19 +143,29 @@ type HistoryInfo struct {
 	Count     int    `json:"count,omitempty"`
 }
 
+// HeightRange is one inclusive chained-height interval in a refill
+// request: the server returns the chained lines whose chain_height falls
+// inside it.
+type HeightRange struct {
+	From uint64 `json:"from"`
+	To   uint64 `json:"to"`
+}
+
 // HistoryRequest asks the server for stored history. AfterSeq pages
 // ascending (oldest first, seq > AfterSeq), BeforeSeq pages descending
 // (newest first, seq < BeforeSeq); 0 means from the oldest / the tip.
-// Before/After are the legacy height cursors kept until the seq-cursor
-// path replaces them. The response reuses the replay format (lines plus
-// a HistorySync trailer), so no new parser is needed.
+// Ranges fetches exact chained heights (refill) and wins over the
+// cursors. Before/After are the legacy height cursors kept until the
+// seq-cursor path replaces them. The response reuses the replay format
+// (lines plus a HistorySync trailer), so no new parser is needed.
 type HistoryRequest struct {
-	Type      string  `json:"type"` // "history_request"
-	Before    uint64  `json:"before,omitempty"`
-	Limit     int     `json:"limit,omitempty"`
-	After     uint64  `json:"after,omitempty"`
-	AfterSeq  *uint64 `json:"after_seq,omitempty"`  // ascending from this seq (0 = oldest)
-	BeforeSeq *uint64 `json:"before_seq,omitempty"` // descending from this seq (0 = tip)
+	Type      string        `json:"type"` // "history_request"
+	Before    uint64        `json:"before,omitempty"`
+	Limit     int           `json:"limit,omitempty"`
+	After     uint64        `json:"after,omitempty"`
+	AfterSeq  *uint64       `json:"after_seq,omitempty"`  // ascending from this seq (0 = oldest)
+	BeforeSeq *uint64       `json:"before_seq,omitempty"` // descending from this seq (0 = tip)
+	Ranges    []HeightRange `json:"ranges,omitempty"`     // exact chained heights (refill)
 }
 
 // PowOffer is a server-issued proof-of-work challenge, signed with the

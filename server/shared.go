@@ -72,6 +72,7 @@ type (
 	AuthPacket     = wire.AuthPacket
 	HistorySync    = wire.HistorySync
 	HistoryRequest = wire.HistoryRequest
+	HeightRange    = wire.HeightRange
 )
 
 type ServerIdentity struct {
@@ -144,9 +145,10 @@ type ChatServer struct {
 	IpCounts   map[string]int
 	IpCountsMu sync.Mutex
 
-	// HistoryCooldown throttles on-demand history requests per IP, so
-	// two connections from one IP cannot halve the effective cooldown.
-	HistoryCooldown *guard.CooldownMap
+	// HistoryBudget throttles history requests per IP by cost (lines
+	// returned), so two connections from one IP share one budget and an
+	// expensive disk read costs more than a RAM page.
+	HistoryBudget *guard.BudgetMap
 
 	// SlowCooldown throttles chat per IP at tier 2+: base cooldown
 	// times the tier multiplier. Per-IP (not per-session) so opening
@@ -206,7 +208,7 @@ func NewChatServer() *ChatServer {
 		StartTime:       time.Now(),
 		Hub:             Hub{Clients: make(map[*websocket.Conn]*ClientSession), DisplayNameCount: make(map[string]int)},
 		IpCounts:        make(map[string]int),
-		HistoryCooldown: guard.NewCooldownMap(),
+		HistoryBudget:   guard.NewBudgetMap(),
 		SlowCooldown:    guard.NewCooldownMap(),
 		LastConnectTime: make(map[string]time.Time),
 		AuthFails:       make(map[string]RateLimitRecord),

@@ -27,7 +27,14 @@ type DynamicConfig struct {
 	IdleChatTimeout        time.Duration `json:"idleChatTimeout"`
 	MaxHistoryBytes        int           `json:"maxHistoryBytes"`
 	MaxHistorySend         int           `json:"maxHistorySend"`
-	HistorySegmentCooldown time.Duration `json:"historySegmentCooldown"`
+	// History requests draw on a per-IP cost budget (token bucket):
+	// each request spends the number of lines it may return, refilled
+	// at HistoryBudgetPerSec up to HistoryBudgetBurst. Replaces a fixed
+	// time cooldown so a bounded initial load proceeds while sustained
+	// abuse drains the budget.
+	HistoryBudgetBurst     int `json:"historyBudgetBurst"`
+	HistoryBudgetPerSec    int `json:"historyBudgetPerSec"`
+	HistoryRefillMaxRanges int `json:"historyRefillMaxRanges"`
 	// HistoryReplayBatchLines/Bytes coalesce a replay response into
 	// multi-line frames so a bounded window fits the per-session send
 	// queue instead of being dropped frame by frame.
@@ -55,7 +62,9 @@ func DefaultDynamic() *DynamicConfig {
 		IdleChatTimeout:        30 * time.Minute,
 		MaxHistoryBytes:        10485760,
 		MaxHistorySend:         500,
-		HistorySegmentCooldown: 2 * time.Second,
+		HistoryBudgetBurst:     1000,
+		HistoryBudgetPerSec:    500,
+		HistoryRefillMaxRanges: 64,
 		HistoryReplayBatchLines: 32,
 		HistoryReplayBatchBytes: 16384,
 		HistoryDiskLookup:      0,
@@ -215,20 +224,24 @@ type ClientConfig struct {
 		MaxTier   int   `json:"maxTier"`
 		MaxCostMs int64 `json:"maxCostMs"`
 	} `json:"pow"`
-	// History controls recovery of missed lines. RecoverCap bounds how
-	// many missing lines the client auto-requests to fill a detected
-	// chain gap; larger gaps only warn. Zero disables auto-recovery;
-	// absent backfills to the default. The server still caps each
-	// request at maxHistorySend.
+	// History controls recovery of missed lines. RecoverRetries bounds
+	// how many times a refill is retried when the server answers
+	// incomplete; RecoverRetryDelay waits between attempts (must cover
+	// the server's history budget refill). LiveRecoverCap bounds the
+	// lines auto-refilled from live gaps per session (0 = unlimited).
 	History struct {
-		RecoverCap *int `json:"recoverCap"`
+		RecoverRetries    *int    `json:"recoverRetries"`
+		RecoverRetryDelay *string `json:"recoverRetryDelay"`
+		LiveRecoverCap    *int    `json:"liveRecoverCap"`
 	} `json:"history"`
 }
 
-// DefaultHistoryRecoverCap is the auto-recovery cap when the history
-// section is absent: a single request burst stays under the server's
-// per-session send queue, so recovery cannot drop its own lines.
-const DefaultHistoryRecoverCap = 200
+// History recovery defaults when the history section is absent.
+const (
+	DefaultHistoryRecoverRetries    = 2
+	DefaultHistoryRecoverRetryDelay = 2 * time.Second
+	DefaultHistoryLiveRecoverCap    = 1000
+)
 
 // DefaultClientConfig returns defaults matching current hardcoded values.
 func DefaultClientConfig() *ClientConfig {
@@ -277,7 +290,9 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.Reply.Enabled = boolPtr(true)
 	c.UI.Reply.QuoteMaxRunes = 80
 	c.UI.Clipboard.ClearAfterSec = intPtr(30)
-	c.History.RecoverCap = intPtr(DefaultHistoryRecoverCap)
+	c.History.RecoverRetries = intPtr(DefaultHistoryRecoverRetries)
+	c.History.RecoverRetryDelay = strPtr("2s")
+	c.History.LiveRecoverCap = intPtr(DefaultHistoryLiveRecoverCap)
 	// Code highlight palette (dark, matching the trip palette hues).
 	// A [0,0,0] entry means "use this default".
 	c.UI.CodeStyle.Background = [3]int{48, 48, 48}
@@ -340,8 +355,8 @@ func DefaultClientConfig() *ClientConfig {
 // boolPtr allocates a bool for default config values that must tell
 // "absent" apart from "false" after JSON round-trips.
 func boolPtr(v bool) *bool { return &v }
-
 func intPtr(v int) *int { return &v }
+func strPtr(v string) *string { return &v }
 
 // ShowMeta reports whether message meta lines render. A nil pointer
 // (hand-edited or ancient config) means the default: shown.
@@ -478,14 +493,36 @@ func (c *ClientConfig) ClipboardClearAfterSec() int {
 	return *c.UI.Clipboard.ClearAfterSec
 }
 
-// HistoryRecoverCap returns the auto-recovery cap: how many missing
-// lines the client requests to fill a detected chain gap. Zero
-// disables auto-recovery; absent or negative means the default.
-func (c *ClientConfig) HistoryRecoverCap() int {
-	if c == nil || c.History.RecoverCap == nil || *c.History.RecoverCap < 0 {
-		return DefaultHistoryRecoverCap
+// HistoryRecoverRetries returns the max refill retry rounds (default 2;
+// absent or negative means the default, explicit 0 disables retries).
+func (c *ClientConfig) HistoryRecoverRetries() int {
+	if c == nil || c.History.RecoverRetries == nil || *c.History.RecoverRetries < 0 {
+		return DefaultHistoryRecoverRetries
 	}
-	return *c.History.RecoverCap
+	return *c.History.RecoverRetries
+}
+
+// HistoryRecoverRetryDelay returns the wait between refill retries
+// (default 2s; absent or unparsable means the default).
+func (c *ClientConfig) HistoryRecoverRetryDelay() time.Duration {
+	if c == nil || c.History.RecoverRetryDelay == nil {
+		return DefaultHistoryRecoverRetryDelay
+	}
+	d, err := time.ParseDuration(*c.History.RecoverRetryDelay)
+	if err != nil || d <= 0 {
+		return DefaultHistoryRecoverRetryDelay
+	}
+	return d
+}
+
+// HistoryLiveRecoverCap returns the per-session live-gap refill budget
+// in lines (default 1000; explicit 0 means unlimited; absent or negative
+// means the default).
+func (c *ClientConfig) HistoryLiveRecoverCap() int {
+	if c == nil || c.History.LiveRecoverCap == nil || *c.History.LiveRecoverCap < 0 {
+		return DefaultHistoryLiveRecoverCap
+	}
+	return *c.History.LiveRecoverCap
 }
 
 // Load reads a client config file. The config is read-only input: a
@@ -586,8 +623,14 @@ func parse(data []byte) (*ClientConfig, error) {
 		c.UI.Meta.Show = def.UI.Meta.Show
 	}
 	// Backfill recovery cap (absent means default: 200 auto lines).
-	if c.History.RecoverCap == nil {
-		c.History.RecoverCap = def.History.RecoverCap
+	if c.History.RecoverRetries == nil {
+		c.History.RecoverRetries = def.History.RecoverRetries
+	}
+	if c.History.RecoverRetryDelay == nil {
+		c.History.RecoverRetryDelay = def.History.RecoverRetryDelay
+	}
+	if c.History.LiveRecoverCap == nil {
+		c.History.LiveRecoverCap = def.History.LiveRecoverCap
 	}
 	// Backfill version-check knobs (absent means default: enabled warn).
 	if c.UI.VersionCheck.Enabled == nil {

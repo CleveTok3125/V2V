@@ -175,6 +175,12 @@ type ChainState struct {
 	// heights plus the anchor they must continue. Nil when idle.
 	// Written under DisplayMu by the pump.
 	RecoverPending *recoverWindow
+	// RecoverGen invalidates stale refill timers (settle timeout and
+	// retry scheduling) when a newer attempt supersedes them.
+	RecoverGen uint64
+	// LiveRecovered counts chained lines auto-refilled from live gaps
+	// this session, against history.liveRecoverCap.
+	LiveRecovered int
 	// SyncHeights maps chained heights received during the join replay
 	// to their hashes. Reset when the join window opens; the trailer
 	// uses it both to refill dropped heights and to judge a fork by

@@ -232,17 +232,25 @@ func TestClipboardBackfill(t *testing.T) {
 
 // History paging knobs pin their defaults: 2s segment throttle,
 // disk lookup off (opt-in per deployment cost).
-func TestHistoryRecoverCap(t *testing.T) {
-	if got := DefaultClientConfig().HistoryRecoverCap(); got != 200 {
-		t.Fatalf("default recoverCap = %d, want 200", got)
+func TestHistoryRecoveryDefaults(t *testing.T) {
+	d := DefaultClientConfig()
+	if got := d.HistoryRecoverRetries(); got != 2 {
+		t.Fatalf("default recoverRetries = %d, want 2", got)
+	}
+	if got := d.HistoryRecoverRetryDelay(); got != 2*time.Second {
+		t.Fatalf("default recoverRetryDelay = %v, want 2s", got)
+	}
+	if got := d.HistoryLiveRecoverCap(); got != 1000 {
+		t.Fatalf("default liveRecoverCap = %d, want 1000", got)
 	}
 	var nilCfg *ClientConfig
-	if got := nilCfg.HistoryRecoverCap(); got != 200 {
-		t.Fatalf("nil config recoverCap = %d, want 200", got)
+	if nilCfg.HistoryRecoverRetries() != 2 || nilCfg.HistoryLiveRecoverCap() != 1000 {
+		t.Fatal("nil config must fall back to defaults")
 	}
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.jsonc")
-	// Old config without the history section backfills to the default.
+	// Old config without the history section backfills to the defaults.
 	raw, _ := json.Marshal(map[string]any{"defaults": map[string]any{"username": "A"}})
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
@@ -251,11 +259,14 @@ func TestHistoryRecoverCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := c.HistoryRecoverCap(); got != 200 {
-		t.Fatalf("absent section recoverCap = %d, want 200", got)
+	if c.HistoryRecoverRetries() != 2 || c.HistoryLiveRecoverCap() != 1000 {
+		t.Fatal("absent history section must backfill to defaults")
 	}
-	// Explicit zero disables auto-recovery instead of backfilling.
-	raw, _ = json.Marshal(map[string]any{"history": map[string]any{"recoverCap": 0}})
+	// Explicit values are honored; explicit zero liveRecoverCap means
+	// unlimited (returned as 0, not the default).
+	raw, _ = json.Marshal(map[string]any{"history": map[string]any{
+		"recoverRetries": 5, "recoverRetryDelay": "3s", "liveRecoverCap": 0,
+	}})
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -263,27 +274,22 @@ func TestHistoryRecoverCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := c.HistoryRecoverCap(); got != 0 {
-		t.Fatalf("explicit zero recoverCap = %d, want 0 (disabled)", got)
+	if got := c.HistoryRecoverRetries(); got != 5 {
+		t.Fatalf("explicit recoverRetries = %d, want 5", got)
 	}
-	// A positive value is honored as-is.
-	raw, _ = json.Marshal(map[string]any{"history": map[string]any{"recoverCap": 50}})
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatal(err)
+	if got := c.HistoryRecoverRetryDelay(); got != 3*time.Second {
+		t.Fatalf("explicit recoverRetryDelay = %v, want 3s", got)
 	}
-	c, err = Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := c.HistoryRecoverCap(); got != 50 {
-		t.Fatalf("explicit recoverCap = %d, want 50", got)
+	if got := c.HistoryLiveRecoverCap(); got != 0 {
+		t.Fatalf("explicit zero liveRecoverCap = %d, want 0 (unlimited)", got)
 	}
 }
 
 func TestHistoryPagingDefaults(t *testing.T) {
 	d := DefaultDynamic()
-	if d.HistorySegmentCooldown != 2*time.Second {
-		t.Fatalf("HistorySegmentCooldown = %v, want 2s", d.HistorySegmentCooldown)
+	if d.HistoryBudgetBurst != 1000 || d.HistoryBudgetPerSec != 500 || d.HistoryRefillMaxRanges != 64 {
+		t.Fatalf("history budget defaults = burst %d rate %d ranges %d, want 1000/500/64",
+			d.HistoryBudgetBurst, d.HistoryBudgetPerSec, d.HistoryRefillMaxRanges)
 	}
 	if d.HistoryDiskLookup != 0 {
 		t.Fatalf("HistoryDiskLookup = %d, want 0 (RAM-only default)", d.HistoryDiskLookup)

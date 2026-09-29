@@ -53,6 +53,7 @@ type (
 	Permission     = wire.Permission
 	HistorySync    = wire.HistorySync
 	HistoryRequest = wire.HistoryRequest
+	HeightRange    = wire.HeightRange
 	PowOffer       = wire.PowOffer
 	PowResult      = wire.PowResult
 	PowDecline     = wire.PowDecline

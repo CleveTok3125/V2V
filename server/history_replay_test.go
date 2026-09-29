@@ -618,28 +618,29 @@ func TestSegment_HoldsBroadcastMu(t *testing.T) {
 	}
 }
 
-// TestAllowHistorySegment pins the throttle: the first request from an
-// IP passes, an immediate second is refused, a different IP is
-// independent, and one past the HistorySegmentCooldown knob passes
-// again. IP-keyed (not session) so two connections from one address
-// cannot halve the effective cooldown. The dedicated knob (not
-// MessageCooldown) is intentional: tuning chat must never retune
-// history paging.
-func TestAllowHistorySegment(t *testing.T) {
+// TestAllowHistoryRequestBudget pins the per-IP cost budget: the first
+// charge passes, an immediate second beyond the burst is refused, a
+// different IP is independent, and a refilled charge passes. IP-keyed
+// (not session) so two connections from one address share one budget.
+func TestAllowHistoryRequestBudget(t *testing.T) {
 	testCfg(t)
+	cfg := config.DefaultDynamic()
+	cfg.HistoryBudgetBurst = 100
+	cfg.HistoryBudgetPerSec = 1000
+	Cfg.Dynamic.Store(cfg)
 	s := NewChatServer()
 	const ip = "10.2.0.1"
-	if !s.allowHistorySegment(ip) {
-		t.Fatal("first request must pass")
+	if !s.allowHistoryRequest(ip, 100) {
+		t.Fatal("first charge must pass")
 	}
-	if s.allowHistorySegment(ip) {
-		t.Fatal("immediate second request from the same IP must be refused")
+	if s.allowHistoryRequest(ip, 100) {
+		t.Fatal("second charge beyond the burst must be refused")
 	}
-	if !s.allowHistorySegment("10.2.0.2") {
+	if !s.allowHistoryRequest("10.2.0.2", 100) {
 		t.Fatal("a different IP must be independent")
 	}
-	time.Sleep(Cfg.Dynamic.Load().HistorySegmentCooldown + 20*time.Millisecond)
-	if !s.allowHistorySegment(ip) {
-		t.Fatal("request past the cooldown must pass")
+	time.Sleep(150 * time.Millisecond)
+	if !s.allowHistoryRequest(ip, 100) {
+		t.Fatal("a refilled charge must pass")
 	}
 }

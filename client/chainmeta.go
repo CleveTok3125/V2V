@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -822,155 +823,211 @@ func (s *Session) verifyReplayWire(wire WireMessage, allowStash bool) bool {
 	return false
 }
 
-// recoverWindow is one outstanding gap refill: the missed [From, To]
-// heights plus the anchor (height and hash of the running tip at
-// detection time) the first recovered wire must continue. Next and
-// LastHash advance with each verified wire. Missing, when non-nil,
-// marks which heights in the span were actually lost: the server
-// returns the whole span, and already-received heights are verified
-// and skipped instead of rendered. FollowUp holds a newer gap detected
-// while this window was in flight; finishRecovery promotes it so the
-// extra heights still get refilled.
+// recoverWindow is one outstanding refill: the chained heights still
+// missing and the known height→hash map used to verify each recovered
+// wire against its predecessor. The server returns the exact ranges,
+// oldest first; a recovered height is rendered and removed from Missing.
+// Attempts counts sends so finishRecovery can retry a partial answer.
 type recoverWindow struct {
-	From, To     uint64
-	AnchorHeight uint64
-	AnchorHash   [32]byte
-	Next         uint64
-	LastHash     [32]byte
-	Received     int
-	Failed       bool
-	RequestedAt  time.Time
-	Missing      map[uint64]bool
-	FollowUp     *recoverWindow
+	Missing     map[uint64]bool
+	Known       map[uint64][32]byte
+	Live        map[uint64]bool // subset added by live gaps (session budget)
+	MaxMissing  uint64
+	Received    int
+	Attempts    int
+	Failed      bool
+	RequestedAt time.Time
 }
 
-// recoverTimeout bounds one refill attempt: a gap detected after it
-// replaces the window and retries.
-const recoverTimeout = 5 * time.Second
+// recoverSettleTimeout bounds one in-flight refill: past it the window
+// is settled as failed so a retry can proceed (a rejected request may
+// never produce a trailer).
+const recoverSettleTimeout = 5 * time.Second
 
-// maybeRequestRecovery files a history_request for a detected gap and
-// reports whether a refill is now active. Gaps beyond the configured
-// cap (or a disabled/unsendable request) keep the light notice only.
-// At most one request flies at a time. A newer gap inside the timeout
-// cannot extend the in-flight window — the server already capped the
-// reply at the requested limit — so it is queued as a follow-up refill
-// that fires when the current window settles. Caller must hold
-// DisplayMu.
+// missingRuns returns the contiguous ascending runs of missing heights.
+func missingRuns(missing map[uint64]bool) []HeightRange {
+	hs := make([]uint64, 0, len(missing))
+	for h := range missing {
+		hs = append(hs, h)
+	}
+	sort.Slice(hs, func(i, j int) bool { return hs[i] < hs[j] })
+	var runs []HeightRange
+	for _, h := range hs {
+		if n := len(runs); n > 0 && runs[n-1].To+1 == h {
+			runs[n-1].To = h
+			continue
+		}
+		runs = append(runs, HeightRange{From: h, To: h})
+	}
+	return runs
+}
+
+// pruneMissing drops missing heights whose run start has no known
+// predecessor hash: the refill's first link could not be verified, so
+// those lines are unrecoverable and must not fail the whole window. It
+// returns how many were dropped.
+func pruneMissing(p *recoverWindow) int {
+	lost := 0
+	for _, run := range missingRuns(p.Missing) {
+		if _, ok := p.Known[run.From-1]; ok {
+			continue
+		}
+		for h := run.From; h <= run.To; h++ {
+			delete(p.Missing, h)
+			delete(p.Live, h)
+			lost++
+		}
+	}
+	return lost
+}
+
+// sendRecoverLocked files one refill request for the pending window's
+// remaining missing heights and arms its settle timeout. Caller must
+// hold DisplayMu.
+func (s *Session) sendRecoverLocked() bool {
+	p := s.Chain.RecoverPending
+	if p == nil || s.Conn == nil {
+		return false
+	}
+	pruneMissing(p)
+	if len(p.Missing) == 0 {
+		return false
+	}
+	ranges := missingRuns(p.Missing)
+	if err := s.sendJSON(HistoryRequest{Type: "history_request", Ranges: ranges, Limit: len(p.Missing)}); err != nil {
+		return false
+	}
+	p.Attempts++
+	p.Received = 0
+	p.Failed = false
+	p.RequestedAt = time.Now()
+	s.Chain.RecoverGen++
+	gen := s.Chain.RecoverGen
+	time.AfterFunc(recoverSettleTimeout, func() {
+		s.Display.DisplayMu.Lock()
+		if s.Chain.RecoverGen == gen && s.Chain.RecoverPending == p {
+			s.finishRecovery()
+		}
+		s.Display.DisplayMu.Unlock()
+	})
+	return true
+}
+
+// maybeRequestRecovery files a refill for a detected live gap: the gap
+// heights join the pending window (or start one) and a request goes out
+// when none is in flight. Returns whether the heights are now pending.
+// Caller must hold DisplayMu.
 func (s *Session) maybeRequestRecovery(from, to, anchorHeight uint64, anchorHash [32]byte) bool {
-	return s.requestRecovery(from, to, anchorHeight, anchorHash, nil)
-}
-
-// requestRecovery is maybeRequestRecovery with an explicit missing set
-// for join-replay refills: the request spans the whole window, but only
-// heights in missing are rendered. A nil set means every height in the
-// span is missing (live gap). Caller must hold DisplayMu.
-func (s *Session) requestRecovery(from, to, anchorHeight uint64, anchorHash [32]byte, missing map[uint64]bool) bool {
-	capN := ClientCfg.HistoryRecoverCap()
-	if ClientCfg != nil && ClientCfg.Limits.MaxHistorySend > 0 && capN > ClientCfg.Limits.MaxHistorySend {
-		capN = ClientCfg.Limits.MaxHistorySend
+	if s.Conn == nil || from == 0 || to < from {
+		return false
+	}
+	capN := 0
+	if ClientCfg != nil {
+		capN = ClientCfg.HistoryLiveRecoverCap()
+	}
+	p := s.Chain.RecoverPending
+	if p == nil {
+		p = &recoverWindow{Missing: map[uint64]bool{}, Known: map[uint64][32]byte{}, Live: map[uint64]bool{}}
+		s.Chain.RecoverPending = p
 	}
 	gap := int(to - from + 1)
-	if capN <= 0 || gap > capN || s.Conn == nil {
-		return false
-	}
-	if p := s.Chain.RecoverPending; p != nil && time.Since(p.RequestedAt) < recoverTimeout {
-		p.FollowUp = &recoverWindow{
-			From: from, To: to, AnchorHeight: anchorHeight, AnchorHash: anchorHash,
-			Missing: missing,
+	if capN > 0 && s.Chain.LiveRecovered+len(p.Live)+gap > capN {
+		if len(p.Missing) == 0 {
+			s.Chain.RecoverPending = nil
 		}
-		return true
-	}
-	if err := s.sendJSON(HistoryRequest{Type: "history_request", After: from, Limit: gap}); err != nil {
-		s.Chain.RecoverPending = nil
 		return false
 	}
-	s.Chain.RecoverPending = &recoverWindow{
-		From: from, To: to, AnchorHeight: anchorHeight, AnchorHash: anchorHash,
-		Next: from, LastHash: anchorHash, RequestedAt: time.Now(), Missing: missing,
+	for h := from; h <= to; h++ {
+		p.Missing[h] = true
+		p.Live[h] = true
+		if h > p.MaxMissing {
+			p.MaxMissing = h
+		}
 	}
+	p.Known[anchorHeight] = anchorHash
+	if p.Attempts == 0 {
+		return s.sendRecoverLocked()
+	}
+	// An attempt is in flight; the new heights ride its retry.
 	return true
 }
 
 // recoverMissedFromTrailer turns a join-replay trailer that lost lines
-// into one bounded refill: heights in the intended window with no
-// recorded hash are the drops, and the first drop's predecessor anchors
-// the request. The whole span is fetched (the server cannot return
-// disjoint ranges), and received heights inside it are verified but not
-// re-rendered. Caller must hold DisplayMu.
+// into a refill: heights in the intended window with no recorded hash
+// are the drops, verified against the received heights around them.
+// Caller must hold DisplayMu.
 func (s *Session) recoverMissedFromTrailer(hs HistorySync) {
 	if hs.Dropped <= 0 || hs.MinHeight == 0 || hs.MaxHeight < hs.MinHeight {
 		return
 	}
-	missing := map[uint64]bool{}
-	var first uint64
+	p := &recoverWindow{Missing: map[uint64]bool{}, Known: map[uint64][32]byte{}, Live: map[uint64]bool{}}
+	for h, hash := range s.Chain.SyncHeights {
+		p.Known[h] = hash
+	}
 	for h := hs.MinHeight; h <= hs.MaxHeight; h++ {
 		if _, ok := s.Chain.SyncHeights[h]; !ok {
-			missing[h] = true
-			if first == 0 {
-				first = h
+			p.Missing[h] = true
+			if h > p.MaxMissing {
+				p.MaxMissing = h
 			}
 		}
 	}
-	if first == 0 {
+	lost := pruneMissing(p)
+	if len(p.Missing) == 0 {
+		if lost > 0 {
+			s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Bỏ lỡ %d tin khi tải lịch sử.\n", lost))
+		}
 		return
 	}
-	anchor, ok := s.Chain.SyncHeights[first-1]
-	if !ok {
-		// The predecessor never arrived either, so the refill's first
-		// link cannot be verified; leave a plain notice.
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Bỏ lỡ %d tin khi tải lịch sử.\n", len(missing)))
-		return
-	}
-	if !s.requestRecovery(first, hs.MaxHeight, first-1, anchor, missing) {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Bỏ lỡ %d tin khi tải lịch sử.\n", len(missing)))
+	s.Chain.RecoverPending = p
+	if !s.sendRecoverLocked() {
+		s.Chain.RecoverPending = nil
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Bỏ lỡ %d tin khi tải lịch sử.\n", len(p.Missing)+lost))
 	}
 }
 
-// checkRecoverWire consumes one wire of a recovery window. Wires
-// linking contiguously from the anchor verify and advance the window;
-// those in the Missing set (or all, for a live gap) render and index
-// exactly like live ones, while already-received heights are verified
-// and skipped. RecoverRendered is set for every handled wire so the
-// pump never draws it twice. Anything that breaks the chain fails the
-// window at the trailer. A wire newer than the window — or any wire
-// with no pending refill, from a dropped footer — is live traffic: the
-// window closes and the wire takes the normal path. Caller must hold
-// DisplayMu.
+// checkRecoverWire consumes one wire of a refill window. A wire at a
+// missing height verifies against its predecessor's known hash, then
+// renders and clears from Missing; a wire newer than every missing
+// height is live traffic (the window closes), and anything else is
+// skipped. RecoverRendered is set so the pump never draws it twice.
+// Caller must hold DisplayMu.
 func (s *Session) checkRecoverWire(wire WireMessage) {
 	p := s.Chain.RecoverPending
-	if p == nil || wire.ChainHeight > p.To || wire.ChainHash == "" {
+	if p == nil || wire.ChainHash == "" || wire.ChainHeight > p.MaxMissing {
 		s.Chain.InRecover = false
 		s.consumeEchoLocked(wire, false)
 		s.checkChainLink(wire)
 		return
 	}
-	if wire.ChainHeight != p.Next {
-		// Out-of-window height (duplicate or hole): skip without
-		// failing; the trailer settles completeness. RecoverRendered
-		// stays false so the pump draws it normally — dropping it
-		// silently would hide a genuine duplicate.
+	s.Chain.RecoverRendered = true
+	if !p.Missing[wire.ChainHeight] {
 		return
 	}
-	s.Chain.RecoverRendered = true
-	if _, err := verifyWireLink(wire, p.LastHash); err != nil {
-		// A failed wire is deliberately not rendered or indexed: it
-		// does not continue the anchor, so drawing it would present
-		// unverified content as recovered history.
+	prev, ok := p.Known[wire.ChainHeight-1]
+	if !ok {
 		p.Failed = true
 		return
 	}
-	if p.Missing == nil || p.Missing[wire.ChainHeight] {
-		if s.Display.CatchupHold {
-			s.renderRecoveredInPlace(wire)
-		} else {
-			s.renderChatBlock(wire)
-		}
-		p.Received++
+	h, err := verifyWireLink(wire, prev)
+	if err != nil {
+		// Not rendered or indexed: it does not continue its anchor, so
+		// drawing it would present unverified content as recovered.
+		p.Failed = true
+		return
 	}
-	p.Next++
-	if h, ok := chain.ParseHex64(wire.ChainHash); ok {
-		p.LastHash = h
+	if s.Display.CatchupHold {
+		s.renderRecoveredInPlace(wire)
+	} else {
+		s.renderChatBlock(wire)
 	}
+	delete(p.Missing, wire.ChainHeight)
+	p.Known[wire.ChainHeight] = h
+	if p.Live[wire.ChainHeight] {
+		s.Chain.LiveRecovered++
+		delete(p.Live, wire.ChainHeight)
+	}
+	p.Received++
 }
 
 // metaHeightIndex returns the index just after the last meta line
@@ -1037,25 +1094,51 @@ func (s *Session) renderRecoveredInPlace(wire WireMessage) {
 // follow-up gap queued meanwhile is then started against its own
 // anchor, so an extended loss still gets refilled. Caller must hold
 // DisplayMu.
+// finishRecovery settles one refill attempt: a window with nothing left
+// missing confirms; otherwise it retries the remainder after the
+// configured delay, up to history.recoverRetries, and finally reports
+// the loss. Caller must hold DisplayMu.
 func (s *Session) finishRecovery() {
 	p := s.Chain.RecoverPending
-	s.Chain.RecoverPending = nil
 	if p == nil {
 		return
 	}
-	total := int(p.To - p.From + 1)
-	if p.Missing != nil {
-		total = len(p.Missing)
-	}
-	if !p.Failed && p.Next == p.To+1 {
+	if len(p.Missing) == 0 && !p.Failed {
+		s.Chain.RecoverPending = nil
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Đã bù %d tin bị lỡ.\n", p.Received))
-	} else {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Không bù đủ tin (nhận %d/%d).\n", p.Received, total))
+		s.releaseCatchupLocked()
+		return
 	}
-	if f := p.FollowUp; f != nil {
-		s.requestRecovery(f.From, f.To, f.AnchorHeight, f.AnchorHash, f.Missing)
+	retries, delay := 2, 2*time.Second
+	if ClientCfg != nil {
+		retries = ClientCfg.HistoryRecoverRetries()
+		delay = ClientCfg.HistoryRecoverRetryDelay()
 	}
-	// A catch-up hold ends with the refill it was waiting for.
+	if p.Attempts <= retries {
+		s.Chain.RecoverGen++
+		gen := s.Chain.RecoverGen
+		time.AfterFunc(delay, func() {
+			s.Display.DisplayMu.Lock()
+			if s.Chain.RecoverGen == gen && s.Chain.RecoverPending == p {
+				if !s.sendRecoverLocked() {
+					s.abandonRecoveryLocked(p)
+				}
+			}
+			s.Display.DisplayMu.Unlock()
+		})
+		return
+	}
+	s.abandonRecoveryLocked(p)
+}
+
+// abandonRecoveryLocked clears the pending refill and reports the loss.
+// Caller must hold DisplayMu.
+func (s *Session) abandonRecoveryLocked(p *recoverWindow) {
+	if s.Chain.RecoverPending != p {
+		return
+	}
+	s.Chain.RecoverPending = nil
+	s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Không bù đủ tin (nhận %d/%d).\n", p.Received, p.Received+len(p.Missing)))
 	s.releaseCatchupLocked()
 }
 

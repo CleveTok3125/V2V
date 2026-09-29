@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/CleveTok3125/V2V/internal/config"
 	"github.com/CleveTok3125/V2V/internal/env"
@@ -166,7 +165,9 @@ func LoadDynamicConfig() (config.DynamicConfig, []string, error) {
 		IdleChatTimeout:         loader.Duration("IDLE_CHAT_TIMEOUT"),
 		MaxHistoryBytes:         loader.Int("MAX_HISTORY_BYTES"),
 		MaxHistorySend:          loader.Int("MAX_HISTORY_SEND"),
-		HistorySegmentCooldown:  loader.Duration("HISTORY_SEGMENT_COOLDOWN"),
+		HistoryBudgetBurst:      loader.Int("HISTORY_BUDGET_BURST"),
+		HistoryBudgetPerSec:     loader.Int("HISTORY_BUDGET_PER_SEC"),
+		HistoryRefillMaxRanges:  loader.Int("HISTORY_REFILL_MAX_RANGES"),
 		HistoryReplayBatchLines: loader.Int("HISTORY_REPLAY_BATCH_LINES"),
 		HistoryReplayBatchBytes: loader.Int("HISTORY_REPLAY_BATCH_BYTES"),
 		HistoryDiskLookup:       loader.Int("HISTORY_DISK_LOOKUP"),
@@ -182,11 +183,17 @@ func LoadDynamicConfig() (config.DynamicConfig, []string, error) {
 	if cfg.MaxHistorySend <= 0 {
 		cfg.MaxHistorySend = 500
 	}
-	// Fail-closed floors: a missing/zero segment throttle would let one
-	// client re-scan history unthrottled; an out-of-range disk tier must
-	// never widen reads beyond what the operator picked.
-	if cfg.HistorySegmentCooldown <= 0 {
-		cfg.HistorySegmentCooldown = 2 * time.Second
+	// Fail-closed floors: a missing/zero budget would let one client
+	// re-scan history unthrottled; an out-of-range disk tier must never
+	// widen reads beyond what the operator picked.
+	if cfg.HistoryBudgetBurst <= 0 {
+		cfg.HistoryBudgetBurst = 1000
+	}
+	if cfg.HistoryBudgetPerSec <= 0 {
+		cfg.HistoryBudgetPerSec = 500
+	}
+	if cfg.HistoryRefillMaxRanges <= 0 {
+		cfg.HistoryRefillMaxRanges = 64
 	}
 	// Batch floors: zero would send one frame per line, defeating the
 	// coalescing that keeps a window inside the send queue.

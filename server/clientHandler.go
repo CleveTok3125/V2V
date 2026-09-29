@@ -72,13 +72,14 @@ func (s *ChatServer) releaseIPConnection(clientIP string) {
 	}
 }
 
-// allowHistorySegment enforces the HistorySegmentCooldown knob per IP:
-// true allows the request. Keyed by IP (not session) so two
-// connections from one address cannot halve the effective cooldown.
-// Deliberately separate from MessageCooldown so tuning chat never
-// retunes history paging. Only ReadPump calls it.
-func (s *ChatServer) allowHistorySegment(clientIP string) bool {
-	return s.HistoryCooldown.Allow(clientIP, Cfg.Dynamic.Load().HistorySegmentCooldown)
+// allowHistoryRequest charges one history request against the per-IP
+// cost budget. cost is the number of lines the request may return,
+// scaled by the disk tier for segment reads. Keyed by IP (not session)
+// so two connections from one address share the budget. Only ReadPump
+// calls it.
+func (s *ChatServer) allowHistoryRequest(clientIP string, cost int) bool {
+	cfg := Cfg.Dynamic.Load()
+	return s.HistoryBudget.Allow(clientIP, float64(cost), float64(cfg.HistoryBudgetBurst), float64(cfg.HistoryBudgetPerSec))
 }
 
 func (h *Hub) registerClient(session *ClientSession, clientIP string) {
@@ -296,36 +297,44 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		// PoW frames bypass the mute gate: a muted client must still
 		// be able to answer or decline.
 		var env struct {
-			Type      string  `json:"type"`
-			Before    uint64  `json:"before"`
-			Limit     int     `json:"limit"`
-			After     uint64  `json:"after"`
-			AfterSeq  *uint64 `json:"after_seq"`
-			BeforeSeq *uint64 `json:"before_seq"`
+			Type      string        `json:"type"`
+			Before    uint64        `json:"before"`
+			Limit     int           `json:"limit"`
+			After     uint64        `json:"after"`
+			AfterSeq  *uint64       `json:"after_seq"`
+			BeforeSeq *uint64       `json:"before_seq"`
+			Ranges    []HeightRange `json:"ranges"`
 		}
 		if err := json.Unmarshal([]byte(raw), &env); err == nil && env.Type != "" {
 			switch env.Type {
 			// On-demand older segment (paged history): served in
 			// replay format, never chained, never counted as chat. A
 			// forged request only fetches the requester's own window.
-			// after_seq/before_seq are the seq-cursor paging used by
-			// the initial load, /older, refills and relay mirroring;
-			// the legacy height cursors (After/Before) remain until
-			// the seq path replaces them.
+			// ranges/after_seq/before_seq are the seq-cursor and refill
+			// paths; the legacy height cursors (After/Before) remain
+			// until the seq path replaces them.
 			case "history_request":
 				limit := env.Limit
 				if limit <= 0 || limit > dynCfg.MaxHistorySend {
 					limit = dynCfg.MaxHistorySend
 				}
-				if !s.allowHistorySegment(clientIP) {
+				// Cost is the lines the request may return; a segment
+				// read may touch disk, so it costs more per line.
+				cost := limit
+				if len(env.Ranges) == 0 && env.AfterSeq == nil && env.BeforeSeq == nil && env.After == 0 {
+					cost = limit * (1 + dynCfg.HistoryDiskLookup)
+				}
+				if !s.allowHistoryRequest(clientIP, cost) {
 					select {
-					case session.Send <- []byte("[Hệ thống]: Yêu cầu lịch sử cũ quá nhanh, thử lại sau."):
+					case session.Send <- []byte("[Hệ thống]: Yêu cầu lịch sử quá nhanh, thử lại sau."):
 					default:
 					}
 					updateReadDeadline()
 					continue
 				}
 				switch {
+				case len(env.Ranges) > 0:
+					s.serveHistoryRanges(session, env.Ranges, limit)
 				case env.AfterSeq != nil || env.BeforeSeq != nil:
 					s.serveHistorySeq(session, env.AfterSeq, env.BeforeSeq, limit)
 				case env.After > 0:

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/CleveTok3125/V2V/internal/strutil"
 	"time"
@@ -627,6 +628,72 @@ func (s *ChatServer) serveHistorySeq(session *ClientSession, afterSeq, beforeSeq
 	s.Hub.BroadcastMu.Lock()
 	defer s.Hub.BroadcastMu.Unlock()
 	s.Chain.sendReplayPage(session, lines, header, mode, meta)
+}
+
+// collectRanges returns up to limit chained lines whose chain_height
+// falls inside one of the ranges, oldest first. Invalid ranges (From 0
+// or From > To) are dropped. RAM only: a refill repairs recent drops,
+// and deeper history stays on the height-cursor path.
+func (c *ChainService) collectRanges(ranges []HeightRange, limit int) []string {
+	if limit <= 0 || len(ranges) == 0 {
+		return nil
+	}
+	rs := make([]HeightRange, 0, len(ranges))
+	for _, r := range ranges {
+		if r.From == 0 || r.From > r.To {
+			continue
+		}
+		rs = append(rs, r)
+	}
+	if len(rs) == 0 {
+		return nil
+	}
+	sort.Slice(rs, func(i, j int) bool { return rs[i].From < rs[j].From })
+	maxTo := rs[len(rs)-1].To
+	c.Mu.RLock()
+	defer c.Mu.RUnlock()
+	var out []string
+	for _, msgStr := range c.History {
+		var wire WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil {
+			continue
+		}
+		h := wire.ChainHeight
+		if h == 0 || h > maxTo {
+			continue
+		}
+		inRange := false
+		for _, r := range rs {
+			if h >= r.From && h <= r.To {
+				inRange = true
+				break
+			}
+		}
+		if !inRange {
+			continue
+		}
+		out = append(out, msgStr)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+// serveHistoryRanges answers a refill request for exact chained-height
+// ranges. The collection runs outside BroadcastMu; only the send holds
+// it, like segments.
+func (s *ChatServer) serveHistoryRanges(session *ClientSession, ranges []HeightRange, limit int) {
+	if limit <= 0 || len(ranges) == 0 {
+		return
+	}
+	if maxR := Cfg.Dynamic.Load().HistoryRefillMaxRanges; maxR > 0 && len(ranges) > maxR {
+		ranges = ranges[:maxR]
+	}
+	lines := s.Chain.collectRanges(ranges, limit)
+	s.Hub.BroadcastMu.Lock()
+	defer s.Hub.BroadcastMu.Unlock()
+	s.Chain.sendReplayPage(session, lines, "--- Lịch sử bù ---", replayRecovery, pageMeta{})
 }
 
 // serveHistoryRange answers a recovery request for lines at or above

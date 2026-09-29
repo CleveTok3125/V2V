@@ -110,407 +110,215 @@ func waitRecoverSettled(t *testing.T, sess *Session, deadline time.Duration) {
 	}
 }
 
-// A forward gap files one bounded request and skips the tamper latch.
+// setRecoverCfg overrides the client recovery config for a test.
+func setRecoverCfg(t *testing.T, retries int, delay string, liveCap int) {
+	t.Helper()
+	old := ClientCfg
+	cfg := config.DefaultClientConfig()
+	cfg.History.RecoverRetries = &retries
+	cfg.History.RecoverRetryDelay = &delay
+	cfg.History.LiveRecoverCap = &liveCap
+	ClientCfg = cfg
+	t.Cleanup(func() { ClientCfg = old })
+}
+
+// A live gap files one range request and seeds the window.
 func TestRecoveryRequestOnGap(t *testing.T) {
 	conn := &captureConn{frames: make(chan []byte)}
 	sess := recoverTestSession(t, 9, conn)
-
 	sess.Display.DisplayMu.Lock()
-	sess.checkChainLink(chainTestWire(103, 0x11))
+	ok := sess.maybeRequestRecovery(101, 102, 100, [32]byte{9})
 	sess.Display.DisplayMu.Unlock()
-
+	if !ok {
+		t.Fatal("live gap must file a refill")
+	}
 	req := conn.lastRequest(t)
-	if req.Type != "history_request" || req.After != 101 || req.Limit != 2 {
-		t.Fatalf("request wrong: %+v", req)
+	if len(req.Ranges) != 1 || req.Ranges[0].From != 101 || req.Ranges[0].To != 102 || req.Limit != 2 {
+		t.Fatalf("request = %+v", req)
 	}
 	p := sess.Chain.RecoverPending
-	if p == nil || p.From != 101 || p.To != 102 || p.AnchorHeight != 100 || p.AnchorHash != [32]byte{9} {
-		t.Fatalf("pending wrong: %+v", p)
-	}
-	if strings.Contains(tabSysText(sess), "Đang bù") {
-		t.Fatalf("in-progress notice must stay hidden: %q", tabSysText(sess))
-	}
-	if sess.Chain.ChainGapWarned {
-		t.Fatal("requested gap must not latch the tamper notice")
-	}
-	if sess.Chain.ChainHeight != 103 {
-		t.Fatalf("tip must re-anchor to #103, got #%d", sess.Chain.ChainHeight)
+	if p == nil || !p.Missing[101] || !p.Missing[102] || p.Known[100] != [32]byte{9} || p.Attempts != 1 {
+		t.Fatalf("pending = %+v", p)
 	}
 }
 
-// A complete refill renders, indexes, verifies, and confirms —
-// without moving the running tip.
+// A complete refill verifies, renders and confirms.
 func TestRecoveryWindowFlow(t *testing.T) {
 	conn := &captureConn{frames: make(chan []byte)}
 	sess := recoverTestSession(t, 9, conn)
 	anchor := [32]byte{9}
 	sess.Chain.RecoverPending = &recoverWindow{
-		From: 101, To: 102, AnchorHeight: 100, AnchorHash: anchor,
-		Next: 101, LastHash: anchor, RequestedAt: time.Now(),
+		Missing:    map[uint64]bool{101: true, 102: true},
+		Known:      map[uint64][32]byte{100: anchor},
+		Live:       map[uint64]bool{},
+		MaxMissing: 102, Attempts: 1, RequestedAt: time.Now(),
 	}
 	wires := recoverTestChain(anchor, 101, 2)
-
 	sess.Display.DisplayMu.Lock()
-	sess.trackReplayWindow("--- Lịch sử bù ---", true)
-	if !sess.Chain.InRecover {
-		sess.Display.DisplayMu.Unlock()
-		t.Fatal("recovery header must raise InRecover")
-	}
-	sess.verifyReplayWire(wires[0], true)
-	sess.verifyReplayWire(wires[1], true)
-	sess.trackReplayWindow("--- Kết thúc lịch sử bù (2/2) ---", false)
-	if sess.Chain.InRecover {
-		sess.Display.DisplayMu.Unlock()
-		t.Fatal("recovery footer must clear InRecover")
-	}
+	sess.checkRecoverWire(wires[0])
+	sess.checkRecoverWire(wires[1])
+	sess.finishRecovery()
 	sess.Display.DisplayMu.Unlock()
-	sess.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 101, MaxHeight: 102, Sent: 2, Total: 2})
 
+	if sess.Chain.RecoverPending != nil {
+		t.Fatal("complete refill must clear pending")
+	}
 	for _, h := range []uint64{101, 102} {
 		if _, ok := sess.Chain.WireIdx.get(h); !ok {
 			t.Fatalf("recovered #%d must index", h)
 		}
 	}
-	if sess.Chain.ChainTip != anchor || sess.Chain.ChainHeight != 100 {
-		t.Fatal("recovery must not move the running tip")
-	}
-	sys := tabSysText(sess)
-	if !strings.Contains(sys, "Đã bù 2 tin bị lỡ") {
-		t.Fatalf("missing refill confirmation: %q", sys)
-	}
-	if strings.Contains(sys, "đứt") {
-		t.Fatalf("refill must not warn tamper: %q", sys)
-	}
-	if sess.Chain.RecoverPending != nil {
-		t.Fatal("completed refill must clear pending")
+	if !strings.Contains(tabSysText(sess), "Đã bù 2 tin bị lỡ") {
+		t.Fatalf("missing confirmation: %q", tabSysText(sess))
 	}
 }
 
-// A wire that does not continue the anchor fails the window at the
-// trailer without touching the tamper latch.
+// A wire that does not continue its anchor fails; with no retries left
+// the loss is reported.
 func TestRecoveryMismatchFails(t *testing.T) {
+	setRecoverCfg(t, 0, "1ms", 1000)
 	conn := &captureConn{frames: make(chan []byte)}
 	sess := recoverTestSession(t, 9, conn)
 	anchor := [32]byte{9}
 	sess.Chain.RecoverPending = &recoverWindow{
-		From: 101, To: 102, AnchorHeight: 100, AnchorHash: anchor,
-		Next: 101, LastHash: anchor, RequestedAt: time.Now(),
+		Missing:    map[uint64]bool{101: true},
+		Known:      map[uint64][32]byte{100: anchor},
+		Live:       map[uint64]bool{},
+		MaxMissing: 101, Attempts: 1, RequestedAt: time.Now(),
 	}
 	bad := chainTestWire(101, 0x11)
-
 	sess.Display.DisplayMu.Lock()
-	sess.trackReplayWindow("--- Lịch sử bù ---", true)
-	sess.verifyReplayWire(bad, true)
-	sess.trackReplayWindow("--- Kết thúc lịch sử bù (1/1) ---", false)
+	sess.checkRecoverWire(bad)
+	sess.finishRecovery()
 	sess.Display.DisplayMu.Unlock()
-	sess.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 101, MaxHeight: 101, Sent: 1, Total: 1})
-
-	sys := tabSysText(sess)
-	if !strings.Contains(sys, "Không bù đủ") {
-		t.Fatalf("missing refill failure: %q", sys)
+	if sess.Chain.RecoverPending != nil {
+		t.Fatal("failed refill must clear pending")
 	}
-	if sess.Chain.ChainWarned {
-		t.Fatal("bad refill wire must not latch tamper")
+	if !strings.Contains(tabSysText(sess), "Không bù đủ tin") {
+		t.Fatalf("missing failure notice: %q", tabSysText(sess))
 	}
 	if _, ok := sess.Chain.WireIdx.get(101); ok {
-		t.Fatal("bad refill wire must not index")
+		t.Fatal("failed wire must not index")
 	}
 }
 
-// A gap beyond the cap keeps the notice-only path: no request.
-func TestRecoveryCapExceeded(t *testing.T) {
+// An incomplete answer retries the remainder.
+func TestRecoveryRetriesIncomplete(t *testing.T) {
+	setRecoverCfg(t, 2, "1ms", 1000)
 	conn := &captureConn{frames: make(chan []byte)}
 	sess := recoverTestSession(t, 9, conn)
-
+	anchor := [32]byte{9}
+	sess.Chain.RecoverPending = &recoverWindow{
+		Missing:    map[uint64]bool{101: true, 103: true},
+		Known:      map[uint64][32]byte{100: anchor, 102: anchor},
+		Live:       map[uint64]bool{},
+		MaxMissing: 103, RequestedAt: time.Now(),
+	}
+	wires := recoverTestChain(anchor, 101, 1)
 	sess.Display.DisplayMu.Lock()
-	sess.checkChainLink(chainTestWire(500, 0x11))
+	if !sess.sendRecoverLocked() {
+		sess.Display.DisplayMu.Unlock()
+		t.Fatal("first refill must send")
+	}
+	sess.checkRecoverWire(wires[0])
+	sess.finishRecovery()
 	sess.Display.DisplayMu.Unlock()
 
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn.mu.Lock()
+		n := len(conn.written)
+		conn.mu.Unlock()
+		if n >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("retry not sent (requests=%d)", n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	conn.mu.Lock()
-	n := len(conn.written)
+	raw := conn.written[1]
 	conn.mu.Unlock()
-	if n != 0 {
-		t.Fatalf("oversize gap must not request, sent %d", n)
+	var req HistoryRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		t.Fatalf("retry not a request: %v", err)
 	}
-	if sess.Chain.RecoverPending != nil {
-		t.Fatal("oversize gap must not pend")
-	}
-	if !sess.Chain.ChainGapWarned {
-		t.Fatal("oversize gap must keep the light notice")
+	if len(req.Ranges) != 1 || req.Ranges[0].From != 103 || req.Ranges[0].To != 103 {
+		t.Fatalf("retry request = %+v", req)
 	}
 }
 
-// A second gap inside the timeout cannot widen the in-flight request
-// (the server already capped its reply), so it is queued as a
-// follow-up refill that fires when the first window settles.
-func TestRecoveryMergesInflight(t *testing.T) {
+// Exhausting retries reports the loss.
+func TestRecoveryExhausts(t *testing.T) {
+	setRecoverCfg(t, 0, "1ms", 1000)
 	conn := &captureConn{frames: make(chan []byte)}
 	sess := recoverTestSession(t, 9, conn)
-
-	sess.Display.DisplayMu.Lock()
-	sess.checkChainLink(chainTestWire(103, 0x11))
-	sess.checkChainLink(chainTestWire(106, 0x22))
-	sess.Display.DisplayMu.Unlock()
-
-	req := conn.lastRequest(t)
-	if req.After != 101 || req.Limit != 2 {
-		t.Fatalf("first request must stay bounded: %+v", req)
+	sess.Chain.RecoverPending = &recoverWindow{
+		Missing:    map[uint64]bool{101: true},
+		Known:      map[uint64][32]byte{100: {9}},
+		Live:       map[uint64]bool{},
+		MaxMissing: 101, Attempts: 1, RequestedAt: time.Now(),
 	}
-	p := sess.Chain.RecoverPending
-	if p == nil || p.To != 102 {
-		t.Fatalf("in-flight window must not be widened: %+v", p)
-	}
-	if p.FollowUp == nil || p.FollowUp.From != 104 || p.FollowUp.To != 105 {
-		t.Fatalf("second gap must queue a follow-up: %+v", p.FollowUp)
-	}
-
-	// Settling the first window starts the follow-up against its own
-	// anchor.
 	sess.Display.DisplayMu.Lock()
 	sess.finishRecovery()
 	sess.Display.DisplayMu.Unlock()
-	conn.mu.Lock()
-	n := len(conn.written)
-	conn.mu.Unlock()
-	if n != 2 {
-		t.Fatalf("follow-up must send a second request, sent %d", n)
-	}
-	var req2 HistoryRequest
-	if err := json.Unmarshal(conn.written[1], &req2); err != nil || req2.After != 104 || req2.Limit != 2 {
-		t.Fatalf("follow-up request wrong: %+v %v", req2, err)
-	}
-}
-
-// A gap after the timeout replaces the stale window and retries.
-func TestRecoveryTimeoutRetries(t *testing.T) {
-	conn := &captureConn{frames: make(chan []byte)}
-	sess := recoverTestSession(t, 9, conn)
-	sess.Chain.RecoverPending = &recoverWindow{
-		From: 101, To: 102, AnchorHeight: 100, AnchorHash: [32]byte{9},
-		Next: 101, LastHash: [32]byte{9}, RequestedAt: time.Now().Add(-time.Minute),
-	}
-
-	sess.Display.DisplayMu.Lock()
-	sess.checkChainLink(chainTestWire(106, 0x22))
-	sess.Display.DisplayMu.Unlock()
-
-	conn.mu.Lock()
-	n := len(conn.written)
-	conn.mu.Unlock()
-	if n != 1 {
-		t.Fatalf("timed-out window must retry, sent %d", n)
-	}
-	var req HistoryRequest
-	if err := json.Unmarshal(conn.written[0], &req); err != nil || req.After != 101 || req.Limit != 5 {
-		t.Fatalf("retry must cover #101–#105: %+v %v", req, err)
-	}
-	if p := sess.Chain.RecoverPending; p == nil || p.From != 101 || p.To != 105 {
-		t.Fatalf("retry must replace pending: %+v", p)
-	}
-}
-
-// Explicit zero disables auto-recovery.
-func TestRecoveryDisabled(t *testing.T) {
-	oldCfg := ClientCfg
-	cfg := config.DefaultClientConfig()
-	zero := 0
-	cfg.History.RecoverCap = &zero
-	ClientCfg = cfg
-	defer func() { ClientCfg = oldCfg }()
-
-	conn := &captureConn{frames: make(chan []byte)}
-	sess := recoverTestSession(t, 9, conn)
-
-	sess.Display.DisplayMu.Lock()
-	sess.checkChainLink(chainTestWire(103, 0x11))
-	sess.Display.DisplayMu.Unlock()
-
-	conn.mu.Lock()
-	n := len(conn.written)
-	conn.mu.Unlock()
-	if n != 0 {
-		t.Fatal("disabled recovery must not request")
-	}
-}
-
-// An exhausted window (nothing left in RAM) settles to failure.
-func TestRecoveryExhausted(t *testing.T) {
-	conn := &captureConn{frames: make(chan []byte)}
-	sess := recoverTestSession(t, 9, conn)
-	anchor := [32]byte{9}
-	sess.Chain.RecoverPending = &recoverWindow{
-		From: 101, To: 102, AnchorHeight: 100, AnchorHash: anchor,
-		Next: 101, LastHash: anchor, RequestedAt: time.Now(),
-	}
-
-	sess.Display.DisplayMu.Lock()
-	sess.trackReplayWindow("--- Lịch sử bù ---", true)
-	sess.trackReplayWindow("--- Kết thúc lịch sử bù: không còn tin trong bộ nhớ ---", false)
-	sess.Display.DisplayMu.Unlock()
-	sess.handleHistorySync(HistorySync{Type: "history_sync", Sent: 0, Total: 0})
-
-	sys := tabSysText(sess)
-	if !strings.Contains(sys, "Không bù đủ") {
-		t.Fatalf("exhausted refill must fail loudly: %q", sys)
-	}
 	if sess.Chain.RecoverPending != nil {
 		t.Fatal("exhausted refill must clear pending")
 	}
+	if !strings.Contains(tabSysText(sess), "Không bù đủ tin") {
+		t.Fatalf("missing notice: %q", tabSysText(sess))
+	}
 }
 
-// TestRecoveryPumpRendersOnce drives the real pump path: a recovery
-// window must render each refilled message exactly once. Regression
-// for the double render where checkRecoverWire drew the wire and the
-// pump drew it again.
-func TestRecoveryPumpRendersOnce(t *testing.T) {
-	conn := &captureConn{frames: make(chan []byte, 8)}
+// The session live budget refuses a gap past liveRecoverCap.
+func TestRecoveryLiveCap(t *testing.T) {
+	setRecoverCfg(t, 2, "1ms", 1)
+	conn := &captureConn{frames: make(chan []byte)}
 	sess := recoverTestSession(t, 9, conn)
-	sess.Display.ActiveTab = TabChat
-	sess.Display.TabSys = newTabBuffer(100, 100000)
-	sess.Display.TabChat = newTabBuffer(100, 100000)
-	anchor := [32]byte{9}
-	sess.Chain.RecoverPending = &recoverWindow{
-		From: 101, To: 102, AnchorHeight: 100, AnchorHash: anchor,
-		Next: 101, LastHash: anchor, RequestedAt: time.Now(),
-	}
-	wires := recoverTestChain(anchor, 101, 2)
-	frame := func(v any) []byte {
-		raw, err := json.Marshal(v)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		return raw
-	}
-	conn.frames <- []byte("--- Lịch sử bù ---\n")
-	conn.frames <- frame(wires[0])
-	conn.frames <- frame(wires[1])
-	conn.frames <- []byte("--- Kết thúc lịch sử bù (2/2) ---\n")
-	conn.frames <- frame(HistorySync{Type: "history_sync", MinHeight: 101, MaxHeight: 102, Sent: 2, Total: 2})
-
-	done := make(chan struct{})
-	go func() { sess.runPump(); close(done) }()
-
-	waitRecoverSettled(t, sess, 3*time.Second)
-	close(conn.frames)
-	close(sess.Quitting)
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("pump did not stop")
-	}
-
 	sess.Display.DisplayMu.Lock()
-	got := 0
-	for _, l := range sess.Display.TabChat.lines {
-		if strings.Contains(l, "msg") {
-			got++
-		}
-	}
+	ok := sess.maybeRequestRecovery(101, 102, 100, [32]byte{9})
 	sess.Display.DisplayMu.Unlock()
-	if got != 2 {
-		t.Fatalf("recovered messages rendered %d head lines, want 2 (double render?)", got)
+	if ok || sess.Chain.RecoverPending != nil {
+		t.Fatal("gap past the live budget must be refused")
 	}
 }
 
-// TestRecoveryPumpSkipsBadWire: a wire that does not continue the
-// anchor must not be rendered or indexed by the pump either — only
-// the window's failure notice reports it.
-func TestRecoveryPumpSkipsBadWire(t *testing.T) {
-	conn := &captureConn{frames: make(chan []byte, 8)}
-	sess := recoverTestSession(t, 9, conn)
-	sess.Display.ActiveTab = TabChat
-	sess.Display.TabSys = newTabBuffer(100, 100000)
-	sess.Display.TabChat = newTabBuffer(100, 100000)
-	anchor := [32]byte{9}
-	sess.Chain.RecoverPending = &recoverWindow{
-		From: 101, To: 101, AnchorHeight: 100, AnchorHash: anchor,
-		Next: 101, LastHash: anchor, RequestedAt: time.Now(),
-	}
-	bad := chainTestWire(101, 0x11)
-	raw, err := json.Marshal(bad)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	conn.frames <- []byte("--- Lịch sử bù ---\n")
-	conn.frames <- raw
-	conn.frames <- []byte("--- Kết thúc lịch sử bù (1/1) ---\n")
-	conn.frames <- []byte(`{"type":"history_sync","min_height":101,"max_height":101,"sent":1,"total":1}`)
-
-	done := make(chan struct{})
-	go func() { sess.runPump(); close(done) }()
-	waitRecoverSettled(t, sess, 3*time.Second)
-	close(conn.frames)
-	close(sess.Quitting)
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("pump did not stop")
-	}
-
-	sess.Display.DisplayMu.Lock()
-	defer sess.Display.DisplayMu.Unlock()
-	if _, ok := sess.Chain.WireIdx.get(101); ok {
-		t.Fatal("bad recovery wire must not index")
-	}
-	for _, l := range sess.Display.TabChat.lines {
-		if strings.Contains(l, "msg") {
-			t.Fatalf("bad recovery wire must not render: %q", l)
-		}
-	}
-}
-
-// TestRecoveryFromJoinTrailer: a join replay that lost lines must file
-// one refill for exactly the missing heights, anchored on the drop's
-// predecessor.
+// The join trailer builds one request with a range per missing run.
 func TestRecoveryFromJoinTrailer(t *testing.T) {
 	conn := &captureConn{frames: make(chan []byte)}
 	sess := recoverTestSession(t, 9, conn)
 	anchor := [32]byte{9}
-	wires := recoverTestChain(anchor, 100, 5) // heights 100..104
+	wires := recoverTestChain(anchor, 100, 5) // 100..104
 	hashes := map[uint64][32]byte{}
 	for _, w := range wires {
 		h, _ := chain.ParseHex64(w.ChainHash)
 		hashes[w.ChainHeight] = h
 	}
-
 	sess.Display.DisplayMu.Lock()
 	sess.trackReplayWindow("--- Lịch sử chat gần đây ---", true)
-	// 102 was dropped mid-replay.
-	for _, h := range []uint64{100, 101, 103, 104} {
+	for _, h := range []uint64{100, 101, 103} {
 		sess.Chain.SyncHeights[h] = hashes[h]
 	}
-	sess.trackReplayWindow("--- Kết thúc lịch sử (4/5) ---", false)
+	sess.trackReplayWindow("--- Kết thúc lịch sử (3/5) ---", false)
 	sess.Display.DisplayMu.Unlock()
-
-	sess.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 104, Sent: 4, Total: 5, Dropped: 1})
+	sess.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 104, Sent: 3, Total: 5, Dropped: 2})
 
 	req := conn.lastRequest(t)
-	if req.After != 102 || req.Limit != 3 {
-		t.Fatalf("join refill must span #102–#104: %+v", req)
+	if len(req.Ranges) != 2 || req.Ranges[0].From != 102 || req.Ranges[0].To != 102 ||
+		req.Ranges[1].From != 104 || req.Ranges[1].To != 104 {
+		t.Fatalf("join refill ranges = %+v", req.Ranges)
 	}
 	p := sess.Chain.RecoverPending
-	if p == nil || p.From != 102 || p.To != 104 {
-		t.Fatalf("pending wrong: %+v", p)
-	}
-	if len(p.Missing) != 1 || !p.Missing[102] {
-		t.Fatalf("only #102 must be marked missing: %+v", p.Missing)
-	}
-	if p.LastHash != hashes[101] {
-		t.Fatal("refill must anchor on the drop's predecessor")
+	if p == nil || !p.Missing[102] || !p.Missing[104] || p.MaxMissing != 104 {
+		t.Fatalf("pending = %+v", p)
 	}
 }
 
-// TestRecoveryFromJoinTrailerRendersOnlyMissing: the refill span
-// carries received heights too; those verify and advance the window
-// but are not rendered again.
-func TestRecoveryFromJoinTrailerRendersOnlyMissing(t *testing.T) {
-	conn := &captureConn{frames: make(chan []byte, 8)}
+// A refill renders the missing heights and skips the received ones.
+func TestRecoveryRendersOnlyMissing(t *testing.T) {
+	conn := &captureConn{frames: make(chan []byte)}
 	sess := recoverTestSession(t, 9, conn)
-	sess.Display.TabSys = newTabBuffer(100, 100000)
-	sess.Display.TabChat = newTabBuffer(100, 100000)
-	var out bytes.Buffer
-	sess.Display.Out = &out
-	sess.Display.ActiveTab = TabChat
 	anchor := [32]byte{9}
 	wires := recoverTestChain(anchor, 100, 5)
 	hashes := map[uint64][32]byte{}
@@ -518,133 +326,57 @@ func TestRecoveryFromJoinTrailerRendersOnlyMissing(t *testing.T) {
 		h, _ := chain.ParseHex64(w.ChainHash)
 		hashes[w.ChainHeight] = h
 	}
-
-	sess.Display.DisplayMu.Lock()
-	sess.trackReplayWindow("--- Lịch sử chat gần đây ---", true)
-	for _, h := range []uint64{100, 101, 103, 104} {
-		sess.Chain.SyncHeights[h] = hashes[h]
+	sess.Chain.RecoverPending = &recoverWindow{
+		Missing:    map[uint64]bool{102: true, 104: true},
+		Known:      map[uint64][32]byte{100: hashes[100], 101: hashes[101], 103: hashes[103]},
+		Live:       map[uint64]bool{},
+		MaxMissing: 104, Attempts: 1, RequestedAt: time.Now(),
 	}
-	sess.trackReplayWindow("--- Kết thúc lịch sử (4/5) ---", false)
+	sess.Display.DisplayMu.Lock()
+	sess.checkRecoverWire(wires[2]) // 102 missing
+	sess.checkRecoverWire(wires[3]) // 103 received
+	sess.checkRecoverWire(wires[4]) // 104 missing
+	sess.finishRecovery()
 	sess.Display.DisplayMu.Unlock()
-	sess.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 104, Sent: 4, Total: 5, Dropped: 1})
 
-	frame := func(v any) []byte {
-		raw, err := json.Marshal(v)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		return raw
-	}
-	conn.frames <- []byte("--- Lịch sử bù ---\n")
-	conn.frames <- frame(wires[2]) // 102 (missing)
-	conn.frames <- frame(wires[3]) // 103 (already received)
-	conn.frames <- frame(wires[4]) // 104 (already received)
-	conn.frames <- []byte("--- Kết thúc lịch sử bù (3/3) ---\n")
-	conn.frames <- frame(HistorySync{Type: "history_sync", MinHeight: 102, MaxHeight: 104, Sent: 3, Total: 3})
-
-	done := make(chan struct{})
-	go func() { sess.runPump(); close(done) }()
-	waitRecoverSettled(t, sess, 3*time.Second)
-	close(conn.frames)
-	close(sess.Quitting)
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("pump did not stop")
-	}
-
-	sess.Display.DisplayMu.Lock()
-	defer sess.Display.DisplayMu.Unlock()
 	got := 0
 	for _, l := range sess.Display.TabChat.lines {
 		if strings.Contains(l, "msg") {
 			got++
 		}
 	}
-	if got != 1 {
-		t.Fatalf("refill rendered %d head lines, want 1 (only the missing #102)", got)
+	if got != 2 {
+		t.Fatalf("rendered %d head lines, want 2 (#102,#104)", got)
 	}
-	if _, ok := sess.Chain.WireIdx.get(102); !ok {
-		t.Fatal("missing #102 must index")
+	for _, h := range []uint64{102, 104} {
+		if _, ok := sess.Chain.WireIdx.get(h); !ok {
+			t.Fatalf("#%d must index", h)
+		}
 	}
-	sess.flushOutputNow()
-	text := out.String()
-	// The recovery boundaries stay hidden; the confirmation follows the
-	// refilled content.
-	if strings.Contains(text, "Lịch sử bù") {
-		t.Fatalf("recovery boundaries must stay hidden: %q", text)
-	}
-	mi := strings.Index(text, "msg")
-	ci := strings.Index(text, "Đã bù")
-	if mi < 0 || ci < 0 || mi > ci {
-		t.Fatalf("refilled content must precede the confirmation: %q", text)
+	if _, ok := sess.Chain.WireIdx.get(103); ok {
+		t.Fatal("received #103 must not be re-rendered")
 	}
 }
 
-// A join replay whose refill span exceeds the cap keeps the notice.
-func TestRecoveryFromJoinTrailerCap(t *testing.T) {
-	conn := &captureConn{frames: make(chan []byte)}
-	sess := recoverTestSession(t, 9, conn)
-	sess.Chain.SyncHeights = map[uint64][32]byte{100: {9}}
-	sess.Chain.SyncClosed = true
-
-	sess.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 500, Dropped: 1})
-
-	conn.mu.Lock()
-	n := len(conn.written)
-	conn.mu.Unlock()
-	if n != 0 {
-		t.Fatalf("oversize join gap must not request, sent %d", n)
-	}
-	if sess.Chain.RecoverPending != nil {
-		t.Fatal("oversize join gap must not pend")
-	}
-	if !strings.Contains(tabSysText(sess), "Bỏ lỡ") {
-		t.Fatalf("oversize join gap must notice: %q", tabSysText(sess))
+// waitHoldReleased waits for the catch-up hold to end.
+func waitHoldReleased(t *testing.T, sess *Session, deadline time.Duration) {
+	t.Helper()
+	limit := time.Now().Add(deadline)
+	for {
+		sess.Display.DisplayMu.Lock()
+		held := sess.Display.CatchupHold
+		sess.Display.DisplayMu.Unlock()
+		if !held {
+			return
+		}
+		if time.Now().After(limit) {
+			t.Fatal("catch-up hold never released")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
-// TestHandleHistorySyncForkScope pins the fork check to the join
-// trailer: segment and recovery trailers have no received-height set,
-// so comparing the persisted tip against the join's would only warn
-// falsely.
-func TestHandleHistorySyncForkScope(t *testing.T) {
-	newSess := func() *Session {
-		s := recoverTestSession(t, 9, &captureConn{frames: make(chan []byte)})
-		s.Display.TabSys = newTabBuffer(100, 100000)
-		s.Chain.HavePersistedTip = true
-		s.Chain.PersistedTip = [32]byte{0xaa}
-		s.Chain.PersistedHeight = 120
-		return s
-	}
-
-	// Segment trailer: no warning.
-	seg := newSess()
-	seg.Display.DisplayMu.Lock()
-	seg.trackReplayWindow("--- Lịch sử cũ ---", true)
-	seg.trackReplayWindow("--- Kết thúc lịch sử cũ (2/2) ---", false)
-	seg.Display.DisplayMu.Unlock()
-	seg.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 130, Sent: 2, Total: 2})
-	if strings.Contains(tabSysText(seg), "phân nhánh") {
-		t.Fatalf("segment trailer must not warn: %q", tabSysText(seg))
-	}
-
-	// Join trailer with the same height rewritten: warns.
-	join := newSess()
-	join.Display.DisplayMu.Lock()
-	join.trackReplayWindow("--- Lịch sử chat gần đây ---", true)
-	join.Chain.SyncHeights[120] = [32]byte{0xbb}
-	join.trackReplayWindow("--- Kết thúc lịch sử (2/2) ---", false)
-	join.Display.DisplayMu.Unlock()
-	join.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 130, Sent: 2, Total: 2})
-	if !strings.Contains(tabSysText(join), "phân nhánh") {
-		t.Fatalf("join trailer must warn on a rewritten height: %q", tabSysText(join))
-	}
-}
-
-// TestRecoveryMergesJoinReplayInOrder drives the full catch-up: a join
-// replay with a mid gap must print the refilled message between its
-// neighbours, not appended at the bottom.
+// The full catch-up merges a refilled line between its neighbours.
 func TestRecoveryMergesJoinReplayInOrder(t *testing.T) {
 	conn := &captureConn{frames: make(chan []byte, 16)}
 	sess := recoverTestSession(t, 9, conn)
@@ -655,7 +387,7 @@ func TestRecoveryMergesJoinReplayInOrder(t *testing.T) {
 	sess.Display.ActiveTab = TabChat
 	sess.Display.ShowMeta = true
 	anchor := [32]byte{9}
-	wires := recoverTestChain(anchor, 100, 4) // heights 100..103
+	wires := recoverTestChain(anchor, 100, 4) // 100..103
 	frame := func(v any) []byte {
 		raw, err := json.Marshal(v)
 		if err != nil {
@@ -670,39 +402,20 @@ func TestRecoveryMergesJoinReplayInOrder(t *testing.T) {
 	conn.frames <- []byte("--- Kết thúc lịch sử (3/4) ---\n")
 	conn.frames <- frame(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 103, Sent: 3, Total: 4, Dropped: 1})
 	conn.frames <- []byte("--- Lịch sử bù ---\n")
-	conn.frames <- frame(wires[2]) // 102 (refill)
-	conn.frames <- frame(wires[3]) // 103 (already had)
-	conn.frames <- []byte("--- Kết thúc lịch sử bù (2/2) ---\n")
-	conn.frames <- frame(HistorySync{Type: "history_sync", MinHeight: 102, MaxHeight: 103, Sent: 2, Total: 2})
+	conn.frames <- frame(wires[2]) // 102 refill
+	conn.frames <- []byte("--- Kết thúc lịch sử bù (1/1) ---\n")
+	conn.frames <- frame(HistorySync{Type: "history_sync", MinHeight: 102, MaxHeight: 102, Sent: 1, Total: 1})
 
-	done := make(chan struct{})
-	go func() { sess.runPump(); close(done) }()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		sess.Display.DisplayMu.Lock()
-		held := sess.Display.CatchupHold
-		sess.Display.DisplayMu.Unlock()
-		if !held {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("catch-up hold never released")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	go sess.runPump()
+	waitHoldReleased(t, sess, 3*time.Second)
 	close(conn.frames)
 	close(sess.Quitting)
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("pump did not stop")
-	}
+	<-sess.PumpDone
 	sess.flushOutputNow()
 
 	text := out.String()
-	order := []string{"#100:", "#101:", "#102:", "#103:"}
 	prev := -1
-	for _, needle := range order {
+	for _, needle := range []string{"#100:", "#101:", "#102:", "#103:"} {
 		i := strings.Index(text, needle)
 		if i < 0 {
 			t.Fatalf("missing %s in output: %q", needle, text)
@@ -714,9 +427,40 @@ func TestRecoveryMergesJoinReplayInOrder(t *testing.T) {
 	}
 }
 
-// TestDateBannerDedup: a repeated date banner (server announce right
-// after the replay's own banner) prints once; a different date still
-// prints.
+// TestHandleHistorySyncForkScope pins the fork check to the join trailer.
+func TestHandleHistorySyncForkScope(t *testing.T) {
+	newSess := func() *Session {
+		s := recoverTestSession(t, 9, &captureConn{frames: make(chan []byte)})
+		s.Display.TabSys = newTabBuffer(100, 100000)
+		s.Chain.HavePersistedTip = true
+		s.Chain.PersistedTip = [32]byte{0xaa}
+		s.Chain.PersistedHeight = 120
+		return s
+	}
+
+	seg := newSess()
+	seg.Display.DisplayMu.Lock()
+	seg.trackReplayWindow("--- Lịch sử cũ ---", true)
+	seg.trackReplayWindow("--- Kết thúc lịch sử cũ (2/2) ---", false)
+	seg.Display.DisplayMu.Unlock()
+	seg.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 130, Sent: 2, Total: 2})
+	if strings.Contains(tabSysText(seg), "phân nhánh") {
+		t.Fatalf("segment trailer must not warn: %q", tabSysText(seg))
+	}
+
+	join := newSess()
+	join.Display.DisplayMu.Lock()
+	join.trackReplayWindow("--- Lịch sử chat gần đây ---", true)
+	join.Chain.SyncHeights[120] = [32]byte{0xbb}
+	join.trackReplayWindow("--- Kết thúc lịch sử (2/2) ---", false)
+	join.Display.DisplayMu.Unlock()
+	join.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 130, Sent: 2, Total: 2})
+	if !strings.Contains(tabSysText(join), "phân nhánh") {
+		t.Fatalf("join trailer must warn on a rewritten height: %q", tabSysText(join))
+	}
+}
+
+// TestDateBannerDedup: a repeated date banner prints once.
 func TestDateBannerDedup(t *testing.T) {
 	sess := chainTestSession(t, 9)
 	sess.Display.TabSys = newTabBuffer(100, 100000)
@@ -736,7 +480,7 @@ func TestDateBannerDedup(t *testing.T) {
 }
 
 // TestGreetingAfterCatchup: the held welcome line prints after the
-// loaded history, not above it.
+// loaded history.
 func TestGreetingAfterCatchup(t *testing.T) {
 	conn := &captureConn{frames: make(chan []byte, 16)}
 	sess := recoverTestSession(t, 9, conn)
@@ -762,19 +506,7 @@ func TestGreetingAfterCatchup(t *testing.T) {
 	conn.frames <- frame(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 101, Sent: 2, Total: 2})
 
 	go sess.runPump()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		sess.Display.DisplayMu.Lock()
-		held := sess.Display.CatchupHold
-		sess.Display.DisplayMu.Unlock()
-		if !held {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("catch-up hold never released")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitHoldReleased(t, sess, 3*time.Second)
 	close(conn.frames)
 	close(sess.Quitting)
 	<-sess.PumpDone
@@ -788,8 +520,7 @@ func TestGreetingAfterCatchup(t *testing.T) {
 	}
 }
 
-// Recovery boundaries track their own flag, independent of the join
-// and segment windows.
+// TestTrackRecoveryWindow: recovery boundaries track their own flag.
 func TestTrackRecoveryWindow(t *testing.T) {
 	sess := chainTestSession(t, 9)
 	sess.Display.DisplayMu.Lock()
