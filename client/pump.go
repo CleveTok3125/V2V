@@ -54,63 +54,138 @@ func (s *Session) emitDateBannerLocked(text string) {
 }
 
 // trackReplayWindow updates the replay window flags for one boundary
-// line. The join header raises InSync (full verification); the
+// line. A join/load header raises InSync (full verification); the
 // on-demand segment header raises InOlder (render and index only —
 // older heights can never verify against the running tip); the
 // recovery header raises InRecover (render, index, and verify against
-// the refill anchor in RecoverPending). Any footer flushes a stashed
-// date banner first (otherwise a banner closing the window is
-// silently dropped) and then clears all three. Caller must hold
-// DisplayMu.
+// the refill anchor). Any footer flushes a stashed date banner first
+// (otherwise a banner closing the window is silently dropped) and then
+// clears all three. Caller must hold DisplayMu.
 func (s *Session) trackReplayWindow(line string, start bool) {
 	if start {
-		// A new window supersedes any join whose trailer never came.
-		s.Chain.SyncClosed = false
 		if isOlderSegmentHeader(line) {
 			s.Chain.InOlder = true
 		} else if isRecoveryHeader(line) {
 			s.Chain.InRecover = true
 		} else {
 			s.Chain.InSync = true
-			// A fresh join window: heights from any earlier replay are
-			// stale and must not mask drops in this one.
-			s.Chain.SyncHeights = map[uint64][32]byte{}
-			// Hold the replay until its trailer says whether lines were
-			// dropped: merging refills into an already-printed stream
-			// is impossible, and a gapped print would linger in
-			// scrollback. The timer releases a stuck hold.
-			s.Display.CatchupHold = true
-			s.Display.HoldGen++
-			gen := s.Display.HoldGen
-			s.Display.HoldTimer = time.AfterFunc(catchupHoldMax, func() {
-				s.Display.DisplayMu.Lock()
-				if s.Display.HoldGen == gen {
-					s.releaseCatchupLocked()
-				}
-				s.Display.DisplayMu.Unlock()
-			})
 		}
 		return
 	}
-	wasJoin := s.Chain.InSync
 	s.flushDateBannerLocked()
 	s.Chain.InOlder = false
 	s.Chain.InRecover = false
 	s.Pending.PendingDateBanner = ""
 	s.Pending.PendingDateBannerWire = nil
 	s.Chain.InSync = false
-	// A join footer precedes its trailer: remember it so the trailer
-	// can refill the heights the replay dropped.
-	if wasJoin {
-		s.Chain.SyncClosed = true
+}
+
+// handleHistoryInfo starts the client-driven initial load: the server
+// announces the available window, the client holds live output and
+// pages ascending until it has initialLines or the server reports no
+// more. Caller refreshes after.
+func (s *Session) handleHistoryInfo(info HistoryInfo) {
+	s.Display.DisplayMu.Lock()
+	defer s.Display.DisplayMu.Unlock()
+	if s.Chain.Loading {
+		return
+	}
+	target := 500
+	if ClientCfg != nil {
+		target = ClientCfg.HistoryInitialLines()
+	}
+	s.Chain.Loading = true
+	s.Chain.SyncHeights = map[uint64][32]byte{}
+	s.Chain.LoadTarget = target
+	s.Chain.LoadLoaded = 0
+	s.Chain.LoadRetried = 0
+	s.Chain.LoadMaxSeq = info.MaxSeq
+	// after_seq is exclusive: to load the last `target` lines ending at
+	// MaxSeq, start just below MaxSeq-target+1.
+	after := uint64(0)
+	if info.MaxSeq >= uint64(target) {
+		after = info.MaxSeq - uint64(target)
+	}
+	s.Chain.LoadStartSeq = after + 1
+	// Hold live output until the load completes so the history and the
+	// live stream print as one continuous block.
+	s.Display.CatchupHold = true
+	s.Display.HoldGen++
+	gen := s.Display.HoldGen
+	s.Display.HoldTimer = time.AfterFunc(catchupHoldMax, func() {
+		s.Display.DisplayMu.Lock()
+		if s.Display.HoldGen == gen && s.Chain.Loading {
+			s.finishLoadLocked()
+		}
+		s.Display.DisplayMu.Unlock()
+	})
+	s.sendLoadPageLocked(after)
+}
+
+// sendLoadPageLocked requests one ascending page from cursor. Caller
+// must hold DisplayMu.
+func (s *Session) sendLoadPageLocked(cursor uint64) {
+	if s.Conn == nil {
+		s.finishLoadLocked()
+		return
+	}
+	batch := 100
+	if ClientCfg != nil {
+		batch = ClientCfg.HistoryBatchLines()
+	}
+	after := cursor
+	if err := s.sendJSON(HistoryRequest{Type: "history_request", AfterSeq: &after, Limit: batch}); err != nil {
+		s.finishLoadLocked()
 	}
 }
 
+// onLoadPageLocked consumes one load-page trailer: retry a page that
+// lost lines, then page on while the target and the announced window
+// both have more, otherwise finish. Caller must hold DisplayMu.
+func (s *Session) onLoadPageLocked(hs HistorySync) {
+	if hs.Dropped > 0 {
+		retries := 2
+		if ClientCfg != nil {
+			retries = ClientCfg.HistoryRecoverRetries()
+		}
+		if s.Chain.LoadRetried < retries {
+			s.Chain.LoadRetried++
+			after := uint64(0)
+			if hs.FirstSeq > 0 {
+				after = hs.FirstSeq - 1
+			}
+			s.sendLoadPageLocked(after)
+			return
+		}
+	}
+	s.Chain.LoadRetried = 0
+	if hs.More && s.Chain.LoadLoaded < s.Chain.LoadTarget && hs.NextSeq < s.Chain.LoadMaxSeq {
+		s.sendLoadPageLocked(hs.NextSeq)
+		return
+	}
+	s.finishLoadLocked()
+}
+
+// finishLoadLocked ends the initial load: release the hold and run the
+// fork check against the received heights. Caller must hold DisplayMu.
+func (s *Session) finishLoadLocked() {
+	s.Chain.Loading = false
+	s.releaseCatchupLocked()
+	if warn, flush := forkWarning(HistorySync{Type: "history_sync", MaxHeight: ^uint64(0)},
+		s.Chain.HavePersistedTip, s.Chain.PersistedTip, s.Chain.PersistedHeight, s.Chain.SyncHeights); warn != "" {
+		s.emitLocalFeedback(warn)
+		if flush {
+			s.flushChainTip()
+		}
+	}
+	s.Chain.SyncHeights = map[uint64][32]byte{}
+}
+
 // handleHistorySync consumes a replay trailer from either a whole
-// frame or a coalesced per-line blob. Only the join replay records its
-// received heights (SyncHeights), so only its trailer can judge a fork;
-// segment and recovery trailers carry no such set. A recovery trailer
-// settles its refill instead. Caller refreshes after.
+// frame or a coalesced per-line blob. A load-page trailer continues the
+// initial load; a recovery trailer settles its refill; anything else
+// (a dropped recovery footer) is settled if a refill is pending.
+// Caller refreshes after.
 func (s *Session) handleHistorySync(hs HistorySync) {
 	s.Display.DisplayMu.Lock()
 	s.Chain.InSync = false
@@ -121,26 +196,12 @@ func (s *Session) handleHistorySync(hs HistorySync) {
 		s.Display.DisplayMu.Unlock()
 		return
 	}
-	if s.Chain.SyncClosed {
-		s.Chain.SyncClosed = false
-		// The join replay reports how many lines it lost; recover those
-		// heights before the fork check (which also skips on drops).
-		s.recoverMissedFromTrailer(hs)
-		if s.Chain.RecoverPending == nil {
-			// Nothing to refill: print the replay now.
-			s.releaseCatchupLocked()
-		}
-		if warn, flush := forkWarning(hs, s.Chain.HavePersistedTip, s.Chain.PersistedTip, s.Chain.PersistedHeight, s.Chain.SyncHeights); warn != "" {
-			s.emitLocalFeedback(warn)
-			if flush {
-				s.flushChainTip()
-			}
-		}
-		s.Chain.SyncHeights = map[uint64][32]byte{}
+	if s.Chain.Loading && hs.Direction == "after" {
+		s.onLoadPageLocked(hs)
 		s.Display.DisplayMu.Unlock()
 		return
 	}
-	// Non-join trailer: a recovery whose footer was dropped is still
+	// Non-load trailer: a recovery whose footer was dropped is still
 	// pending (a present footer settles it at the pump, after its line).
 	if s.Chain.RecoverPending != nil {
 		s.finishRecovery()
@@ -232,6 +293,13 @@ func (s *Session) runPump() {
 		// fork check below consumes it.
 		if hs, ok := parseHistorySync(msg); ok {
 			s.handleHistorySync(hs)
+			s.refreshCoalesced()
+			continue
+		}
+		// History window announcement: starts the client-driven load.
+		var info HistoryInfo
+		if err := json.Unmarshal(msg, &info); err == nil && info.Type == "history_info" {
+			s.handleHistoryInfo(info)
 			s.refreshCoalesced()
 			continue
 		}

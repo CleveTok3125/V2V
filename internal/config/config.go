@@ -230,6 +230,8 @@ type ClientConfig struct {
 	// the server's history budget refill). LiveRecoverCap bounds the
 	// lines auto-refilled from live gaps per session (0 = unlimited).
 	History struct {
+		InitialLines      *int    `json:"initialLines"`
+		BatchLines        *int    `json:"batchLines"`
 		RecoverRetries    *int    `json:"recoverRetries"`
 		RecoverRetryDelay *string `json:"recoverRetryDelay"`
 		LiveRecoverCap    *int    `json:"liveRecoverCap"`
@@ -238,6 +240,8 @@ type ClientConfig struct {
 
 // History recovery defaults when the history section is absent.
 const (
+	DefaultHistoryInitialLines      = 500
+	DefaultHistoryBatchLines        = 100
 	DefaultHistoryRecoverRetries    = 2
 	DefaultHistoryRecoverRetryDelay = 2 * time.Second
 	DefaultHistoryLiveRecoverCap    = 1000
@@ -290,6 +294,8 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.Reply.Enabled = boolPtr(true)
 	c.UI.Reply.QuoteMaxRunes = 80
 	c.UI.Clipboard.ClearAfterSec = intPtr(30)
+	c.History.InitialLines = intPtr(DefaultHistoryInitialLines)
+	c.History.BatchLines = intPtr(DefaultHistoryBatchLines)
 	c.History.RecoverRetries = intPtr(DefaultHistoryRecoverRetries)
 	c.History.RecoverRetryDelay = strPtr("2s")
 	c.History.LiveRecoverCap = intPtr(DefaultHistoryLiveRecoverCap)
@@ -493,6 +499,24 @@ func (c *ClientConfig) ClipboardClearAfterSec() int {
 	return *c.UI.Clipboard.ClearAfterSec
 }
 
+// HistoryInitialLines returns how much recent history the initial load
+// covers (default 500; absent or non-positive means the default).
+func (c *ClientConfig) HistoryInitialLines() int {
+	if c == nil || c.History.InitialLines == nil || *c.History.InitialLines <= 0 {
+		return DefaultHistoryInitialLines
+	}
+	return *c.History.InitialLines
+}
+
+// HistoryBatchLines returns the lines requested per paging round
+// (default 100; absent or non-positive means the default).
+func (c *ClientConfig) HistoryBatchLines() int {
+	if c == nil || c.History.BatchLines == nil || *c.History.BatchLines <= 0 {
+		return DefaultHistoryBatchLines
+	}
+	return *c.History.BatchLines
+}
+
 // HistoryRecoverRetries returns the max refill retry rounds (default 2;
 // absent or negative means the default, explicit 0 disables retries).
 func (c *ClientConfig) HistoryRecoverRetries() int {
@@ -623,6 +647,12 @@ func parse(data []byte) (*ClientConfig, error) {
 		c.UI.Meta.Show = def.UI.Meta.Show
 	}
 	// Backfill recovery cap (absent means default: 200 auto lines).
+	if c.History.InitialLines == nil {
+		c.History.InitialLines = def.History.InitialLines
+	}
+	if c.History.BatchLines == nil {
+		c.History.BatchLines = def.History.BatchLines
+	}
 	if c.History.RecoverRetries == nil {
 		c.History.RecoverRetries = def.History.RecoverRetries
 	}

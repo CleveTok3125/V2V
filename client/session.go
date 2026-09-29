@@ -181,17 +181,22 @@ type ChainState struct {
 	// LiveRecovered counts chained lines auto-refilled from live gaps
 	// this session, against history.liveRecoverCap.
 	LiveRecovered int
-	// SyncHeights maps chained heights received during the join replay
-	// to their hashes. Reset when the join window opens; the trailer
-	// uses it both to refill dropped heights and to judge a fork by
-	// comparing the persisted tip's height. Under DisplayMu like the
-	// other sync fields.
+	// SyncHeights maps chained heights received during the initial load
+	// to their hashes. Reset when the load starts; the fork check
+	// compares the persisted tip's height against it. Under DisplayMu
+	// like the other sync fields.
 	SyncHeights map[uint64][32]byte
-	// SyncClosed marks that a join window's footer just closed, so the
-	// next trailer can settle its drops (the footer clears InSync
-	// before the trailer arrives). Cleared by any window start and by
-	// the trailer itself.
-	SyncClosed   bool
+	// Loading tracks the client-driven initial load: pages are requested
+	// ascending until LoadTarget lines are loaded, the announced window
+	// end (LoadMaxSeq) is reached, or the server reports no more.
+	// LoadStartSeq is the first seq expected, LoadLoaded the distinct
+	// lines loaded so far, LoadRetried the current page's retry count.
+	Loading      bool
+	LoadStartSeq uint64
+	LoadMaxSeq   uint64
+	LoadTarget   int
+	LoadLoaded   int
+	LoadRetried  int
 	TipSinceSave uint64
 	WireIdx      *wireIndex
 	RenderCache  *renderCache

@@ -291,8 +291,8 @@ func TestWantJoinsEndToEnd(t *testing.T) {
 		t.Run(map[bool]string{false: "filtered", true: "joins"}[want], func(t *testing.T) {
 			testCfg(t)
 			s := NewChatServer()
-			s.Chain.appendMessageToHistory(`{"type":"system","sys_kind":"join","text":"old join"}`)
-			s.Chain.appendMessageToHistory(`{"type":"chat","text":"hello"}`)
+			s.Chain.appendMessageToHistory(noticeLine("join", "old join"))
+			s.Chain.appendMessageToHistory(tagLine(1, "chat", "", "hello"))
 			client, serverConn := dialAuthPair(t, s)
 			sessDone := make(chan *ClientSession, 1)
 			go func() {
@@ -323,7 +323,12 @@ func TestWantJoinsEndToEnd(t *testing.T) {
 				t.Fatalf("WantJoins = %v, want %v", sess.WantJoins, want)
 			}
 			sess.Send = make(chan []byte, 64)
-			s.Hub.registerClient(sess, "127.0.0.1")
+			zero := uint64(0)
+			replayDone := make(chan struct{})
+			go func() {
+				s.serveHistorySeq(sess, &zero, nil, 100)
+				close(replayDone)
+			}()
 			var got []string
 			timeout := time.After(5 * time.Second)
 		drain:
@@ -332,6 +337,7 @@ func TestWantJoinsEndToEnd(t *testing.T) {
 				case m := <-sess.Send:
 					var hs HistorySync
 					if err := json.Unmarshal(m, &hs); err == nil && hs.Type == "history_sync" {
+						<-replayDone
 						break drain
 					}
 					got = append(got, string(m))

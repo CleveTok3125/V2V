@@ -670,9 +670,9 @@ func TestVerifyReplayWireSkipsSegment(t *testing.T) {
 	}
 }
 
-// TestVerifyReplayWireLiveStillVerifies pins the other side: with the
-// segment flag off, the same older wire must warn (live path keeps
-// full verification).
+// TestVerifyReplayWireLiveStillVerifies pins the other side: a live
+// wire adjacent to the tip that does not continue it must warn. (A wire
+// at or below the tip is a duplicate and is skipped.)
 func TestVerifyReplayWireLiveStillVerifies(t *testing.T) {
 	sess := NewSession()
 	sess.Display.Out = io.Discard
@@ -685,9 +685,9 @@ func TestVerifyReplayWireLiveStillVerifies(t *testing.T) {
 	sess.Chain.ChainHaveTip = true
 
 	var prev [32]byte
-	old := WireMessage{Type: "chat", Time: "12:00", DisplayName: "A", Text: "old", ChainHeight: 50, ChainVer: 2}
+	old := WireMessage{Type: "chat", Time: "12:00", DisplayName: "A", Text: "old", ChainHeight: 101, ChainVer: 2}
 	old.ChainPrev = hex.EncodeToString(prev[:])
-	h := chain.Hash(prev, 50, 0, 0, "chat", "12:00", "A", "old", "")
+	h := chain.Hash(prev, 101, 0, 0, "chat", "12:00", "A", "old", "")
 	old.ChainHash = hex.EncodeToString(h[:])
 
 	sess.Display.DisplayMu.Lock()
@@ -696,6 +696,20 @@ func TestVerifyReplayWireLiveStillVerifies(t *testing.T) {
 
 	if !sess.Chain.ChainWarned {
 		t.Fatal("live path must still warn on a broken link")
+	}
+}
+
+// TestDuplicateWireSkipped: a wire at or below the running tip is a
+// re-sent page line or a replayed echo, not a tamper signal.
+func TestDuplicateWireSkipped(t *testing.T) {
+	sess := chainTestSession(t, 9)
+	sess.Display.Out = io.Discard
+	dup := chainTestWire(100, 0x11) // same height as the tip
+	sess.Display.DisplayMu.Lock()
+	sess.checkChainLink(dup)
+	sess.Display.DisplayMu.Unlock()
+	if sess.Chain.ChainWarned {
+		t.Fatal("a duplicate height must not warn")
 	}
 }
 

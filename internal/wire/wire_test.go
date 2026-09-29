@@ -95,12 +95,12 @@ func TestWireJSONKeySet(t *testing.T) {
 
 	// HistoryRequest pins its key set; Before 0 means oldest absolute.
 	zero, ten, forty := uint64(0), uint64(10), uint64(40)
-	req := HistoryRequest{Type: "history_request", Before: 50, Limit: 20, After: 30, AfterSeq: &ten, BeforeSeq: &forty,
+	req := HistoryRequest{Type: "history_request", Before: 50, Limit: 20, AfterSeq: &ten, BeforeSeq: &forty,
 		Ranges: []HeightRange{{From: 1, To: 2}}}
 	raw, _ = json.Marshal(req)
 	var rmap map[string]any
 	_ = json.Unmarshal(raw, &rmap)
-	for _, k := range []string{"type", "before", "limit", "after", "after_seq", "before_seq", "ranges"} {
+	for _, k := range []string{"type", "before", "limit", "after_seq", "before_seq", "ranges"} {
 		if _, ok := rmap[k]; !ok {
 			t.Errorf("missing history_request key %q in %s", k, raw)
 		}

@@ -54,6 +54,7 @@ type (
 	HistorySync    = wire.HistorySync
 	HistoryRequest = wire.HistoryRequest
 	HeightRange    = wire.HeightRange
+	HistoryInfo    = wire.HistoryInfo
 	PowOffer       = wire.PowOffer
 	PowResult      = wire.PowResult
 	PowDecline     = wire.PowDecline

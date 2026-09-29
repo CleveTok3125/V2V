@@ -124,12 +124,13 @@
     "maxTier": 3,
     "maxCostMs": 120000
   },
-  // History recovery behavior. recoverRetries bounds how many times a
-  // refill is retried when the server answers incomplete;
-  // recoverRetryDelay waits between attempts (cover the server's
-  // history budget refill). liveRecoverCap bounds the lines auto-
-  // refilled from live gaps per session (0 = unlimited).
+  // History load and recovery. initialLines is how much recent history
+  // the client requests on connect; batchLines is the page size.
+  // recoverRetries/recoverRetryDelay govern refill retries;
+  // liveRecoverCap bounds live-gap refills per session (0 = unlimited).
   "history": {
+    "initialLines": 500,
+    "batchLines": 100,
     "recoverRetries": 2,
     "recoverRetryDelay": "2s",
     "liveRecoverCap": 1000

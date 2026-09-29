@@ -952,40 +952,6 @@ func (s *Session) maybeRequestRecovery(from, to, anchorHeight uint64, anchorHash
 	return true
 }
 
-// recoverMissedFromTrailer turns a join-replay trailer that lost lines
-// into a refill: heights in the intended window with no recorded hash
-// are the drops, verified against the received heights around them.
-// Caller must hold DisplayMu.
-func (s *Session) recoverMissedFromTrailer(hs HistorySync) {
-	if hs.Dropped <= 0 || hs.MinHeight == 0 || hs.MaxHeight < hs.MinHeight {
-		return
-	}
-	p := &recoverWindow{Missing: map[uint64]bool{}, Known: map[uint64][32]byte{}, Live: map[uint64]bool{}}
-	for h, hash := range s.Chain.SyncHeights {
-		p.Known[h] = hash
-	}
-	for h := hs.MinHeight; h <= hs.MaxHeight; h++ {
-		if _, ok := s.Chain.SyncHeights[h]; !ok {
-			p.Missing[h] = true
-			if h > p.MaxMissing {
-				p.MaxMissing = h
-			}
-		}
-	}
-	lost := pruneMissing(p)
-	if len(p.Missing) == 0 {
-		if lost > 0 {
-			s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Bỏ lỡ %d tin khi tải lịch sử.\n", lost))
-		}
-		return
-	}
-	s.Chain.RecoverPending = p
-	if !s.sendRecoverLocked() {
-		s.Chain.RecoverPending = nil
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: ↩ Bỏ lỡ %d tin khi tải lịch sử.\n", len(p.Missing)+lost))
-	}
-}
-
 // checkRecoverWire consumes one wire of a refill window. A wire at a
 // missing height verifies against its predecessor's known hash, then
 // renders and clears from Missing; a wire newer than every missing
@@ -1290,6 +1256,15 @@ func (s *Session) checkChainLink(wire WireMessage) {
 		if h, ok := chain.ParseHex64(wire.ChainHash); ok {
 			s.Chain.SyncHeights[wire.ChainHeight] = h
 		}
+	}
+	// A wire at or below the running tip is a duplicate: a page retry
+	// re-sending an already-verified line, or a replayed echo. It cannot
+	// continue the tip, and verifying it would warn falsely.
+	if s.Chain.ChainHaveTip && wire.ChainHeight <= s.Chain.ChainHeight {
+		return
+	}
+	if s.Chain.Loading && s.Chain.InSync {
+		s.Chain.LoadLoaded++
 	}
 	newTip, err := verifyWireLink(wire, s.Chain.ChainTip)
 	if err != nil && !s.Chain.ChainHaveTip {

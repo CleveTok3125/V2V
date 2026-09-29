@@ -99,16 +99,19 @@ func (h *Hub) registerClient(session *ClientSession, clientIP string) {
 		}
 	}
 
-	// Hold BroadcastMu across replay + own-join: no live chat may
-	// interleave between replay lines and the trailer, otherwise the
-	// client collects foreign hashes into its fork window and jumps
-	// tips mid-sync. Notices (no BroadcastMu) can still slip in, but
-	// they carry no chain fields and never disturb tip accounting.
+	// Hold BroadcastMu across the history-info frame + own-join so the
+	// info reflects a consistent window and no live chat interleaves
+	// before the peer starts paging.
 	// Lock order stays BroadcastMu -> LastMessageDateMu -> HistoryMu
 	// (Chain.Mu) -> ClientsMu: the Clients map insert in this function
 	// is sequential, never nested.
 	h.BroadcastMu.Lock()
-	h.chain.SendChatHistory(session)
+	if data, err := json.Marshal(h.chain.historyInfo()); err == nil {
+		select {
+		case session.Send <- data:
+		default:
+		}
+	}
 
 	joinTime := time.Now().In(Cfg.Static.Timezone)
 	h.CheckAndBroadcastDate(joinTime)
@@ -300,19 +303,16 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			Type      string        `json:"type"`
 			Before    uint64        `json:"before"`
 			Limit     int           `json:"limit"`
-			After     uint64        `json:"after"`
 			AfterSeq  *uint64       `json:"after_seq"`
 			BeforeSeq *uint64       `json:"before_seq"`
 			Ranges    []HeightRange `json:"ranges"`
 		}
 		if err := json.Unmarshal([]byte(raw), &env); err == nil && env.Type != "" {
 			switch env.Type {
-			// On-demand older segment (paged history): served in
-			// replay format, never chained, never counted as chat. A
-			// forged request only fetches the requester's own window.
-			// ranges/after_seq/before_seq are the seq-cursor and refill
-			// paths; the legacy height cursors (After/Before) remain
-			// until the seq path replaces them.
+			// History request: ranges refill exact chained heights,
+			// after_seq/before_seq page by the history cursor, and
+			// before pages older segments (RAM + disk tiers). A forged
+			// request only fetches the requester's own window.
 			case "history_request":
 				limit := env.Limit
 				if limit <= 0 || limit > dynCfg.MaxHistorySend {
@@ -321,7 +321,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				// Cost is the lines the request may return; a segment
 				// read may touch disk, so it costs more per line.
 				cost := limit
-				if len(env.Ranges) == 0 && env.AfterSeq == nil && env.BeforeSeq == nil && env.After == 0 {
+				if len(env.Ranges) == 0 && env.AfterSeq == nil && env.BeforeSeq == nil {
 					cost = limit * (1 + dynCfg.HistoryDiskLookup)
 				}
 				if !s.allowHistoryRequest(clientIP, cost) {
@@ -337,8 +337,6 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 					s.serveHistoryRanges(session, env.Ranges, limit)
 				case env.AfterSeq != nil || env.BeforeSeq != nil:
 					s.serveHistorySeq(session, env.AfterSeq, env.BeforeSeq, limit)
-				case env.After > 0:
-					s.serveHistoryRange(session, env.After, limit)
 				default:
 					s.serveHistorySegment(session, env.Before, limit)
 				}

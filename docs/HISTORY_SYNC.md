@@ -1,10 +1,10 @@
 # History Sync Protocol
 
-Status: design spec. Describes the target protocol for fetching stored
-history. It is the single mechanism behind the initial client load,
-on-demand paging (`/older`), dropped-line refills, and future relay
-mirroring. Not implemented yet; this document is the contract to build
-against.
+Status: implemented. The initial load, refills and seq paging below are
+in use. `/older` still pages older segments by the `before` height
+cursor (RAM plus disk tiers); seq paging over disk generations is future
+work, as is the relay mirroring flow (the protocol is designed to
+support it).
 
 ## Goals
 

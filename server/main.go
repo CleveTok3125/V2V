@@ -177,10 +177,9 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveAuthenticated runs the pumps around registration. WritePump must
-// start BEFORE registerClient: SendChatHistory pushes up to
-// MaxHistorySend lines into the buffered Send channel synchronously, so
-// registering first with a full history and no reader deadlocks the
-// handshake forever.
+// start BEFORE registerClient: registerClient queues the history-info
+// frame into the buffered Send channel synchronously, so registering
+// first with a full queue and no reader could stall the handshake.
 func (s *ChatServer) serveAuthenticated(session *ClientSession, clientIP string) {
 	go session.WritePump()
 

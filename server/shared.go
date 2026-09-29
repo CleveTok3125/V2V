@@ -73,6 +73,7 @@ type (
 	HistorySync    = wire.HistorySync
 	HistoryRequest = wire.HistoryRequest
 	HeightRange    = wire.HeightRange
+	HistoryInfo    = wire.HistoryInfo
 )
 
 type ServerIdentity struct {

@@ -234,6 +234,12 @@ func TestClipboardBackfill(t *testing.T) {
 // disk lookup off (opt-in per deployment cost).
 func TestHistoryRecoveryDefaults(t *testing.T) {
 	d := DefaultClientConfig()
+	if got := d.HistoryInitialLines(); got != 500 {
+		t.Fatalf("default initialLines = %d, want 500", got)
+	}
+	if got := d.HistoryBatchLines(); got != 100 {
+		t.Fatalf("default batchLines = %d, want 100", got)
+	}
 	if got := d.HistoryRecoverRetries(); got != 2 {
 		t.Fatalf("default recoverRetries = %d, want 2", got)
 	}

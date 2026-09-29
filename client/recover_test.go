@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -284,34 +285,14 @@ func TestRecoveryLiveCap(t *testing.T) {
 	}
 }
 
-// The join trailer builds one request with a range per missing run.
-func TestRecoveryFromJoinTrailer(t *testing.T) {
-	conn := &captureConn{frames: make(chan []byte)}
-	sess := recoverTestSession(t, 9, conn)
-	anchor := [32]byte{9}
-	wires := recoverTestChain(anchor, 100, 5) // 100..104
-	hashes := map[uint64][32]byte{}
-	for _, w := range wires {
-		h, _ := chain.ParseHex64(w.ChainHash)
-		hashes[w.ChainHeight] = h
+// missingRuns coalesces scattered heights into contiguous ranges.
+func TestMissingRuns(t *testing.T) {
+	runs := missingRuns(map[uint64]bool{1: true, 2: true, 4: true, 7: true, 8: true})
+	if fmt.Sprint(runs) != "[{1 2} {4 4} {7 8}]" {
+		t.Fatalf("runs = %v", runs)
 	}
-	sess.Display.DisplayMu.Lock()
-	sess.trackReplayWindow("--- Lịch sử chat gần đây ---", true)
-	for _, h := range []uint64{100, 101, 103} {
-		sess.Chain.SyncHeights[h] = hashes[h]
-	}
-	sess.trackReplayWindow("--- Kết thúc lịch sử (3/5) ---", false)
-	sess.Display.DisplayMu.Unlock()
-	sess.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 104, Sent: 3, Total: 5, Dropped: 2})
-
-	req := conn.lastRequest(t)
-	if len(req.Ranges) != 2 || req.Ranges[0].From != 102 || req.Ranges[0].To != 102 ||
-		req.Ranges[1].From != 104 || req.Ranges[1].To != 104 {
-		t.Fatalf("join refill ranges = %+v", req.Ranges)
-	}
-	p := sess.Chain.RecoverPending
-	if p == nil || !p.Missing[102] || !p.Missing[104] || p.MaxMissing != 104 {
-		t.Fatalf("pending = %+v", p)
+	if len(missingRuns(nil)) != 0 {
+		t.Fatal("no missing heights must yield no runs")
 	}
 }
 
@@ -376,9 +357,10 @@ func waitHoldReleased(t *testing.T, sess *Session, deadline time.Duration) {
 	}
 }
 
-// The full catch-up merges a refilled line between its neighbours.
-func TestRecoveryMergesJoinReplayInOrder(t *testing.T) {
-	conn := &captureConn{frames: make(chan []byte, 16)}
+// TestRecoveryMergesInOrder: a refilled block is spliced in after its
+// chain predecessor inside a held catch-up, not appended at the end.
+func TestRecoveryMergesInOrder(t *testing.T) {
+	conn := &captureConn{frames: make(chan []byte)}
 	sess := recoverTestSession(t, 9, conn)
 	sess.Display.TabSys = newTabBuffer(100, 100000)
 	sess.Display.TabChat = newTabBuffer(100, 100000)
@@ -388,29 +370,27 @@ func TestRecoveryMergesJoinReplayInOrder(t *testing.T) {
 	sess.Display.ShowMeta = true
 	anchor := [32]byte{9}
 	wires := recoverTestChain(anchor, 100, 4) // 100..103
-	frame := func(v any) []byte {
-		raw, err := json.Marshal(v)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		return raw
+	hashes := map[uint64][32]byte{}
+	for _, w := range wires {
+		h, _ := chain.ParseHex64(w.ChainHash)
+		hashes[w.ChainHeight] = h
 	}
-	conn.frames <- []byte("--- Lịch sử chat gần đây ---\n")
-	conn.frames <- frame(wires[0]) // 100
-	conn.frames <- frame(wires[1]) // 101
-	conn.frames <- frame(wires[3]) // 103, 102 dropped
-	conn.frames <- []byte("--- Kết thúc lịch sử (3/4) ---\n")
-	conn.frames <- frame(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 103, Sent: 3, Total: 4, Dropped: 1})
-	conn.frames <- []byte("--- Lịch sử bù ---\n")
-	conn.frames <- frame(wires[2]) // 102 refill
-	conn.frames <- []byte("--- Kết thúc lịch sử bù (1/1) ---\n")
-	conn.frames <- frame(HistorySync{Type: "history_sync", MinHeight: 102, MaxHeight: 102, Sent: 1, Total: 1})
 
-	go sess.runPump()
-	waitHoldReleased(t, sess, 3*time.Second)
-	close(conn.frames)
-	close(sess.Quitting)
-	<-sess.PumpDone
+	// A held join replay of 100,101,103 with 102 missing.
+	sess.Display.DisplayMu.Lock()
+	sess.Display.CatchupHold = true
+	sess.renderChatBlock(wires[0])
+	sess.renderChatBlock(wires[1])
+	sess.renderChatBlock(wires[3])
+	sess.Chain.RecoverPending = &recoverWindow{
+		Missing:    map[uint64]bool{102: true},
+		Known:      map[uint64][32]byte{101: hashes[101]},
+		Live:       map[uint64]bool{},
+		MaxMissing: 102, Attempts: 1, RequestedAt: time.Now(),
+	}
+	sess.checkRecoverWire(wires[2])
+	sess.finishRecovery()
+	sess.Display.DisplayMu.Unlock()
 	sess.flushOutputNow()
 
 	text := out.String()
@@ -427,55 +407,31 @@ func TestRecoveryMergesJoinReplayInOrder(t *testing.T) {
 	}
 }
 
-// TestHandleHistorySyncForkScope pins the fork check to the join trailer.
+// TestHandleHistorySyncForkScope: the segment trailer runs no fork
+// check; the load's fork check warns on a rewritten height.
 func TestHandleHistorySyncForkScope(t *testing.T) {
-	newSess := func() *Session {
-		s := recoverTestSession(t, 9, &captureConn{frames: make(chan []byte)})
-		s.Display.TabSys = newTabBuffer(100, 100000)
-		s.Chain.HavePersistedTip = true
-		s.Chain.PersistedTip = [32]byte{0xaa}
-		s.Chain.PersistedHeight = 120
-		return s
-	}
-
-	seg := newSess()
-	seg.Display.DisplayMu.Lock()
-	seg.trackReplayWindow("--- Lịch sử cũ ---", true)
-	seg.trackReplayWindow("--- Kết thúc lịch sử cũ (2/2) ---", false)
-	seg.Display.DisplayMu.Unlock()
+	seg := recoverTestSession(t, 9, &captureConn{frames: make(chan []byte)})
+	seg.Display.TabSys = newTabBuffer(100, 100000)
+	seg.Chain.HavePersistedTip = true
+	seg.Chain.PersistedTip = [32]byte{0xaa}
+	seg.Chain.PersistedHeight = 120
 	seg.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 130, Sent: 2, Total: 2})
 	if strings.Contains(tabSysText(seg), "phân nhánh") {
 		t.Fatalf("segment trailer must not warn: %q", tabSysText(seg))
 	}
 
-	join := newSess()
+	join := recoverTestSession(t, 9, &captureConn{frames: make(chan []byte)})
+	join.Display.TabSys = newTabBuffer(100, 100000)
+	join.Chain.HavePersistedTip = true
+	join.Chain.PersistedTip = [32]byte{0xaa}
+	join.Chain.PersistedHeight = 120
 	join.Display.DisplayMu.Lock()
-	join.trackReplayWindow("--- Lịch sử chat gần đây ---", true)
+	join.Chain.Loading = true
 	join.Chain.SyncHeights[120] = [32]byte{0xbb}
-	join.trackReplayWindow("--- Kết thúc lịch sử (2/2) ---", false)
+	join.finishLoadLocked()
 	join.Display.DisplayMu.Unlock()
-	join.handleHistorySync(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 130, Sent: 2, Total: 2})
 	if !strings.Contains(tabSysText(join), "phân nhánh") {
-		t.Fatalf("join trailer must warn on a rewritten height: %q", tabSysText(join))
-	}
-}
-
-// TestDateBannerDedup: a repeated date banner prints once.
-func TestDateBannerDedup(t *testing.T) {
-	sess := chainTestSession(t, 9)
-	sess.Display.TabSys = newTabBuffer(100, 100000)
-	sess.Display.DisplayMu.Lock()
-	sess.emitDateBannerLocked("--- Ngày 28/09/2026 ---")
-	sess.emitDateBannerLocked("--- Ngày 28/09/2026 ---")
-	sess.emitDateBannerLocked("--- Ngày 29/09/2026 ---")
-	sess.Display.DisplayMu.Unlock()
-
-	got := tabSysText(sess)
-	if n := strings.Count(got, "Ngày 28/09/2026"); n != 1 {
-		t.Fatalf("duplicate date banner printed %d times: %q", n, got)
-	}
-	if !strings.Contains(got, "Ngày 29/09/2026") {
-		t.Fatalf("new date banner must print: %q", got)
+		t.Fatalf("load fork check must warn on a rewritten height: %q", tabSysText(join))
 	}
 }
 
@@ -499,11 +455,12 @@ func TestGreetingAfterCatchup(t *testing.T) {
 		}
 		return raw
 	}
+	conn.frames <- frame(HistoryInfo{Type: "history_info", MinSeq: 1, MaxSeq: 2, MinHeight: 100, MaxHeight: 101, Count: 2})
 	conn.frames <- []byte("--- Lịch sử chat gần đây ---\n")
 	conn.frames <- frame(wires[0])
 	conn.frames <- frame(wires[1])
 	conn.frames <- []byte("--- Kết thúc lịch sử (2/2) ---\n")
-	conn.frames <- frame(HistorySync{Type: "history_sync", MinHeight: 100, MaxHeight: 101, Sent: 2, Total: 2})
+	conn.frames <- frame(HistorySync{Type: "history_sync", Direction: "after", FirstSeq: 1, LastSeq: 2, Sent: 2, Total: 2})
 
 	go sess.runPump()
 	waitHoldReleased(t, sess, 3*time.Second)
@@ -535,4 +492,59 @@ func TestTrackRecoveryWindow(t *testing.T) {
 		t.Fatal("recovery footer must clear InRecover")
 	}
 	sess.Display.DisplayMu.Unlock()
+}
+
+// TestLoadPagesUntilMaxSeq: the client pages ascending until it reaches
+// the announced window end, sending after_seq = next_seq each time.
+func TestLoadPagesUntilMaxSeq(t *testing.T) {
+	conn := &captureConn{frames: make(chan []byte, 16)}
+	sess := recoverTestSession(t, 9, conn)
+	sess.Display.TabSys = newTabBuffer(100, 100000)
+	sess.Display.TabChat = newTabBuffer(100, 100000)
+	sess.Display.Out = io.Discard
+	sess.Display.ActiveTab = TabChat
+	anchor := [32]byte{9}
+	wires := recoverTestChain(anchor, 1, 3) // heights 1..3
+	frame := func(v any) []byte {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return raw
+	}
+	conn.frames <- frame(HistoryInfo{Type: "history_info", MinSeq: 1, MaxSeq: 3, MinHeight: 1, MaxHeight: 3, Count: 3})
+	conn.frames <- []byte("--- Lịch sử chat gần đây ---\n")
+	conn.frames <- frame(wires[0])
+	conn.frames <- frame(wires[1])
+	conn.frames <- []byte("--- Kết thúc lịch sử (2/3) ---\n")
+	conn.frames <- frame(HistorySync{Type: "history_sync", Direction: "after", FirstSeq: 1, LastSeq: 2, NextSeq: 2, More: true, Sent: 2, Total: 2})
+	conn.frames <- []byte("--- Lịch sử chat gần đây ---\n")
+	conn.frames <- frame(wires[2])
+	conn.frames <- []byte("--- Kết thúc lịch sử (1/1) ---\n")
+	conn.frames <- frame(HistorySync{Type: "history_sync", Direction: "after", FirstSeq: 3, LastSeq: 3, NextSeq: 3, More: false, Sent: 1, Total: 1})
+
+	go sess.runPump()
+	waitHoldReleased(t, sess, 3*time.Second)
+	close(conn.frames)
+	close(sess.Quitting)
+	<-sess.PumpDone
+
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+	if len(conn.written) != 2 {
+		t.Fatalf("load requests = %d, want 2", len(conn.written))
+	}
+	var r1, r2 HistoryRequest
+	if err := json.Unmarshal(conn.written[0], &r1); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(conn.written[1], &r2); err != nil {
+		t.Fatal(err)
+	}
+	if r1.AfterSeq == nil || *r1.AfterSeq != 0 {
+		t.Fatalf("first page after_seq = %v, want 0", r1.AfterSeq)
+	}
+	if r2.AfterSeq == nil || *r2.AfterSeq != 2 {
+		t.Fatalf("second page after_seq = %v, want 2", r2.AfterSeq)
+	}
 }

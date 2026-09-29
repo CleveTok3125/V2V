@@ -341,30 +341,6 @@ func (h *Hub) CheckAndBroadcastDate(now time.Time) {
 	}
 }
 
-func (c *ChainService) SendChatHistory(session *ClientSession) {
-	c.Mu.RLock()
-
-	historyLen := len(c.History)
-
-	if historyLen == 0 {
-		c.Mu.RUnlock()
-		return
-	}
-
-	dynCfg := Cfg.Dynamic.Load()
-
-	startIndex := 0
-	if historyLen > dynCfg.MaxHistorySend {
-		startIndex = historyLen - dynCfg.MaxHistorySend
-	}
-
-	historyCopy := make([]string, historyLen-startIndex)
-	copy(historyCopy, c.History[startIndex:])
-	c.Mu.RUnlock()
-
-	c.sendReplay(session, historyCopy, "--- Lịch sử chat gần đây ---", replayJoin)
-}
-
 // windowRing keeps the last n fed lines oldest→newest: a full forward
 // stream collapses to its tail window with O(limit) memory and O(1)
 // amortized feed (circular overwrite, no memmove churn on big scans).
@@ -477,6 +453,42 @@ func oldestChained(lines []string) uint64 {
 	return oldest
 }
 
+// historyInfo summarizes the served RAM window for a joining peer so it
+// can start paging without guessing. Only RAM is announced; a peer that
+// needs deeper history pages with the before cursor.
+func (c *ChainService) historyInfo() HistoryInfo {
+	c.Mu.RLock()
+	defer c.Mu.RUnlock()
+	info := HistoryInfo{Type: "history_info", Count: len(c.History)}
+	n := len(c.History)
+	if n == 0 {
+		return info
+	}
+	var first, last WireMessage
+	if json.Unmarshal([]byte(c.History[0]), &first) == nil {
+		info.MinSeq = first.Seq
+	}
+	if json.Unmarshal([]byte(c.History[n-1]), &last) == nil {
+		info.MaxSeq = last.Seq
+	}
+	info.MinHeight = oldestChained(c.History)
+	for i := n - 1; i >= 0; i-- {
+		var w WireMessage
+		if json.Unmarshal([]byte(c.History[i]), &w) == nil && w.ChainHeight > 0 {
+			info.MaxHeight = w.ChainHeight
+			break
+		}
+	}
+	// Defensive: a foreign or hand-edited store could be out of order.
+	if info.MinSeq > info.MaxSeq {
+		info.MinSeq, info.MaxSeq = info.MaxSeq, info.MinSeq
+	}
+	if info.MinHeight > info.MaxHeight {
+		info.MinHeight, info.MaxHeight = info.MaxHeight, info.MinHeight
+	}
+	return info
+}
+
 // collectSegment gathers up to limit stored lines older than before in
 // replay order, without sending. before is an exclusive chain height; 0
 // means the tail window over the whole history. Unchained lines carry no
@@ -523,33 +535,6 @@ func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, li
 		return
 	}
 	c.sendReplay(session, c.collectSegment(before, limit), "--- Lịch sử cũ ---", replaySegment)
-}
-
-// collectRange returns up to limit chained lines at or above after,
-// in ascending stored order. RAM only: heights evicted from RAM yield
-// an empty window, never a disk scan. Unchained notices carry no
-// height and travel only with the windows that contain them by
-// position; a recovery window is purely the missed chain positions.
-func (c *ChainService) collectRange(after uint64, limit int) []string {
-	if limit <= 0 || after == 0 {
-		return nil
-	}
-	c.Mu.RLock()
-	defer c.Mu.RUnlock()
-	var out []string
-	for _, msgStr := range c.History {
-		var wire WireMessage
-		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil {
-			continue
-		}
-		if wire.ChainHeight >= after {
-			out = append(out, msgStr)
-			if len(out) >= limit {
-				break
-			}
-		}
-	}
-	return out
 }
 
 // collectAfterSeq returns up to limit stored lines with seq > afterSeq,
@@ -694,33 +679,6 @@ func (s *ChatServer) serveHistoryRanges(session *ClientSession, ranges []HeightR
 	s.Hub.BroadcastMu.Lock()
 	defer s.Hub.BroadcastMu.Unlock()
 	s.Chain.sendReplayPage(session, lines, "--- Lịch sử bù ---", replayRecovery, pageMeta{})
-}
-
-// serveHistoryRange answers a recovery request for lines at or above
-// after (ascending). The expensive collection runs outside
-// BroadcastMu; only the send holds it, like segments. A cursor past
-// the tip (or with nothing left in RAM) answers with the exhausted
-// window, so the requester cancels its recovery instead of hanging.
-func (s *ChatServer) serveHistoryRange(session *ClientSession, after uint64, limit int) {
-	if limit <= 0 || after == 0 {
-		return
-	}
-	s.Chain.Mu.RLock()
-	ready, tip := s.Chain.ready, s.Chain.height
-	s.Chain.Mu.RUnlock()
-	if ready && after > tip {
-		s.Hub.BroadcastMu.Lock()
-		s.Chain.sendReplay(session, nil, "--- Lịch sử bù ---", replayRecovery)
-		s.Hub.BroadcastMu.Unlock()
-		return
-	}
-	// Collect before taking BroadcastMu: the RAM scan can span the whole
-	// history, and holding the global broadcast lock through it would
-	// stall every live broadcast (same contract as segments).
-	lines := s.Chain.collectRange(after, limit)
-	s.Hub.BroadcastMu.Lock()
-	defer s.Hub.BroadcastMu.Unlock()
-	s.Chain.sendReplay(session, lines, "--- Lịch sử bù ---", replayRecovery)
 }
 
 // sendReplay renders stored lines in replay format: header, content,

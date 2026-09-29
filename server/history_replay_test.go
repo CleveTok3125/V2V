@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,13 +13,19 @@ import (
 	"github.com/CleveTok3125/V2V/internal/config"
 )
 
+// testSeq assigns increasing history cursors to lines seeded directly in
+// tests (production assigns them at the append choke point).
+var testSeq atomic.Uint64
+
+func testNextSeq() uint64 { return testSeq.Add(1) }
+
 // tagLine builds one stored history line with chain fields and kind
 // (chat, audit, or pre-split system records).
 func tagLine(height uint64, typ, kind, text string) string {
 	raw, _ := json.Marshal(WireMessage{
 		Type: typ, Time: "12:00", SysKind: kind, Text: text,
 		ChainHash:   fmt.Sprintf("%064x", height),
-		ChainHeight: height, ChainVer: 2,
+		ChainHeight: height, ChainVer: 2, Seq: testNextSeq(),
 	})
 	return string(raw)
 }
@@ -27,19 +34,20 @@ func tagLine(height uint64, typ, kind, text string) string {
 // no chain fields, no height. The chain never advances over these.
 func noticeLine(kind, text string) string {
 	raw, _ := json.Marshal(WireMessage{
-		Type: "system", Time: "12:00", SysKind: kind, Text: text,
+		Type: "system", Time: "12:00", SysKind: kind, Text: text, Seq: testNextSeq(),
 	})
 	return string(raw)
 }
 
-// drainReplay runs SendChatHistory and splits the stream into content
-// lines, footer and trailer.
+// drainReplay runs the tail-window seq page and splits the stream into
+// content lines, footer and trailer.
 func drainReplay(t *testing.T, s *ChatServer, wantJoins bool) (contents []string, footer string, trailer HistorySync) {
 	t.Helper()
 	sess := &ClientSession{Send: make(chan []byte, 4096), DisplayName: "T#0000", Perms: GetDefaultPermission(), WantJoins: wantJoins}
 	done := make(chan struct{})
 	go func() {
-		s.Chain.SendChatHistory(sess)
+		zero := uint64(0)
+		s.serveHistorySeq(sess, &zero, nil, 50000)
 		close(done)
 	}()
 	timeout := time.After(10 * time.Second)
@@ -184,10 +192,10 @@ func TestHistorySyncTrailer_Dropped(t *testing.T) {
 	}
 }
 
-// TestSendChatHistory_NeverBlocks: a dead peer (WritePump gone, channel
-// full, no reader) must not wedge the replay, which runs under
+// TestServeHistorySeq_NeverBlocks: a dead peer (WritePump gone, channel
+// full, no reader) must not wedge the page, which runs under
 // BroadcastMu — blocking here would stall every broadcast.
-func TestSendChatHistory_NeverBlocks(t *testing.T) {
+func TestServeHistorySeq_NeverBlocks(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	for i := 0; i < 50; i++ {
@@ -196,13 +204,14 @@ func TestSendChatHistory_NeverBlocks(t *testing.T) {
 	sess := &ClientSession{Send: make(chan []byte), DisplayName: "Ghost#0000", Perms: GetDefaultPermission()}
 	done := make(chan struct{})
 	go func() {
-		s.Chain.SendChatHistory(sess)
+		zero := uint64(0)
+		s.serveHistorySeq(sess, &zero, nil, 50000)
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("SendChatHistory blocked on a dead peer")
+		t.Fatal("serveHistorySeq blocked on a dead peer")
 	}
 }
 
@@ -251,14 +260,12 @@ checked:
 	}
 }
 
-// TestRegister_NoLiveInterleave: live chats racing a replay must land
-// strictly after the trailer. The broadcaster starts only after the
-// replay header proves the lock is held.
-func TestRegister_NoLiveInterleave(t *testing.T) {
+// TestRegister_HistoryInfoFirst: connect announces the history window
+// (the client then pages) instead of pushing a replay.
+func TestRegister_HistoryInfoFirst(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
-	const replayLines = 300
-	for i := 0; i < replayLines; i++ {
+	for i := 0; i < 10; i++ {
 		s.Chain.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "replay line"))
 	}
 	sess := &ClientSession{Conn: nil, Send: make(chan []byte, 16384), DisplayName: "New#0000", Perms: GetDefaultPermission()}
@@ -267,42 +274,16 @@ func TestRegister_NoLiveInterleave(t *testing.T) {
 		s.Hub.registerClient(sess, "127.0.0.1")
 		close(regDone)
 	}()
-	// Wait for the replay header: proves registerClient is inside the
-	// locked region before any live broadcast fires.
-	header := <-sess.Send
-	if !strings.Contains(string(header), "Lịch sử chat gần đây") {
-		t.Fatalf("first stream item is not the replay header: %q", header)
+	first := <-sess.Send
+	var info HistoryInfo
+	if err := json.Unmarshal(first, &info); err != nil || info.Type != "history_info" {
+		t.Fatalf("first frame must be history_info: %q", first)
 	}
-	liveDone := make(chan struct{})
-	go func() {
-		defer close(liveDone)
-		for i := 0; i < 50; i++ {
-			s.Hub.BroadcastWire(WireMessage{Type: "chat", Text: "live line", DisplayName: "Other#1111"}, nil, "")
-		}
-	}()
+	if info.MaxSeq == 0 || info.Count == 0 || info.MaxHeight == 0 {
+		t.Fatalf("history_info must announce the window: %+v", info)
+	}
 	<-regDone
-	<-liveDone
 	close(sess.Send)
-	stream := []string{string(header)}
-	for msg := range sess.Send {
-		stream = append(stream, string(msg))
-	}
-	trailerIdx, firstLiveIdx := -1, -1
-	for i, m := range stream {
-		var hs HistorySync
-		if err := json.Unmarshal([]byte(m), &hs); err == nil && hs.Type == "history_sync" {
-			trailerIdx = i
-		}
-		if strings.Contains(m, "live line") && firstLiveIdx < 0 {
-			firstLiveIdx = i
-		}
-	}
-	if trailerIdx < 0 {
-		t.Fatal("trailer missing from stream")
-	}
-	if firstLiveIdx >= 0 && firstLiveIdx < trailerIdx {
-		t.Fatalf("live message interleaved into replay at %d (trailer at %d)", firstLiveIdx, trailerIdx)
-	}
 }
 
 // BroadcastAudit is chained, verifiable, delivered live, and always
@@ -384,116 +365,6 @@ func drainSegment(t *testing.T, s *ChatServer, before uint64, limit int) (conten
 func seedSegmentHistory(s *ChatServer) {
 	for _, h := range []uint64{1, 2, 3, 4, 5, 6} {
 		s.Chain.appendMessageToHistory(tagLine(h, "chat", "", "line"))
-	}
-}
-
-// drainRange runs serveHistoryRange and splits the stream into the
-// recovery header, content lines, footer and trailer.
-func drainRange(t *testing.T, s *ChatServer, after uint64, limit int) (header string, contents []string, footer string, trailer HistorySync) {
-	t.Helper()
-	sess := &ClientSession{Send: make(chan []byte, 4096), DisplayName: "T#0000", Perms: GetDefaultPermission()}
-	done := make(chan struct{})
-	go func() {
-		s.serveHistoryRange(sess, after, limit)
-		close(done)
-	}()
-	timeout := time.After(10 * time.Second)
-	for {
-		select {
-		case msg := <-sess.Send:
-			for _, line := range replayFrameLines(msg) {
-				var hs HistorySync
-				if err := json.Unmarshal([]byte(line), &hs); err == nil && hs.Type == "history_sync" {
-					trailer = hs
-					<-done
-					return header, contents, footer, trailer
-				}
-				if strings.Contains(line, "Kết thúc lịch sử bù") {
-					footer = line
-					continue
-				}
-				if strings.Contains(line, "Lịch sử bù") {
-					header = line
-					continue
-				}
-				contents = append(contents, line)
-			}
-		case <-timeout:
-			t.Fatal("range stream stalled before trailer")
-		}
-	}
-}
-
-func seedRangeHistory(s *ChatServer) {
-	for _, h := range []uint64{1, 2, 3, 4, 5, 6} {
-		if h == 4 {
-			s.Chain.appendMessageToHistory(noticeLine("date", "day marker"))
-		}
-		s.Chain.appendMessageToHistory(tagLine(h, "chat", "", "line"))
-	}
-}
-
-// A recovery window carries chained lines at or above the cursor in
-// ascending order, with notices left out of the window.
-func TestRange_Ascending(t *testing.T) {
-	testCfg(t)
-	s := NewChatServer()
-	seedRangeHistory(s)
-	header, contents, footer, trailer := drainRange(t, s, 4, 10)
-	if header != "--- Lịch sử bù ---" {
-		t.Fatalf("range header = %q", header)
-	}
-	if len(contents) != 3 {
-		t.Fatalf("range from 4 = %d lines, want 3 (4,5,6): %q", len(contents), contents)
-	}
-	var heights []uint64
-	for _, c := range contents {
-		var wire WireMessage
-		if err := json.Unmarshal([]byte(c), &wire); err != nil {
-			t.Fatalf("range line not a wire: %q", c)
-		}
-		heights = append(heights, wire.ChainHeight)
-	}
-	if fmt.Sprint(heights) != "[4 5 6]" {
-		t.Fatalf("range heights = %v, want [4 5 6]", heights)
-	}
-	if !strings.Contains(footer, "Kết thúc lịch sử bù (3/3)") {
-		t.Fatalf("range footer wrong: %q", footer)
-	}
-	if trailer.MinHeight != 4 || trailer.MaxHeight != 6 || trailer.Sent != 3 || trailer.Total != 3 {
-		t.Fatalf("range trailer wrong: %+v", trailer)
-	}
-}
-
-// The limit caps the window; notices never occupy chain positions.
-func TestRange_Limit(t *testing.T) {
-	testCfg(t)
-	s := NewChatServer()
-	seedRangeHistory(s)
-	_, contents, _, trailer := drainRange(t, s, 1, 2)
-	if len(contents) != 2 {
-		t.Fatalf("range limit 2 = %d lines, want 2", len(contents))
-	}
-	if trailer.MinHeight != 1 || trailer.MaxHeight != 2 {
-		t.Fatalf("range trailer wrong: %+v", trailer)
-	}
-}
-
-// A cursor past every stored height yields an empty but terminated
-// stream, so the requester cancels its recovery instead of hanging.
-func TestRange_PastTip(t *testing.T) {
-	testCfg(t)
-	s := NewChatServer()
-	seedRangeHistory(s)
-	_, contents, footer, trailer := drainRange(t, s, 100, 10)
-	if len(contents) != 0 {
-		t.Fatalf("range past tip must be empty, got %q", contents)
-	}
-	if !strings.Contains(footer, "không còn tin trong bộ nhớ") {
-		t.Fatalf("exhausted range must say so: %q", footer)
-	}
-	if trailer.Sent != 0 || trailer.Total != 0 {
-		t.Fatalf("empty range trailer wrong: %+v", trailer)
 	}
 }
 

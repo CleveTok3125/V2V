@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -31,10 +30,9 @@ func TestReadLimitFor(t *testing.T) {
 	}
 }
 
-// With a history longer than the Send buffer (600 > 256), registering
-// before WritePump blocks forever inside SendChatHistory because no reader
-// is draining the channel yet. serveAuthenticated must start the pump first.
-func TestServeAuthenticated_LargeHistoryNoDeadlock(t *testing.T) {
+// serveAuthenticated must start WritePump before registerClient, then
+// announce the history window and the join. The peer pages itself.
+func TestServeAuthenticated_HistoryInfoThenJoin(t *testing.T) {
 	old := Cfg.Dynamic.Load()
 	Cfg.Dynamic.Store(config.DefaultDynamic())
 	defer Cfg.Dynamic.Store(old)
@@ -43,9 +41,8 @@ func TestServeAuthenticated_LargeHistoryNoDeadlock(t *testing.T) {
 	defer func() { Cfg.Static = oldStatic }()
 
 	s := NewChatServer()
-	const historyLines = 600
-	for i := 0; i < historyLines; i++ {
-		s.Chain.appendMessageToHistory(fmt.Sprintf("legacy line %04d", i))
+	for i := 0; i < 600; i++ {
+		s.Chain.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "line"))
 	}
 
 	serverConnCh := make(chan *websocket.Conn, 1)
@@ -67,9 +64,7 @@ func TestServeAuthenticated_LargeHistoryNoDeadlock(t *testing.T) {
 	serverConn := <-serverConnCh
 
 	session := &ClientSession{
-		Conn: serverConn,
-		// Oversized on purpose: replay sends are non-blocking, and a
-		// full buffer here would drop lines and flake the count below.
+		Conn:        serverConn,
 		Send:        make(chan []byte, 2048),
 		DisplayName: "Tester#abcd",
 		Perms:       GetDefaultPermission(),
@@ -80,40 +75,29 @@ func TestServeAuthenticated_LargeHistoryNoDeadlock(t *testing.T) {
 		close(done)
 	}()
 
-	// Drain everything the server pushes: 500 capped history lines framed
-	// by header/footer, then the date line and our own join broadcast.
-	var historyCount int
-	var inHistory, sawFooter, sawJoin bool
+	var sawInfo, sawJoin bool
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		clientConn.SetReadDeadline(deadline)
 		_, msg, err := clientConn.ReadMessage()
 		if err != nil {
-			t.Fatalf("read failed before join seen: %v", err)
+			t.Fatalf("read failed before history_info + join: %v", err)
 		}
-		text := string(msg)
-		switch {
-		case strings.Contains(text, "Lịch sử chat gần đây"):
-			inHistory = true
-		case strings.Contains(text, "Kết thúc lịch sử"):
-			inHistory, sawFooter = false, true
-		case inHistory:
-			historyCount++
-		case strings.Contains(text, "đã tham gia phòng chat"):
+		var info HistoryInfo
+		if json.Unmarshal(msg, &info) == nil && info.Type == "history_info" {
+			sawInfo = true
+		}
+		if strings.Contains(string(msg), "đã tham gia phòng chat") {
 			sawJoin = true
 		}
-		if sawFooter && sawJoin {
+		if sawInfo && sawJoin {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for history + join (pump-order deadlock?)")
+			t.Fatal("timed out waiting for history_info + join")
 		}
 	}
-	if historyCount != 500 {
-		t.Fatalf("expected capped 500 history lines, got %d", historyCount)
-	}
 
-	// Closing our side ends ReadPump, which must return serveAuthenticated.
 	_ = clientConn.Close()
 	select {
 	case <-done:

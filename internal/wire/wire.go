@@ -155,14 +155,13 @@ type HeightRange struct {
 // ascending (oldest first, seq > AfterSeq), BeforeSeq pages descending
 // (newest first, seq < BeforeSeq); 0 means from the oldest / the tip.
 // Ranges fetches exact chained heights (refill) and wins over the
-// cursors. Before/After are the legacy height cursors kept until the
-// seq-cursor path replaces them. The response reuses the replay format
-// (lines plus a HistorySync trailer), so no new parser is needed.
+// cursors. Before pages older segments (RAM plus disk tiers). The
+// response reuses the replay format (lines plus a HistorySync trailer),
+// so no new parser is needed.
 type HistoryRequest struct {
 	Type      string        `json:"type"` // "history_request"
 	Before    uint64        `json:"before,omitempty"`
 	Limit     int           `json:"limit,omitempty"`
-	After     uint64        `json:"after,omitempty"`
 	AfterSeq  *uint64       `json:"after_seq,omitempty"`  // ascending from this seq (0 = oldest)
 	BeforeSeq *uint64       `json:"before_seq,omitempty"` // descending from this seq (0 = tip)
 	Ranges    []HeightRange `json:"ranges,omitempty"`     // exact chained heights (refill)

@@ -164,11 +164,11 @@ func TestLoadRecords_CorruptAndOversized(t *testing.T) {
 
 // Concurrent history senders must share one read lock correctly:
 // every sender releases exactly the lock it acquired. Runs under -race.
-func TestSendChatHistory_NoDoubleUnlock(t *testing.T) {
+func TestServeHistorySeq_NoDoubleUnlock(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	for i := 0; i < 50; i++ {
-		s.Chain.appendMessageToHistory("line")
+		s.Chain.appendMessageToHistory(tagLine(uint64(i+1), "chat", "", "line"))
 	}
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -176,7 +176,8 @@ func TestSendChatHistory_NoDoubleUnlock(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			sess := &ClientSession{Send: make(chan []byte, 1024)}
-			s.Chain.SendChatHistory(sess)
+			zero := uint64(0)
+			s.serveHistorySeq(sess, &zero, nil, 50000)
 			for len(sess.Send) > 0 {
 				<-sess.Send
 			}

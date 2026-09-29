@@ -180,7 +180,8 @@ func TestReplayBatchedFrames(t *testing.T) {
 	sess := &ClientSession{Send: make(chan []byte, 4096), DisplayName: "T#0000", Perms: GetDefaultPermission()}
 	done := make(chan struct{})
 	go func() {
-		s.Chain.SendChatHistory(sess)
+		zero := uint64(0)
+		s.serveHistorySeq(sess, &zero, nil, 50000)
 		close(done)
 	}()
 	frames, lines := 0, 0
