@@ -156,21 +156,23 @@ func LoadDynamicConfig() (config.DynamicConfig, []string, error) {
 	loader := &EnvLoader{}
 
 	cfg := config.DynamicConfig{
-		StatusURL:              loader.Optional("STATUS_URL"),
-		DownloadURL:            loader.Optional("DOWNLOAD_URL"),
-		HomepageURL:            loader.Optional("HOMEPAGE_URL"),
-		MaxConnectionsPerIP:    loader.Int("MAX_CONNECTIONS_PER_IP"),
-		MaxMessageLength:       loader.Int("MAX_MESSAGE_LENGTH"),
-		MaxMessageLine:         loader.Int("MAX_MESSAGE_LINE"),
-		MessageCooldown:        loader.Duration("MESSAGE_COOLDOWN"),
-		IdleChatTimeout:        loader.Duration("IDLE_CHAT_TIMEOUT"),
-		MaxHistoryBytes:        loader.Int("MAX_HISTORY_BYTES"),
-		MaxHistorySend:         loader.Int("MAX_HISTORY_SEND"),
-		HistorySegmentCooldown: loader.Duration("HISTORY_SEGMENT_COOLDOWN"),
-		HistoryDiskLookup:      loader.Int("HISTORY_DISK_LOOKUP"),
-		MaxUsernameLength:      loader.Int("MAX_USERNAME_LENGTH"),
-		MaxTripcodeLength:      getEnvAsIntFallback(&w, "MAX_TRIPCODE_LENGTH", 64),
-		ConnectionCooldown:     loader.Duration("CONNECTION_COOLDOWN"),
+		StatusURL:               loader.Optional("STATUS_URL"),
+		DownloadURL:             loader.Optional("DOWNLOAD_URL"),
+		HomepageURL:             loader.Optional("HOMEPAGE_URL"),
+		MaxConnectionsPerIP:     loader.Int("MAX_CONNECTIONS_PER_IP"),
+		MaxMessageLength:        loader.Int("MAX_MESSAGE_LENGTH"),
+		MaxMessageLine:          loader.Int("MAX_MESSAGE_LINE"),
+		MessageCooldown:         loader.Duration("MESSAGE_COOLDOWN"),
+		IdleChatTimeout:         loader.Duration("IDLE_CHAT_TIMEOUT"),
+		MaxHistoryBytes:         loader.Int("MAX_HISTORY_BYTES"),
+		MaxHistorySend:          loader.Int("MAX_HISTORY_SEND"),
+		HistorySegmentCooldown:  loader.Duration("HISTORY_SEGMENT_COOLDOWN"),
+		HistoryReplayBatchLines: loader.Int("HISTORY_REPLAY_BATCH_LINES"),
+		HistoryReplayBatchBytes: loader.Int("HISTORY_REPLAY_BATCH_BYTES"),
+		HistoryDiskLookup:       loader.Int("HISTORY_DISK_LOOKUP"),
+		MaxUsernameLength:       loader.Int("MAX_USERNAME_LENGTH"),
+		MaxTripcodeLength:       getEnvAsIntFallback(&w, "MAX_TRIPCODE_LENGTH", 64),
+		ConnectionCooldown:      loader.Duration("CONNECTION_COOLDOWN"),
 	}
 	if err := loader.Err(); err != nil {
 		return config.DynamicConfig{}, w.list, err
@@ -185,6 +187,14 @@ func LoadDynamicConfig() (config.DynamicConfig, []string, error) {
 	// never widen reads beyond what the operator picked.
 	if cfg.HistorySegmentCooldown <= 0 {
 		cfg.HistorySegmentCooldown = 2 * time.Second
+	}
+	// Batch floors: zero would send one frame per line, defeating the
+	// coalescing that keeps a window inside the send queue.
+	if cfg.HistoryReplayBatchLines <= 0 {
+		cfg.HistoryReplayBatchLines = 32
+	}
+	if cfg.HistoryReplayBatchBytes <= 0 {
+		cfg.HistoryReplayBatchBytes = 16384
 	}
 	if cfg.HistoryDiskLookup < DiskLookupOff || cfg.HistoryDiskLookup > DiskLookupArchive {
 		cfg.HistoryDiskLookup = DiskLookupOff

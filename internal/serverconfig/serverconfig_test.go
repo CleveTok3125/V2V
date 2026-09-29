@@ -50,6 +50,8 @@ func setDynamicEnv(t *testing.T) {
 	t.Setenv("IDLE_CHAT_TIMEOUT", "30m")
 	t.Setenv("MAX_HISTORY_BYTES", "10485760")
 	t.Setenv("MAX_HISTORY_SEND", "500")
+	t.Setenv("HISTORY_REPLAY_BATCH_LINES", "32")
+	t.Setenv("HISTORY_REPLAY_BATCH_BYTES", "16384")
 	t.Setenv("HISTORY_SEGMENT_COOLDOWN", "2s")
 	t.Setenv("HISTORY_DISK_LOOKUP", "0")
 	t.Setenv("MAX_USERNAME_LENGTH", "12")

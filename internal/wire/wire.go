@@ -47,6 +47,11 @@ type WireMessage struct {
 	ChainHash   string `json:"chain_hash,omitempty"` // hex 64
 	ChainHeight uint64 `json:"chain_height,omitempty"`
 	ChainVer    int    `json:"chain_ver,omitempty"` // link encoding, current 2
+	// Seq is the server-assigned history cursor: a monotonic counter
+	// over every stored line (chained and unchained alike). It orders
+	// paging and relay mirroring and is not covered by the chain hash,
+	// so it is an ordering aid, never an integrity proof.
+	Seq uint64 `json:"seq,omitempty"`
 }
 
 type AuthPacket struct {
@@ -103,12 +108,14 @@ type AuthPacket struct {
 }
 
 // HistorySync is the machine-readable trailer closing a history
-// replay, sent after the human footer. Fork-check logic keys off its
+// response, sent after the human footer. Fork-check logic keys off its
 // window bounds: a persisted tip inside the window but absent from the
 // replayed lines means the log changed. MinHeight/MaxHeight cover the
-// lines the replay intended to send; Dropped counts the sends a full
-// peer buffer refused, so a trailer with Dropped > 0 describes an
-// incomplete window whose holes prove nothing about the log.
+// chained lines the response intended to send; Dropped counts the sends
+// a full peer buffer refused, so a trailer with Dropped > 0 describes an
+// incomplete window whose holes prove nothing about the log. Direction,
+// FirstSeq, LastSeq, NextSeq and More drive the seq-cursor paging used
+// by the initial load, /older, refills and relay mirroring.
 type HistorySync struct {
 	Type      string `json:"type"` // "history_sync"
 	MinHeight uint64 `json:"min_height,omitempty"`
@@ -116,20 +123,39 @@ type HistorySync struct {
 	Sent      int    `json:"sent,omitempty"`
 	Total     int    `json:"total,omitempty"`
 	Dropped   int    `json:"dropped,omitempty"`
+	Direction string `json:"direction,omitempty"` // "after" or "before"
+	FirstSeq  uint64 `json:"first_seq,omitempty"`
+	LastSeq   uint64 `json:"last_seq,omitempty"`
+	NextSeq   uint64 `json:"next_seq,omitempty"` // resume cursor; 0 when done
+	More      bool   `json:"more,omitempty"`
 }
 
-// HistoryRequest asks the server for an older segment on demand
-// (paged history): the last Limit lines below Before. Before 0 means
-// the oldest absolute segment. After asks the opposite direction: up
-// to Limit lines at or above After (ascending, RAM only), to fill
-// heights a slow peer missed; After wins when both are set. The
-// response reuses the replay format (lines plus a HistorySync
-// trailer), so no new parser is needed.
+// HistoryInfo announces the available history window once after connect,
+// so a peer can choose where to start paging without guessing. It
+// replaces the connect-time push replay: the peer asks for the slice it
+// wants instead of receiving a burst.
+type HistoryInfo struct {
+	Type      string `json:"type"` // "history_info"
+	MinSeq    uint64 `json:"min_seq,omitempty"`
+	MaxSeq    uint64 `json:"max_seq,omitempty"`
+	MinHeight uint64 `json:"min_height,omitempty"`
+	MaxHeight uint64 `json:"max_height,omitempty"`
+	Count     int    `json:"count,omitempty"`
+}
+
+// HistoryRequest asks the server for stored history. AfterSeq pages
+// ascending (oldest first, seq > AfterSeq), BeforeSeq pages descending
+// (newest first, seq < BeforeSeq); 0 means from the oldest / the tip.
+// Before/After are the legacy height cursors kept until the seq-cursor
+// path replaces them. The response reuses the replay format (lines plus
+// a HistorySync trailer), so no new parser is needed.
 type HistoryRequest struct {
-	Type   string `json:"type"` // "history_request"
-	Before uint64 `json:"before,omitempty"`
-	Limit  int    `json:"limit,omitempty"`
-	After  uint64 `json:"after,omitempty"`
+	Type      string  `json:"type"` // "history_request"
+	Before    uint64  `json:"before,omitempty"`
+	Limit     int     `json:"limit,omitempty"`
+	After     uint64  `json:"after,omitempty"`
+	AfterSeq  *uint64 `json:"after_seq,omitempty"`  // ascending from this seq (0 = oldest)
+	BeforeSeq *uint64 `json:"before_seq,omitempty"` // descending from this seq (0 = tip)
 }
 
 // PowOffer is a server-issued proof-of-work challenge, signed with the

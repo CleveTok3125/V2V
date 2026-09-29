@@ -28,6 +28,11 @@ type DynamicConfig struct {
 	MaxHistoryBytes        int           `json:"maxHistoryBytes"`
 	MaxHistorySend         int           `json:"maxHistorySend"`
 	HistorySegmentCooldown time.Duration `json:"historySegmentCooldown"`
+	// HistoryReplayBatchLines/Bytes coalesce a replay response into
+	// multi-line frames so a bounded window fits the per-session send
+	// queue instead of being dropped frame by frame.
+	HistoryReplayBatchLines int `json:"historyReplayBatchLines"`
+	HistoryReplayBatchBytes int `json:"historyReplayBatchBytes"`
 	// HistoryDiskLookup tiers on-demand older-segment reads beyond
 	// RAM: 0 RAM-only, 1 +active history.jsonl, 2 +.old raw,
 	// 3 +.old.zst archive (full). Higher tiers cost more per request.
@@ -51,6 +56,8 @@ func DefaultDynamic() *DynamicConfig {
 		MaxHistoryBytes:        10485760,
 		MaxHistorySend:         500,
 		HistorySegmentCooldown: 2 * time.Second,
+		HistoryReplayBatchLines: 32,
+		HistoryReplayBatchBytes: 16384,
 		HistoryDiskLookup:      0,
 		MaxUsernameLength:      12,
 		MaxTripcodeLength:      64,

@@ -2,6 +2,7 @@ package wire
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -18,6 +19,7 @@ func TestWireJSONKeySet(t *testing.T) {
 		ChainHash:   "ch",
 		ChainHeight: 4,
 		ChainVer:    2,
+		Seq:         5,
 	}
 	raw, err := json.Marshal(full)
 	if err != nil {
@@ -27,7 +29,7 @@ func TestWireJSONKeySet(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	wantTop := []string{"type", "time", "displayName", "sys_kind", "text", "trip", "tmp_id", "reply_to", "chain_prev", "chain_hash", "chain_height", "chain_ver"}
+	wantTop := []string{"type", "time", "displayName", "sys_kind", "text", "trip", "tmp_id", "reply_to", "chain_prev", "chain_hash", "chain_height", "chain_ver", "seq"}
 	if len(got) != len(wantTop) {
 		t.Fatalf("top-level keys = %v, want %v", keysOf(got), wantTop)
 	}
@@ -75,33 +77,52 @@ func TestWireJSONKeySet(t *testing.T) {
 	}
 
 	// HistorySync trailer pins its key set as well.
-	sync := HistorySync{Type: "history_sync", MinHeight: 1, MaxHeight: 142, Sent: 32, Total: 142, Dropped: 3}
+	sync := HistorySync{Type: "history_sync", MinHeight: 1, MaxHeight: 142, Sent: 32, Total: 142, Dropped: 3,
+		Direction: "after", FirstSeq: 1, LastSeq: 32, NextSeq: 33, More: true}
 	raw, _ = json.Marshal(sync)
 	var smap map[string]any
 	_ = json.Unmarshal(raw, &smap)
-	for _, k := range []string{"type", "min_height", "max_height", "sent", "total", "dropped"} {
+	for _, k := range []string{"type", "min_height", "max_height", "sent", "total", "dropped",
+		"direction", "first_seq", "last_seq", "next_seq", "more"} {
 		if _, ok := smap[k]; !ok {
 			t.Errorf("missing history_sync key %q in %s", k, raw)
 		}
 	}
 	var back HistorySync
-	if err := json.Unmarshal(raw, &back); err != nil || back.Dropped != 3 {
-		t.Errorf("dropped must round-trip: %+v %v", back, err)
+	if err := json.Unmarshal(raw, &back); err != nil || back.Dropped != 3 || back.Direction != "after" || back.NextSeq != 33 || !back.More {
+		t.Errorf("history_sync must round-trip: %+v %v", back, err)
 	}
 
 	// HistoryRequest pins its key set; Before 0 means oldest absolute.
-	req := HistoryRequest{Type: "history_request", Before: 50, Limit: 20, After: 30}
+	zero, ten, forty := uint64(0), uint64(10), uint64(40)
+	req := HistoryRequest{Type: "history_request", Before: 50, Limit: 20, After: 30, AfterSeq: &ten, BeforeSeq: &forty}
 	raw, _ = json.Marshal(req)
 	var rmap map[string]any
 	_ = json.Unmarshal(raw, &rmap)
-	for _, k := range []string{"type", "before", "limit", "after"} {
+	for _, k := range []string{"type", "before", "limit", "after", "after_seq", "before_seq"} {
 		if _, ok := rmap[k]; !ok {
 			t.Errorf("missing history_request key %q in %s", k, raw)
 		}
 	}
+	// An explicit zero cursor must survive as a present key.
+	raw, _ = json.Marshal(HistoryRequest{Type: "history_request", AfterSeq: &zero})
+	if !strings.Contains(string(raw), `"after_seq":0`) {
+		t.Errorf("explicit zero after_seq must serialize: %s", raw)
+	}
 	var bareReq HistoryRequest
 	if err := json.Unmarshal([]byte(`{"type":"history_request"}`), &bareReq); err != nil || bareReq.Before != 0 || bareReq.Limit != 0 {
 		t.Fatalf("bare history_request must decode zero: %+v %v", bareReq, err)
+	}
+
+	// HistoryInfo pins its key set.
+	info := HistoryInfo{Type: "history_info", MinSeq: 1, MaxSeq: 142, MinHeight: 1, MaxHeight: 100, Count: 142}
+	raw, _ = json.Marshal(info)
+	var imap map[string]any
+	_ = json.Unmarshal(raw, &imap)
+	for _, k := range []string{"type", "min_seq", "max_seq", "min_height", "max_height", "count"} {
+		if _, ok := imap[k]; !ok {
+			t.Errorf("missing history_info key %q in %s", k, raw)
+		}
 	}
 
 	// SysKind round-trips on system lines.

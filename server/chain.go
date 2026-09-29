@@ -39,6 +39,7 @@ func (c *ChainService) linkAndStore(wire WireMessage, serverPub string) (WireMes
 	wire.ChainHash = hex.EncodeToString(h[:])
 	wire.ChainHeight = c.height
 	wire.ChainVer = chainVersion
+	wire.Seq = c.assignSeqLocked()
 	c.tip = h
 	data, _ := json.Marshal(wire)
 	c.appendMessageLocked(string(data))
@@ -46,6 +47,14 @@ func (c *ChainService) linkAndStore(wire WireMessage, serverPub string) (WireMes
 		c.Store.EnqueueWire(wire, time.Now().In(Cfg.Static.Timezone))
 	}
 	return wire, data
+}
+
+// assignSeqLocked returns the next history sequence. Caller must hold
+// Chain.Mu. Seq is assigned under the same lock as the append so the
+// counter matches storage order for chained lines and notices alike.
+func (c *ChainService) assignSeqLocked() uint64 {
+	c.seq++
+	return c.seq
 }
 
 // initChainLocked resumes the tip from stored history or starts a new
@@ -59,6 +68,7 @@ func (c *ChainService) initChainLocked(serverPub string) {
 	var anchor string
 	var anchored bool
 	broken := false
+	var maxSeq uint64
 	for _, msgStr := range c.History {
 		var wire WireMessage
 		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil {
@@ -66,6 +76,9 @@ func (c *ChainService) initChainLocked(serverPub string) {
 			anchor = msgStr
 			anchored = true
 			continue
+		}
+		if wire.Seq > maxSeq {
+			maxSeq = wire.Seq
 		}
 		if wire.Type == "system" && wire.ChainHash == "" {
 			// Unchained notification (join/leave/date): never chain,
@@ -115,6 +128,9 @@ func (c *ChainService) initChainLocked(serverPub string) {
 		tip = chain.LegacyAnchor(anchor)
 	}
 	c.tip, c.height, c.ready = tip, height, true
+	if maxSeq > c.seq {
+		c.seq = maxSeq
+	}
 }
 
 // serverPub returns the hex identity for chain genesis (empty in tests).

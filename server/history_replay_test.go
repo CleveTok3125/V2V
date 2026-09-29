@@ -46,25 +46,38 @@ func drainReplay(t *testing.T, s *ChatServer, wantJoins bool) (contents []string
 	for {
 		select {
 		case msg := <-sess.Send:
-			var hs HistorySync
-			if err := json.Unmarshal(msg, &hs); err == nil && hs.Type == "history_sync" {
-				trailer = hs
-				<-done
-				return contents, footer, trailer
+			for _, line := range replayFrameLines(msg) {
+				var hs HistorySync
+				if err := json.Unmarshal([]byte(line), &hs); err == nil && hs.Type == "history_sync" {
+					trailer = hs
+					<-done
+					return contents, footer, trailer
+				}
+				if strings.Contains(line, "Kết thúc lịch sử") {
+					footer = line
+					continue
+				}
+				if strings.Contains(line, "Lịch sử chat gần đây") {
+					continue
+				}
+				contents = append(contents, line)
 			}
-			text := string(msg)
-			if strings.Contains(text, "Kết thúc lịch sử") {
-				footer = text
-				continue
-			}
-			if strings.Contains(text, "Lịch sử chat gần đây") {
-				continue
-			}
-			contents = append(contents, text)
 		case <-timeout:
 			t.Fatal("replay stream stalled before trailer")
 		}
 	}
+}
+
+// replayFrameLines splits one WebSocket frame into its newline-separated
+// replay lines: a batched frame carries many.
+func replayFrameLines(msg []byte) []string {
+	var out []string
+	for _, line := range strings.Split(string(msg), "\n") {
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 func seedReplayHistory(s *ChatServer) {
@@ -163,7 +176,7 @@ func TestReplay_LiveShape142(t *testing.T) {
 // trailers because an incomplete window proves nothing.
 func TestHistorySyncTrailer_Dropped(t *testing.T) {
 	var hs HistorySync
-	if err := json.Unmarshal(historySyncTrailer(3, 6, 2, 5, 3), &hs); err != nil {
+	if err := json.Unmarshal(historySyncTrailer(3, 6, 2, 5, 3, 0, 0, pageMeta{}), &hs); err != nil {
 		t.Fatalf("trailer unmarshal: %v", err)
 	}
 	if hs.Dropped != 3 || hs.MinHeight != 3 || hs.MaxHeight != 6 || hs.Sent != 2 || hs.Total != 5 {
@@ -346,21 +359,22 @@ func drainSegment(t *testing.T, s *ChatServer, before uint64, limit int) (conten
 	for {
 		select {
 		case msg := <-sess.Send:
-			var hs HistorySync
-			if err := json.Unmarshal(msg, &hs); err == nil && hs.Type == "history_sync" {
-				trailer = hs
-				<-done
-				return contents, footer, trailer
+			for _, line := range replayFrameLines(msg) {
+				var hs HistorySync
+				if err := json.Unmarshal([]byte(line), &hs); err == nil && hs.Type == "history_sync" {
+					trailer = hs
+					<-done
+					return contents, footer, trailer
+				}
+				if strings.Contains(line, "Kết thúc lịch sử") {
+					footer = line
+					continue
+				}
+				if strings.Contains(line, "Lịch sử") {
+					continue
+				}
+				contents = append(contents, line)
 			}
-			text := string(msg)
-			if strings.Contains(text, "Kết thúc lịch sử") {
-				footer = text
-				continue
-			}
-			if strings.Contains(text, "Lịch sử") {
-				continue
-			}
-			contents = append(contents, text)
 		case <-timeout:
 			t.Fatal("segment stream stalled before trailer")
 		}
@@ -387,22 +401,23 @@ func drainRange(t *testing.T, s *ChatServer, after uint64, limit int) (header st
 	for {
 		select {
 		case msg := <-sess.Send:
-			var hs HistorySync
-			if err := json.Unmarshal(msg, &hs); err == nil && hs.Type == "history_sync" {
-				trailer = hs
-				<-done
-				return header, contents, footer, trailer
+			for _, line := range replayFrameLines(msg) {
+				var hs HistorySync
+				if err := json.Unmarshal([]byte(line), &hs); err == nil && hs.Type == "history_sync" {
+					trailer = hs
+					<-done
+					return header, contents, footer, trailer
+				}
+				if strings.Contains(line, "Kết thúc lịch sử bù") {
+					footer = line
+					continue
+				}
+				if strings.Contains(line, "Lịch sử bù") {
+					header = line
+					continue
+				}
+				contents = append(contents, line)
 			}
-			text := string(msg)
-			if strings.Contains(text, "Kết thúc lịch sử bù") {
-				footer = text
-				continue
-			}
-			if strings.Contains(text, "Lịch sử bù") {
-				header = text
-				continue
-			}
-			contents = append(contents, text)
 		case <-timeout:
 			t.Fatal("range stream stalled before trailer")
 		}

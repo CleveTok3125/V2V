@@ -296,19 +296,22 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		// PoW frames bypass the mute gate: a muted client must still
 		// be able to answer or decline.
 		var env struct {
-			Type   string `json:"type"`
-			Before uint64 `json:"before"`
-			Limit  int    `json:"limit"`
-			After  uint64 `json:"after"`
+			Type      string  `json:"type"`
+			Before    uint64  `json:"before"`
+			Limit     int     `json:"limit"`
+			After     uint64  `json:"after"`
+			AfterSeq  *uint64 `json:"after_seq"`
+			BeforeSeq *uint64 `json:"before_seq"`
 		}
 		if err := json.Unmarshal([]byte(raw), &env); err == nil && env.Type != "" {
 			switch env.Type {
 			// On-demand older segment (paged history): served in
 			// replay format, never chained, never counted as chat. A
 			// forged request only fetches the requester's own window.
-			// After (recovery) asks the same format upward from a
-			// height instead of downward from a cutoff; After wins
-			// when both are set.
+			// after_seq/before_seq are the seq-cursor paging used by
+			// the initial load, /older, refills and relay mirroring;
+			// the legacy height cursors (After/Before) remain until
+			// the seq path replaces them.
 			case "history_request":
 				limit := env.Limit
 				if limit <= 0 || limit > dynCfg.MaxHistorySend {
@@ -322,9 +325,12 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 					updateReadDeadline()
 					continue
 				}
-				if env.After > 0 {
+				switch {
+				case env.AfterSeq != nil || env.BeforeSeq != nil:
+					s.serveHistorySeq(session, env.AfterSeq, env.BeforeSeq, limit)
+				case env.After > 0:
 					s.serveHistoryRange(session, env.After, limit)
-				} else {
+				default:
 					s.serveHistorySegment(session, env.Before, limit)
 				}
 				s.observeHistory(clientIP)

@@ -86,6 +86,7 @@ type indexedRecord struct {
 }
 
 type historyRecord struct {
+	Seq       uint64       `json:"seq,omitempty"` // history cursor (see wire.WireMessage.Seq)
 	Timestamp string       `json:"ts"`            // RFC3339Nano for readability
 	Message   string       `json:"msg,omitempty"` // system messages (date/join/leave) remain as plain string
 	Wire      *WireMessage `json:"wire,omitempty"`
@@ -236,6 +237,7 @@ func (h *HistoryStore) EnqueueWire(wire WireMessage, now time.Time) {
 	}
 	select {
 	case h.queue <- historyRecord{
+		Seq:       wire.Seq,
 		Timestamp: now.Format(time.RFC3339Nano),
 		Wire:      &wire,
 	}:

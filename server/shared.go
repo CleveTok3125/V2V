@@ -92,10 +92,14 @@ type RateLimitRecord = guard.RateLimitRecord
 // the on-disk store. Mu guards tip, height, ready, History and
 // HistorySize together so linkAndStore stays atomic across both.
 type ChainService struct {
-	Mu          sync.RWMutex
-	tip         [32]byte
-	height      uint64
-	ready       bool
+	Mu     sync.RWMutex
+	tip    [32]byte
+	height uint64
+	ready  bool
+	// seq is the last history sequence assigned. Every stored line
+	// (chained or not) gets one, monotonically, in storage order; it is
+	// the paging/relay cursor and is not part of the chain hash.
+	seq         uint64
 	History     []string
 	HistorySize int
 	Store       *HistoryStore

@@ -38,6 +38,48 @@ func (c *pumpFeedConn) WriteMessage(int, []byte) error { return io.EOF }
 func (c *pumpFeedConn) SetReadLimit(int64)             {}
 func (c *pumpFeedConn) Close() error                   { return nil }
 
+// TestRunPumpParsesBatchedFrame: a multi-line frame (the server's replay
+// batching) renders every line, not just the first.
+func TestRunPumpParsesBatchedFrame(t *testing.T) {
+	sess := NewSession()
+	sess.Display.Out = io.Discard
+	sess.Display.Term = &fakeTerm{}
+	sess.Display.ActiveTab = TabChat
+	sess.Display.TabSys = newTabBuffer(100, 100000)
+	sess.Display.TabChat = newTabBuffer(100, 100000)
+	sess.Chain.TipPath = t.TempDir() + "/tip.json"
+	sess.Chain.WireIdx = newWireIndex(16)
+	sess.Chain.RenderCache = newRenderCache(8)
+	conn := &pumpFeedConn{frames: make(chan []byte, 4), release: make(chan struct{})}
+	sess.Conn = conn
+
+	var prev [32]byte
+	w1, p1 := pumpBatchWire(prev, 1)
+	w2, _ := pumpBatchWire(p1, 2)
+	b1, _ := json.Marshal(w1)
+	b2, _ := json.Marshal(w2)
+	conn.frames <- []byte(string(b1) + "\n" + string(b2) + "\n")
+
+	go sess.runPump()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		sess.Display.DisplayMu.Lock()
+		_, ok1 := sess.Chain.WireIdx.get(1)
+		_, ok2 := sess.Chain.WireIdx.get(2)
+		sess.Display.DisplayMu.Unlock()
+		if ok1 && ok2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("batched frame lines not both parsed: #1=%v #2=%v", ok1, ok2)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(conn.frames)
+	close(sess.Quitting)
+	<-sess.PumpDone
+}
+
 // slowWriter simulates a sluggish terminal: every Write parks, so any
 // read-loop write blocks the socket drain — exactly how a slow peer
 // fills the server's per-session queue until frames drop.

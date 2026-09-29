@@ -97,10 +97,24 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 		return fmt.Errorf("không thể nạp history từ disk: %w", err)
 	}
 
-	for _, rec := range records {
+	var lastSeq uint64
+	for i := range records {
+		rec := &records[i]
+		// Backfill the history cursor for records written before seq
+		// existed: assign in load order so a stored line keeps a stable
+		// seq across restarts.
+		if rec.Seq == 0 {
+			lastSeq++
+			rec.Seq = lastSeq
+		} else if rec.Seq > lastSeq {
+			lastSeq = rec.Seq
+		}
+		if rec.Wire != nil && rec.Wire.Seq == 0 {
+			rec.Wire.Seq = rec.Seq
+		}
 		var tripForChain *TripMeta
 		var wireForVerify *WireMessage
-		msgForHistory, ok := recordLine(rec)
+		msgForHistory, ok := recordLine(*rec)
 		if !ok {
 			continue
 		}
@@ -184,6 +198,8 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 		s.Chain.appendMessageToHistory(msgForHistory)
 	}
 
+	s.Chain.seq = lastSeq
+
 	loggedCount := len(s.Chain.History)
 	if loggedCount > 0 {
 		logInfof("📚 Đã phục hồi %d tin nhắn history từ disk", loggedCount)
@@ -245,12 +261,17 @@ func (h *Hub) fanout(data []byte, sender *websocket.Conn, isSystem, echo bool) {
 // unicast warnings stay raw strings (per-client, never chained).
 func (h *Hub) BroadcastNotice(text, kind string, sender *websocket.Conn) {
 	now := time.Now().In(Cfg.Static.Timezone)
+	// Seq is assigned under Chain.Mu, and the disk enqueue happens under
+	// the same lock, so persisted order always matches seq order.
+	h.chain.Mu.Lock()
 	wire := WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: kind, Text: text}
+	wire.Seq = h.chain.assignSeqLocked()
 	data, _ := json.Marshal(wire)
-	h.chain.appendMessageToHistory(string(data))
+	h.chain.appendMessageLocked(string(data))
 	if h.chain.Store != nil {
 		h.chain.Store.EnqueueWire(wire, now)
 	}
+	h.chain.Mu.Unlock()
 	h.fanout(data, sender, true, false)
 }
 
@@ -422,7 +443,13 @@ func recordLine(rec historyRecord) (string, bool) {
 		return string(data), true
 	}
 	if rec.Message != "" {
-		return rec.Message, true
+		if rec.Seq == 0 {
+			return rec.Message, true
+		}
+		// A backfilled legacy notice is normalized to a system wire so
+		// it carries its history cursor like any other stored line.
+		data, _ := json.Marshal(WireMessage{Type: "system", Text: rec.Message, Seq: rec.Seq})
+		return string(data), true
 	}
 	return "", false
 }
@@ -524,6 +551,84 @@ func (c *ChainService) collectRange(after uint64, limit int) []string {
 	return out
 }
 
+// collectAfterSeq returns up to limit stored lines with seq > afterSeq,
+// oldest first, plus whether more remain and the resume cursor (the last
+// seq returned). RAM only: the recent window is what an initial load or
+// a refill needs; deeper history stays on the height-cursor path.
+func (c *ChainService) collectAfterSeq(afterSeq uint64, limit int) (lines []string, more bool, next uint64) {
+	if limit <= 0 {
+		return nil, false, 0
+	}
+	c.Mu.RLock()
+	defer c.Mu.RUnlock()
+	for _, msgStr := range c.History {
+		var wire WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil || wire.Seq <= afterSeq {
+			continue
+		}
+		if len(lines) == limit {
+			return lines, true, next
+		}
+		lines = append(lines, msgStr)
+		next = wire.Seq
+	}
+	return lines, false, 0
+}
+
+// collectBeforeSeq returns up to limit stored lines with seq < beforeSeq,
+// newest first (beforeSeq 0 means from the tip), plus whether more remain
+// and the resume cursor (the smallest seq returned).
+func (c *ChainService) collectBeforeSeq(beforeSeq uint64, limit int) (lines []string, more bool, next uint64) {
+	if limit <= 0 {
+		return nil, false, 0
+	}
+	if beforeSeq == 0 {
+		beforeSeq = ^uint64(0)
+	}
+	c.Mu.RLock()
+	defer c.Mu.RUnlock()
+	for i := len(c.History) - 1; i >= 0; i-- {
+		msgStr := c.History[i]
+		var wire WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil || wire.Seq == 0 || wire.Seq >= beforeSeq {
+			continue
+		}
+		if len(lines) == limit {
+			return lines, true, next
+		}
+		lines = append(lines, msgStr)
+		next = wire.Seq
+	}
+	return lines, false, 0
+}
+
+// serveHistorySeq answers a seq-cursor page. Ascending (after) is
+// verified like a join window; descending (before) is render-only older
+// history. The collection runs outside BroadcastMu; only the send holds
+// it, like segments.
+func (s *ChatServer) serveHistorySeq(session *ClientSession, afterSeq, beforeSeq *uint64, limit int) {
+	if limit <= 0 {
+		return
+	}
+	var lines []string
+	var meta pageMeta
+	var header string
+	var mode replayMode
+	switch {
+	case afterSeq != nil:
+		l, more, next := s.Chain.collectAfterSeq(*afterSeq, limit)
+		lines, meta, header, mode = l, pageMeta{Direction: "after", NextSeq: next, More: more}, "--- Lịch sử chat gần đây ---", replayJoin
+	case beforeSeq != nil:
+		l, more, next := s.Chain.collectBeforeSeq(*beforeSeq, limit)
+		lines, meta, header, mode = l, pageMeta{Direction: "before", NextSeq: next, More: more}, "--- Lịch sử cũ ---", replaySegment
+	default:
+		return
+	}
+	s.Hub.BroadcastMu.Lock()
+	defer s.Hub.BroadcastMu.Unlock()
+	s.Chain.sendReplayPage(session, lines, header, mode, meta)
+}
+
 // serveHistoryRange answers a recovery request for lines at or above
 // after (ascending). The expensive collection runs outside
 // BroadcastMu; only the send holds it, like segments. A cursor past
@@ -564,9 +669,19 @@ func (s *ChatServer) serveHistoryRange(session *ClientSession, after uint64, lim
 // replay. Dropped is the number of sends the peer's full buffer
 // refused: the client skips its fork check when it is non-zero, since
 // an incomplete window cannot prove the log changed.
-func historySyncTrailer(minHeight, maxHeight uint64, sent, total, dropped int) []byte {
+// pageMeta carries the seq-cursor metadata for a paged response. Zero
+// values mean "not a seq page": the connect/segment/recovery replays
+// keep the legacy trailer fields only.
+type pageMeta struct {
+	Direction string
+	NextSeq   uint64
+	More      bool
+}
+
+func historySyncTrailer(minHeight, maxHeight uint64, sent, total, dropped int, firstSeq, lastSeq uint64, meta pageMeta) []byte {
 	trailer, _ := json.Marshal(HistorySync{Type: "history_sync", MinHeight: minHeight, MaxHeight: maxHeight,
-		Sent: sent, Total: total, Dropped: dropped})
+		Sent: sent, Total: total, Dropped: dropped,
+		Direction: meta.Direction, FirstSeq: firstSeq, LastSeq: lastSeq, NextSeq: meta.NextSeq, More: meta.More})
 	return trailer
 }
 
@@ -582,29 +697,73 @@ const (
 )
 
 func (c *ChainService) sendReplay(session *ClientSession, lines []string, header string, mode replayMode) {
+	c.sendReplayPage(session, lines, header, mode, pageMeta{})
+}
+
+func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, header string, mode replayMode, meta pageMeta) {
 	// Replay filters join/leave unless the session asked for them.
 	// Dates, audits and untagged lines always go. Filtered lines never
 	// occupied chain positions, so the replayed window has no gaps.
 	var minHeight, maxHeight uint64
 	var haveHeight bool
+	var firstSeq, lastSeq uint64
 	sent := 0
 	dropped := 0
 
 	// Non-blocking sends: the peer may be slow or already dead (WritePump
 	// gone) and this runs under BroadcastMu, so blocking here would stall
 	// every broadcast. Drops are counted and logged; the trailer reports
-	// what was actually queued.
+	// what was actually queued. Content lines coalesce into multi-line
+	// frames (newline-separated JSON) so a bounded window fits the
+	// per-session send queue; header, footer and trailer stay separate
+	// frames.
 	replaySend := func(b []byte) bool {
 		select {
 		case session.Send <- b:
 			return true
 		default:
-			dropped++
 			return false
 		}
 	}
+	batchLines, batchBytes := 32, 16384
+	if cfg := Cfg.Dynamic.Load(); cfg != nil {
+		if cfg.HistoryReplayBatchLines > 0 {
+			batchLines = cfg.HistoryReplayBatchLines
+		}
+		if cfg.HistoryReplayBatchBytes > 0 {
+			batchBytes = cfg.HistoryReplayBatchBytes
+		}
+	}
+	var batch []byte
+	batchN := 0
+	flushBatch := func() {
+		if len(batch) == 0 {
+			return
+		}
+		// Send a copy: the frame outlives this loop and the scratch
+		// buffer is reused for the next batch.
+		out := make([]byte, len(batch))
+		copy(out, batch)
+		if replaySend(out) {
+			sent += batchN
+		} else {
+			dropped += batchN
+		}
+		batch = batch[:0]
+		batchN = 0
+	}
+	addBatched := func(payload string) {
+		if batchN > 0 && (batchN >= batchLines || len(batch)+len(payload)+1 > batchBytes) {
+			flushBatch()
+		}
+		batch = append(batch, payload...)
+		batch = append(batch, '\n')
+		batchN++
+	}
 
-	replaySend([]byte(header))
+	if !replaySend([]byte(header)) {
+		dropped++
+	}
 	for _, msgStr := range lines {
 		// Keep history messages as stored (could be legacy ANSI string or WireMessage JSON)
 		// For WireMessage JSON, send as is; for legacy, clean and send
@@ -626,24 +785,32 @@ func (c *ChainService) sendReplay(session *ClientSession, lines []string, header
 			}
 			haveHeight = true
 		}
+		if wireErr == nil && wire.Seq > 0 {
+			if firstSeq == 0 {
+				firstSeq = wire.Seq
+			}
+			lastSeq = wire.Seq
+		}
 		if wireErr == nil {
+			// JSON lines are newline-free (Marshal escapes them), so
+			// they batch safely.
 			if wire.Type == "chat" {
-				if replaySend([]byte(msgStr)) {
-					sent++
-				}
+				addBatched(msgStr)
 			} else {
-				cleaned := filter.CleanHistoryMessage(msgStr)
-				if replaySend([]byte(cleaned)) {
-					sent++
-				}
+				addBatched(filter.CleanHistoryMessage(msgStr))
 			}
 		} else {
-			cleaned := filter.CleanHistoryMessage(msgStr)
-			if replaySend([]byte(cleaned)) {
+			// Legacy raw lines may embed newlines: flush the batch and
+			// send them alone so the peer's split stays exact.
+			flushBatch()
+			if replaySend([]byte(filter.CleanHistoryMessage(msgStr))) {
 				sent++
+			} else {
+				dropped++
 			}
 		}
 	}
+	flushBatch()
 	footer := fmt.Sprintf("--- Kết thúc lịch sử (%d/%d) ---", sent, len(lines))
 	if mode != replayJoin {
 		noun := "lịch sử cũ"
@@ -657,8 +824,12 @@ func (c *ChainService) sendReplay(session *ClientSession, lines []string, header
 			footer = exhausted
 		}
 	}
-	replaySend([]byte(footer))
-	replaySend(historySyncTrailer(minHeight, maxHeight, sent, len(lines), dropped))
+	if !replaySend([]byte(footer)) {
+		dropped++
+	}
+	if !replaySend(historySyncTrailer(minHeight, maxHeight, sent, len(lines), dropped, firstSeq, lastSeq, meta)) {
+		dropped++
+	}
 	if dropped > 0 {
 		logWarnf("⚠️ [REPLAY] Dropped %d/%d lines for slow peer (buffer full)", dropped, len(lines)+3)
 	}
