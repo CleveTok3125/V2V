@@ -17,7 +17,8 @@ var Version = "dev"
 // the configured highlight palette, falling back to compiled defaults
 // when the client config is absent. Forum markup (bold, italic,
 // strikethrough, links, quotes) renders through markup, which delegates
-// code to codebg.
+// code to codebg. Bare http(s) URLs are wrapped as OSC8 hyperlinks so
+// they are clickable on the web build too.
 
 // Session-wide config, protocol aliases and shared terminal/socket
 // surfaces. The render/parse helpers live in render.go; the session

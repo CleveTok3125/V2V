@@ -38,7 +38,12 @@ func renderChatText(text string) string {
 			Operator:   cs.Operator,
 		}
 	}
-	return markup.Span(filter.SanitizeForDisplay(text), st)
+	// Bare http(s) URLs are linkify's job (markup only wraps explicit
+	// [text](url) and <autolink> forms). Wrapping them here gives every
+	// received message clickable links on terminals without a built-in
+	// URL matcher and on the xterm.js web build, matching the local echo
+	// path, which already calls markup.Linkify.
+	return markup.Linkify(markup.Span(filter.SanitizeForDisplay(text), st))
 }
 
 // serverText neutralizes terminal escapes in server-supplied free text
@@ -336,6 +341,32 @@ func (s *Session) refreshCoalesced() {
 // replay: our own old messages must never pollute the stash (their
 // tmpIDs belong to previous sessions). Caller must hold s.Display.DisplayMu.
 
+// verifyLinkBase returns "https://<host>" for the connected server, or
+// "" when the host is unknown. Badge links must be absolute: the
+// display sanitizer drops an OSC8 target that has no http(s) scheme,
+// so a host-relative verify path would render as plain text instead of
+// a clickable link (native terminals and the xterm.js link handler both
+// require a full URL).
+func (s *Session) verifyLinkBase() string {
+	if u, err := url.Parse(s.WSURL); err == nil && u.Host != "" {
+		return "https://" + u.Host
+	}
+	return ""
+}
+
+// absoluteVerifyURL turns a host-relative verify path (as parseTripBadgeLine
+// recovers from a legacy rendered line) into an absolute https URL so the
+// display sanitizer keeps the OSC8 target. Absolute URLs pass through.
+func (s *Session) absoluteVerifyURL(urlStr string) string {
+	if urlStr == "" || strings.HasPrefix(urlStr, "http://") || strings.HasPrefix(urlStr, "https://") {
+		return urlStr
+	}
+	if base := s.verifyLinkBase(); base != "" {
+		return base + urlStr
+	}
+	return urlStr
+}
+
 // badgeForWire verifies a trip badge and builds its colored display
 // plus the manual-verify hyperlink (kept, opens the stateless API).
 // av selects verified vs plain rendering; it is part of the render
@@ -364,7 +395,7 @@ func (s *Session) badgeForWire(wire WireMessage, av bool) (colored, urlStr strin
 	} else {
 		colored = plain
 	}
-	if u, err := url.Parse(s.WSURL); err == nil && u.Host != "" {
+	if base := s.verifyLinkBase(); base != "" {
 		// No text= param: msg_hash suffices for verification, keeping
 		// links bounded and content out of URLs/history. Old links
 		// carrying text keep working (server checks it when present).
@@ -380,7 +411,7 @@ func (s *Session) badgeForWire(wire WireMessage, av bool) (colored, urlStr strin
 		q.Set("display_name", wire.DisplayName)
 		q.Set("tmp_id", strconv.FormatUint(wire.Trip.TmpID, 10))
 		q.Set("reply_to", strconv.FormatUint(wire.Trip.ReplyTo, 10))
-		urlStr = "https://" + u.Host + "/api/trip/verify?" + q.Encode()
+		urlStr = base + "/api/trip/verify?" + q.Encode()
 	}
 	return colored, urlStr
 }

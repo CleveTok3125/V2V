@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/CleveTok3125/V2V/internal/filter"
+)
 
 func TestParseHistoryBoundary(t *testing.T) {
 	// Sync tracking must not depend on the join-display toggle: with -j
@@ -81,5 +86,64 @@ func TestNormalizeURL(t *testing.T) {
 		if got := normalizeURL(c.in); got != c.want {
 			t.Errorf("normalizeURL(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// Bare URLs in received chat text must render as OSC8 hyperlinks: the
+// local echo path already linkifies, and xterm.js on the web build has
+// no built-in URL matcher, so without this a pasted verify link shows
+// as plain text and is not clickable.
+func TestRenderChatTextLinkifiesBareURL(t *testing.T) {
+	out := renderChatText("see https://example.com/x now")
+	if !strings.Contains(out, "\x1b]8;;https://example.com/x\x1b\\") {
+		t.Fatalf("bare URL not wrapped in OSC8: %q", out)
+	}
+	// Visible characters are unchanged (cell arithmetic relies on it).
+	if strings.ReplaceAll(out, "\x1b", "") == out {
+		t.Fatal("expected escape sequences in output")
+	}
+}
+
+func TestRenderChatTextKeepsMarkupAndLinks(t *testing.T) {
+	out := renderChatText("**bold** and https://example.com/y")
+	if !strings.Contains(out, "\x1b[1m") {
+		t.Fatalf("bold markup lost: %q", out)
+	}
+	if !strings.Contains(out, "\x1b]8;;https://example.com/y\x1b\\") {
+		t.Fatalf("bare URL alongside markup not linkified: %q", out)
+	}
+}
+
+// A host-relative verify path recovered from a legacy rendered badge
+// line must become absolute; the sanitizer drops OSC8 targets without
+// an http(s) scheme, which would leave the verify link as plain text.
+func TestAbsoluteVerifyURL(t *testing.T) {
+	s := &Session{WSURL: "wss://chat.example.com/ws"}
+	if got := s.absoluteVerifyURL("/api/trip/verify?pub=a"); got != "https://chat.example.com/api/trip/verify?pub=a" {
+		t.Fatalf("relative path = %q", got)
+	}
+	if got := s.absoluteVerifyURL("https://other.example.com/api/trip/verify"); got != "https://other.example.com/api/trip/verify" {
+		t.Fatalf("absolute URL must pass through, got %q", got)
+	}
+	// Unknown host: best effort, never crash or double-prefix.
+	s2 := &Session{}
+	if got := s2.absoluteVerifyURL("/api/trip/verify"); got != "/api/trip/verify" {
+		t.Fatalf("empty host = %q", got)
+	}
+}
+
+// The legacy badge path rebuilds the verify hyperlink; with the absolute
+// URL the display sanitizer keeps the OSC8 target, so a click still
+// opens the stateless API (previously the relative path was dropped).
+func TestAbsoluteVerifyURLSurvivesSanitize(t *testing.T) {
+	s := &Session{WSURL: "wss://chat.example.com/ws"}
+	jobURL := s.absoluteVerifyURL("/api/trip/verify?pub=a&sig=b")
+	if !strings.HasPrefix(jobURL, "https://chat.example.com/") {
+		t.Fatalf("not absolute: %q", jobURL)
+	}
+	line := "|   └─ ✍️ \x1b]8;;" + jobURL + "\x1b\\\x1b[94m◆ abcd1234\x1b[0m\x1b]8;;\x1b\\"
+	sanitized := filter.SanitizeForDisplay(line)
+	if !strings.Contains(sanitized, "\x1b]8;;"+jobURL+"\x1b\\") {
+		t.Fatalf("verify link stripped by sanitizer: %q", sanitized)
 	}
 }

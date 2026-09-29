@@ -437,7 +437,7 @@ func (s *Session) runVerify() {
 		} else {
 			colored = "\x1b[91m" + job.badge + " ✗\x1b[0m"
 		}
-		line := fmt.Sprintf("  └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", job.urlStr, colored)
+		line := fmt.Sprintf("  └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", s.absoluteVerifyURL(job.urlStr), colored)
 		s.Display.DisplayMu.Lock()
 		s.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 		s.Display.DisplayMu.Unlock()
