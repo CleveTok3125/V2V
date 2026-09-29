@@ -548,3 +548,51 @@ func TestLoadPagesUntilMaxSeq(t *testing.T) {
 		t.Fatalf("second page after_seq = %v, want 2", r2.AfterSeq)
 	}
 }
+
+// TestLoadAnnouncesSync: the load prints a "Đang tải lịch sử" banner
+// before the history so a slow load does not look like a hang, the
+// banner precedes the loaded lines, page markers stay hidden, and a
+// batched frame's trailing newline does not render a blank line.
+func TestLoadAnnouncesSync(t *testing.T) {
+	conn := &captureConn{frames: make(chan []byte, 16)}
+	sess := recoverTestSession(t, 9, conn)
+	sess.Display.TabSys = newTabBuffer(100, 100000)
+	sess.Display.TabChat = newTabBuffer(100, 100000)
+	var out bytes.Buffer
+	sess.Display.Out = &out
+	sess.Display.ActiveTab = TabChat
+	anchor := [32]byte{9}
+	wires := recoverTestChain(anchor, 1, 1)
+	frame := func(v any) []byte {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		return raw
+	}
+	conn.frames <- frame(HistoryInfo{Type: "history_info", MinSeq: 1, MaxSeq: 1, MinHeight: 1, MaxHeight: 1, Count: 1})
+	conn.frames <- []byte("--- Lịch sử chat gần đây ---\n")
+	conn.frames <- frame(wires[0])
+	conn.frames <- []byte("--- Kết thúc lịch sử (1/1) ---\n")
+	conn.frames <- frame(HistorySync{Type: "history_sync", Direction: "after", FirstSeq: 1, LastSeq: 1, NextSeq: 1, Sent: 1, Total: 1})
+
+	go sess.runPump()
+	waitHoldReleased(t, sess, 3*time.Second)
+	close(conn.frames)
+	close(sess.Quitting)
+	<-sess.PumpDone
+	sess.flushOutputNow()
+
+	text := out.String()
+	bi := strings.Index(text, "Đang tải lịch sử")
+	mi := strings.Index(text, "msg")
+	if bi < 0 || mi < 0 || bi > mi {
+		t.Fatalf("sync banner must precede the loaded history: %q", text)
+	}
+	if strings.Contains(text, "Lịch sử chat gần đây") || strings.Contains(text, "Kết thúc lịch sử") {
+		t.Fatalf("page markers must stay hidden during the load: %q", text)
+	}
+	if strings.Contains(text, "\n| \n") {
+		t.Fatalf("batched frames must not render blank lines: %q", text)
+	}
+}

@@ -100,6 +100,8 @@ func (s *Session) handleHistoryInfo(info HistoryInfo) {
 	s.Chain.LoadLoaded = 0
 	s.Chain.LoadRetried = 0
 	s.Chain.LoadMaxSeq = info.MaxSeq
+	// Announce the sync so a slow/large load does not look like a hang.
+	s.emitTab(TabChat, "| --- Đang tải lịch sử... ---\n")
 	// after_seq is exclusive: to load the last `target` lines ending at
 	// MaxSeq, start just below MaxSeq-target+1.
 	after := uint64(0)
@@ -312,6 +314,11 @@ func (s *Session) runPump() {
 			continue
 		}
 		for _, line := range strings.Split(string(msg), "\n") {
+			// A batched frame ends with a newline; the empty tail would
+			// otherwise render as a blank "|" line between blocks.
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
 			// Also try per-line JSON (for history blob where each line is a WireMessage JSON)
 			var wl WireMessage
 			if hs, ok := parseHistorySync([]byte(line)); ok {
@@ -347,10 +354,13 @@ func (s *Session) runPump() {
 			if boundary, start := parseHistoryBoundary(line); boundary {
 				s.Display.DisplayMu.Lock()
 				s.trackReplayWindow(line, start)
-				// Recovery boundaries are internal plumbing: the merge
-				// places the refilled lines inline and one notice
-				// reports the outcome, so the markers stay hidden.
-				if !isRecoveryHeader(line) && !isRecoveryFooter(line) {
+				// A page during the client-driven load closes with its
+				// own header/footer; printing them per page would pepper
+				// the stream with markers. The load prints one banner up
+				// front and the merge hides recovery markers, so all of
+				// them stay hidden while Loading.
+				hide := s.Chain.Loading || isRecoveryHeader(line) || isRecoveryFooter(line)
+				if !hide {
 					s.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 				}
 				// A recovery footer settles its refill after the footer

@@ -219,9 +219,10 @@ round-trip covers every missing run, even when they are scattered.
 ## Client initial load
 
 1. Connect and authenticate.
-2. Receive `history_info`; pick a start `seq` so the load covers at most
-   `initialLines` recent lines (start = `max_seq - initialLines + 1`,
-   clamped to `min_seq`).
+2. Receive `history_info`; print a sync banner (so a slow load does not
+   look like a hang), then pick a start `seq` so the load covers at most
+   `initialLines` recent lines (start = `max_seq - initialLines`, then
+   page with the exclusive `after_seq`).
 3. Page ascending in `batchLines` batches until the tip or `initialLines`
    is reached, rendering each batch in order and verifying the chain.
 4. Live frames that arrive during the load are held and merged, then the
