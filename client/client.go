@@ -183,7 +183,7 @@ func main() {
 	// the join replay so it lands at the bottom of the loaded history
 	// instead of above it. A short timer in the pump releases it when
 	// no replay arrives.
-	sess.Display.PendingGreeting = "Đã kết nối với username: " + serverField(sess.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n"
+	sess.Display.PendingGreeting = "\nĐã kết nối với username: " + serverField(sess.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n"
 
 	go sess.runPump()
 

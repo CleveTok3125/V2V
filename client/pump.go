@@ -100,8 +100,9 @@ func (s *Session) handleHistoryInfo(info HistoryInfo) {
 	s.Chain.LoadLoaded = 0
 	s.Chain.LoadRetried = 0
 	s.Chain.LoadMaxSeq = info.MaxSeq
-	// Announce the sync so a slow/large load does not look like a hang.
-	s.emitTab(TabChat, "| --- Đang tải lịch sử... ---\n")
+	// Announce the sync as a local line so a slow/large load does not
+	// look like a hang.
+	s.emitLocalFeedback("| [Local]: Đang tải lịch sử...\n")
 	// after_seq is exclusive: to load the last `target` lines ending at
 	// MaxSeq, start just below MaxSeq-target+1.
 	after := uint64(0)

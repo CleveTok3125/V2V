@@ -584,10 +584,10 @@ func TestLoadAnnouncesSync(t *testing.T) {
 	sess.flushOutputNow()
 
 	text := out.String()
-	bi := strings.Index(text, "Đang tải lịch sử")
+	bi := strings.Index(text, "| [Local]: Đang tải lịch sử")
 	mi := strings.Index(text, "msg")
 	if bi < 0 || mi < 0 || bi > mi {
-		t.Fatalf("sync banner must precede the loaded history: %q", text)
+		t.Fatalf("local sync banner must precede the loaded history: %q", text)
 	}
 	if strings.Contains(text, "Lịch sử chat gần đây") || strings.Contains(text, "Kết thúc lịch sử") {
 		t.Fatalf("page markers must stay hidden during the load: %q", text)
