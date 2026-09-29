@@ -135,6 +135,12 @@ func TestInstanceInitCreatesTree(t *testing.T) {
 			t.Fatalf("%s missing: %v", rel, err)
 		}
 	}
+	// The data dir holds secrets: owner-only, not the old 0755.
+	if fi, err := os.Stat(filepath.Join(inst, "data")); err != nil {
+		t.Fatal(err)
+	} else if fi.Mode().Perm() != 0o700 {
+		t.Fatalf("instance data mode = %o, want 700", fi.Mode().Perm())
+	}
 	env, err := os.ReadFile(filepath.Join(inst, ".env"))
 	if err != nil {
 		t.Fatal(err)
@@ -155,6 +161,34 @@ func TestInstanceInitRefusesExisting(t *testing.T) {
 	}
 	if err := c.Run(); err == nil {
 		t.Fatal("second init on the same name must fail")
+	}
+}
+
+func TestNormalizeDataDirTightensLegacyMode(t *testing.T) {
+	dir, _ := fixture(t)
+	if err := (&InstanceInitCmd{Names: []string{"prod"}, Dir: dir}).Run(); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(dir, "instances", "prod", "data")
+	if err := os.Chmod(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	normalizeDataDir(dir, "prod")
+	fi, err := os.Stat(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o700 {
+		t.Fatalf("legacy data mode = %o, want 700 after normalize", fi.Mode().Perm())
+	}
+}
+
+func TestNormalizeDataDirMissingIsNoOp(t *testing.T) {
+	dir, _ := fixture(t)
+	// No instance "ghost": a missing dir must not panic or create one.
+	normalizeDataDir(dir, "ghost")
+	if _, err := os.Stat(filepath.Join(dir, "instances", "ghost", "data")); !os.IsNotExist(err) {
+		t.Fatalf("normalizeDataDir must not create a dir, stat err = %v", err)
 	}
 }
 

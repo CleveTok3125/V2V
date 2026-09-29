@@ -134,7 +134,10 @@ func (c *InstanceInitCmd) initOne(root, name string) error {
 	if err := sync.Run(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(inst, "data"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(inst, "data"), 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(filepath.Join(inst, "data"), 0o700); err != nil {
 		return err
 	}
 	envPath := filepath.Join(inst, ".env")
@@ -190,6 +193,24 @@ func (c *InstanceListCmd) Run() error {
 // composeRunner runs one docker compose command. Swapped in tests.
 var composeRunner = defaultComposeRunner
 
+// normalizeDataDir tightens an existing instance data dir to 0700. Older
+// instances were created 0755, and MkdirAll never fixes an existing dir, so
+// this runs on every compose action. It warns instead of failing: the dir is
+// still usable, and an operator-managed bind mount may legitimately differ.
+func normalizeDataDir(root, name string) {
+	dataDir := filepath.Join(instanceDir(root, name), "data")
+	fi, err := os.Stat(dataDir)
+	if err != nil {
+		return
+	}
+	if fi.Mode().Perm() == 0o700 {
+		return
+	}
+	if err := os.Chmod(dataDir, 0o700); err != nil {
+		fmt.Printf("cảnh báo: không đặt được quyền 0700 cho %s: %v\n", dataDir, err)
+	}
+}
+
 func defaultComposeRunner(args, env []string, dir string) error {
 	path, err := exec.LookPath("docker")
 	if err != nil {
@@ -215,6 +236,7 @@ func runInstanceCompose(root, name string, sub ...string) error {
 	if _, err := os.Stat(filepath.Join(inst, ".env")); err != nil {
 		return fmt.Errorf("instance %q chưa có .env: %w", name, err)
 	}
+	normalizeDataDir(root, name)
 	args := []string{
 		"compose",
 		"--project-name", "v2v-" + name,

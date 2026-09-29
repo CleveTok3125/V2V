@@ -740,6 +740,17 @@ func writeAtomic(path string, data []byte) error {
 	return identity.WriteConfigFile(path, data)
 }
 
+// writeConfigFile routes one manifest entry to the writer that matches its
+// sensitivity: roles.json carries the hmac_shield, so it is written
+// owner-only; every other config artifact stays world-readable for container
+// bind mounts.
+func writeConfigFile(id, path string, data []byte) error {
+	if id == "roles" {
+		return identity.WriteSecretConfigFile(path, data)
+	}
+	return writeAtomic(path, data)
+}
+
 func stripJSONComments(data []byte) []byte {
 	if len(data) == 0 {
 		return data
@@ -847,7 +858,7 @@ func (s *ConfigSyncCmd) Run() error {
 		if bytes.Equal(fm.Current, fm.Merged) {
 			continue
 		}
-		if err := writeAtomic(fm.Dst, fm.Merged); err != nil {
+		if err := writeConfigFile(fm.ID, fm.Dst, fm.Merged); err != nil {
 			return err
 		}
 		written++

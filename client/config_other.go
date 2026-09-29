@@ -10,10 +10,10 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/config"
 	"github.com/CleveTok3125/V2V/internal/configdir"
 	"github.com/CleveTok3125/V2V/internal/env"
+	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/passprompt"
 	"github.com/CleveTok3125/V2V/internal/tui"
 )
@@ -29,6 +29,14 @@ func parseFlags() {
 	}
 	if CLI.CacheDir == "" {
 		CLI.CacheDir = configdir.DefaultCacheDir()
+	}
+	// Create the cache dir owner-only before readline opens its history
+	// file inside it: readline writes history.tmp without a mode, so the
+	// directory mode is what keeps typed input away from other users.
+	if err := os.MkdirAll(CLI.CacheDir, 0o700); err != nil {
+		fmt.Printf("cảnh báo: không tạo được thư mục cache %s: %v\n", CLI.CacheDir, err)
+	} else if err := os.Chmod(CLI.CacheDir, 0o700); err != nil {
+		fmt.Printf("cảnh báo: không đặt được quyền 0700 cho %s: %v\n", CLI.CacheDir, err)
 	}
 	if CLI.KeyFile != "" {
 		// Explicit path wins (breaks old -k <path>, now -K/--key-file)

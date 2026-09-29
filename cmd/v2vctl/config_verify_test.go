@@ -197,7 +197,8 @@ func TestSyncNormalizesConfigModes(t *testing.T) {
 	}
 	assertMode(t, filepath.Join(cfg, ".env"), 0o644)
 	assertMode(t, filepath.Join(cfg, "config"), 0o755)
-	assertMode(t, filepath.Join(cfg, "config", "roles.json"), 0o644)
+	// roles.json holds the hmac_shield: owner-only even on sync.
+	assertMode(t, filepath.Join(cfg, "config", "roles.json"), 0o600)
 	assertMode(t, filepath.Join(cfg, "config", "trustedproxy"), 0o755)
 	assertMode(t, filepath.Join(cfg, "config", "trustedproxy", "cloudflare.txt"), 0o644)
 }

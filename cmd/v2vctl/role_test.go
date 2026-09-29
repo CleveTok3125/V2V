@@ -242,8 +242,8 @@ func TestRoleUpdateShowDeleteMerge(t *testing.T) {
 	})
 }
 
-// TestAtomicWriteFileAdmin_Permissions: role saves land with the config
-// standard 0644 and no temp files leak.
+// TestAtomicWriteFileAdmin_Permissions: role saves land owner-only (0600),
+// because roles.json carries the hmac_shield, and no temp files leak.
 func TestAtomicWriteFileAdmin_Permissions(t *testing.T) {
 	withTempDir(t, func() {
 		if err := (&RoleCreateCmd{Role: "sec"}).Run(); err != nil {
@@ -253,12 +253,35 @@ func TestAtomicWriteFileAdmin_Permissions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if fi.Mode().Perm() != 0o644 {
-			t.Fatalf("roles.json perm = %o, want 644", fi.Mode().Perm())
+		if fi.Mode().Perm() != 0o600 {
+			t.Fatalf("roles.json perm = %o, want 600", fi.Mode().Perm())
 		}
 		leftovers, _ := filepath.Glob(".tmp-*")
 		if len(leftovers) != 0 {
 			t.Fatalf("temp files leaked: %v", leftovers)
+		}
+	})
+}
+
+// TestRoleWriteTightensLooseRolesFile: a pre-existing 0644 roles.json must be
+// tightened to 0600 on the next role write, not left host-readable.
+func TestRoleWriteTightensLooseRolesFile(t *testing.T) {
+	withTempDir(t, func() {
+		if err := os.MkdirAll(filepath.Dir(rolesPath()), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(rolesPath(), []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := (&RoleCreateCmd{Role: "member"}).Run(); err != nil {
+			t.Fatal(err)
+		}
+		fi, err := os.Stat(rolesPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0o600 {
+			t.Fatalf("roles.json perm = %o, want 600 after hardening", fi.Mode().Perm())
 		}
 	})
 }

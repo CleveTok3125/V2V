@@ -77,8 +77,23 @@ require_readable() {
 		exit 1
 	fi
 }
+# roles.json carries the hmac_shield and is written 0600, so it is
+# intentionally not world-readable: the fix is ownership, never chmod
+# o+r. A missing file is still the bootstrap case.
+require_readable_owned() {
+	path=$1
+	bootstrap=$2
+	if ! "$SU_EXEC_BIN" "$APP_USER:$APP_GROUP" test -e "$path"; then
+		echo "FATAL: $path missing; on the host run: $bootstrap"
+		exit 1
+	fi
+	if ! "$SU_EXEC_BIN" "$APP_USER:$APP_GROUP" test -r "$path"; then
+		echo "FATAL: $path unreadable by $APP_USER; on the host run: chown $want <instance>/config/roles.json (it stays 0600 on purpose)"
+		exit 1
+	fi
+}
 require_readable "$V2V_ROOT/.env" "make v2vctl && v2vctl config sync --dir . --to <instance dir>"
-require_readable "$V2V_ROOT/config/roles.json" "make v2vctl && v2vctl config sync --dir . --to <instance dir>"
+require_readable_owned "$V2V_ROOT/config/roles.json" "make v2vctl && v2vctl config sync --dir . --to <instance dir>"
 
 # Writability probe: without it the server dies on its first write
 # with a bare "permission denied". Fail here instead, with the fix.

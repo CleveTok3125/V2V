@@ -162,6 +162,23 @@ func WriteConfigFile(path string, data []byte) error {
 	return os.Chmod(path, 0o644)
 }
 
+// WriteSecretConfigFile writes a config artifact that carries sensitive
+// material (roles.json holds the hmac_shield used to forge identity
+// proofs) with owner-only permissions. Parent directories stay 0755 so the
+// server can traverse config/ across a container bind mount, while the file
+// itself is forced to 0600 even when it already exists with looser modes.
+func WriteSecretConfigFile(path string, data []byte) error {
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	if err := atomicWriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
+}
+
 // MergeRolesFile applies update() to a single role entry inside roles.json,
 // preserving every other top-level role. A file that exists but cannot be
 // parsed aborts the operation instead of being clobbered.
@@ -183,7 +200,7 @@ func MergeRolesFile(path, role string, update func(entry map[string]any)) error 
 	if err != nil {
 		return err
 	}
-	return WriteConfigFile(path, out)
+	return WriteSecretConfigFile(path, out)
 }
 
 func pad32(b []byte) []byte {

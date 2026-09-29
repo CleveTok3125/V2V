@@ -201,4 +201,7 @@ func TestSyncTakeBeatsRolesSkip(t *testing.T) {
 	if !strings.Contains(string(roles), "\"member\"") {
 		t.Fatalf("local-only role must survive take, got:\n%s", roles)
 	}
+
+	// take routes through the sync write path: roles must stay owner-only.
+	assertMode(t, filepath.Join(cfg, "config", "roles.json"), 0o600)
 }
