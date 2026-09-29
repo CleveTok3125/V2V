@@ -151,7 +151,8 @@ else
 fi
 rm -rf "$ROOT"
 
-# T-unreadable-roles: same for roles.json.
+# T-unreadable-roles: same for roles.json, but the fix is ownership, never
+# chmod o+r: roles.json carries the hmac_shield and stays 0600 on purpose.
 sandbox; ROOT=$SANDBOX_ROOT
 echo "x=1" > "$APP_ROOT/.env"
 chmod 644 "$APP_ROOT/.env"
@@ -160,7 +161,7 @@ chmod 600 "$APP_ROOT/config/roles.json"
 if run_entry; then
 	bad "unreadable-roles: must exit nonzero"
 else
-	echo "$RUN_OUT" | grep -q "chmod o+r config/roles.json" && ok "unreadable-roles: actionable msg" || bad "unreadable-roles: msg"
+	echo "$RUN_OUT" | grep -q "config/roles.json (it stays 0600 on purpose)" && ok "unreadable-roles: actionable msg" || bad "unreadable-roles: msg"
 fi
 rm -rf "$ROOT"
 
