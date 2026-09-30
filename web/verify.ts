@@ -156,7 +156,7 @@ import { gateFetch } from "./pow_bridge.js";
           var height = q.get("height") || "";
           if (height) addField("Chiều cao (height, không xác minh)", height, true);
           var tmp = q.get("tmp_id") || "";
-          if (tmp) addField("ID phiền (tmp_id)", tmp, true);
+          if (tmp) addField("ID phiên (tmp_id)", tmp, true);
           var rp = q.get("reply_to") || "";
           if (rp) addField("Trích dẫn (reply_to)", rp, true);
           var sentAt = q.get("sent_at") || "";

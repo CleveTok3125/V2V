@@ -70,6 +70,13 @@
     #content-verdict.bad { color: var(--error); }
     .row { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; }
     .row + .row { border-top: 1px solid #22222e; }
+    /* Narrow screens: stack the label above the value so the long hex
+       values keep the full width instead of sharing it with a 230px
+       label column. */
+    @media (max-width: 560px) {
+      .row { flex-direction: column; gap: 2px; }
+      .row .k { flex: 0 0 auto; padding-top: 0; }
+    }
     .row .k { flex: 0 0 230px; color: var(--muted); font-size: 13px; padding-top: 4px; }
     .row .v {
       flex: 1;
