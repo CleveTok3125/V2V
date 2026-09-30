@@ -60,7 +60,7 @@ func TestInputLoopInlineReply(t *testing.T) {
 
 	for _, body := range []string{"/meta", "/clear"} {
 		sess := smokeSession()
-		if _, act := sess.dispatch("/reply 1234 "+body); act != cmdDone {
+		if _, act := sess.dispatch("/reply 1234 " + body); act != cmdDone {
 			t.Fatalf("reply with command body %s act=%v, want cmdDone", body, act)
 		}
 		if sess.Pending.PendingReplyTo != 0 {

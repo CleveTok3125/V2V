@@ -13,7 +13,7 @@ import (
 )
 
 type encryptEnvelope struct {
-	Version int    `json:"version"`
+	Version   int `json:"version"`
 	Encrypted struct {
 		KDF        string `json:"kdf"`
 		Time       uint32 `json:"t"`

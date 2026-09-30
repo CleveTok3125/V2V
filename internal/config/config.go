@@ -20,13 +20,13 @@ type DynamicConfig struct {
 	DownloadURL string `json:"downloadUrl"`
 	HomepageURL string `json:"homepageUrl"`
 
-	MaxConnectionsPerIP    int           `json:"maxConnectionsPerIP"`
-	MaxMessageLength       int           `json:"maxMessageLength"`
-	MaxMessageLine         int           `json:"maxMessageLine"`
-	MessageCooldown        time.Duration `json:"messageCooldown"`
-	IdleChatTimeout        time.Duration `json:"idleChatTimeout"`
-	MaxHistoryBytes        int           `json:"maxHistoryBytes"`
-	MaxHistorySend         int           `json:"maxHistorySend"`
+	MaxConnectionsPerIP int           `json:"maxConnectionsPerIP"`
+	MaxMessageLength    int           `json:"maxMessageLength"`
+	MaxMessageLine      int           `json:"maxMessageLine"`
+	MessageCooldown     time.Duration `json:"messageCooldown"`
+	IdleChatTimeout     time.Duration `json:"idleChatTimeout"`
+	MaxHistoryBytes     int           `json:"maxHistoryBytes"`
+	MaxHistorySend      int           `json:"maxHistorySend"`
 	// History requests draw on a per-IP cost budget (token bucket):
 	// each request spends the number of lines it may return, refilled
 	// at HistoryBudgetPerSec up to HistoryBudgetBurst. Replaces a fixed
@@ -52,34 +52,34 @@ type DynamicConfig struct {
 // DefaultDynamic returns defaults matching the server instance template .env.
 func DefaultDynamic() *DynamicConfig {
 	return &DynamicConfig{
-		StatusURL:              "https://example.com/status",
-		DownloadURL:            "https://example.com/download",
-		HomepageURL:            "https://example.com/",
-		MaxConnectionsPerIP:    2,
-		MaxMessageLength:       5000,
-		MaxMessageLine:         50,
-		MessageCooldown:        1000 * time.Millisecond,
-		IdleChatTimeout:        30 * time.Minute,
-		MaxHistoryBytes:        10485760,
-		MaxHistorySend:         500,
-		HistoryBudgetBurst:     1000,
-		HistoryBudgetPerSec:    500,
-		HistoryRefillMaxRanges: 64,
+		StatusURL:               "https://example.com/status",
+		DownloadURL:             "https://example.com/download",
+		HomepageURL:             "https://example.com/",
+		MaxConnectionsPerIP:     2,
+		MaxMessageLength:        5000,
+		MaxMessageLine:          50,
+		MessageCooldown:         1000 * time.Millisecond,
+		IdleChatTimeout:         30 * time.Minute,
+		MaxHistoryBytes:         10485760,
+		MaxHistorySend:          500,
+		HistoryBudgetBurst:      1000,
+		HistoryBudgetPerSec:     500,
+		HistoryRefillMaxRanges:  64,
 		HistoryReplayBatchLines: 32,
 		HistoryReplayBatchBytes: 16384,
-		HistoryDiskLookup:      0,
-		MaxUsernameLength:      12,
-		MaxTripcodeLength:      64,
-		ConnectionCooldown:     5 * time.Second,
+		HistoryDiskLookup:       0,
+		MaxUsernameLength:       12,
+		MaxTripcodeLength:       64,
+		ConnectionCooldown:      5 * time.Second,
 	}
 }
 
 // ClientConfig is the full client config.jsonc structure.
 type ClientConfig struct {
 	Defaults struct {
-		Username   string `json:"username"`
-		UserAgent  string `json:"userAgent"`
-		ShowJoin   bool   `json:"showJoin"`
+		Username  string `json:"username"`
+		UserAgent string `json:"userAgent"`
+		ShowJoin  bool   `json:"showJoin"`
 		// AutoVerify is a pointer so a partial config that omits it
 		// backfills to enabled instead of silently disabling the
 		// trip verification.
@@ -183,7 +183,7 @@ type ClientConfig struct {
 		} `json:"theme"`
 		Web struct {
 			CharAspect float64 `json:"charAspect"`
-			Scrollback int `json:"scrollback"`
+			Scrollback int     `json:"scrollback"`
 		} `json:"web"`
 		// Collapse folds long blocks (head rows + expand trailer).
 		// Rows is the collapse threshold in screen rows, PreviewRows
@@ -219,20 +219,20 @@ type ClientConfig struct {
 		} `json:"notify"`
 	} `json:"ui"`
 	Commands map[string][]string `json:"commands"`
-	Tabs struct {
+	Tabs     struct {
 		ChatMaxBytes   int `json:"chatMaxBytes"`
 		SystemMaxLines int `json:"systemMaxLines"`
 		SystemMaxBytes int `json:"systemMaxBytes"`
 	} `json:"tabs"`
 	Timeouts struct {
-		QuitGrace         string `json:"quitGrace"`
-		AuthResponse      string `json:"authResponse"`
-		WsPing            string `json:"wsPing"`
-		WsPong            string `json:"wsPong"`
-		WsWrite           string `json:"wsWrite"`
-		ReadHeader        string `json:"readHeader"`
-		HistoryFlush      string `json:"historyFlush"`
-		WsHandshake       string `json:"wsHandshakeTimeout"`
+		QuitGrace          string `json:"quitGrace"`
+		AuthResponse       string `json:"authResponse"`
+		WsPing             string `json:"wsPing"`
+		WsPong             string `json:"wsPong"`
+		WsWrite            string `json:"wsWrite"`
+		ReadHeader         string `json:"readHeader"`
+		HistoryFlush       string `json:"historyFlush"`
+		WsHandshake        string `json:"wsHandshakeTimeout"`
 		EnrollChallengeTTL string `json:"enrollChallengeTTL"`
 	} `json:"timeouts"`
 	// Pow bounds proof-of-work the client will perform: offers above
@@ -385,8 +385,8 @@ func DefaultClientConfig() *ClientConfig {
 
 // boolPtr allocates a bool for default config values that must tell
 // "absent" apart from "false" after JSON round-trips.
-func boolPtr(v bool) *bool { return &v }
-func intPtr(v int) *int { return &v }
+func boolPtr(v bool) *bool    { return &v }
+func intPtr(v int) *int       { return &v }
 func strPtr(v string) *string { return &v }
 
 // ShowMeta reports whether message meta lines render. A nil pointer

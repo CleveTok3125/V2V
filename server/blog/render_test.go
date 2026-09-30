@@ -18,8 +18,8 @@ func TestRenderMarkdownKitchenSink(t *testing.T) {
 		"<strong>dam</strong>",
 		"<code>code inline</code>",
 		"<table>", "<blockquote>",
-		`class="chroma"`, // highlighted fenced block
-		"<pre><code>plain block", // unknown language stays plain
+		`class="chroma"`,            // highlighted fenced block
+		"<pre><code>plain block",    // unknown language stays plain
 		"<!-- raw HTML omitted -->", // script neutralized
 	} {
 		if !strings.Contains(out, want) {
@@ -47,10 +47,10 @@ func TestValidTag(t *testing.T) {
 func TestPostPageEscapesAndChrome(t *testing.T) {
 	out := PostPage(`<b>T</b>`, "12/09/2026", []string{"guide", "<x>"}, "<p>body</p>", "/web/blog/cactus.css")
 	for _, want := range []string{
-		"&lt;b&gt;T&lt;/b&gt;", // title escaped
+		"&lt;b&gt;T&lt;/b&gt;",                // title escaped
 		`href="/blog/tag/guide"`, "&lt;x&gt;", // tags escaped
-		"<p>body</p>",            // library HTML passes through
-		`&copy; V2V 2026`,        // exact footer
+		"<p>body</p>",               // library HTML passes through
+		`&copy; V2V 2026`,           // exact footer
 		`id="theme"`, `id="to-top"`, // chrome present
 		`<link rel="stylesheet" href="/web/blog/cactus.css">`,
 		`<article class="prose">`, `<div class="masthead">`,

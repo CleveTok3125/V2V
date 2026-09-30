@@ -333,16 +333,16 @@ func buildChromaStyle(st Style) *chroma.Style {
 		return fmt.Sprintf("#%02x%02x%02x", clampChan(v[0]), clampChan(v[1]), clampChan(v[2]))
 	}
 	return chroma.MustNewStyle("v2v", chroma.StyleEntries{
-		chroma.Background:   "bg:" + hex(st.Background, d.Background),
-		chroma.Keyword:      hex(st.Keyword, d.Keyword),
-		chroma.KeywordType:  hex(st.Type, d.Type),
-		chroma.Name:         hex(st.Name, d.Name),
-		chroma.NameFunction: hex(st.Function, d.Function),
-		chroma.NameClass:    hex(st.Type, d.Type),
+		chroma.Background:    "bg:" + hex(st.Background, d.Background),
+		chroma.Keyword:       hex(st.Keyword, d.Keyword),
+		chroma.KeywordType:   hex(st.Type, d.Type),
+		chroma.Name:          hex(st.Name, d.Name),
+		chroma.NameFunction:  hex(st.Function, d.Function),
+		chroma.NameClass:     hex(st.Type, d.Type),
 		chroma.LiteralString: hex(st.String, d.String),
-		chroma.Comment:      hex(st.Comment, d.Comment),
-		chroma.Number:       hex(st.Number, d.Number),
-		chroma.Operator:     hex(st.Operator, d.Operator),
+		chroma.Comment:       hex(st.Comment, d.Comment),
+		chroma.Number:        hex(st.Number, d.Number),
+		chroma.Operator:      hex(st.Operator, d.Operator),
 	})
 }
 

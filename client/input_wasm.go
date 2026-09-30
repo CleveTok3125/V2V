@@ -251,24 +251,24 @@ func (t *wasmTerm) lineLoop() {
 				t.clearLine()
 			case '\x05': // Ctrl+E: end
 				t.end()
-		case '\x03':
-			t.mu.Lock()
-			if len(t.line) == 0 {
-				// Ctrl+C on an empty line: abort the in-flight ReadLine.
-				select {
-				case t.cancelCh <- struct{}{}:
-				default:
+			case '\x03':
+				t.mu.Lock()
+				if len(t.line) == 0 {
+					// Ctrl+C on an empty line: abort the in-flight ReadLine.
+					select {
+					case t.cancelCh <- struct{}{}:
+					default:
+					}
+					t.mu.Unlock()
+					continue
 				}
+				// Ctrl+C on a non-empty line: clear it.
+				up := t.wipeOffsetLocked()
+				t.wipeLocked(up)
+				t.line = t.line[:0]
+				t.cur = 0
+				t.out.Write([]byte(t.prompt))
 				t.mu.Unlock()
-				continue
-			}
-			// Ctrl+C on a non-empty line: clear it.
-			up := t.wipeOffsetLocked()
-			t.wipeLocked(up)
-			t.line = t.line[:0]
-			t.cur = 0
-			t.out.Write([]byte(t.prompt))
-			t.mu.Unlock()
 			default:
 				if r >= 0x20 {
 					t.insertRune(r)

@@ -34,9 +34,9 @@ type waUser struct {
 	cred webauthn.Credential
 }
 
-func (u waUser) WebAuthnID() []byte                        { return u.id }
-func (u waUser) WebAuthnName() string                      { return u.name }
-func (u waUser) WebAuthnDisplayName() string               { return u.name }
+func (u waUser) WebAuthnID() []byte                         { return u.id }
+func (u waUser) WebAuthnName() string                       { return u.name }
+func (u waUser) WebAuthnDisplayName() string                { return u.name }
 func (u waUser) WebAuthnCredentials() []webauthn.Credential { return []webauthn.Credential{u.cred} }
 
 // libSession builds the session both ceremonies share. Challenge is

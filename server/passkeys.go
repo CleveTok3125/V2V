@@ -43,9 +43,9 @@ func LoadWebauthnEnv() {
 	}
 	var err error
 	WebAuth, err = webauthn.New(&webauthn.Config{
-		RPDisplayName: "V2V",
-		RPID:          WAConfig.RPID,
-		RPOrigins:     []string{WAConfig.Origin},
+		RPDisplayName:         "V2V",
+		RPID:                  WAConfig.RPID,
+		RPOrigins:             []string{WAConfig.Origin},
 		AttestationPreference: protocol.PreferDirectAttestation,
 		AuthenticatorSelection: protocol.AuthenticatorSelection{
 			RequireResidentKey: protocol.ResidentKeyRequired(),

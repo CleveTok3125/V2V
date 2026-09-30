@@ -158,13 +158,13 @@ func TestPromptProxyConfig(t *testing.T) {
 
 func TestPromptProxySchemePiped(t *testing.T) {
 	cases := map[string]int{
-		"\n":           0, // Enter = default http
-		"1\n":          0,
-		"2\n":          1,
-		"3\n":          2,
-		"socks5\n":     1,
-		"HTTPS\n":      2,
-		"4\nhttp\n":    0, // custom slot, then valid text
+		"\n":            0, // Enter = default http
+		"1\n":           0,
+		"2\n":           1,
+		"3\n":           2,
+		"socks5\n":      1,
+		"HTTPS\n":       2,
+		"4\nhttp\n":     0, // custom slot, then valid text
 		"xyz\nsocks5\n": 1, // invalid, retry, valid
 	}
 	for in, want := range cases {

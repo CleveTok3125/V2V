@@ -226,7 +226,7 @@ func buildCreationSelfAttested(t *testing.T, priv *ecdsa.PrivateKey, challengeB6
 		t.Fatal(err)
 	}
 	attObj, err := cbor.Marshal(map[string]any{
-		"fmt": "packed",
+		"fmt":      "packed",
 		"authData": authData,
 		"attStmt":  map[string]any{"alg": int64(-7), "sig": sig},
 	})
