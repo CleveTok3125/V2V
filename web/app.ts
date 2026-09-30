@@ -362,7 +362,10 @@ import { gateFetch } from "./pow_bridge.js";
 
     term.open(host);
 
-    // Allow v2v:// and https trip verify links — stateless verification
+    // Link clicks are routed by hand because every destination is either
+    // an in-app command (v2v://expand), a trip verification (copied, then
+    // confirmed before a tab opens) or external content that always asks
+    // first and shows its URL.
     try {
       term.options.linkHandler = {
         allowNonHttpProtocols: true,
@@ -399,7 +402,17 @@ import { gateFetch } from "./pow_bridge.js";
             }
             return;
           }
-          if (uri) window.open(uri, "_blank");
+          // Any remaining link is plain external content. Ask first and
+          // show the destination so the user can judge where it leads;
+          // only http(s) is ever opened, so a crafted scheme can never
+          // reach window.open. The client already strips non-http(s) OSC8
+          // targets, this is the second gate.
+          if (uri && /^https?:\/\//i.test(uri)) {
+            if (e && e.preventDefault) e.preventDefault();
+            if (window.confirm("Mở liên kết ngoài?\n\n" + uri)) {
+              window.open(uri, "_blank", "noopener");
+            }
+          }
         }
       };
     } catch (err) {}
