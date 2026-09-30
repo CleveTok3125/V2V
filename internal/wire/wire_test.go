@@ -20,6 +20,7 @@ func TestWireJSONKeySet(t *testing.T) {
 		ChainHeight: 4,
 		ChainVer:    2,
 		Seq:         5,
+		SentAt:      "2026-09-27T03:27:45+07:00",
 	}
 	raw, err := json.Marshal(full)
 	if err != nil {
@@ -29,7 +30,7 @@ func TestWireJSONKeySet(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	wantTop := []string{"type", "time", "displayName", "sys_kind", "text", "trip", "tmp_id", "reply_to", "chain_prev", "chain_hash", "chain_height", "chain_ver", "seq"}
+	wantTop := []string{"type", "time", "displayName", "sys_kind", "text", "trip", "tmp_id", "reply_to", "chain_prev", "chain_hash", "chain_height", "chain_ver", "seq", "sent_at"}
 	if len(got) != len(wantTop) {
 		t.Fatalf("top-level keys = %v, want %v", keysOf(got), wantTop)
 	}

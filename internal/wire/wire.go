@@ -52,6 +52,12 @@ type WireMessage struct {
 	// paging and relay mirroring and is not covered by the chain hash,
 	// so it is an ordering aid, never an integrity proof.
 	Seq uint64 `json:"seq,omitempty"`
+	// SentAt is the server-side send timestamp in RFC3339 with the
+	// server's timezone offset, used for human-facing display (/info,
+	// the verify page). It is not covered by the chain hash, so it is a
+	// display aid, never an integrity proof; wire.Time stays the hashed
+	// link input.
+	SentAt string `json:"sent_at,omitempty"`
 }
 
 type AuthPacket struct {

@@ -647,6 +647,9 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			Trip:        tripMeta,
 			TmpID:       msgTmpID,
 			ReplyTo:     msgReplyTo,
+			// Display-only stamp: not hashed into the chain link, so
+			// stored history keeps verifying.
+			SentAt: now.Format(time.RFC3339),
 		}
 		s.Hub.BroadcastWire(wire, session.Conn, s.serverPub())
 	}

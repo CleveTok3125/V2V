@@ -152,7 +152,7 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 - `/reply <height>[:hash] <text>` quotes a buffered message; the height suffix acts as a typo checksum.
 - Bare `/reply <height>` opens a draft: the quote previews at once and the next line becomes the body (any `/` command or empty-line `^C` aborts); only chat messages are quotable, never server markers.
 - Quotes resolve per receiver (`wireIdx` first for time/author, buffer-head fallback) and render `↩ #height | time author: text…` in placeholder and echo alike; a chain-content mismatch appends a red `✗`, intact content shows no mark. The verdict recomputes the target's chain content locally.
-- `/info <height>[:hash]` prints the full metadata detail of one indexed wire (height/tmp/reply, full hashes, trip fields with live signature verdict, chain verdict, plus a `raw:` row with stored bytes unrendered: newlines as `⏎`, ESC/control dropped).
+- `/info <height>[:hash]` prints the full metadata detail of one indexed wire (height/tmp/reply, full hashes, `sent_at` send timestamp (`(không)` on records stored before the field existed), trip fields with live signature verdict, chain verdict, plus a `raw:` row with stored bytes unrendered: newlines as `⏎`, ESC/control dropped).
 - Long blocks fold at render (`ui.collapse {enabled, rows, previewRows}`, defaults on/10/5): over-threshold heads print preview rows with dim `...` plus `[Xem thêm: /expand #height]` on the last preview line (OSC8 `v2v://expand/<height>` link on web, clicked via Ctrl+U-clean command injection). `/expand <height>` re-renders the full block from the wire index and replays it inside a git-style conflict frame (`| [Local]: <<<<<<< #height` … `| [Local]: >>>>>>> #height`, markers dimmed) — no buffer surgery, no cursor math. Evicted wires report as drifted; system-tab content never folds.
 - The trip section shows every signature input (pub, seq, prev, sig, msg_hash with text-match mark, server_pub, payload bytes), so the verdict is checkable by hand with any ed25519 tool.
 - Wires index by height (cap 1000 FIFO); legacy and evicted report as missing.
@@ -167,8 +167,10 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `internal/wire` alone; client and server alias it, and `wire_test` pins the exact key set so drift fails loudly instead of dropping fields silently:
 
 ```json
-{"type":"chat","time":"15:04","displayName":"[Admin] Alice#ab12","text":"hello","tmp_id":7,"reply_to":3,"trip":{"pub":"...","seq":1,"prev":"...","sig":"...","server_pub":"...","msg_hash":"...","display_name":"...","tmp_id":7},"chain_prev":"...","chain_hash":"...","chain_height":1234}
+{"type":"chat","time":"15:04","sent_at":"2026-09-27T03:27:45+07:00","displayName":"[Admin] Alice#ab12","text":"hello","tmp_id":7,"reply_to":3,"trip":{"pub":"...","seq":1,"prev":"...","sig":"...","server_pub":"...","msg_hash":"...","display_name":"...","tmp_id":7},"chain_prev":"...","chain_hash":"...","chain_height":1234}
 ```
+
+- `sent_at` is the server's send stamp in RFC3339 with the configured timezone offset (`TIMEZONE`). Like `seq` it is **not** covered by the chain hash, so it is a display aid for `/info` and the verify page, never an integrity proof, and adding it did not invalidate stored history. `time` remains the hashed link input.
 
 - Client → server always travels in a JSON envelope carrying `reply_to` (quote target height, `omitempty`) alongside `tmp_id`; the server relays it verbatim with a cheap existence guard (`reply_to <= tip+1`) and covers it in the v2 link.
 - Client → server always travels in a JSON envelope carrying the sender's per-session counter: signed `{text,pub,seq,prev,sig,display_name,tmp_id}` (`client/tripchain.go:TripMessage`) or unsigned `{tmp_id,text}` (`PlainMessage`).
@@ -308,11 +310,13 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - History file edits without updating `sig` are detected as `HISTORY TAMPER`.
 
 ### Link
-- Badge is wrapped in OSC8 `https://<host>/api/trip/verify?pub&seq&prev&sig&msg_hash&server_pub&display_name&tmp_id&reply_to` (stateless `GET /api/trip/verify`, rate-limited `200ms/IP`, capped `2048` query).
+- Badge is wrapped in OSC8 `https://<host>/api/trip/verify?pub&seq&prev&sig&msg_hash&server_pub&display_name&tmp_id&reply_to` plus the display-only `height` and `sent_at` (stateless `GET /api/trip/verify`, rate-limited `200ms/IP`, capped `2048` query).
 - No `text=` — `msg_hash` suffices, keeping links bounded and content out of URLs, while old links carrying text keep working.
 - `serverPub` is enforced to be the server's own key to prevent cross-server reuse.
 - `linkify` (server) and `webterm/app.js` (browser) handle `https` links; `v2v://` legacy is removed.
 - Browser navigation (`Accept: text/html`) gets the self-contained `webterm/verify.html` page instead of JSON: verdict pill, a paste-to-verify content section (SHA-256 recomputed locally against `msg_hash`), per-field rows with copy buttons, an API-link section, and collapsible raw JSON.
+- Verify page rows follow the `/info` field order and keep the original key in the label, so the two views read side by side: `Chiều cao (height)`, `ID phiền (tmp_id)`, `Trích dẫn (reply_to)`, `Thời gian gửi (sent_at)`, `Tên (from)`, `Chữ ký trip (trip)`, `trip.seq`, `trip.pub`, `trip.prev`, `trip.sig`, `trip.hash`, `trip.srv`. Chain-level evidence (`hash`/`prev`/chain verdict) is deliberately absent: the endpoint is stateless and carries no `text`, so it cannot recompute a link, and `raw` is left out because the page never inlines message content.
+- `height` and `sent_at` reach the page as query parameters and are covered by neither the trip signature nor the chain hash, so editing them in the URL cannot change the verdict. Their labels carry `không xác minh` to keep them from reading as evidence, unlike every other row.
 - Clicking the badge in the web terminal copies the verify URL and asks with a native `window.confirm` whether to open the verify page in a new tab; a blocked popup leaves the copied link as the fallback.
 - The page re-fetches the same URL with `Accept: application/json`, so curl/fetch behavior is unchanged.
 - `/copy <height>[:hash]` copies raw message text to the OS clipboard for pasting into the page (plaintext lives in the clipboard until auto-cleared or overwritten — any local app can read it).
@@ -361,7 +365,7 @@ Paths below are relative to the instance root (`V2V_ROOT`, default `instances/de
 - **Injection:** All inbound `text` and `username` go through `internal/filter`.
 - `ValidateMessage` rejects `Cf/Mn/Me/Zl/Zp/0xFFFD/non-graphic`, `SanitizeForDisplay` keeps only whitelisted `SGR \x1b[...m` and OSC8 links (`\x1b]8;...;uri\x1b\\`) whose target is `http(s)` or the client-generated `v2v://expand/`; every other OSC (clipboard write, palette/color, kitty) is dropped, and an unterminated OSC drops the tail instead of leaking the link target.
 - Client double-filters before display, so a compromised server's tampered history cannot execute `ESC[2J` etc.
-- Server-controlled fields outside message `text` are sanitized at their render sink: `time`/`display_name` through `SanitizeSingleLine`, free text (server host, auth error, dial response body, `--info` page) through `SanitizeForDisplay`, chain/trip hex only when it really is hex, and all trip-verify URL parameters percent-encoded. The same filter backs the WASM web client.
+- Server-controlled fields outside message `text` are sanitized at their render sink: `time`/`displayName`/`sent_at` through `SanitizeSingleLine`, free text (server host, auth error, dial response body, `--info` page) through `SanitizeForDisplay`, chain/trip hex only when it really is hex, and all trip-verify URL parameters percent-encoded. The same filter backs the WASM web client.
 - **Client DoS bounds:** the desktop client sets a WebSocket `SetReadLimit` of `maxHistoryBytes + 1MiB` (the server sends replay lines individually, so every legitimate frame is far smaller) and caps the `--info` body at `256KiB`; the WASM shim enforces the same per-frame budget before queueing.
 - Remaining exposure sits in the terminal emulator itself (outside the client) and in OSC8 phishing via an allowed-scheme link the user chooses to open.
 - **Phishing:** Privileged identities are pinned to `server_pubkey` (not hostname); real passkeys are pinned by `RPID`/`origin`.

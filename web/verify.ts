@@ -147,24 +147,36 @@ import { gateFetch } from "./pow_bridge.js";
               contentVerdict.className = "bad";
             });
           }
+          // Field order and names mirror the client's /info block so the
+          // two can be read side by side; each label keeps the original
+          // key in parentheses. Copy buttons always take the raw value.
+          // height and sent_at are display context carried in the URL and
+          // are NOT covered by the signature or the chain hash, so editing
+          // them changes nothing about the verdict — their labels say so.
+          var height = q.get("height") || "";
+          if (height) addField("Chiều cao (height, không xác minh)", height, true);
+          var tmp = q.get("tmp_id") || "";
+          if (tmp) addField("ID phiền (tmp_id)", tmp, true);
+          var rp = q.get("reply_to") || "";
+          if (rp) addField("Trích dẫn (reply_to)", rp, true);
+          var sentAt = q.get("sent_at") || "";
+          if (sentAt) addField("Thời gian gửi (sent_at, không xác minh)", sentAt, true);
+          var dn = q.get("display_name") || "";
+          if (dn) addField("Tên (from)", dn, true);
           if (j.badge) {
-            var badgeEl = addField("badge", j.badge, true);
+            var badgeEl = addField("Chữ ký trip (trip)", j.badge, true);
             badgeEl.style.color = badgeCss(j.badgeColor, true);
             badgeEl.style.fontWeight = "700";
           }
-          if (j.pub) addField("pub", j.pub, true);
-          addField("seq", String(j.seq), true);
-          ["prev", "sig", "msg_hash"].forEach(function (k) {
-            var v = q.get(k) || "";
-            if (v) addField(k, v, true);
-          });
-          if (j.server_pub) addField("server_pub", j.server_pub, true);
-          var dn = q.get("display_name") || "";
-          if (dn) addField("tên", dn, true);
-          var tmp = q.get("tmp_id") || "";
-          if (tmp) addField("tmp_id", tmp, true);
-          var rp = q.get("reply_to") || "";
-          if (rp) addField("reply_to", rp, true);
+          addField("Số thứ tự (trip.seq)", String(j.seq), true);
+          if (j.pub) addField("Khoá (trip.pub)", j.pub, true);
+          var prev = q.get("prev") || "";
+          if (prev) addField("Chuỗi trước (trip.prev)", prev, true);
+          var sig = q.get("sig") || "";
+          if (sig) addField("Chữ ký (trip.sig)", sig, true);
+          var msgHash = q.get("msg_hash") || "";
+          if (msgHash) addField("Hash nội dung (trip.hash)", msgHash, true);
+          if (j.server_pub) addField("Khoá server (trip.srv)", j.server_pub, true);
         })
         .catch(function (e) {
           fail("❌ Không gọi được API: " + (e && e.message ? e.message : e));

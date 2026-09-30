@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 
@@ -145,5 +146,38 @@ func TestAbsoluteVerifyURLSurvivesSanitize(t *testing.T) {
 	sanitized := filter.SanitizeForDisplay(line)
 	if !strings.Contains(sanitized, "\x1b]8;;"+jobURL+"\x1b\\") {
 		t.Fatalf("verify link stripped by sanitizer: %q", sanitized)
+	}
+}
+
+// The badge verify link carries display-only context (chain height and
+// send timestamp) so the verify page can line its fields up with /info.
+func TestBadgeVerifyURLCarriesHeightAndSentAt(t *testing.T) {
+	s := &Session{WSURL: "wss://chat.example.com/ws"}
+	s.Chain.ServerPubHex = "00"
+	wire := WireMessage{
+		ChainHeight: 42,
+		SentAt:      "2026-09-27T03:27:45+07:00",
+		DisplayName: "Alice",
+		Trip: &TripMeta{
+			Pub: "aa", Seq: 7, Prev: "bb", Sig: "cc", MsgHash: "dd", ServerPub: "ee",
+		},
+	}
+	_, urlStr := s.badgeForWire(wire, false)
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		t.Fatalf("verify url unparsable: %v (%q)", err, urlStr)
+	}
+	q := u.Query()
+	if got := q.Get("height"); got != "42" {
+		t.Fatalf("height param = %q, want 42", got)
+	}
+	if got := q.Get("sent_at"); got != "2026-09-27T03:27:45+07:00" {
+		t.Fatalf("sent_at param = %q", got)
+	}
+	// The signed trip inputs must remain present and unrenamed.
+	for _, k := range []string{"pub", "seq", "prev", "sig", "msg_hash", "server_pub"} {
+		if q.Get(k) == "" {
+			t.Fatalf("verify url lost signed param %q: %q", k, urlStr)
+		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/CleveTok3125/V2V/internal/chain"
 )
@@ -314,5 +315,34 @@ func TestChainResumeAuditAndDate(t *testing.T) {
 	r.Chain.Mu.Unlock()
 	if height != 2 || tip != s.Chain.tip {
 		t.Fatalf("resume tip/height = %x/%d, want %x/2", tip, height, s.Chain.tip)
+	}
+}
+
+// The send timestamp is a display-only stamp: it must survive the trip
+// through the chain into stored history untouched by link computation.
+func TestLinkAndStorePreservesSentAt(t *testing.T) {
+	defer testChainCfg()()
+	s := NewChatServer()
+	stamp := "2026-09-27T03:27:45+07:00"
+	if _, err := time.Parse(time.RFC3339, stamp); err != nil {
+		t.Fatalf("fixture must be RFC3339: %v", err)
+	}
+	stored, _ := s.Chain.linkAndStore(WireMessage{
+		Type: "chat", Time: "03:27", DisplayName: "Alice", Text: "hi",
+		TmpID: 1, SentAt: stamp,
+	}, "")
+	if stored.SentAt != stamp {
+		t.Fatalf("sent_at = %q, want %q", stored.SentAt, stamp)
+	}
+	// The stored JSON (what history replay and clients read) keeps it.
+	if len(s.Chain.History) == 0 {
+		t.Fatal("history must hold the record")
+	}
+	var round WireMessage
+	if err := json.Unmarshal([]byte(s.Chain.History[0]), &round); err != nil {
+		t.Fatal(err)
+	}
+	if round.SentAt != stamp {
+		t.Fatalf("stored sent_at = %q, want %q", round.SentAt, stamp)
 	}
 }

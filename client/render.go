@@ -411,6 +411,15 @@ func (s *Session) badgeForWire(wire WireMessage, av bool) (colored, urlStr strin
 		q.Set("display_name", wire.DisplayName)
 		q.Set("tmp_id", strconv.FormatUint(wire.Trip.TmpID, 10))
 		q.Set("reply_to", strconv.FormatUint(wire.Trip.ReplyTo, 10))
+		// Display-only context (not part of the signed payload): the
+		// chain height and send timestamp let the verify page line its
+		// fields up with /info.
+		if wire.ChainHeight > 0 {
+			q.Set("height", strconv.FormatUint(wire.ChainHeight, 10))
+		}
+		if wire.SentAt != "" {
+			q.Set("sent_at", wire.SentAt)
+		}
 		urlStr = base + "/api/trip/verify?" + q.Encode()
 	}
 	return colored, urlStr

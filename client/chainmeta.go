@@ -538,7 +538,13 @@ func formatInfoBlock(wire WireMessage) []string {
 	out = append(out, row("reply_to:", strconv.FormatUint(wire.ReplyTo, 10)))
 	out = append(out, row("hash:", hexField(wire.ChainHash)))
 	out = append(out, row("prev:", hexField(wire.ChainPrev)))
-	out = append(out, row("time:", filter.SanitizeSingleLine(wire.Time)))
+	// Records stored before sent_at existed carry no stamp; say so
+	// instead of printing a blank row.
+	sentAt := filter.SanitizeSingleLine(wire.SentAt)
+	if sentAt == "" {
+		sentAt = "(không)"
+	}
+	out = append(out, row("sent_at:", sentAt))
 	out = append(out, row("from:", filter.SanitizeSingleLine(wire.DisplayName)))
 	if wire.Trip != nil {
 		tm := wire.Trip

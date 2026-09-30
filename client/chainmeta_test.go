@@ -382,11 +382,11 @@ func TestWireIndexBounded(t *testing.T) {
 func TestFormatInfoBlock(t *testing.T) {
 	wire := chainedTestWire(chain.Genesis("srv"), 12, 5)
 	wire.DisplayName = "Alice"
-	wire.Time = "15:04"
+	wire.SentAt = "2026-09-27T03:27:45+07:00"
 	wire.Text = "hello"
 	lines := formatInfoBlock(wire)
 	joined := strings.Join(lines, "")
-	for _, want := range []string{"#12", "tmp_id:", "12", "reply_to:", "hash:", "prev:", "Alice", "15:04", "(không)", "khớp ✓", "hello"} {
+	for _, want := range []string{"#12", "tmp_id:", "12", "reply_to:", "hash:", "prev:", "Alice", "sent_at:", "2026-09-27T03:27:45+07:00", "(không)", "khớp ✓", "hello"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("block must contain %q:\n%s", want, joined)
 		}
@@ -864,4 +864,35 @@ func TestTrackReplayWindowFooterFlushesBanner(t *testing.T) {
 	}
 	t.Fatalf("footer must flush the stashed banner, chat=%q sys=%q",
 		sess.Display.TabChat.lines, sess.Display.TabSys.lines)
+}
+
+// TestSentAtIsNotCoveredByChainHash: sent_at is a display-only stamp, so
+// adding or changing it must not break link verification. This is what
+// keeps already-stored history valid after the field is introduced.
+func TestSentAtIsNotCoveredByChainHash(t *testing.T) {
+	genesis := chain.Genesis("srv")
+	base := chainedTestWire(genesis, 1, 5)
+	if err := verifyWireContent(base); err != nil {
+		t.Fatalf("base wire must verify: %v", err)
+	}
+	stamped := base
+	stamped.SentAt = "2026-09-27T03:27:45+07:00"
+	if err := verifyWireContent(stamped); err != nil {
+		t.Fatalf("sent_at must not break verification: %v", err)
+	}
+	other := stamped
+	other.SentAt = "2030-01-02T03:04:05+07:00"
+	if err := verifyWireContent(other); err != nil {
+		t.Fatalf("changing sent_at must not break verification: %v", err)
+	}
+}
+
+// Records stored before sent_at existed must not render a blank row.
+func TestFormatInfoBlockSentAtMissing(t *testing.T) {
+	wire := chainedTestWire(chain.Genesis("srv"), 3, 1)
+	wire.Text = "old"
+	joined := strings.Join(formatInfoBlock(wire), "")
+	if !strings.Contains(joined, "sent_at:      (không)") {
+		t.Fatalf("missing sent_at must be explicit:\n%s", joined)
+	}
 }
