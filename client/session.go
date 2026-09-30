@@ -77,11 +77,16 @@ type DisplayState struct {
 	ShowJoinMu    sync.RWMutex
 	ShowMeta      bool
 	ShowMetaMu    sync.RWMutex
-	DisplayMu     sync.Mutex
-	ActiveTab     int
-	TabChat       *tabBuffer
-	TabSys        *tabBuffer
-	PrintGen      uint64
+	// Notify gates live printing of informational notices (/notify,
+	// ui.notify.*). A muted notice still lands in TabSystem. Critical
+	// warnings bypass the gate. Under NotifyMu.
+	Notify    NotifyState
+	NotifyMu  sync.RWMutex
+	DisplayMu sync.Mutex
+	ActiveTab int
+	TabChat   *tabBuffer
+	TabSys    *tabBuffer
+	PrintGen  uint64
 
 	// Terminal and output funnel.
 	Term inputTerminal
@@ -250,6 +255,11 @@ func NewSession() *Session {
 		},
 		Chain: ChainState{
 			SyncHeights: map[uint64][32]byte{},
+		},
+		// Default notification gates to shown so a Session that never
+		// runs initUI (tests, embedded use) still prints notices.
+		Display: DisplayState{
+			Notify: NotifyState{Pow: true, PowMinTier: 1, History: true, Join: true, Date: true, System: true},
 		},
 	}
 }
@@ -471,8 +481,14 @@ func (s *Session) initUI() bool {
 	s.Display.Out = s.Display.Term.Writer()
 
 	s.Display.ShowJoinLeave = CLI.ShowJoin
+	if !s.Display.ShowJoinLeave && ClientCfg != nil {
+		s.Display.ShowJoinLeave = ClientCfg.Defaults.ShowJoin
+	}
 
-	s.Verify.AutoVerify = true
+	s.Display.Notify = notifyStateFromConfig()
+	s.applyQuietFlags()
+
+	s.Verify.AutoVerify = ClientCfg.DefaultAutoVerify()
 	// s.Display.ShowMeta toggles the trailing "#height:hash" line (/meta, default
 	// from ui.meta.show in config). The session command overrides
 	// in-memory only; the chain still verifies when hidden.

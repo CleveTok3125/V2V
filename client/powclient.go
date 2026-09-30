@@ -305,7 +305,7 @@ func (s *Session) handlePowOffer(offer wire.PowOffer) {
 		return
 	}
 	s.Display.DisplayMu.Lock()
-	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Đang giải PoW (tier %d)…\n", offer.Tier))
+	s.emitLocalFeedbackLive(s.notifyPowLive(offer.Tier), fmt.Sprintf("| [Local]: Đang giải PoW (tier %d)…\n", offer.Tier))
 	s.Display.DisplayMu.Unlock()
 	nonce, err := solveWithBudget(preset, offer.Salt, maxCostMs)
 	if err != nil {

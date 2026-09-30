@@ -80,7 +80,10 @@ type ClientConfig struct {
 		Username   string `json:"username"`
 		UserAgent  string `json:"userAgent"`
 		ShowJoin   bool   `json:"showJoin"`
-		AutoVerify bool   `json:"autoVerify"`
+		// AutoVerify is a pointer so a partial config that omits it
+		// backfills to enabled instead of silently disabling the
+		// trip verification.
+		AutoVerify *bool `json:"autoVerify"`
 	} `json:"defaults"`
 	Network struct {
 		DefaultScheme string `json:"defaultScheme"`
@@ -199,6 +202,21 @@ type ClientConfig struct {
 			Mode    string `json:"mode"`
 			Expect  string `json:"expect"`
 		} `json:"versionCheck"`
+		// Notify gates informational notices: a false value mutes the
+		// line on screen while it still lands in the system tab, so
+		// nothing is lost. Critical warnings (chain integrity, send
+		// guards, connection loss, command output) are never gated.
+		// Each bool is a pointer so an absent section backfills to the
+		// default (shown) instead of silently muting. PowMinTier hides
+		// the "solving PoW" notice for tiers below it (default 1).
+		Notify struct {
+			Pow        *bool `json:"pow"`
+			PowMinTier *int  `json:"powMinTier"`
+			History    *bool `json:"history"`
+			Join       *bool `json:"join"`
+			Date       *bool `json:"date"`
+			System     *bool `json:"system"`
+		} `json:"notify"`
 	} `json:"ui"`
 	Commands map[string][]string `json:"commands"`
 	Tabs struct {
@@ -253,7 +271,7 @@ func DefaultClientConfig() *ClientConfig {
 	c.Defaults.Username = "Anonymous"
 	c.Defaults.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 	c.Defaults.ShowJoin = false
-	c.Defaults.AutoVerify = true
+	c.Defaults.AutoVerify = boolPtr(true)
 	c.Limits = *DefaultDynamic()
 	c.Network.DefaultScheme = "wss"
 	c.Network.DefaultPath = "/ws"
@@ -325,6 +343,12 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.VersionCheck.Enabled = boolPtr(true)
 	c.UI.VersionCheck.Mode = "warn"
 	c.UI.VersionCheck.Expect = ""
+	c.UI.Notify.Pow = boolPtr(true)
+	c.UI.Notify.PowMinTier = intPtr(1)
+	c.UI.Notify.History = boolPtr(true)
+	c.UI.Notify.Join = boolPtr(true)
+	c.UI.Notify.Date = boolPtr(true)
+	c.UI.Notify.System = boolPtr(true)
 	c.Commands = map[string][]string{
 		"quit":         {"/quit", "/q"},
 		"clear":        {"/clear", "/c"},
@@ -337,6 +361,7 @@ func DefaultClientConfig() *ClientConfig {
 		"meta":         {"/meta", "/m"},
 		"find":         {"/find", "/f"},
 		"reply":        {"/reply"},
+		"notify":       {"/notify", "/nt"},
 		"whoami":       {"/whoami", "/w"},
 		"status":       {"/status"},
 		"help":         {"/help", "/h"},
@@ -373,6 +398,15 @@ func (c *ClientConfig) ShowMeta() bool {
 	return *c.UI.Meta.Show
 }
 
+// DefaultAutoVerify reports the startup value of trip auto-verify. A nil
+// pointer (absent section) means the default: enabled.
+func (c *ClientConfig) DefaultAutoVerify() bool {
+	if c == nil || c.Defaults.AutoVerify == nil {
+		return true
+	}
+	return *c.Defaults.AutoVerify
+}
+
 // VersionCheckEnabled reports whether the pre-dial server version
 // check runs at all.
 func (c *ClientConfig) VersionCheckEnabled() bool {
@@ -404,6 +438,57 @@ func (c *ClientConfig) VersionCheckExpect() string {
 		return ""
 	}
 	return c.UI.VersionCheck.Expect
+}
+
+// NotifyPow reports whether in-chat PoW progress notices print live.
+func (c *ClientConfig) NotifyPow() bool {
+	if c == nil || c.UI.Notify.Pow == nil {
+		return true
+	}
+	return *c.UI.Notify.Pow
+}
+
+// NotifyPowMinTier returns the lowest PoW tier whose "solving" notice
+// prints (default 1: every tier).
+func (c *ClientConfig) NotifyPowMinTier() int {
+	if c == nil || c.UI.Notify.PowMinTier == nil {
+		return 1
+	}
+	return *c.UI.Notify.PowMinTier
+}
+
+// NotifyHistory reports whether history load/recovery notices print live.
+func (c *ClientConfig) NotifyHistory() bool {
+	if c == nil || c.UI.Notify.History == nil {
+		return true
+	}
+	return *c.UI.Notify.History
+}
+
+// NotifyJoin reports whether join/leave notices print live.
+func (c *ClientConfig) NotifyJoin() bool {
+	if c == nil || c.UI.Notify.Join == nil {
+		return true
+	}
+	return *c.UI.Notify.Join
+}
+
+// NotifyDate reports whether date banners print live.
+func (c *ClientConfig) NotifyDate() bool {
+	if c == nil || c.UI.Notify.Date == nil {
+		return true
+	}
+	return *c.UI.Notify.Date
+}
+
+// NotifySystem reports whether informational "[Hệ thống]" lines from the
+// server print live. Per-client warnings that fail a send still land in
+// the system tab regardless.
+func (c *ClientConfig) NotifySystem() bool {
+	if c == nil || c.UI.Notify.System == nil {
+		return true
+	}
+	return *c.UI.Notify.System
 }
 
 // CollapseEnabled reports whether long blocks fold.
@@ -646,6 +731,10 @@ func parse(data []byte) (*ClientConfig, error) {
 	if c.UI.Meta.Show == nil {
 		c.UI.Meta.Show = def.UI.Meta.Show
 	}
+	// Backfill auto-verify (absent means default: enabled).
+	if c.Defaults.AutoVerify == nil {
+		c.Defaults.AutoVerify = def.Defaults.AutoVerify
+	}
 	// Backfill recovery cap (absent means default: 200 auto lines).
 	if c.History.InitialLines == nil {
 		c.History.InitialLines = def.History.InitialLines
@@ -668,6 +757,25 @@ func parse(data []byte) (*ClientConfig, error) {
 	}
 	if c.UI.VersionCheck.Mode == "" {
 		c.UI.VersionCheck.Mode = def.UI.VersionCheck.Mode
+	}
+	// Backfill notify gates (absent means default: shown).
+	if c.UI.Notify.Pow == nil {
+		c.UI.Notify.Pow = def.UI.Notify.Pow
+	}
+	if c.UI.Notify.PowMinTier == nil {
+		c.UI.Notify.PowMinTier = def.UI.Notify.PowMinTier
+	}
+	if c.UI.Notify.History == nil {
+		c.UI.Notify.History = def.UI.Notify.History
+	}
+	if c.UI.Notify.Join == nil {
+		c.UI.Notify.Join = def.UI.Notify.Join
+	}
+	if c.UI.Notify.Date == nil {
+		c.UI.Notify.Date = def.UI.Notify.Date
+	}
+	if c.UI.Notify.System == nil {
+		c.UI.Notify.System = def.UI.Notify.System
 	}
 	// Backfill collapse knobs (absent means default: enabled 10/5).
 	if c.UI.Collapse.Enabled == nil {

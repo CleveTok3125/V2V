@@ -65,7 +65,7 @@ Nền tảng và kiến trúc được hỗ trợ: [INSTALL.md](INSTALL.md#platf
 
 Biến môi trường `V2V_TRIPCODE` cũng dùng được (chỉ cho CI — nên dùng file mã hóa).
 
-Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/clearhistory`, `/whoami`, `/status`, `/showjoin`, `/autoverify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`, `/expand`, `/copy`).
+Gõ `/help` trong phòng để xem lệnh (`/quit`, `/clear`, `/clearhistory`, `/whoami`, `/status`, `/showjoin`, `/autoverify`, `/notify`, `/tab`, `/meta`, `/find`, `/reply`, `/info`, `/expand`, `/copy`).
 
 Tin nhắn của bạn hiện xám kèm `⏳` trước, rồi được thay bằng dòng xác nhận khi server gửi lại (echo). Lệnh `/` lạ bị chặn ngay trên máy, không gửi đi (muốn gửi chữ bắt đầu bằng `/` thì bọc trong codeblock ```).
 

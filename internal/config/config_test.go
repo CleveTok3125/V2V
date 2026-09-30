@@ -301,3 +301,88 @@ func TestHistoryPagingDefaults(t *testing.T) {
 		t.Fatalf("HistoryDiskLookup = %d, want 0 (RAM-only default)", d.HistoryDiskLookup)
 	}
 }
+
+func TestNotifyDefaults(t *testing.T) {
+	c := DefaultClientConfig()
+	if !c.NotifyPow() || !c.NotifyHistory() || !c.NotifyJoin() || !c.NotifyDate() || !c.NotifySystem() {
+		t.Fatal("notify gates must default to shown")
+	}
+	if got := c.NotifyPowMinTier(); got != 1 {
+		t.Fatalf("default powMinTier = %d, want 1", got)
+	}
+	var nilCfg *ClientConfig
+	if !nilCfg.NotifyPow() || nilCfg.NotifyPowMinTier() != 1 {
+		t.Fatal("nil config must fall back to shown / tier 1")
+	}
+}
+
+func TestNotifyBackfillAndExplicitFalse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.jsonc")
+	// Absent notify section backfills to shown.
+	raw, _ := json.Marshal(map[string]any{"defaults": map[string]any{"username": "A"}})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.NotifyPow() || !c.NotifySystem() {
+		t.Fatal("absent notify section must backfill to shown")
+	}
+	// Explicit false survives the round trip; powMinTier is honored.
+	raw, _ = json.Marshal(map[string]any{"ui": map[string]any{"notify": map[string]any{
+		"pow": false, "powMinTier": 3, "history": false, "join": false, "date": false, "system": false,
+	}}})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.NotifyPow() || c.NotifyHistory() || c.NotifyJoin() || c.NotifyDate() || c.NotifySystem() {
+		t.Fatal("explicit false must be honored for every gate")
+	}
+	if got := c.NotifyPowMinTier(); got != 3 {
+		t.Fatalf("explicit powMinTier = %d, want 3", got)
+	}
+}
+
+func TestDefaultAutoVerifyBackfill(t *testing.T) {
+	c := DefaultClientConfig()
+	if !c.DefaultAutoVerify() {
+		t.Fatal("auto-verify must default to enabled")
+	}
+	var nilCfg *ClientConfig
+	if !nilCfg.DefaultAutoVerify() {
+		t.Fatal("nil config must fall back to enabled")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.jsonc")
+	// Absent defaults.autoVerify backfills to enabled.
+	raw, _ := json.Marshal(map[string]any{"defaults": map[string]any{"username": "A"}})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.DefaultAutoVerify() {
+		t.Fatal("absent defaults.autoVerify must backfill to enabled")
+	}
+	// Explicit false survives.
+	raw, _ = json.Marshal(map[string]any{"defaults": map[string]any{"autoVerify": false}})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DefaultAutoVerify() {
+		t.Fatal("explicit false must be honored")
+	}
+}

@@ -50,7 +50,7 @@ func (s *Session) emitDateBannerLocked(text string) {
 		return
 	}
 	s.Display.LastDateBanner = text
-	s.emitTab(TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(text)))
+	s.emitTabLive(s.notifyKindAllowed(NotifyKindDate), TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(text)))
 }
 
 // trackReplayWindow updates the replay window flags for one boundary
@@ -102,7 +102,7 @@ func (s *Session) handleHistoryInfo(info HistoryInfo) {
 	s.Chain.LoadMaxSeq = info.MaxSeq
 	// Announce the sync as a local line so a slow/large load does not
 	// look like a hang.
-	s.emitLocalFeedback("| [Local]: Đang tải lịch sử...\n")
+	s.emitLocalFeedbackKind(NotifyKindHistory, "| [Local]: Đang tải lịch sử...\n")
 	// after_seq is exclusive: to load the last `target` lines ending at
 	// MaxSeq, start just below MaxSeq-target+1.
 	after := uint64(0)
@@ -393,7 +393,8 @@ func (s *Session) runPump() {
 				}
 			}
 			s.Display.DisplayMu.Lock()
-			s.emitTab(classifyTab(line), fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
+			kind := notifyKindForLine(line)
+			s.emitTabLive(kind == "" || s.notifyKindAllowed(kind), classifyTab(line), fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 			s.Display.DisplayMu.Unlock()
 		}
 		s.refreshCoalesced()

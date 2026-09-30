@@ -33,6 +33,7 @@ var CLI struct {
 	UserAgent   string           `help:"Tùy chỉnh User-Agent" default:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" short:"a"`
 	Info        bool             `help:"Kiểm tra thông tin trạng thái của Server" short:"i"`
 	ShowJoin    bool             `help:"Hiện thông báo người dùng ra/vào phòng" short:"j"`
+	Quiet       []string         `help:"Ẩn thông báo thông tin (lặp được): pow,history,join,date,system,all" name:"quiet" short:"Q"`
 
 	UseKey    bool   `help:"Dùng key mặc định trong config-dir" short:"k"`
 	KeyFile   string `help:"Đường dẫn file chứa khóa xác thực" short:"K" name:"key-file"`

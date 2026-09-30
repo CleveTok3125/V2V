@@ -28,7 +28,7 @@ func (s *Session) dispatch(text string) (string, cmdAction) {
 	}
 	for _, cmd := range []func(string) bool{
 		s.cmdWhoami, s.cmdStatus, s.cmdHelp, s.cmdShowjoin,
-		s.cmdAutoverify, s.cmdTab, s.cmdClear,
+		s.cmdAutoverify, s.cmdNotify, s.cmdTab, s.cmdClear,
 	} {
 		if cmd(text) {
 			return text, cmdDone
@@ -186,6 +186,7 @@ func (s *Session) cmdHelp(text string) bool {
 	s.emitLocalFeedback("    - /whoami, /w    : Thông tin danh tính và quyền hiện tại\n")
 	s.emitLocalFeedback("    - /status        : Trạng thái kết nối và phiên bản client\n")
 	s.emitLocalFeedback("    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
+	s.emitLocalFeedback("    - /notify, /nt [<cat> on|off | all on|off | powmin <N>]: Ẩn/hiện thông báo thông tin (pow/history/join/date/system)\n")
 	s.emitLocalFeedback("    - /info <n>[:hash]: Xem đầy đủ metadata tin nhắn (verify lại tại local)\n")
 	s.emitLocalFeedback("    - /expand <n>, /xpan  : Mở đầy đủ tin bị thu gọn (vd /expand 1234)\n")
 	s.emitLocalFeedback("    - /copy <n>[:hash]: Copy nội dung thô tin nhắn vào clipboard\n")
@@ -234,6 +235,71 @@ func (s *Session) cmdAutoverify(text string) bool {
 	s.Display.DisplayMu.Lock()
 	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Auto-verify đã %s (mặc định BẬT, verify song song qua channel FIFO).\n", status))
 	s.Display.DisplayMu.Unlock()
+	return true
+}
+
+// cmdNotify lists or toggles the informational notice gates. Muting a
+// kind hides it live while it still lands in the system tab.
+func (s *Session) cmdNotify(text string) bool {
+	if !(text == "/notify" || text == "/nt" || strings.HasPrefix(text, "/notify ") || strings.HasPrefix(text, "/nt ")) {
+		return false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(text, "/notify"))
+	if rest == text {
+		rest = strings.TrimSpace(strings.TrimPrefix(text, "/nt"))
+	}
+	s.Display.DisplayMu.Lock()
+	defer s.Display.DisplayMu.Unlock()
+	fields := strings.Fields(rest)
+	if len(fields) > 0 {
+		fields[0] = strings.ToLower(fields[0])
+	}
+	if len(fields) == 0 {
+		n := s.notifySnapshot()
+		onoff := func(b bool) string {
+			if b {
+				return "on"
+			}
+			return "off"
+		}
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Notify: pow=%s(tier>=%d) history=%s join=%s date=%s system=%s\n",
+			onoff(n.Pow), n.PowMinTier, onoff(n.History), onoff(n.Join), onoff(n.Date), onoff(n.System)))
+		s.emitLocalFeedback("| [Local]: Dùng /notify <cat> on|off | all on|off | powmin <N> (off: ẩn live, vẫn lưu tab 2)\n")
+		return true
+	}
+	if fields[0] == "powmin" {
+		if len(fields) != 2 {
+			s.emitLocalFeedback("| [Local]: Dùng /notify powmin <N> (N >= 1).\n")
+			return true
+		}
+		tier, err := strconv.Atoi(fields[1])
+		if err != nil || tier < 1 {
+			s.emitLocalFeedback("| [Local]: powmin phải là số nguyên >= 1.\n")
+			return true
+		}
+		s.notifySetPowMinTier(tier)
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Notify powmin = %d.\n", tier))
+		return true
+	}
+	if len(fields) != 2 {
+		s.emitLocalFeedback("| [Local]: Dùng /notify <cat> on|off | all on|off | powmin <N>.\n")
+		return true
+	}
+	on, ok := parseOnOff(fields[1])
+	if !ok {
+		s.emitLocalFeedback("| [Local]: Giá trị phải là on hoặc off.\n")
+		return true
+	}
+	if fields[0] == "all" {
+		s.notifySetAll(on)
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Notify all = %s.\n", onOffLabel(on)))
+		return true
+	}
+	if !s.notifySetKind(fields[0], on) {
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Không rõ loại thông báo: %s.\n", fields[0]))
+		return true
+	}
+	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Notify %s = %s.\n", fields[0], onOffLabel(on)))
 	return true
 }
 

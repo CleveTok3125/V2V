@@ -119,6 +119,7 @@ One binary serves many instances: an instance is a directory holding `.env`, `co
 - Partial files stay usable: missing `tabs`/`codeStyle` sections, numeric `limits`, and `ui.meta.show` are backfilled.
 - Sensitive fields (tripcode, passphrases, private keys) never go in `config.json` — they stay in encrypted `key.json`.
 - `ui.meta.show` (default true, `*bool` so absent ≠ false) toggles the trailing `#height:hash` line; `/meta` overrides it for the session only.
+- Informational notices are gated by `ui.notify {pow, powMinTier, history, join, date, system}` (each a `*bool`, default shown; `powMinTier` default 1): a muted kind stops printing live but still lands in the system tab, so nothing is lost. Critical warnings (chain/fork/echo, send guards, connection loss, command output) bypass the gate. `/notify`/`/nt` lists or toggles them (`<cat> on|off`, `all on|off`, `powmin <N>`); `--quiet <name>` (repeatable, `-Q`) applies the same at startup.
 - `ui.clipboard.clearAfterSec` (default 30, explicit 0 disables, absent backfills) auto-clears `/copy` output from the OS clipboard, wiping only when it still holds exactly what was copied.
 - `ui.mention` (`enabled`, `color [r,g,b]` default bright cyan, `[0,0,0]`/out-of-range falls back) and `ui.reply` (`enabled`, `quoteMaxRunes` clamped 20–200, default 80) tune mentions and reply quotes the same way.
 - The verified chain tip persists in `<cache>/chain_tip.json` namespaced by server identity (foreign tips are ignored, never a fork).
@@ -145,7 +146,7 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 ## Slash Commands
 
 - Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, `/meta`/`/m` with optional `on|off`, `/find`/`/f` with `<height>[:hash]`, `/info` with `<height>[:hash]` and `/expand`/`/xpan` with `<height>`.
-- Session commands: `/whoami`/`/w`, `/status`, `/showjoin`/`/sj`, `/autoverify`/`/av`, `/clear`/`/c`, `/clearhistory`/`/ch` (deletes the keystroke history file), `/copy <height>[:hash]` (clipboard, auto-cleared).
+- Session commands: `/whoami`/`/w`, `/status`, `/showjoin`/`/sj`, `/autoverify`/`/av`, `/notify`/`/nt`, `/clear`/`/c`, `/clearhistory`/`/ch` (deletes the keystroke history file), `/copy <height>[:hash]` (clipboard, auto-cleared).
 - Anything else starting with `/` is an unknown command (`client/commands.go:isUnknownSlashCommand`) rejected locally with `| [Local]: Lệnh không tồn tại…`, never broadcast or trip-signed.
 - Code blocks (```) are unaffected, so they double as the escape hatch for sending literal text starting with `/`.
 - `/reply <height>[:hash] <text>` quotes a buffered message; the height suffix acts as a typo checksum.

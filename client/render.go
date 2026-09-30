@@ -486,6 +486,11 @@ func (s *Session) renderChatBlock(wire WireMessage) {
 	s.Display.ShowMetaMu.RLock()
 	withMeta := s.Display.ShowMeta
 	s.Display.ShowMetaMu.RUnlock()
+	// Notify gates live printing of informational system notices; the
+	// lines still land in their tab buffer when muted.
+	kind := notifyKindForWire(wire)
+	live := kind == "" || s.notifyKindAllowed(kind)
+	emit := func(tab int, line string) { s.emitTabLive(live, tab, line) }
 	// Replay and tab switches re-render the same immutable wires;
 	// the chain hash covers the content, so it is a safe cache key
 	// (verify mode and meta visibility are folded in). Messages with
@@ -496,29 +501,29 @@ func (s *Session) renderChatBlock(wire WireMessage) {
 			"\x00" + map[bool]string{true: "v", false: "p"}[av] +
 			"\x00" + map[bool]string{true: "m", false: "n"}[withMeta]
 		if hit, ok := s.Chain.RenderCache.get(key); ok {
-			s.emitTab(hit.tab, hit.head)
+			emit(hit.tab, hit.head)
 			if hit.hasMeta {
-				s.emitTab(hit.tab, hit.meta)
+				emit(hit.tab, hit.meta)
 			}
 			return
 		}
 		_, head, meta, tab, hasMeta := s.buildChatBlock(wire, av, withMeta)
 		head = maybeCollapse(head, wire, tab)
 		s.Chain.RenderCache.put(key, renderedBlock{tab: tab, head: head, meta: meta, hasMeta: hasMeta})
-		s.emitTab(tab, head)
+		emit(tab, head)
 		if hasMeta {
-			s.emitTab(tab, meta)
+			emit(tab, meta)
 		}
 		return
 	}
 	quote, head, meta, tab, hasMeta := s.buildChatBlock(wire, av, withMeta)
 	head = maybeCollapse(head, wire, tab)
 	for _, q := range quote {
-		s.emitTab(tab, q+"\n")
+		emit(tab, q+"\n")
 	}
-	s.emitTab(tab, head)
+	emit(tab, head)
 	if hasMeta {
-		s.emitTab(tab, meta)
+		emit(tab, meta)
 	}
 }
 

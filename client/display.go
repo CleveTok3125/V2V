@@ -161,10 +161,21 @@ func (s *Session) flushPendingGreetingLocked() {
 }
 
 func (s *Session) emitTab(tab int, line string) {
+	s.emitTabLive(true, tab, line)
+}
+
+// emitTabLive appends a line to its tab buffer and prints it live only
+// when live is true. A muted line still lands in the buffer, so it
+// stays reviewable in the system tab and on tab switches. Caller must
+// hold DisplayMu.
+func (s *Session) emitTabLive(live bool, tab int, line string) {
 	if tab == TabChat {
 		s.Display.TabChat.append(line)
 	} else {
 		s.Display.TabSys.append(line)
+	}
+	if !live {
+		return
 	}
 	// Tab 1 shows the full legacy stream, so it is unaffected by tabs.
 	// Tab 2 is purely additive and shows only its own lines.
@@ -182,6 +193,25 @@ func (s *Session) emitTab(tab int, line string) {
 // leaves it incomplete. Caller must hold DisplayMu.
 func (s *Session) emitLocalFeedback(line string) {
 	s.Display.TabSys.append(line)
+	s.holdOrEnqueue(line)
+	s.Display.PrintGen++
+}
+
+// emitLocalFeedbackKind is emitLocalFeedback for informational notices
+// that /notify can mute: the line always lands in Tab 2, but the live
+// print is skipped while its kind is muted. Caller must hold DisplayMu.
+func (s *Session) emitLocalFeedbackKind(kind, line string) {
+	s.emitLocalFeedbackLive(s.notifyKindAllowed(kind), line)
+}
+
+// emitLocalFeedbackLive buffers a local line in TabSystem and prints it
+// live only when live is true; a muted line remains reviewable in Tab 2.
+// Caller must hold DisplayMu.
+func (s *Session) emitLocalFeedbackLive(live bool, line string) {
+	s.Display.TabSys.append(line)
+	if !live {
+		return
+	}
 	s.holdOrEnqueue(line)
 	s.Display.PrintGen++
 }
