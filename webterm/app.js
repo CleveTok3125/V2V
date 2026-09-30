@@ -27,7 +27,6 @@ import { gateFetch } from "./pow_bridge.js";
     var userInput = document.getElementById("username");
     var tripInput = document.getElementById("tripcode");
     var connectBtn = document.getElementById("connect-btn");
-    var showJoinToggle = document.getElementById("showjoin");
     var passkeyBtn = document.getElementById("passkey-btn");
     var passkeyRoleInput = document.getElementById("passkey-role");
     var passkeyRoleLabel = document.getElementById("passkey-role-label");
@@ -75,6 +74,204 @@ import { gateFetch } from "./pow_bridge.js";
         statusLine.textContent = msg;
         statusLine.className = isError ? "error" : "";
     }
+    // ---- Settings panel ----------------------------------------------------
+    // Mirrors the toggle subset of the desktop client config (ui.meta.show,
+    // join/leave notices, defaults.autoVerify, ui.notify.*). Applied when
+    // connecting, so the panel is the pre-connect surface for these; the live
+    // session still owns them afterwards through /meta, /showjoin,
+    // /autoverify, /notify.
+    var OPT_DEFAULTS = {
+        meta: true,
+        showJoin: false,
+        autoVerify: true,
+        notify: { pow: true, powMinTier: 1, history: true, join: true, date: true, system: true },
+    };
+    var OPT_KEY = "v2v.config";
+    var opts = cloneOpts(OPT_DEFAULTS);
+    function cloneOpts(src) {
+        return {
+            meta: src.meta,
+            showJoin: src.showJoin,
+            autoVerify: src.autoVerify,
+            notify: {
+                pow: src.notify.pow,
+                powMinTier: src.notify.powMinTier,
+                history: src.notify.history,
+                join: src.notify.join,
+                date: src.notify.date,
+                system: src.notify.system,
+            },
+        };
+    }
+    // sessionStorage is the default: the choices survive a reload (which is
+    // what /quit does) but die with the tab. "Lưu lâu dài" additionally
+    // mirrors into localStorage so they outlive the browser session.
+    function loadOpts() {
+        var raw = null;
+        try {
+            raw = window.localStorage.getItem(OPT_KEY) || window.sessionStorage.getItem(OPT_KEY);
+        }
+        catch (e) { /* storage may be blocked; defaults stand */ }
+        if (!raw)
+            return;
+        try {
+            var got = JSON.parse(raw);
+            if (got && typeof got === "object") {
+                ["meta", "showJoin", "autoVerify"].forEach(function (k) {
+                    if (typeof got[k] === "boolean")
+                        opts[k] = got[k];
+                });
+                if (got.notify && typeof got.notify === "object") {
+                    ["pow", "history", "join", "date", "system"].forEach(function (k) {
+                        if (typeof got.notify[k] === "boolean")
+                            opts.notify[k] = got.notify[k];
+                    });
+                    if (typeof got.notify.powMinTier === "number" && got.notify.powMinTier >= 1) {
+                        opts.notify.powMinTier = Math.floor(got.notify.powMinTier);
+                    }
+                }
+            }
+        }
+        catch (e) { /* corrupt payload: keep defaults */ }
+    }
+    function persistEnabled() {
+        try {
+            return !!window.localStorage.getItem(OPT_KEY);
+        }
+        catch (e) {
+            return false;
+        }
+    }
+    function saveOpts() {
+        var raw = JSON.stringify(opts);
+        try {
+            window.sessionStorage.setItem(OPT_KEY, raw);
+        }
+        catch (e) { /* ignore */ }
+        if (persistEnabled()) {
+            try {
+                window.localStorage.setItem(OPT_KEY, raw);
+            }
+            catch (e) { /* ignore */ }
+        }
+    }
+    function clearStoredOpts() {
+        try {
+            window.sessionStorage.removeItem(OPT_KEY);
+        }
+        catch (e) { /* ignore */ }
+        try {
+            window.localStorage.removeItem(OPT_KEY);
+        }
+        catch (e) { /* ignore */ }
+    }
+    function el(id) { return document.getElementById(id); }
+    function syncJoinDep() {
+        // notify.join only has meaning while join/leave render at all.
+        var row = el("opt-notifyjoin-row");
+        if (!row)
+            return;
+        var input = el("opt-notifyjoin");
+        input.disabled = !opts.showJoin;
+    }
+    function applyOptsToUI() {
+        el("opt-meta").checked = opts.meta;
+        el("opt-showjoin").checked = opts.showJoin;
+        el("opt-autoverify").checked = opts.autoVerify;
+        el("opt-notifypow").checked = opts.notify.pow;
+        el("opt-powmintier").value = String(opts.notify.powMinTier);
+        el("opt-notifyhistory").checked = opts.notify.history;
+        el("opt-notifyjoin").checked = opts.notify.join;
+        el("opt-notifydate").checked = opts.notify.date;
+        el("opt-notify-system").checked = opts.notify.system;
+        el("opt-persist").checked = persistEnabled();
+        syncJoinDep();
+    }
+    // [options path, input id] — listed explicitly so the wiring cannot drift
+    // from the markup the way a computed id would.
+    var OPT_SWITCHES = [
+        ["meta", "opt-meta"],
+        ["showJoin", "opt-showjoin"],
+        ["autoVerify", "opt-autoverify"],
+        ["notify.pow", "opt-notifypow"],
+        ["notify.history", "opt-notifyhistory"],
+        ["notify.join", "opt-notifyjoin"],
+        ["notify.date", "opt-notifydate"],
+        ["notify.system", "opt-notify-system"],
+    ];
+    function readOpt(path) {
+        var parts = path.split(".");
+        var v = opts;
+        for (var i = 0; i < parts.length; i++)
+            v = v[parts[i]];
+        return v;
+    }
+    function writeOpt(path, value) {
+        var parts = path.split(".");
+        var last = parts.pop();
+        var v = opts;
+        for (var i = 0; i < parts.length; i++)
+            v = v[parts[i]];
+        v[last] = value;
+    }
+    function initConfigPanel() {
+        var btn = el("config-btn");
+        var panel = el("config-panel");
+        if (!btn || !panel)
+            return;
+        loadOpts();
+        applyOptsToUI();
+        btn.addEventListener("click", function () {
+            var open = panel.classList.contains("hidden");
+            panel.classList.toggle("hidden");
+            btn.textContent = open ? "⚙️ Ẩn tuỳ chọn" : "⚙️ Tuỳ chọn";
+        });
+        OPT_SWITCHES.forEach(function (pair) {
+            var input = el(pair[1]);
+            if (!input)
+                return;
+            input.addEventListener("change", function () {
+                writeOpt(pair[0], this.checked);
+                if (pair[0] === "showJoin")
+                    syncJoinDep();
+                saveOpts();
+            });
+        });
+        var tier = el("opt-powmintier");
+        if (tier) {
+            tier.addEventListener("change", function () {
+                writeOpt("notify.powMinTier", Math.max(1, Math.floor(Number(this.value) || 1)));
+                this.value = String(readOpt("notify.powMinTier"));
+                saveOpts();
+            });
+        }
+        var persist = el("opt-persist");
+        if (persist) {
+            persist.addEventListener("change", function () {
+                if (this.checked) {
+                    try {
+                        window.localStorage.setItem(OPT_KEY, JSON.stringify(opts));
+                    }
+                    catch (e) { /* ignore */ }
+                }
+                else {
+                    try {
+                        window.localStorage.removeItem(OPT_KEY);
+                    }
+                    catch (e) { /* ignore */ }
+                }
+            });
+        }
+        var reset = el("config-reset");
+        if (reset) {
+            reset.addEventListener("click", function () {
+                clearStoredOpts();
+                opts = cloneOpts(OPT_DEFAULTS);
+                applyOptsToUI();
+            });
+        }
+    }
+    initConfigPanel();
     // Expose status setter for WASM to show auth errors without a full page reload.
     window.v2vSetStatus = function (msg, isError) {
         setStatus(msg, !!isError);
@@ -488,6 +685,14 @@ import { gateFetch } from "./pow_bridge.js";
             setStatus("Lỗi: wasm_exec.js chưa được tải (thiếu file build? Chạy ./build_web.sh trước khi deploy).", true);
             return;
         }
+        // index.html and app.js revalidate independently, so a cached page can
+        // briefly pair one version's markup with another's script. Check before
+        // disabling the button, otherwise a mismatch throws here and leaves the
+        // form stuck on "Đang kết nối..." with a dead button.
+        if (!form || !connectBtn || !serverInput || !userInput) {
+            setStatus("Lỗi: trang không khớp phiên bản — tải lại (Ctrl+Shift+R).", true);
+            return;
+        }
         connectBtn.disabled = true;
         setStatus("Đang kết nối...");
         var origin = location.origin + "/";
@@ -498,7 +703,17 @@ import { gateFetch } from "./pow_bridge.js";
             serverUrl: server,
             username: userInput.value.trim(),
             tripcode: tripInput.value.trim(),
-            showJoin: showJoinToggle.checked,
+            showJoin: opts.showJoin,
+            showMeta: opts.meta,
+            autoVerify: opts.autoVerify,
+            notify: {
+                pow: opts.notify.pow,
+                powMinTier: opts.notify.powMinTier,
+                history: opts.notify.history,
+                join: opts.notify.join,
+                date: opts.notify.date,
+                system: opts.notify.system,
+            },
         };
         // Clear passphrase from DOM immediately after copying to WASM
         tripInput.value = "";

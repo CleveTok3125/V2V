@@ -77,6 +77,20 @@ import { gateFetch } from "./pow_bridge.js";
         fieldsEl.appendChild(row);
         return v;
     }
+    // Every row of the /info block is listed whether or not the link
+    // carries a value, so the shape of the block is always the same.
+    // A missing value shows a dim dash and no copy button: an absent
+    // field has nothing to copy. The server answers some rejections
+    // before it computes anything, so undefined/null/"" all count as
+    // missing (String(undefined) would print the word itself).
+    function addFieldOrPlaceholder(label, value) {
+        if (value === undefined || value === null || value === "") {
+            var cell = addField(label, "—", false);
+            cell.classList.add("empty");
+            return cell;
+        }
+        return addField(label, String(value), true);
+    }
     function fail(message) {
         setPill(message, "bad");
     }
@@ -98,16 +112,21 @@ import { gateFetch } from "./pow_bridge.js";
         .then(function (res) {
         var j = res.body || {};
         rawEl.textContent = JSON.stringify(j, null, 2);
+        var q = new URLSearchParams(location.search);
+        // The field list is independent of the verdict: a rejected link
+        // still shows what the link carried, which is what you need to
+        // see to work out why it was rejected. The pill carries the
+        // verdict on its own.
         if (!j.valid) {
             fail("❌ Không hợp lệ" + (j.error ? ": " + j.error : ""));
             if (j.error)
                 addField("lỗi", String(j.error), false);
-            return;
         }
-        setPill("✅ Trip hợp lệ", "ok");
-        var q = new URLSearchParams(location.search);
+        else {
+            setPill("✅ Trip hợp lệ", "ok");
+        }
         var wantHash = (q.get("msg_hash") || "").toLowerCase();
-        if (wantHash) {
+        if (j.valid && wantHash) {
             contentSec.classList.remove("hidden");
             contentCheck.addEventListener("click", checkContent);
             contentInput.addEventListener("input", checkContent);
@@ -145,44 +164,37 @@ import { gateFetch } from "./pow_bridge.js";
         }
         // Field order and names mirror the client's /info block so the
         // two can be read side by side; each label keeps the original
-        // key in parentheses. Copy buttons always take the raw value.
+        // key in parentheses. Every row is always present.
         // height and sent_at are display context carried in the URL and
         // are NOT covered by the signature or the chain hash, so editing
         // them changes nothing about the verdict — their labels say so.
         var height = q.get("height") || "";
-        if (height)
-            addField("Chiều cao (height, không xác minh)", height, true);
         var tmp = q.get("tmp_id") || "";
-        if (tmp)
-            addField("ID phiên (tmp_id)", tmp, true);
         var rp = q.get("reply_to") || "";
-        if (rp)
-            addField("Trích dẫn (reply_to)", rp, true);
         var sentAt = q.get("sent_at") || "";
-        if (sentAt)
-            addField("Thời gian gửi (sent_at, không xác minh)", sentAt, true);
         var dn = q.get("display_name") || "";
-        if (dn)
-            addField("Tên (from)", dn, true);
+        var prev = q.get("prev") || "";
+        var sig = q.get("sig") || "";
+        var msgHash = q.get("msg_hash") || "";
+        addFieldOrPlaceholder("Chiều cao (height, không xác minh)", height);
+        addFieldOrPlaceholder("ID phiên (tmp_id)", tmp);
+        addFieldOrPlaceholder("Trích dẫn (reply_to)", rp);
+        addFieldOrPlaceholder("Thời gian gửi (sent_at, không xác minh)", sentAt);
+        addFieldOrPlaceholder("Tên (from)", dn);
+        var badgeEl = addFieldOrPlaceholder("Chữ ký trip (trip)", j.badge);
         if (j.badge) {
-            var badgeEl = addField("Chữ ký trip (trip)", j.badge, true);
-            badgeEl.style.color = badgeCss(j.badgeColor, true);
+            // Colour by the verdict, not by presence: the server can return
+            // a badge for a signature mismatch, so a hardcoded "valid" here
+            // would paint a rejected trip as accepted.
+            badgeEl.style.color = badgeCss(j.badgeColor, j.valid);
             badgeEl.style.fontWeight = "700";
         }
-        addField("Số thứ tự (trip.seq)", String(j.seq), true);
-        if (j.pub)
-            addField("Khoá (trip.pub)", j.pub, true);
-        var prev = q.get("prev") || "";
-        if (prev)
-            addField("Chuỗi trước (trip.prev)", prev, true);
-        var sig = q.get("sig") || "";
-        if (sig)
-            addField("Chữ ký (trip.sig)", sig, true);
-        var msgHash = q.get("msg_hash") || "";
-        if (msgHash)
-            addField("Hash nội dung (trip.hash)", msgHash, true);
-        if (j.server_pub)
-            addField("Khoá server (trip.srv)", j.server_pub, true);
+        addFieldOrPlaceholder("Số thứ tự (trip.seq)", j.seq);
+        addFieldOrPlaceholder("Khoá (trip.pub)", j.pub);
+        addFieldOrPlaceholder("Chuỗi trước (trip.prev)", prev);
+        addFieldOrPlaceholder("Chữ ký (trip.sig)", sig);
+        addFieldOrPlaceholder("Hash nội dung (trip.hash)", msgHash);
+        addFieldOrPlaceholder("Khoá server (trip.srv)", j.server_pub);
     })
         .catch(function (e) {
         fail("❌ Không gọi được API: " + (e && e.message ? e.message : e));

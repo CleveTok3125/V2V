@@ -25,17 +25,69 @@
       <label for="passkey-role" id="passkey-role-label" style="display:none">Role</label>
       <input id="passkey-role" type="text" placeholder="member" style="display:none" />
 
-      <label class="check">
-        <input id="showjoin" type="checkbox" />
-        Hiện thông báo người dùng ra/vào phòng
-      </label>
-
       <p id="status-line"></p>
       <div style="display:flex;gap:8px">
         <button type="submit" id="connect-btn">Kết nối</button>
         <button type="button" id="passkey-btn">🔑 Passkey</button>
       </div>
     </form>
+
+    <!-- The settings panel sits outside the form on purpose: Enter inside a
+         form input submits it, and committing a PoW tier by pressing Enter
+         must not start a connection. -->
+    <button type="button" id="config-btn">⚙️ Tuỳ chọn</button>
+
+    <section id="config-panel" class="hidden" aria-labelledby="config-panel-h">
+      <h2 id="config-panel-h">Tuỳ chọn</h2>
+      <p class="hint config-hint">Áp dụng khi kết nối.</p>
+
+      <div class="cfg-group">Hiển thị</div>
+      <label class="check">
+        <input id="opt-meta" type="checkbox" />
+        Dòng meta <code>#height:hash</code>
+      </label>
+      <label class="check">
+        <input id="opt-showjoin" type="checkbox" />
+        Thông báo người dùng ra/vào phòng
+      </label>
+      <label class="check nested" id="opt-notifyjoin-row">
+        <input id="opt-notifyjoin" type="checkbox" />
+        …in ra màn hình <span class="hint-inline">(vẫn lưu ở tab 2)</span>
+      </label>
+      <label class="check">
+        <input id="opt-autoverify" type="checkbox" />
+        Auto-verify trip
+      </label>
+
+      <div class="cfg-group">Thông báo <span class="hint-inline">(tắt = ẩn khi hiện, vẫn lưu ở tab 2)</span></div>
+      <label class="check">
+        <input id="opt-notifypow" type="checkbox" />
+        PoW
+      </label>
+      <label class="cfg-inline">
+        <span>Ngưỡng tier PoW</span>
+        <input id="opt-powmintier" type="number" min="1" step="1" />
+      </label>
+      <label class="check">
+        <input id="opt-notifyhistory" type="checkbox" />
+        Lịch sử tải / bù
+      </label>
+      <label class="check">
+        <input id="opt-notifydate" type="checkbox" />
+        Ngày
+      </label>
+      <label class="check">
+        <input id="opt-notify-system" type="checkbox" />
+        [Hệ thống]
+      </label>
+
+      <div class="cfg-group">Lưu</div>
+      <label class="check">
+        <input id="opt-persist" type="checkbox" />
+        Lưu lâu dài <span class="hint-inline">(mặc định chỉ giữ tới khi đóng tab)</span>
+      </label>
+      <button type="button" id="config-reset" class="cfg-secondary">Đặt lại mặc định</button>
+    </section>
   </div>
 
   <div id="terminal-wrap" style="display:none">

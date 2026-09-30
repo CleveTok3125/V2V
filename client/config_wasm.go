@@ -40,6 +40,7 @@ func parseFlags() {
 		webPasskey.Enabled = true
 		webPasskey.Role = cfg.Get("passkeyRole").String()
 	}
+	applyWebClientOpts(cfg)
 
 	if CLI.Server == "" {
 		CLI.Server = js.Global().Get("location").Get("origin").String() + "/"
@@ -49,6 +50,40 @@ func parseFlags() {
 	}
 
 	initAssertionBridge()
+}
+
+// applyWebClientOpts maps the settings panel's choices onto ClientCfg,
+// which the web build otherwise leaves at its compiled defaults. Only the
+// toggle subset of the desktop config is mapped: everything the web page
+// can offer is a field the page itself wrote.
+func applyWebClientOpts(cfg js.Value) {
+	// A present field wins even when it is false, so each lookup tests for
+	// presence rather than truthiness: JS false is falsy, and reading it as
+	// "absent" would leave the compiled default (usually "on") in place.
+	setBool := func(dst **bool, v js.Value) {
+		if v.Type() == js.TypeBoolean {
+			b := v.Bool()
+			*dst = &b
+		}
+	}
+	setInt := func(dst **int, v js.Value) {
+		if v.Type() == js.TypeNumber {
+			if n := v.Int(); n >= 1 {
+				*dst = &n
+			}
+		}
+	}
+	setBool(&ClientCfg.UI.Meta.Show, cfg.Get("showMeta"))
+	setBool(&ClientCfg.Defaults.AutoVerify, cfg.Get("autoVerify"))
+	notify := cfg.Get("notify")
+	if notify.Type() == js.TypeObject {
+		setBool(&ClientCfg.UI.Notify.Pow, notify.Get("pow"))
+		setBool(&ClientCfg.UI.Notify.History, notify.Get("history"))
+		setBool(&ClientCfg.UI.Notify.Join, notify.Get("join"))
+		setBool(&ClientCfg.UI.Notify.Date, notify.Get("date"))
+		setBool(&ClientCfg.UI.Notify.System, notify.Get("system"))
+		setInt(&ClientCfg.UI.Notify.PowMinTier, notify.Get("powMinTier"))
+	}
 }
 
 // assertionCh carries the JSON assertion produced by the page's

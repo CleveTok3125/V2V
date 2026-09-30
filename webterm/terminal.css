@@ -18,6 +18,17 @@ html, body {
   background: #1a1a21;
   border: 1px solid #2c2c36;
   border-radius: 10px;
+  /* The config panel adds many rows; keep the form reachable on short
+     viewports instead of letting it run past the fold. */
+  max-height: 76vh;
+  overflow-y: auto;
+}
+
+@media (max-width: 480px) {
+  #connect-panel {
+    margin: 0 auto;
+    padding: 18px;
+  }
 }
 
 #connect-panel h1 {
@@ -31,7 +42,7 @@ html, body {
   margin: 0 0 20px;
 }
 
-#connect-form label {
+#connect-form label:not(.check) {
   display: block;
   margin: 12px 0 4px;
   font-size: 13px;
@@ -51,22 +62,6 @@ html, body {
 #connect-form input:focus {
   outline: none;
   border-color: #4f7dff;
-}
-
-#connect-form label.check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 16px 0 0;
-  font-size: 13px;
-  color: #aab2c4;
-  cursor: pointer;
-}
-
-#connect-form label.check input {
-  width: auto;
-  margin: 0;
-  accent-color: #4f7dff;
 }
 
 #connect-btn {
@@ -101,6 +96,119 @@ html, body {
 
 #passkey-btn:hover {
   background: rgba(79, 125, 255, 0.12);
+}
+
+/* Settings panel: plain switches on the desktop client config. */
+.hidden { display: none; }
+
+#config-btn {
+  width: 100%;
+  margin-top: 16px;
+  padding: 9px;
+  background: transparent;
+  color: #aab2c4;
+  border: 1px solid #33333f;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+#config-btn:hover {
+  color: #e6ecf5;
+  border-color: #4f7dff;
+}
+
+#config-panel {
+  margin-top: 14px;
+  padding: 14px;
+  background: #121218;
+  border: 1px solid #2c2c36;
+  border-radius: 8px;
+}
+
+#config-panel h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+#connect-panel .config-hint {
+  margin: 4px 0 12px;
+}
+
+.cfg-group {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8b93a5;
+}
+
+/* Switch row shared by every checkbox option. */
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #aab2c4;
+  cursor: pointer;
+}
+
+label.check input {
+  width: auto;
+  margin: 0;
+  accent-color: #4f7dff;
+}
+
+#config-panel label.check.nested {
+  margin-left: 24px;
+}
+
+/* Dim the whole row when the switch is disabled, not just the node after
+   the input: most of a .check label is a bare text node. */
+#config-panel label:has(input:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.hint-inline {
+  color: #8b93a5;
+  font-weight: normal;
+}
+
+.cfg-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0 24px;
+  font-size: 13px;
+  color: #aab2c4;
+}
+
+#config-panel .cfg-inline input {
+  width: 72px;
+  padding: 6px 8px;
+  background: #121218;
+  color: #e6ecf5;
+  border: 1px solid #33333f;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+#config-panel .cfg-secondary {
+  margin-top: 12px;
+  padding: 7px 12px;
+  background: transparent;
+  color: #8b93a5;
+  border: 1px solid #33333f;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#config-panel .cfg-secondary:hover {
+  color: #e6ecf5;
+  border-color: #4f7dff;
 }
 
 #status-line {

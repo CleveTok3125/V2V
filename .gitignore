@@ -57,6 +57,8 @@ __pycache__/
 template/*.log
 .co*
 /data/
+# Go build cache when GOCACHE points inside the worktree
+.gocache/
 
 # Web terminal build outputs
 webterm/app.wasm
