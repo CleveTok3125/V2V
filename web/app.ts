@@ -383,6 +383,13 @@ import { gateFetch } from "./pow_bridge.js";
                 setStatus(info, !j.valid);
               }).catch(function () { setStatus("Trip link: " + uri, false); });
               if (navigator.clipboard) navigator.clipboard.writeText(uri).catch(function () {});
+              // The URL is already on the clipboard; offer to open the
+              // human-readable verify page in a new tab. If a popup
+              // blocker refuses window.open, the copied link remains the
+              // fallback and nothing else happens.
+              if (window.confirm("Đã copy link verify. Mở trang kiểm tra trong tab mới?")) {
+                window.open(uri, "_blank", "noopener");
+              }
             } else {
               var q = uri.split("?")[1] || "";
               var p = new URLSearchParams(q);

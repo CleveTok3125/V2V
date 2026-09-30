@@ -312,6 +312,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - `serverPub` is enforced to be the server's own key to prevent cross-server reuse.
 - `linkify` (server) and `webterm/app.js` (browser) handle `https` links; `v2v://` legacy is removed.
 - Browser navigation (`Accept: text/html`) gets the self-contained `webterm/verify.html` page instead of JSON: verdict pill, a paste-to-verify content section (SHA-256 recomputed locally against `msg_hash`), per-field rows with copy buttons, an API-link section, and collapsible raw JSON.
+- Clicking the badge in the web terminal copies the verify URL and asks with a native `window.confirm` whether to open the verify page in a new tab; a blocked popup leaves the copied link as the fallback.
 - The page re-fetches the same URL with `Accept: application/json`, so curl/fetch behavior is unchanged.
 - `/copy <height>[:hash]` copies raw message text to the OS clipboard for pasting into the page (plaintext lives in the clipboard until auto-cleared or overwritten — any local app can read it).
 - Verify pages require HTTPS/localhost, and plain-HTTP shows a warning banner since pasted text could be intercepted in transit.
