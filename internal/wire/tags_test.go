@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -336,6 +337,36 @@ func TestWebPanelTagListMatchesTaxonomy(t *testing.T) {
 		if listed[i] != want[i] {
 			t.Fatalf("web/app.ts tag %d = %q, taxonomy = %q\nlisted %v\ntree   %v",
 				i, listed[i], want[i], listed, want)
+		}
+	}
+}
+
+// The tag tree is the vocabulary both UIs and the docs speak. A tag in the
+// code that no document mentions will be offered in /notify and the web
+// panel with nothing explaining what it covers, and a documented tag that
+// the code dropped is a promise nothing keeps. The table in
+// docs/NOTICE_TAGS.md is the reference.
+func TestDocumentedTagsMatchTaxonomy(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "NOTICE_TAGS.md"))
+	if err != nil {
+		t.Fatalf("docs/NOTICE_TAGS.md unavailable: %v", err)
+	}
+	for _, tag := range AllTags() {
+		if !bytes.Contains(doc, []byte("`"+tag+"`")) {
+			t.Errorf("tag %q is in the taxonomy but not documented in docs/NOTICE_TAGS.md", tag)
+		}
+	}
+	// A table row claiming a tag the code does not have is the same drift
+	// in the other direction. Only the table is checked: the prose quotes
+	// tag paths to illustrate what a peer might send.
+	row := regexp.MustCompile("^\\| `(system(?:\\.[a-z]+)*)` \\|")
+	for _, line := range strings.Split(string(doc), "\n") {
+		m := row.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		if !HasTag(AllTags(), m[1]) {
+			t.Errorf("docs/NOTICE_TAGS.md has a table row for %q, which is not in the taxonomy", m[1])
 		}
 	}
 }

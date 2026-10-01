@@ -87,7 +87,9 @@
     // everything, "system.pow": false only the proof-of-work flow. An absent
     // key means shown, so a notice kind you have not heard of stays visible.
     // Critical warnings (chain/fork, send guards, connection loss) always show.
-    // /notify toggles these at runtime.
+    // /notify toggles these at runtime; /notify with no argument prints this
+    // same tree with each row's effective state. Every tag is listed in
+    // docs/NOTICE_TAGS.md.
     "notify": {},
     // Hides the "solving PoW" notice for tiers below this.
     "powMinTier": 1
