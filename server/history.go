@@ -272,22 +272,11 @@ func (h *Hub) BroadcastDate(text, day string, sender *websocket.Conn) {
 	h.broadcastSystem(text, []string{wire.TagDate}, day, sender)
 }
 
-// serverLocation is the timezone a notice is stamped in. Production always
-// resolves a location from config, but a zero Timezone would panic Time.In,
-// so fall back to UTC rather than trust the caller.
-func serverLocation() *time.Location {
-	if loc := Cfg.Static.Timezone; loc != nil {
-		return loc
-	}
-	return time.UTC
-}
-
 // noticeWire builds one unchained system line. leaves names the tag leaves
 // rather than the finished list, so every producer publishes the same
 // root-to-leaf chain and none of them can emit a partial chain that would
 // escape a mute on one of its parents.
 func noticeWire(now time.Time, text string, leaves ...string) WireMessage {
-	now = now.In(serverLocation())
 	return WireMessage{
 		Type: "system",
 		Time: now.Format("15:04"),
@@ -298,7 +287,7 @@ func noticeWire(now time.Time, text string, leaves ...string) WireMessage {
 // broadcastSystem stores and broadcasts one unchained system line. day is
 // the machine date a date banner announces, empty for every other notice.
 func (h *Hub) broadcastSystem(text string, leaves []string, day string, sender *websocket.Conn) {
-	now := time.Now().In(serverLocation())
+	now := time.Now().In(Cfg.Static.Timezone)
 	// Seq is assigned under Chain.Mu, and the disk enqueue happens under
 	// the same lock, so persisted order always matches seq order.
 	h.chain.Mu.Lock()
@@ -319,7 +308,7 @@ func (h *Hub) broadcastSystem(text string, leaves []string, day string, sender *
 // chat. No producers yet; the route exists so management evidence never
 // rides the notice path by mistake.
 func (h *Hub) BroadcastAudit(text string, sender *websocket.Conn, serverPub string) {
-	now := time.Now().In(serverLocation())
+	now := time.Now().In(Cfg.Static.Timezone)
 	h.BroadcastMu.Lock()
 	defer h.BroadcastMu.Unlock()
 	_, data := h.chain.linkAndStore(WireMessage{

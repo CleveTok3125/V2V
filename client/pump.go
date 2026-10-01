@@ -9,7 +9,6 @@ import (
 
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/trip"
-	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // Session read pump and async verify worker (moved from main).
@@ -27,23 +26,30 @@ const greetingGrace = 400 * time.Millisecond
 // flushDateBannerLocked prints a stashed date banner to TabSystem
 // before the block that follows it. Caller must hold s.Display.DisplayMu.
 func (s *Session) flushDateBannerLocked() {
+	if s.Pending.PendingDateBanner != "" {
+		text := s.Pending.PendingDateBanner
+		s.Pending.PendingDateBanner = ""
+		// A raw line carries no sys_date, so there is nothing to dedup
+		// on and the banner simply prints.
+		s.emitDateBannerLocked("", text)
+	}
 	if s.Pending.PendingDateBannerWire != nil {
 		msg := s.Pending.PendingDateBannerWire
 		s.Pending.PendingDateBannerWire = nil
-		if s.showDateBannerLocked(msg.SysDate) {
+		if s.showDateBanner(msg.SysDate) {
 			s.renderChatBlock(*msg)
 		}
 	}
 }
 
-// showDateBannerLocked records the day a banner announces and reports whether it
+// showDateBanner records the day a banner announces and reports whether it
 // is worth drawing. A server that restarts re-announces the current day,
 // which would otherwise print a second identical banner right after the
 // replay carried one. The comparison is on sys_date, the machine value the
 // server stamps, so reformatting the banner text cannot defeat it. A banner
 // with no sys_date has nothing to compare, so it always prints and nothing
 // is recorded.
-func (s *Session) showDateBannerLocked(day string) bool {
+func (s *Session) showDateBanner(day string) bool {
 	if day == "" {
 		return true
 	}
@@ -54,14 +60,15 @@ func (s *Session) showDateBannerLocked(day string) bool {
 	return true
 }
 
-// emitRawLineLocked prints a frame that is not a wire. Since notices are
-// tagged, what still arrives raw is a replay marker or a line from a peer
-// that predates tagging; the marker branches above handle the first, and
-// the second is undiagnosable without reading its text, so it lands in
-// TabChat ungated rather than being classified by wording.
-// Caller must hold DisplayMu.
-func (s *Session) emitRawLineLocked(line string) {
-	s.emitTabLive(true, TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
+// emitDateBannerLocked prints one date banner unless it repeats the
+// previous one: a server may announce the current date on connect right
+// after the replay already carried it, and two identical banners read
+// as noise. Caller must hold DisplayMu.
+func (s *Session) emitDateBannerLocked(day, text string) {
+	if text == "" || !s.showDateBanner(day) {
+		return
+	}
+	s.emitTabLive(s.notifyKindAllowed(NotifyKindDate), TabSystem, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(text)))
 }
 
 // trackReplayWindow updates the replay window flags for one boundary
@@ -86,6 +93,7 @@ func (s *Session) trackReplayWindow(line string, start bool) {
 	s.flushDateBannerLocked()
 	s.Chain.InOlder = false
 	s.Chain.InRecover = false
+	s.Pending.PendingDateBanner = ""
 	s.Pending.PendingDateBannerWire = nil
 	s.Chain.InSync = false
 }
@@ -112,7 +120,7 @@ func (s *Session) handleHistoryInfo(info HistoryInfo) {
 	s.Chain.LoadMaxSeq = info.MaxSeq
 	// Announce the sync as a local line so a slow/large load does not
 	// look like a hang.
-	s.emitLocalFeedbackTags(wire.WithTags(wire.TagHistory), "| [Local]: Đang tải lịch sử...\n")
+	s.emitLocalFeedbackKind(NotifyKindHistory, "| [Local]: Đang tải lịch sử...\n")
 	// after_seq is exclusive: to load the last `target` lines ending at
 	// MaxSeq, start just below MaxSeq-target+1.
 	after := uint64(0)
@@ -268,12 +276,12 @@ func (s *Session) runPump() {
 		s.Display.ShowJoinMu.RUnlock()
 
 		// Try to handle structured WireMessage JSON first (for new protocol)
-		var chatWire WireMessage
-		if err := json.Unmarshal(msg, &chatWire); err == nil && chatWire.Type == "chat" {
+		var wire WireMessage
+		if err := json.Unmarshal(msg, &wire); err == nil && wire.Type == "chat" {
 			s.Display.DisplayMu.Lock()
-			if rendered := s.verifyReplayWire(chatWire, true); !rendered {
+			if rendered := s.verifyReplayWire(wire, true); !rendered {
 				s.flushDateBannerLocked()
-				s.renderChatBlock(chatWire)
+				s.renderChatBlock(wire)
 			}
 			s.Display.DisplayMu.Unlock()
 			s.refreshCoalesced()
@@ -283,13 +291,13 @@ func (s *Session) runPump() {
 		if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {
 			s.Display.DisplayMu.Lock()
 			rendered := s.verifyReplayWire(sysWire, false)
-			if !rendered && !isShowingJoin && wire.HasTag(sysWire.Tags, wire.TagDate) {
+			if !rendered && !isShowingJoin && isDateBanner(sysWire) {
 				s.Pending.PendingDateBannerWire = &sysWire
 				s.Display.DisplayMu.Unlock()
 				s.refreshCoalesced()
 				continue
 			}
-			if !rendered && !isShowingJoin && wire.HasAnyTag(sysWire.Tags, wire.TagJoin, wire.TagLeave) {
+			if !rendered && !isShowingJoin && isJoinLeave(sysWire) {
 				s.Display.DisplayMu.Unlock()
 				s.refreshCoalesced()
 				continue
@@ -339,12 +347,12 @@ func (s *Session) runPump() {
 			if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
 				s.Display.DisplayMu.Lock()
 				rendered := s.verifyReplayWire(wl, wl.Type == "chat")
-				if !rendered && wl.Type == "system" && !isShowingJoin && wire.HasTag(wl.Tags, wire.TagDate) {
+				if !rendered && wl.Type == "system" && !isShowingJoin && isDateBanner(wl) {
 					s.Pending.PendingDateBannerWire = &wl
 					s.Display.DisplayMu.Unlock()
 					continue
 				}
-				if !rendered && wl.Type == "system" && !isShowingJoin && wire.HasAnyTag(wl.Tags, wire.TagJoin, wire.TagLeave) {
+				if !rendered && wl.Type == "system" && !isShowingJoin && isJoinLeave(wl) {
 					s.Display.DisplayMu.Unlock()
 					continue
 				}
@@ -353,6 +361,13 @@ func (s *Session) runPump() {
 					s.renderChatBlock(wl)
 				}
 				s.Display.DisplayMu.Unlock()
+				continue
+			}
+			if !isShowingJoin && isDateBannerLine(line) {
+				s.Pending.PendingDateBanner = line
+				continue
+			}
+			if !isShowingJoin && isJoinLeaveSystemLine(line) {
 				continue
 			}
 			if boundary, start := parseHistoryBoundary(line); boundary {
@@ -376,7 +391,7 @@ func (s *Session) runPump() {
 				s.Display.DisplayMu.Unlock()
 				continue
 			}
-			if !isShowingJoin && s.Pending.PendingDateBannerWire != nil {
+			if !isShowingJoin && (s.Pending.PendingDateBanner != "" || s.Pending.PendingDateBannerWire != nil) {
 				s.Display.DisplayMu.Lock()
 				s.flushDateBannerLocked()
 				s.Display.DisplayMu.Unlock()
@@ -396,7 +411,8 @@ func (s *Session) runPump() {
 				}
 			}
 			s.Display.DisplayMu.Lock()
-			s.emitRawLineLocked(line)
+			kind := notifyKindForLine(line)
+			s.emitTabLive(kind == "" || s.notifyKindAllowed(kind), classifyTab(line), fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
 			s.Display.DisplayMu.Unlock()
 		}
 		s.refreshCoalesced()

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/CleveTok3125/V2V/internal/wire"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -121,13 +120,13 @@ func matchPendingIndex(pending []pendingMsg, tmpID uint64, replyTo uint64, text,
 // pendingEcho holds a server echo of our own message that arrived before
 // its placeholder was tracked (local servers echo in sub-milliseconds).
 type pendingEcho struct {
-	msg WireMessage
-	at  time.Time
+	wire WireMessage
+	at   time.Time
 }
 
 // stashEcho buffers an early echo, bounding the buffer.
-func stashEcho(stash []pendingEcho, msg WireMessage, capN int) []pendingEcho {
-	stash = append(stash, pendingEcho{msg: msg, at: time.Now()})
+func stashEcho(stash []pendingEcho, wire WireMessage, capN int) []pendingEcho {
+	stash = append(stash, pendingEcho{wire: wire, at: time.Now()})
 	for len(stash) > capN {
 		stash = stash[1:]
 	}
@@ -138,8 +137,8 @@ func stashEcho(stash []pendingEcho, msg WireMessage, capN int) []pendingEcho {
 // tmp_id, if any.
 func takeStashedEcho(stash []pendingEcho, tmpID uint64) ([]pendingEcho, WireMessage, bool) {
 	for i, e := range stash {
-		if e.msg.TmpID == tmpID {
-			return append(stash[:i], stash[i+1:]...), e.msg, true
+		if e.wire.TmpID == tmpID {
+			return append(stash[:i], stash[i+1:]...), e.wire, true
 		}
 	}
 	return stash, WireMessage{}, false
@@ -180,7 +179,7 @@ func reapStaleEchoes(stash []pendingEcho, maxAge time.Duration) (kept []pendingE
 	now := time.Now()
 	for _, e := range stash {
 		if now.Sub(e.at) > maxAge {
-			stale = append(stale, e.msg)
+			stale = append(stale, e.wire)
 			continue
 		}
 		kept = append(kept, e)
@@ -425,14 +424,14 @@ func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) st
 // uses attribute-off codes (never 0m) so the pending grey wrapper
 // spanning the whole line is never reset mid-line. Falls back to
 // formatQuote when the caller only has text.
-func formatQuoteRich(msg WireMessage, pending bool, maxRunes int) string {
+func formatQuoteRich(wire WireMessage, pending bool, maxRunes int) string {
 	mark := ""
-	if err := verifyWireContent(msg); err != nil {
+	if err := verifyWireContent(wire); err != nil {
 		mark = " \x1b[91m✗\x1b[39m"
 	}
 	line := fmt.Sprintf("|   ┌─  ↩ #%d | %s %s: %s%s",
-		msg.ChainHeight, filter.SanitizeSingleLine(msg.Time), filter.SanitizeSingleLine(msg.DisplayName),
-		quoteFirstLine(msg.Text, maxRunes), mark)
+		wire.ChainHeight, filter.SanitizeSingleLine(wire.Time), filter.SanitizeSingleLine(wire.DisplayName),
+		quoteFirstLine(wire.Text, maxRunes), mark)
 	if pending {
 		return "\x1b[90m" + line + " ⏳\x1b[0m"
 	}
@@ -461,8 +460,8 @@ func quoteFirstLine(s string, maxRunes int) string {
 // notices (Type system: date, join/leave) stay chained and verified but
 // render none: stamping markers with IDs reads silly and nobody
 // references them. Legacy lines without chain fields render none either.
-func wantsMeta(msg WireMessage, withMeta bool) bool {
-	if !withMeta || msg.Type == "system" || msg.ChainHash == "" {
+func wantsMeta(wire WireMessage, withMeta bool) bool {
+	if !withMeta || wire.Type == "system" || wire.ChainHash == "" {
 		return false
 	}
 	return true
@@ -484,14 +483,14 @@ func newWireIndex(capN int) *wireIndex {
 }
 
 // put indexes wires carrying a chain height; legacy lines are skipped.
-func (x *wireIndex) put(msg WireMessage) {
-	if msg.ChainHeight == 0 {
+func (x *wireIndex) put(wire WireMessage) {
+	if wire.ChainHeight == 0 {
 		return
 	}
-	if _, ok := x.items[msg.ChainHeight]; !ok {
-		x.order = append(x.order, msg.ChainHeight)
+	if _, ok := x.items[wire.ChainHeight]; !ok {
+		x.order = append(x.order, wire.ChainHeight)
 	}
-	x.items[msg.ChainHeight] = msg
+	x.items[wire.ChainHeight] = wire
 	for len(x.order) > x.cap {
 		delete(x.items, x.order[0])
 		x.order = x.order[1:]
@@ -499,8 +498,8 @@ func (x *wireIndex) put(msg WireMessage) {
 }
 
 func (x *wireIndex) get(height uint64) (WireMessage, bool) {
-	found, ok := x.items[height]
-	return found, ok
+	wire, ok := x.items[height]
+	return wire, ok
 }
 
 // oldest returns the smallest indexed height (the oldest wire held in
@@ -529,31 +528,31 @@ func (x *wireIndex) oldest() (uint64, bool) {
 // Layout is one field per line with a fixed label width, so every value
 // starts at the same column; trip inputs carry an explicit trip prefix
 // to never collide with chain-level labels.
-func formatInfoBlock(msg WireMessage) []string {
+func formatInfoBlock(wire WireMessage) []string {
 	row := func(label, value string) string {
 		return fmt.Sprintf("|   %-13s %s\n", label, value)
 	}
-	out := []string{fmt.Sprintf("| [Local] #%d — chi tiết metadata:\n", msg.ChainHeight)}
-	out = append(out, row("height:", strconv.FormatUint(msg.ChainHeight, 10)))
-	out = append(out, row("tmp_id:", strconv.FormatUint(msg.TmpID, 10)))
-	out = append(out, row("reply_to:", strconv.FormatUint(msg.ReplyTo, 10)))
-	out = append(out, row("hash:", hexField(msg.ChainHash)))
-	out = append(out, row("prev:", hexField(msg.ChainPrev)))
+	out := []string{fmt.Sprintf("| [Local] #%d — chi tiết metadata:\n", wire.ChainHeight)}
+	out = append(out, row("height:", strconv.FormatUint(wire.ChainHeight, 10)))
+	out = append(out, row("tmp_id:", strconv.FormatUint(wire.TmpID, 10)))
+	out = append(out, row("reply_to:", strconv.FormatUint(wire.ReplyTo, 10)))
+	out = append(out, row("hash:", hexField(wire.ChainHash)))
+	out = append(out, row("prev:", hexField(wire.ChainPrev)))
 	// Records stored before sent_at existed carry no stamp; say so
 	// instead of printing a blank row.
-	sentAt := filter.SanitizeSingleLine(msg.SentAt)
+	sentAt := filter.SanitizeSingleLine(wire.SentAt)
 	if sentAt == "" {
 		sentAt = "(không)"
 	}
 	out = append(out, row("sent_at:", sentAt))
-	out = append(out, row("from:", filter.SanitizeSingleLine(msg.DisplayName)))
-	if msg.Trip != nil {
-		tm := msg.Trip
+	out = append(out, row("from:", filter.SanitizeSingleLine(wire.DisplayName)))
+	if wire.Trip != nil {
+		tm := wire.Trip
 		verdict := "✗"
 		detail := ""
 		if _, err := trip.Verify(trip.VerifyParams{
-			Text:        msg.Text,
-			DisplayName: msg.DisplayName,
+			Text:        wire.Text,
+			DisplayName: wire.DisplayName,
 			ServerPub:   tm.ServerPub,
 			PubHex:      tm.Pub,
 			Seq:         tm.Seq,
@@ -576,21 +575,21 @@ func formatInfoBlock(msg WireMessage) []string {
 		out = append(out, row("trip.prev:", hexField(tm.Prev)))
 		out = append(out, row("trip.sig:", hexField(tm.Sig)))
 		hashMark := "✗"
-		if h := sha256.Sum256([]byte(msg.Text)); hex.EncodeToString(h[:]) == hexField(tm.MsgHash) {
+		if h := sha256.Sum256([]byte(wire.Text)); hex.EncodeToString(h[:]) == hexField(tm.MsgHash) {
 			hashMark = "✓"
 		}
 		out = append(out, row("trip.hash:", hexField(tm.MsgHash)+" "+hashMark))
 		out = append(out, row("trip.srv:", hexField(tm.ServerPub)))
-		out = append(out, row("trip.payload:", fmt.Sprintf("%x", tripPayloadBytes(msg, tm))))
+		out = append(out, row("trip.payload:", fmt.Sprintf("%x", tripPayloadBytes(wire, tm))))
 	} else {
 		out = append(out, row("trip:", "(không)"))
 	}
-	if err := verifyWireContent(msg); err == nil {
+	if err := verifyWireContent(wire); err == nil {
 		out = append(out, row("chain:", "khớp ✓"))
 	} else {
 		out = append(out, row("chain:", fmt.Sprintf("lệch ✗ (%s)", filter.SanitizeSingleLine(err.Error()))))
 	}
-	out = append(out, row("raw:", rawOneLine(msg.Text)))
+	out = append(out, row("raw:", rawOneLine(wire.Text)))
 	return out
 }
 
@@ -623,7 +622,7 @@ func rawOneLine(s string) string {
 // (same normalization, same field order), so /info shows everything
 // needed to re-verify by hand with any ed25519 tool. Nil when the stored
 // hex does not decode — the verdict line already reports that case.
-func tripPayloadBytes(msg WireMessage, tm *TripMeta) []byte {
+func tripPayloadBytes(wire WireMessage, tm *TripMeta) []byte {
 	lower := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 	pub, err1 := hex.DecodeString(lower(tm.Pub))
 	prev, err2 := hex.DecodeString(lower(tm.Prev))
@@ -631,7 +630,7 @@ func tripPayloadBytes(msg WireMessage, tm *TripMeta) []byte {
 	if err1 != nil || err2 != nil || err3 != nil {
 		return nil
 	}
-	return tripcolor.CanonicalPayload(lower(tm.ServerPub), tm.Seq, prev, msgHash, pub, msg.DisplayName, tm.TmpID, tm.ReplyTo)
+	return tripcolor.CanonicalPayload(lower(tm.ServerPub), tm.Seq, prev, msgHash, pub, wire.DisplayName, tm.TmpID, tm.ReplyTo)
 }
 
 // shortBadge derives the visible badge from a pubkey hex, tolerating junk.
@@ -646,8 +645,8 @@ func shortBadge(pubHex string) string {
 // quotable reports whether a wire may be quoted or mentioned by ID:
 // real chat messages only, never server markers (date/join) or legacy
 // lines without a chain height.
-func quotable(msg WireMessage) bool {
-	return msg.Type == "chat" && msg.ChainHeight > 0
+func quotable(wire WireMessage) bool {
+	return wire.Type == "chat" && wire.ChainHeight > 0
 }
 
 // chainTipFile derives the persisted-tip path next to the readline history.
@@ -709,20 +708,20 @@ func saveChainTip(path string, tip [32]byte, height uint64, serverPub string) er
 // It returns the new tip or an error describing the break. Encoding
 // dispatches on chain_ver: v2 covers the reply target, v1 (absent) is the
 // pre-reply encoding that old records keep verifying against.
-func verifyWireLink(msg WireMessage, prev [32]byte) ([32]byte, error) {
+func verifyWireLink(wire WireMessage, prev [32]byte) ([32]byte, error) {
 	var zero [32]byte
-	gotPrev, ok := chain.ParseHex64(msg.ChainPrev)
+	gotPrev, ok := chain.ParseHex64(wire.ChainPrev)
 	if !ok {
 		return zero, errChainLink("malformed chain_prev")
 	}
 	if gotPrev != prev {
 		return zero, errPrevMismatch
 	}
-	want, ok := chain.ParseHex64(msg.ChainHash)
+	want, ok := chain.ParseHex64(wire.ChainHash)
 	if !ok {
 		return zero, errChainLink("malformed chain_hash")
 	}
-	if err := verifyWireContent(msg); err != nil {
+	if err := verifyWireContent(wire); err != nil {
 		return zero, err
 	}
 	return want, nil
@@ -731,16 +730,16 @@ func verifyWireLink(msg WireMessage, prev [32]byte) ([32]byte, error) {
 // verifyWireContent recomputes a wire link from its own fields, without
 // any tip context: it proves the content is intact but says nothing about
 // position in the log (that needs the running tip in checkChainLink).
-func verifyWireContent(msg WireMessage) error {
-	want, ok := chain.ParseHex64(msg.ChainHash)
+func verifyWireContent(wire WireMessage) error {
+	want, ok := chain.ParseHex64(wire.ChainHash)
 	if !ok {
 		return errChainLink("malformed chain_hash")
 	}
-	prev, ok := chain.ParseHex64(msg.ChainPrev)
+	prev, ok := chain.ParseHex64(wire.ChainPrev)
 	if !ok {
 		return errChainLink("malformed chain_prev")
 	}
-	if !chain.VerifyWire(prev, msg, want) {
+	if !chain.VerifyWire(prev, wire, want) {
 		return errChainLink("hash does not match content")
 	}
 	return nil
@@ -816,17 +815,17 @@ func (s *Session) initChainState() {
 // warnings. It reports whether a recovery window already rendered the
 // wire, in which case the caller must not render it again. Caller must
 // hold DisplayMu.
-func (s *Session) verifyReplayWire(msg WireMessage, allowStash bool) bool {
+func (s *Session) verifyReplayWire(wire WireMessage, allowStash bool) bool {
 	s.Chain.RecoverRendered = false
 	if s.Chain.InOlder {
 		return false
 	}
 	if s.Chain.InRecover {
-		s.checkRecoverWire(msg)
+		s.checkRecoverWire(wire)
 		return s.Chain.RecoverRendered
 	}
-	s.consumeEchoLocked(msg, allowStash && !s.Chain.InSync)
-	s.checkChainLink(msg)
+	s.consumeEchoLocked(wire, allowStash && !s.Chain.InSync)
+	s.checkChainLink(wire)
 	return false
 }
 
@@ -965,24 +964,24 @@ func (s *Session) maybeRequestRecovery(from, to, anchorHeight uint64, anchorHash
 // height is live traffic (the window closes), and anything else is
 // skipped. RecoverRendered is set so the pump never draws it twice.
 // Caller must hold DisplayMu.
-func (s *Session) checkRecoverWire(msg WireMessage) {
+func (s *Session) checkRecoverWire(wire WireMessage) {
 	p := s.Chain.RecoverPending
-	if p == nil || msg.ChainHash == "" || msg.ChainHeight > p.MaxMissing {
+	if p == nil || wire.ChainHash == "" || wire.ChainHeight > p.MaxMissing {
 		s.Chain.InRecover = false
-		s.consumeEchoLocked(msg, false)
-		s.checkChainLink(msg)
+		s.consumeEchoLocked(wire, false)
+		s.checkChainLink(wire)
 		return
 	}
 	s.Chain.RecoverRendered = true
-	if !p.Missing[msg.ChainHeight] {
+	if !p.Missing[wire.ChainHeight] {
 		return
 	}
-	prev, ok := p.Known[msg.ChainHeight-1]
+	prev, ok := p.Known[wire.ChainHeight-1]
 	if !ok {
 		p.Failed = true
 		return
 	}
-	h, err := verifyWireLink(msg, prev)
+	h, err := verifyWireLink(wire, prev)
 	if err != nil {
 		// Not rendered or indexed: it does not continue its anchor, so
 		// drawing it would present unverified content as recovered.
@@ -990,15 +989,15 @@ func (s *Session) checkRecoverWire(msg WireMessage) {
 		return
 	}
 	if s.Display.CatchupHold {
-		s.renderRecoveredInPlace(msg)
+		s.renderRecoveredInPlace(wire)
 	} else {
-		s.renderChatBlock(msg)
+		s.renderChatBlock(wire)
 	}
-	delete(p.Missing, msg.ChainHeight)
-	p.Known[msg.ChainHeight] = h
-	if p.Live[msg.ChainHeight] {
+	delete(p.Missing, wire.ChainHeight)
+	p.Known[wire.ChainHeight] = h
+	if p.Live[wire.ChainHeight] {
 		s.Chain.LiveRecovered++
-		delete(p.Live, msg.ChainHeight)
+		delete(p.Live, wire.ChainHeight)
 	}
 	p.Received++
 }
@@ -1040,22 +1039,22 @@ func insertStrings(lines []string, idx int, block []string) []string {
 // and the chat buffer, so a merged catch-up prints in height order
 // instead of appending refilled lines at the bottom. Caller must hold
 // DisplayMu.
-func (s *Session) renderRecoveredInPlace(msg WireMessage) {
+func (s *Session) renderRecoveredInPlace(wire WireMessage) {
 	beforeHold := len(s.Display.HoldLines)
 	beforeChat := len(s.Display.TabChat.lines)
-	s.renderChatBlock(msg)
+	s.renderChatBlock(wire)
 	blockHold := append([]string{}, s.Display.HoldLines[beforeHold:]...)
 	blockChat := append([]string{}, s.Display.TabChat.lines[beforeChat:]...)
 	s.Display.HoldLines = s.Display.HoldLines[:beforeHold]
 	s.Display.TabChat.spliceOut(beforeChat, beforeChat+len(blockChat))
 
-	holdIdx := metaHeightIndex(s.Display.HoldLines, msg.ChainHeight-1)
+	holdIdx := metaHeightIndex(s.Display.HoldLines, wire.ChainHeight-1)
 	if holdIdx < 0 {
 		holdIdx = len(s.Display.HoldLines)
 	}
 	s.Display.HoldLines = insertStrings(s.Display.HoldLines, holdIdx, blockHold)
 
-	chatIdx := metaHeightIndex(s.Display.TabChat.lines, msg.ChainHeight-1)
+	chatIdx := metaHeightIndex(s.Display.TabChat.lines, wire.ChainHeight-1)
 	if chatIdx < 0 {
 		chatIdx = len(s.Display.TabChat.lines)
 	}
@@ -1078,7 +1077,7 @@ func (s *Session) finishRecovery() {
 	}
 	if len(p.Missing) == 0 && !p.Failed {
 		s.Chain.RecoverPending = nil
-		s.emitLocalFeedbackTags(wire.WithTags(wire.TagHistory), fmt.Sprintf("| [Local]: ↩ Đã bù %d tin bị lỡ.\n", p.Received))
+		s.emitLocalFeedbackKind(NotifyKindHistory, fmt.Sprintf("| [Local]: ↩ Đã bù %d tin bị lỡ.\n", p.Received))
 		s.releaseCatchupLocked()
 		return
 	}
@@ -1111,7 +1110,7 @@ func (s *Session) abandonRecoveryLocked(p *recoverWindow) {
 		return
 	}
 	s.Chain.RecoverPending = nil
-	s.emitLocalFeedbackTags(wire.WithTags(wire.TagHistory), fmt.Sprintf("| [Local]: ↩ Không bù đủ tin (nhận %d/%d).\n", p.Received, p.Received+len(p.Missing)))
+	s.emitLocalFeedbackKind(NotifyKindHistory, fmt.Sprintf("| [Local]: ↩ Không bù đủ tin (nhận %d/%d).\n", p.Received, p.Received+len(p.Missing)))
 	s.releaseCatchupLocked()
 }
 
@@ -1157,41 +1156,41 @@ type echoConsume struct {
 // planEchoConsume runs the queue work under PendingMu (nested under
 // the caller's DisplayMu per the order) and returns the actions for
 // the caller to emit/erase on DisplayMu alone.
-func (s *Session) planEchoConsume(msg WireMessage, allowStash bool) echoConsume {
+func (s *Session) planEchoConsume(wire WireMessage, allowStash bool) echoConsume {
 	s.Pending.Mu.Lock()
 	defer s.Pending.Mu.Unlock()
 	var out echoConsume
 	s.Pending.PendingEchoes, out.stale = reapStaleEchoes(s.Pending.PendingEchoes, 10*time.Second)
-	if msg.DisplayName != s.Username || len(s.Pending.PendingPlaceholders) == 0 {
+	if wire.DisplayName != s.Username || len(s.Pending.PendingPlaceholders) == 0 {
 		// Stash only unseen IDs: the pre-placeholder race needs it,
 		// but a duplicate of a consumed message must drop instead of
 		// re-entering the stash.
-		if allowStash && msg.DisplayName == s.Username && msg.TmpID != 0 && !seenTmpID(s.Pending.SeenTmpIDs, msg.TmpID) {
-			s.Pending.PendingEchoes = stashEcho(s.Pending.PendingEchoes, msg, 16)
+		if allowStash && wire.DisplayName == s.Username && wire.TmpID != 0 && !seenTmpID(s.Pending.SeenTmpIDs, wire.TmpID) {
+			s.Pending.PendingEchoes = stashEcho(s.Pending.PendingEchoes, wire, 16)
 		}
 		return out
 	}
-	idx := matchPendingIndex(s.Pending.PendingPlaceholders, msg.TmpID, msg.ReplyTo, msg.Text, s.Username, msg.DisplayName)
+	idx := matchPendingIndex(s.Pending.PendingPlaceholders, wire.TmpID, wire.ReplyTo, wire.Text, s.Username, wire.DisplayName)
 	if idx == -1 {
 		// No placeholder matches. A tmp_id this session already
 		// consumed is a late or duplicate copy: drop it, otherwise
 		// every duplicate would stash and age into a false "ID
 		// altered" warning burst. An unseen ID may be a server
 		// rewrite, so it still stashes and warns on staleness.
-		if msg.TmpID != 0 && allowStash && !seenTmpID(s.Pending.SeenTmpIDs, msg.TmpID) {
-			s.Pending.PendingEchoes = stashEcho(s.Pending.PendingEchoes, msg, 16)
+		if wire.TmpID != 0 && allowStash && !seenTmpID(s.Pending.SeenTmpIDs, wire.TmpID) {
+			s.Pending.PendingEchoes = stashEcho(s.Pending.PendingEchoes, wire, 16)
 		}
 		return out
 	}
 	out.matched = true
 	out.pm = s.Pending.PendingPlaceholders[idx]
 	s.Pending.PendingPlaceholders = append(s.Pending.PendingPlaceholders[:idx], s.Pending.PendingPlaceholders[idx+1:]...)
-	s.Pending.SeenTmpIDs = noteConsumedTmpID(s.Pending.SeenTmpIDs, msg.TmpID)
+	s.Pending.SeenTmpIDs = noteConsumedTmpID(s.Pending.SeenTmpIDs, wire.TmpID)
 	return out
 }
 
-func (s *Session) consumeEchoLocked(msg WireMessage, allowStash bool) {
-	act := s.planEchoConsume(msg, allowStash)
+func (s *Session) consumeEchoLocked(wire WireMessage, allowStash bool) {
+	act := s.planEchoConsume(wire, allowStash)
 	for _, w := range act.stale {
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Echo không khớp tin đang chờ (tmp_id=%d) — ID có thể đã bị sửa.\n", w.TmpID))
 	}
@@ -1255,28 +1254,28 @@ func (s *Session) warnChainGap(from, to uint64) {
 	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Bỏ lỡ %d tin (#%d–%d) do kết nối chậm — đã nối lại chuỗi.\n", to-from-1, from+1, to-1))
 }
 
-func (s *Session) checkChainLink(msg WireMessage) {
-	if msg.ChainHash == "" {
+func (s *Session) checkChainLink(wire WireMessage) {
+	if wire.ChainHash == "" {
 		return
 	}
 	if s.Chain.InSync {
-		if h, ok := chain.ParseHex64(msg.ChainHash); ok {
-			s.Chain.SyncHeights[msg.ChainHeight] = h
+		if h, ok := chain.ParseHex64(wire.ChainHash); ok {
+			s.Chain.SyncHeights[wire.ChainHeight] = h
 		}
 	}
-	// A msg at or below the running tip is a duplicate: a page retry
+	// A wire at or below the running tip is a duplicate: a page retry
 	// re-sending an already-verified line, or a replayed echo. It cannot
 	// continue the tip, and verifying it would warn falsely.
-	if s.Chain.ChainHaveTip && msg.ChainHeight <= s.Chain.ChainHeight {
+	if s.Chain.ChainHaveTip && wire.ChainHeight <= s.Chain.ChainHeight {
 		return
 	}
 	if s.Chain.Loading && s.Chain.InSync {
 		s.Chain.LoadLoaded++
 	}
-	newTip, err := verifyWireLink(msg, s.Chain.ChainTip)
+	newTip, err := verifyWireLink(wire, s.Chain.ChainTip)
 	if err != nil && !s.Chain.ChainHaveTip {
 		// No tip yet: adopt the message's own prev, content-check only.
-		prev, ok := chain.ParseHex64(msg.ChainPrev)
+		prev, ok := chain.ParseHex64(wire.ChainPrev)
 		if !ok {
 			if !s.Chain.ChainWarned {
 				s.Chain.ChainWarned = true
@@ -1284,7 +1283,7 @@ func (s *Session) checkChainLink(msg WireMessage) {
 			}
 			return
 		}
-		newTip, err = verifyWireLink(msg, prev)
+		newTip, err = verifyWireLink(wire, prev)
 	}
 	if err != nil {
 		// Forward height jump: the in-between frames were dropped in
@@ -1293,31 +1292,31 @@ func (s *Session) checkChainLink(msg WireMessage) {
 		// the tamper latch stays free so a later real break warns.
 		// Only when the received hash is well-formed: a malformed hash
 		// falls through to the tamper warning below.
-		if parsed, ok := chain.ParseHex64(msg.ChainHash); ok &&
-			s.Chain.ChainHaveTip && err == errPrevMismatch && msg.ChainHeight > s.Chain.ChainHeight+1 {
+		if parsed, ok := chain.ParseHex64(wire.ChainHash); ok &&
+			s.Chain.ChainHaveTip && err == errPrevMismatch && wire.ChainHeight > s.Chain.ChainHeight+1 {
 			oldH, oldTip := s.Chain.ChainHeight, s.Chain.ChainTip
 			if s.Chain.InSync {
 				// Join replay: drops are settled once from its trailer
 				// (which knows the intended window), so per-gap requests
 				// here would duplicate that work. Just re-anchor.
-			} else if !s.maybeRequestRecovery(oldH+1, msg.ChainHeight-1, oldH, oldTip) {
-				s.warnChainGap(oldH, msg.ChainHeight)
+			} else if !s.maybeRequestRecovery(oldH+1, wire.ChainHeight-1, oldH, oldTip) {
+				s.warnChainGap(oldH, wire.ChainHeight)
 			}
-			s.noteChainTip(parsed, msg.ChainHeight)
+			s.noteChainTip(parsed, wire.ChainHeight)
 			s.flushChainTip()
 			return
 		}
 		if !s.Chain.ChainWarned {
 			s.Chain.ChainWarned = true
-			s.emitLocalFeedback(fmt.Sprintf("| [Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", msg.ChainHeight, err))
+			s.emitLocalFeedback(fmt.Sprintf("| [Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", wire.ChainHeight, err))
 		}
-		if parsed, ok := chain.ParseHex64(msg.ChainHash); ok {
-			s.noteChainTip(parsed, msg.ChainHeight)
+		if parsed, ok := chain.ParseHex64(wire.ChainHash); ok {
+			s.noteChainTip(parsed, wire.ChainHeight)
 		}
 		s.flushChainTip()
 		return
 	}
-	s.noteChainTip(newTip, msg.ChainHeight)
+	s.noteChainTip(newTip, wire.ChainHeight)
 }
 
 func (s *Session) enqueueVerify(job verifyJob) {

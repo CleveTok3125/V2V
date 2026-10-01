@@ -44,7 +44,7 @@ func (c *ChainService) linkAndStore(wire WireMessage, serverPub string) (WireMes
 	data, _ := json.Marshal(wire)
 	c.appendMessageLocked(string(data))
 	if c.Store != nil {
-		c.Store.EnqueueWire(wire, time.Now().In(serverLocation()))
+		c.Store.EnqueueWire(wire, time.Now().In(Cfg.Static.Timezone))
 	}
 	return wire, data
 }

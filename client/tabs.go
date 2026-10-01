@@ -11,6 +11,18 @@ const (
 	TabSystem = 2
 )
 
+// isGenericSystemLine matches unicast system lines that are not join/leave,
+// date banners or history boundaries (e.g. rate-limit warnings).
+func isGenericSystemLine(line string) bool {
+	t := strings.TrimSpace(line)
+	return strings.Contains(t, "[Hệ thống]:")
+}
+
+// isLocalLine matches lines rendered locally without server round-trip.
+func isLocalLine(line string) bool {
+	return strings.Contains(line, "[Local]:")
+}
+
 // tabLabels lists tabs in order; activeTab holds a 1-based index into it.
 var tabLabels = []string{"1:chat", "2:system"}
 
@@ -37,6 +49,25 @@ func tabBarLine(active int) string {
 	}
 	sb.WriteString("\n")
 	return sb.String()
+}
+
+// classifyTab routes a rendered line to its tab. Chat (WireMessage and trip
+// badge lines) goes to TabChat; system banners, join/leave, history
+// boundaries and local lines go to TabSystem.
+func classifyTab(line string) int {
+	if isTripBadgeLine(line) {
+		return TabChat
+	}
+	// History boundaries delimit the chat history stream, so they belong
+	// to TabChat. Date banners, join/leave, generic system and local lines
+	// go to TabSystem.
+	if isHistoryBoundaryLine(line) {
+		return TabChat
+	}
+	if isJoinLeaveSystemLine(line) || isDateBannerLine(line) || isGenericSystemLine(line) || isLocalLine(line) {
+		return TabSystem
+	}
+	return TabChat
 }
 
 // tabBuffer is a FIFO ring holding raw lines for one tab with dual-limit

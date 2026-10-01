@@ -150,8 +150,8 @@ func TestStashEchoRoundtrip(t *testing.T) {
 
 func TestReapStaleEchoes(t *testing.T) {
 	stash := []pendingEcho{
-		{msg: WireMessage{TmpID: 1}, at: time.Now().Add(-time.Hour)},
-		{msg: WireMessage{TmpID: 2}, at: time.Now()},
+		{wire: WireMessage{TmpID: 1}, at: time.Now().Add(-time.Hour)},
+		{wire: WireMessage{TmpID: 2}, at: time.Now()},
 	}
 	kept, stale := reapStaleEchoes(stash, 10*time.Second)
 	if len(kept) != 1 || len(stale) != 1 || stale[0].TmpID != 1 {
@@ -855,7 +855,7 @@ func TestTrackReplayWindowFooterFlushesBanner(t *testing.T) {
 	defer sess.Display.DisplayMu.Unlock()
 	sess.Pending.PendingDateBannerWire = &banner
 	sess.trackReplayWindow("| --- Kết thúc lịch sử (1/2) ---", false)
-	if sess.Pending.PendingDateBannerWire != nil {
+	if sess.Pending.PendingDateBannerWire != nil || sess.Pending.PendingDateBanner != "" {
 		t.Fatal("footer must clear the stashed banner")
 	}
 	for _, l := range append(sess.Display.TabChat.lines, sess.Display.TabSys.lines...) {

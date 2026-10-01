@@ -263,7 +263,7 @@ func (h *Hub) alertConcurrentIdentity(identityPubHex, newClientIP string) {
 		return
 	}
 	alert, _ := json.Marshal(noticeWire(
-		time.Now(),
+		time.Now().In(Cfg.Static.Timezone),
 		"\x1b[90m[He thong]: Danh tinh cua ban vua duoc dang nhap tu "+newClientIP+".\x1b[0m",
 		wire.TagAuth))
 	select {

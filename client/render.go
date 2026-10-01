@@ -134,18 +134,29 @@ func isTripBadgeLine(line string) bool {
 	return strings.Contains(line, "◆") && strings.Contains(line, "/api/trip/verify")
 }
 
-// tabForWire routes a wire to its tab. A replay marker delimits the chat
-// history stream, so it belongs to TabChat next to the messages it frames;
-// every other system line goes to TabSystem. The type and the tags decide,
-// never the wording.
-func tabForWire(msg WireMessage) int {
-	if msg.Type != "system" {
-		return TabChat
-	}
-	if wire.HasTag(msg.Tags, wire.TagHistory) {
-		return TabChat
-	}
-	return TabSystem
+func isJoinLeaveSystemLine(line string) bool {
+	return strings.Contains(line, "[Hệ thống]:") && (strings.Contains(line, "đã tham gia") || strings.Contains(line, "đã rời"))
+}
+
+func isDateBannerLine(line string) bool {
+	return strings.Contains(line, "--- Ngày ") && strings.Contains(line, " ---")
+}
+
+// isJoinLeave reports whether a system wire is a join/leave notice,
+// decided purely by its tags: the server tags the line at the source, so
+// the client never inspects the wording.
+func isJoinLeave(msg WireMessage) bool {
+	return wire.HasAnyTag(msg.Tags, wire.TagJoin, wire.TagLeave)
+}
+
+// isDateBanner reports whether a system wire is a date banner, same
+// tag-driven rule as isJoinLeave.
+func isDateBanner(msg WireMessage) bool {
+	return wire.HasTag(msg.Tags, wire.TagDate)
+}
+
+func isHistoryBoundaryLine(line string) bool {
+	return strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Lịch sử cũ ---") || isRecoveryHeader(line) || strings.Contains(line, "--- Kết thúc lịch sử")
 }
 
 // isOlderSegmentHeader reports the on-demand segment header. Segment
@@ -355,21 +366,21 @@ func (s *Session) absoluteVerifyURL(urlStr string) string {
 // plus the manual-verify hyperlink (kept, opens the stateless API).
 // av selects verified vs plain rendering; it is part of the render
 // cache key, so toggling /autoverify never serves stale colors.
-func (s *Session) badgeForWire(msg WireMessage, av bool) (colored, urlStr string) {
-	h := sha256.Sum256([]byte(msg.Trip.Pub))
+func (s *Session) badgeForWire(wire WireMessage, av bool) (colored, urlStr string) {
+	h := sha256.Sum256([]byte(wire.Trip.Pub))
 	plain := "◆ " + hex.EncodeToString(h[:])[:8]
 	if av {
 		res, err := trip.Verify(trip.VerifyParams{
-			Text:        msg.Text,
-			DisplayName: msg.DisplayName,
-			ServerPub:   msg.Trip.ServerPub,
-			PubHex:      msg.Trip.Pub,
-			Seq:         msg.Trip.Seq,
-			PrevHex:     msg.Trip.Prev,
-			SigHex:      msg.Trip.Sig,
-			MsgHashHex:  msg.Trip.MsgHash,
-			TmpID:       msg.Trip.TmpID,
-			ReplyTo:     msg.Trip.ReplyTo,
+			Text:        wire.Text,
+			DisplayName: wire.DisplayName,
+			ServerPub:   wire.Trip.ServerPub,
+			PubHex:      wire.Trip.Pub,
+			Seq:         wire.Trip.Seq,
+			PrevHex:     wire.Trip.Prev,
+			SigHex:      wire.Trip.Sig,
+			MsgHashHex:  wire.Trip.MsgHash,
+			TmpID:       wire.Trip.TmpID,
+			ReplyTo:     wire.Trip.ReplyTo,
 		})
 		if err == nil && res != nil {
 			colored = badgeColor(res.Badge) + res.Badge + "\x1b[0m"
@@ -386,23 +397,23 @@ func (s *Session) badgeForWire(msg WireMessage, av bool) (colored, urlStr string
 		// Every server-supplied field is percent-encoded so a crafted
 		// value cannot break out of the OSC8 target.
 		q := url.Values{}
-		q.Set("pub", msg.Trip.Pub)
-		q.Set("seq", strconv.FormatUint(uint64(msg.Trip.Seq), 10))
-		q.Set("prev", msg.Trip.Prev)
-		q.Set("sig", msg.Trip.Sig)
-		q.Set("msg_hash", msg.Trip.MsgHash)
-		q.Set("server_pub", msg.Trip.ServerPub)
-		q.Set("display_name", msg.DisplayName)
-		q.Set("tmp_id", strconv.FormatUint(msg.Trip.TmpID, 10))
-		q.Set("reply_to", strconv.FormatUint(msg.Trip.ReplyTo, 10))
+		q.Set("pub", wire.Trip.Pub)
+		q.Set("seq", strconv.FormatUint(uint64(wire.Trip.Seq), 10))
+		q.Set("prev", wire.Trip.Prev)
+		q.Set("sig", wire.Trip.Sig)
+		q.Set("msg_hash", wire.Trip.MsgHash)
+		q.Set("server_pub", wire.Trip.ServerPub)
+		q.Set("display_name", wire.DisplayName)
+		q.Set("tmp_id", strconv.FormatUint(wire.Trip.TmpID, 10))
+		q.Set("reply_to", strconv.FormatUint(wire.Trip.ReplyTo, 10))
 		// Display-only context (not part of the signed payload): the
 		// chain height and send timestamp let the verify page line its
 		// fields up with /info.
-		if msg.ChainHeight > 0 {
-			q.Set("height", strconv.FormatUint(msg.ChainHeight, 10))
+		if wire.ChainHeight > 0 {
+			q.Set("height", strconv.FormatUint(wire.ChainHeight, 10))
 		}
-		if msg.SentAt != "" {
-			q.Set("sent_at", msg.SentAt)
+		if wire.SentAt != "" {
+			q.Set("sent_at", wire.SentAt)
 		}
 		urlStr = base + "/api/trip/verify?" + q.Encode()
 	}
@@ -445,34 +456,34 @@ func (s *Session) quoteLinesFor(replyTo uint64, pending bool) []string {
 
 // buildChatBlock renders one wire into head + trailing meta strings
 // without emitting. Pure given (wire, av, withMeta); cached by renderChatBlock.
-func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (quote []string, head, meta string, tab int, hasMeta bool) {
+func (s *Session) buildChatBlock(wire WireMessage, av, withMeta bool) (quote []string, head, meta string, tab int, hasMeta bool) {
 	tab = TabChat
-	if msg.Type == "system" {
-		head = fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(msg.Text))
-		return quote, head, "", tabForWire(msg), wantsMeta(msg, withMeta)
+	if wire.Type == "system" {
+		head = fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(wire.Text))
+		return quote, head, "", classifyTab(wire.Text), wantsMeta(wire, withMeta)
 	}
 	mentionOpen, mentionClose := mentionSGR(ClientCfg.MentionColor())
-	head = fmt.Sprintf("| %s %s: %s\n", filter.SanitizeSingleLine(msg.Time), filter.SanitizeSingleLine(msg.DisplayName), renderMentions(renderChatText(msg.Text), s.resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose))
-	if msg.ReplyTo > 0 {
-		quote = s.quoteLinesFor(msg.ReplyTo, false)
+	head = fmt.Sprintf("| %s %s: %s\n", filter.SanitizeSingleLine(wire.Time), filter.SanitizeSingleLine(wire.DisplayName), renderMentions(renderChatText(wire.Text), s.resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose))
+	if wire.ReplyTo > 0 {
+		quote = s.quoteLinesFor(wire.ReplyTo, false)
 	}
-	if !wantsMeta(msg, withMeta) {
+	if !wantsMeta(wire, withMeta) {
 		return quote, head, "", tab, false
 	}
-	meta = metaLineFor(msg.ChainHeight, msg.ChainHash, "")
-	if msg.Trip != nil {
-		colored, urlStr := s.badgeForWire(msg, av)
+	meta = metaLineFor(wire.ChainHeight, wire.ChainHash, "")
+	if wire.Trip != nil {
+		colored, urlStr := s.badgeForWire(wire, av)
 		badge := colored
 		if urlStr != "" {
 			badge = fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", urlStr, colored)
 		}
-		meta = metaLineFor(msg.ChainHeight, msg.ChainHash, badge)
+		meta = metaLineFor(wire.ChainHeight, wire.ChainHash, badge)
 	}
 	return quote, head, fmt.Sprintf("| %s\n", meta), tab, true
 }
 
-func (s *Session) renderChatBlock(msg WireMessage) {
-	s.Chain.WireIdx.put(msg)
+func (s *Session) renderChatBlock(wire WireMessage) {
+	s.Chain.WireIdx.put(wire)
 	s.Verify.AutoVerifyMu.RLock()
 	av := s.Verify.AutoVerify
 	s.Verify.AutoVerifyMu.RUnlock()
@@ -481,15 +492,16 @@ func (s *Session) renderChatBlock(msg WireMessage) {
 	s.Display.ShowMetaMu.RUnlock()
 	// Notify gates live printing of informational system notices; the
 	// lines still land in their tab buffer when muted.
-	live := s.notifyTagsAllowed(notifyTagsForWire(msg))
+	kind := notifyKindForWire(wire)
+	live := kind == "" || s.notifyKindAllowed(kind)
 	emit := func(tab int, line string) { s.emitTabLive(live, tab, line) }
 	// Replay and tab switches re-render the same immutable wires;
 	// the chain hash covers the content, so it is a safe cache key
 	// (verify mode and meta visibility are folded in). Messages with
 	// mentions or quotes bypass the cache: highlight and quote targets
 	// depend on buffer state (eviction), which the key cannot see.
-	if msg.ChainHash != "" && !strings.Contains(msg.Text, "@#") && msg.ReplyTo == 0 {
-		key := strings.ToLower(msg.ChainHash) + "\x00" + msg.Type +
+	if wire.ChainHash != "" && !strings.Contains(wire.Text, "@#") && wire.ReplyTo == 0 {
+		key := strings.ToLower(wire.ChainHash) + "\x00" + wire.Type +
 			"\x00" + map[bool]string{true: "v", false: "p"}[av] +
 			"\x00" + map[bool]string{true: "m", false: "n"}[withMeta]
 		if hit, ok := s.Chain.RenderCache.get(key); ok {
@@ -499,8 +511,8 @@ func (s *Session) renderChatBlock(msg WireMessage) {
 			}
 			return
 		}
-		_, head, meta, tab, hasMeta := s.buildChatBlock(msg, av, withMeta)
-		head = maybeCollapse(head, msg, tab)
+		_, head, meta, tab, hasMeta := s.buildChatBlock(wire, av, withMeta)
+		head = maybeCollapse(head, wire, tab)
 		s.Chain.RenderCache.put(key, renderedBlock{tab: tab, head: head, meta: meta, hasMeta: hasMeta})
 		emit(tab, head)
 		if hasMeta {
@@ -508,8 +520,8 @@ func (s *Session) renderChatBlock(msg WireMessage) {
 		}
 		return
 	}
-	quote, head, meta, tab, hasMeta := s.buildChatBlock(msg, av, withMeta)
-	head = maybeCollapse(head, msg, tab)
+	quote, head, meta, tab, hasMeta := s.buildChatBlock(wire, av, withMeta)
+	head = maybeCollapse(head, wire, tab)
 	for _, q := range quote {
 		emit(tab, q+"\n")
 	}

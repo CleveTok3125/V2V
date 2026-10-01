@@ -1,10 +1,6 @@
 package main
 
-import (
-	"strings"
-
-	"github.com/CleveTok3125/V2V/internal/wire"
-)
+import "strings"
 
 // Notification gates: informational notices can be muted on screen with
 // /notify or the ui.notify.* config, while still landing in the system
@@ -40,33 +36,30 @@ func notifyStateFromConfig() NotifyState {
 	}
 }
 
-// notifyMutedTagsLocked renders the current gates as tag keys, so gating
-// reads the same vocabulary the server publishes. The root key covers every
-// notice, which is what makes the system switch a mute-everything control.
-func (s *Session) notifyMutedTagsLocked() map[string]bool {
-	n := s.Display.Notify
-	return map[string]bool{
-		wire.TagRoot:    !n.System,
-		wire.TagJoin:    !n.Join,
-		wire.TagLeave:   !n.Join,
-		wire.TagDate:    !n.Date,
-		wire.TagPow:     !n.Pow,
-		wire.TagHistory: !n.History,
-	}
-}
-
-// notifyTagsAllowed reports whether a line carrying tags may print live.
-// A line is hidden when any tag it carries, or any ancestor of one, is
-// muted, so switching off a node hides its whole subtree. A line with no
-// tags is always live.
-func (s *Session) notifyTagsAllowed(tags []string) bool {
+// notifyKindAllowed reports whether a notice of the given kind may print
+// live. An unknown kind is always allowed.
+func (s *Session) notifyKindAllowed(kind string) bool {
 	s.Display.NotifyMu.RLock()
 	defer s.Display.NotifyMu.RUnlock()
-	return s.notifyTagsAllowedLocked(tags)
+	return s.notifyKindAllowedLocked(kind)
 }
 
-func (s *Session) notifyTagsAllowedLocked(tags []string) bool {
-	return len(wire.BlockedBy(tags, s.notifyMutedTagsLocked())) == 0
+func (s *Session) notifyKindAllowedLocked(kind string) bool {
+	n := s.Display.Notify
+	switch kind {
+	case NotifyKindPow:
+		return n.Pow
+	case NotifyKindHistory:
+		return n.History
+	case NotifyKindJoin:
+		return n.Join
+	case NotifyKindDate:
+		return n.Date
+	case NotifyKindSystem:
+		return n.System
+	default:
+		return true
+	}
 }
 
 // notifyPowLive reports whether the "solving PoW" notice for a tier
@@ -77,18 +70,37 @@ func (s *Session) notifyPowLive(tier int) bool {
 	return s.Display.Notify.Pow && tier >= s.Display.Notify.PowMinTier
 }
 
-// notifyTagsForWire returns the tags a wire is gated on, or nil for content
-// that is always live. Only system lines are notices; chat is never muted.
-// An untagged system line falls back to the root, so a notice from a peer
-// that predates tagging is still covered by the system switch.
-func notifyTagsForWire(msg WireMessage) []string {
-	if msg.Type != "system" {
-		return nil
+// notifyKindForWire maps a rendered system wire to its notify gate, or
+// "" for always-live content (chat and any non-system wire).
+func notifyKindForWire(wire WireMessage) string {
+	if wire.Type != "system" {
+		return ""
 	}
-	if len(msg.Tags) == 0 {
-		return wire.WithTags(wire.TagRoot)
+	switch {
+	case isJoinLeave(wire):
+		return NotifyKindJoin
+	case isDateBanner(wire):
+		return NotifyKindDate
+	default:
+		return NotifyKindSystem
 	}
-	return msg.Tags
+}
+
+// notifyKindForLine maps a legacy raw line to its notify gate, or "" for
+// always-live content. Only lines that classify into the system tab are
+// gated, so raw legacy chat never gets muted by the system switch.
+func notifyKindForLine(line string) string {
+	if classifyTab(line) != TabSystem {
+		return ""
+	}
+	switch {
+	case isJoinLeaveSystemLine(line):
+		return NotifyKindJoin
+	case isDateBannerLine(line):
+		return NotifyKindDate
+	default:
+		return NotifyKindSystem
+	}
 }
 
 // notifyKindNames lists the toggleable kinds in help order.
