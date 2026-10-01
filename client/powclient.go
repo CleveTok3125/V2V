@@ -210,7 +210,9 @@ func runGateFlow(httpBase, pin string) (string, bool) {
 		fmt.Printf("❌ Từ chối PoW tier %d (vượt cap %d).\n", chal.Tier, maxTier)
 		return "", false
 	}
-	fmt.Printf("🧩 Giải PoW (tier %d)…\n", chal.Tier)
+	if notifyPowWanted(chal.Tier) {
+		fmt.Printf("🧩 Giải PoW (tier %d)…\n", chal.Tier)
+	}
 	nonce, err := solveWithBudget(preset, chal.Salt, maxCostMs)
 	if err != nil {
 		fmt.Printf("❌ %v\n", err)

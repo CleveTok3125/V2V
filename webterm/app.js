@@ -135,14 +135,18 @@ import { gateFetch } from "./pow_bridge.js";
                     if (typeof got[k] === "boolean")
                         opts[k] = got[k];
                 });
+                // powMinTier sits beside notify, not inside it, so it is read
+                // outside the notify guard: a payload that carries the tier but no
+                // notify object would otherwise fall back to 1, which means
+                // "announce every tier".
+                if (typeof got.powMinTier === "number" && got.powMinTier >= 1) {
+                    opts.powMinTier = Math.floor(got.powMinTier);
+                }
                 if (got.notify && typeof got.notify === "object") {
                     NOTIFY_TAGS.forEach(function (k) {
                         if (typeof got.notify[k] === "boolean")
                             opts.notify[k] = got.notify[k];
                     });
-                    if (typeof got.powMinTier === "number" && got.powMinTier >= 1) {
-                        opts.powMinTier = Math.floor(got.powMinTier);
-                    }
                 }
             }
         }
@@ -296,7 +300,17 @@ import { gateFetch } from "./pow_bridge.js";
         var tier = el("opt-powmintier");
         if (tier) {
             tier.addEventListener("change", function () {
-                writeOpt("powMinTier", Math.max(1, Math.floor(Number(this.value) || 1)));
+                // A number input only accepts the locale's numeric syntax, so a
+                // value it could not parse sanitizes to "". Falling back to 1 there
+                // would mean "announce every tier" — the opposite of tightening a
+                // floor — so keep what is already stored instead. Tiers run 1..9
+                // in practice, so that is the whole useful range.
+                var n = Math.floor(Number(this.value));
+                if (this.value.trim() === "" || !isFinite(n)) {
+                    this.value = String(readOpt("powMinTier"));
+                    return;
+                }
+                writeOpt("powMinTier", Math.min(9, Math.max(1, n)));
                 this.value = String(readOpt("powMinTier"));
                 saveOpts();
             });

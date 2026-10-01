@@ -278,3 +278,41 @@ func containsLine(lines []string, needle string) bool {
 	}
 	return false
 }
+
+// TestHandleReplayMarkerRespectsNotifyGates: a marker is a notice, so the
+// history branch and the root are gates over it like any other. The taxonomy
+// advertises system.history.* in /notify and in the web panel, and a toggle
+// there that suppresses nothing is a lie about what the client can do.
+// Muting stops the live print only; the line stays reviewable in the tab.
+func TestHandleReplayMarkerRespectsNotifyGates(t *testing.T) {
+	marker := func(tags ...string) WireMessage {
+		return WireMessage{Type: "system", Tags: wire.WithTags(tags...), Text: "MARKERTEXT"}
+	}
+
+	for _, muted := range []string{wire.TagHistory, wire.TagRoot} {
+		sess, out := queueTestSession(t)
+		sess.Chain.WireIdx = newWireIndex(8)
+		sess.Chain.RenderCache = newRenderCache(8)
+		sess.Display.Notify = NotifyState{Muted: map[string]bool{muted: true}, PowMinTier: 1}
+		sess.handleReplayMarker(marker(wire.TagHistoryOlder))
+		sess.flushOutputNow()
+
+		if strings.Contains(out.String(), "MARKERTEXT") {
+			t.Errorf("muting %q must stop a replay marker printing live", muted)
+		}
+		if !containsLine(sess.Display.TabChat.lines, "MARKERTEXT") {
+			t.Errorf("muting %q must leave the marker in the tab", muted)
+		}
+	}
+
+	// Muting something else leaves the marker alone.
+	sess, out := queueTestSession(t)
+	sess.Chain.WireIdx = newWireIndex(8)
+	sess.Chain.RenderCache = newRenderCache(8)
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagJoin: true}, PowMinTier: 1}
+	sess.handleReplayMarker(marker(wire.TagHistoryOlder))
+	sess.flushOutputNow()
+	if !strings.Contains(out.String(), "MARKERTEXT") {
+		t.Error("muting join must not silence a replay marker")
+	}
+}

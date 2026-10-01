@@ -22,16 +22,59 @@ type NotifyState struct {
 	PowMinTier int
 }
 
-// notifyStateFromConfig builds the runtime state from the loaded config: a
-// false entry in ui.notify mutes that tag, and every other tag is shown.
-func notifyStateFromConfig() NotifyState {
+// configMutedTags turns the loaded config's gates into a muted set, so the
+// subtree rule applies to config exactly as it does at runtime.
+func configMutedTags() map[string]bool {
 	muted := map[string]bool{}
 	for _, tag := range wire.AllTags() {
 		if !ClientCfg.NotifyTag(tag) {
 			muted[tag] = true
 		}
 	}
-	return NotifyState{Muted: muted, PowMinTier: ClientCfg.NotifyPowMinTier()}
+	return muted
+}
+
+// notifyStateFromConfig builds the runtime state from the loaded config: a
+// false entry in ui.notify mutes that tag, and every other tag is shown.
+func notifyStateFromConfig() NotifyState {
+	return NotifyState{Muted: configMutedTags(), PowMinTier: ClientCfg.NotifyPowMinTier()}
+}
+
+// quietNames returns the --quiet names as a muted set, applying the same
+// subtree rule as the config gates. The flag is parsed before either the
+// dial or the gate flow, so it is the one gate both can see.
+func quietNames() map[string]bool {
+	muted := map[string]bool{}
+	for _, name := range CLI.Quiet {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "all" {
+			for _, tag := range wire.AllTags() {
+				muted[tag] = true
+			}
+			continue
+		}
+		if wire.HasTag(wire.AllTags(), name) {
+			muted[name] = true
+		}
+	}
+	return muted
+}
+
+// notifyPowWanted reports whether the "solving PoW" notice for a tier may
+// print, for code that runs before there is a session to hold the runtime
+// gates — the pre-connect join gate. It reads the config and the --quiet
+// names, and applies the same subtree rule as the runtime gates, so muting
+// the root silences it too. Without --quiet here the same switch would mute
+// the in-chat notice and leave this one, depending on when it fired.
+func notifyPowWanted(tier int) bool {
+	muted := quietNames()
+	if ClientCfg != nil {
+		for tag, on := range configMutedTags() {
+			muted[tag] = on
+		}
+	}
+	return len(wire.BlockedBy(wire.WithTags(wire.TagPow), muted)) == 0 &&
+		(ClientCfg == nil || tier >= ClientCfg.NotifyPowMinTier())
 }
 
 // notifyTagsAllowed reports whether a line carrying tags may print live.
@@ -77,19 +120,6 @@ func notifyTagsForWire(msg WireMessage) []string {
 		return wire.WithTags(wire.TagRoot)
 	}
 	return msg.Tags
-}
-
-// notifySnapshot returns a copy of the muted tag set. The map is mutated in
-// place by notifySetTag on another goroutine, so handing back the live one
-// would leave the caller reading a map that can change under it.
-func (s *Session) notifySnapshot() map[string]bool {
-	s.Display.NotifyMu.RLock()
-	defer s.Display.NotifyMu.RUnlock()
-	out := make(map[string]bool, len(s.Display.Notify.Muted))
-	for tag, muted := range s.Display.Notify.Muted {
-		out[tag] = muted
-	}
-	return out
 }
 
 // notifyPowMinTier returns the lowest PoW tier announced live.

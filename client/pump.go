@@ -111,7 +111,10 @@ func (s *Session) handleReplayMarker(msg WireMessage) {
 	// recovery markers, so all of them stay hidden while Loading.
 	recovery := wire.HasTag(tags, wire.TagHistoryRecover)
 	if !(s.Chain.Loading || recovery) {
-		s.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(msg.Text)))
+		// Markers are notices like any other, so muting the history branch
+		// or the root has to silence them. Suppressed either way they still
+		// land in the tab.
+		s.emitTabLive(s.notifyTagsAllowed(tags), TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(msg.Text)))
 	}
 	// A recovery footer settles its refill after the footer line, so the
 	// confirmation reads as a result of the window instead of preceding its

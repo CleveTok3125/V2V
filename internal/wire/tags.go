@@ -40,6 +40,11 @@ const (
 	// TagAudit marks a management line that is chained as evidence, so
 	// verify can replay it. It is a leaf of the root: there is nothing
 	// below it and nothing to group it with.
+	//
+	// Reserved: BroadcastAudit exists but has no producer yet, so no line
+	// carries this tag today and muting it changes nothing. It stays in
+	// the tree so the wire shape is settled before something publishes on
+	// it — a tag added later needs no vocabulary change.
 	TagAudit = "system.audit"
 
 	TagLimit    = "system.limit"
@@ -80,23 +85,6 @@ func AllTags() []string {
 	out := make([]string, len(tagTree))
 	copy(out, tagTree)
 	return out
-}
-
-// ParentTag returns the enclosing tag path, or "" for the root and for a
-// tag this package does not know: an unknown tag is inert rather than an
-// error, because a peer may run a newer vocabulary.
-func ParentTag(tag string) string {
-	cut := strings.LastIndex(tag, ".")
-	if cut < 0 {
-		return ""
-	}
-	parent := tag[:cut]
-	for _, known := range tagTree {
-		if known == parent {
-			return parent
-		}
-	}
-	return ""
 }
 
 // knownAncestor returns the closest tag enclosing this one that the

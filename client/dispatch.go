@@ -285,7 +285,7 @@ func (s *Session) cmdNotify(text string) bool {
 		return true
 	}
 	if len(fields) != 2 {
-		s.emitLocalFeedback("| [Local]: Dùng /notify <cat> on|off | all on|off | powmin <N>.\n")
+		s.emitLocalFeedback("| [Local]: Dùng /notify <tag> on|off | all on|off | powmin <N>.\n")
 		return true
 	}
 	on, ok := parseOnOff(fields[1])

@@ -448,16 +448,19 @@ func (c *ClientConfig) VersionCheckExpect() string {
 // of quietly muting more or less than they asked for.
 type NotifyGates map[string]bool
 
-// legacyNotifyTags maps the pre-tag kind names onto tag paths. "join" drove
-// join and leave together, so it mutes both. "system" is absent on purpose:
-// that name is also a tag, but it meant "the catch-all kind" before and
-// means "everything" now, and widening a user's mute is not a safe guess.
-var legacyNotifyTags = map[string]string{
-	"pow":     "system.pow",
-	"history": "system.history",
-	"join":    "system.join",
-	"leave":   "system.leave",
-	"date":    "system.date",
+// legacyNotifyTags maps the pre-tag kind names onto the tag paths each one
+// drove. More than one path is normal: "join" covered join and leave through
+// a single switch, and system.join is a leaf, not their parent, so mapping it
+// to one tag would quietly un-mute half of what the author asked for.
+// "system" is absent on purpose: that name is also a tag, but it meant "the
+// catch-all kind" before and means "everything" now, and widening a user's
+// mute is not a safe guess.
+var legacyNotifyTags = map[string][]string{
+	"pow":     {"system.pow"},
+	"history": {"system.history"},
+	"join":    {"system.join", "system.leave"},
+	"leave":   {"system.leave"},
+	"date":    {"system.date"},
 }
 
 // UnmarshalJSON reads a gate per entry, skipping any value that is not a
@@ -473,10 +476,13 @@ func (g *NotifyGates) UnmarshalJSON(data []byte) error {
 		if err := json.Unmarshal(value, &on); err != nil {
 			continue
 		}
-		if tag, legacy := legacyNotifyTags[key]; legacy {
-			key = tag
+		tags, legacy := legacyNotifyTags[key]
+		if !legacy {
+			tags = []string{key}
 		}
-		gates[key] = on
+		for _, tag := range tags {
+			gates[tag] = on
+		}
 	}
 	*g = gates
 	return nil

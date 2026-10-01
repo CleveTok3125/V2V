@@ -440,6 +440,11 @@ func TestNotifyToleratesPreTagConfig(t *testing.T) {
 			t.Errorf("pre-tag %q=true must stay shown", tag)
 		}
 	}
+	// The old join switch covered join and leave together, and system.join
+	// is a leaf rather than their parent, so it has to mute both.
+	if c.NotifyTag("system.leave") {
+		t.Error("pre-tag join=false must keep hiding leave notices too")
+	}
 	// powMinTier sat inside notify; it now lives beside it, so the number
 	// left behind must be dropped rather than kept as a gate.
 	if _, kept := c.UI.Notify["powMinTier"]; kept {

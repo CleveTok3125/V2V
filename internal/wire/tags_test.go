@@ -56,19 +56,23 @@ func TestWithTagsStable(t *testing.T) {
 	}
 }
 
-func TestParentTag(t *testing.T) {
+// TestKnownAncestor: the walk has to reach the nearest enclosing tag the
+// taxonomy knows, and keep looking past a level it does not.
+func TestKnownAncestor(t *testing.T) {
 	cases := []struct{ tag, want string }{
 		{TagRoot, ""},
 		{TagPow, TagRoot},
 		{TagPowScreen, TagPow},
 		{TagHistoryEnd, TagHistory},
 		{"system.pow.unknownleaf", TagPow},
+		{"system.pow.unknown.deep", TagPow},
+		{"system.future.leaf", TagRoot},
 		{"bogus", ""},
 		{"", ""},
 	}
 	for _, tc := range cases {
-		if got := ParentTag(tc.tag); got != tc.want {
-			t.Errorf("ParentTag(%q) = %q, want %q", tc.tag, got, tc.want)
+		if got := knownAncestor(tc.tag); got != tc.want {
+			t.Errorf("knownAncestor(%q) = %q, want %q", tc.tag, got, tc.want)
 		}
 	}
 }
@@ -84,7 +88,7 @@ func TestAllTagsListsParentsBeforeChildren(t *testing.T) {
 		position[tag] = i
 	}
 	for _, tag := range AllTags() {
-		parent := ParentTag(tag)
+		parent := knownAncestor(tag)
 		if parent == "" {
 			continue
 		}

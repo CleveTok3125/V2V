@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/CleveTok3125/V2V/internal/config"
 	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
@@ -112,11 +113,11 @@ func TestNotifyTagToggles(t *testing.T) {
 		t.Fatal("unmuting must restore the subtree")
 	}
 	sess.notifySetAll(false)
-	if got := len(sess.notifySnapshot()); got != len(wire.AllTags()) {
+	if got := len(sess.Display.Notify.Muted); got != len(wire.AllTags()) {
 		t.Fatalf("all-off must mute every tag, muted %d of %d", got, len(wire.AllTags()))
 	}
 	sess.notifySetAll(true)
-	if got := len(sess.notifySnapshot()); got != 0 {
+	if got := len(sess.Display.Notify.Muted); got != 0 {
 		t.Fatalf("all-on must clear the muted set, got %d", got)
 	}
 }
@@ -304,5 +305,88 @@ func TestNotifyPowLiveRespectsMutedParent(t *testing.T) {
 	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagHistory: true}, PowMinTier: 1}
 	if !sess.notifyPowLive(5) {
 		t.Fatal("muting history must not suppress the pow notice")
+	}
+}
+
+// TestNotifyPowWantedUsesConfigGates: the pre-connect join gate runs before
+// there is a session, so it reads the config. It has to apply the same
+// subtree rule, or muting the root in ui.notify would leave the gate flow
+// printing a notice the user asked not to see.
+func TestNotifyPowWantedUsesConfigGates(t *testing.T) {
+	old := ClientCfg
+	t.Cleanup(func() { ClientCfg = old })
+
+	ClientCfg = config.DefaultClientConfig()
+	if !ClientCfg.NotifyTag("system") {
+		t.Fatal("test needs the default gates")
+	}
+	if !notifyPowWanted(1) {
+		t.Fatal("default config must announce the gate notice")
+	}
+	// A tier below the floor stays quiet.
+	tier := 3
+	ClientCfg.UI.PowMinTier = &tier
+	if notifyPowWanted(2) {
+		t.Fatal("a tier below the floor must stay quiet")
+	}
+	if !notifyPowWanted(3) {
+		t.Fatal("a tier at the floor must be announced")
+	}
+	// Muting the pow subtree silences it.
+	ClientCfg.UI.Notify = map[string]bool{"system.pow": false}
+	if notifyPowWanted(3) {
+		t.Fatal("a muted system.pow must silence the gate notice")
+	}
+	// So does muting the root.
+	ClientCfg.UI.Notify = map[string]bool{"system": false}
+	if notifyPowWanted(3) {
+		t.Fatal("a muted root must silence the gate notice")
+	}
+	// An unrelated branch leaves it alone.
+	ClientCfg.UI.Notify = map[string]bool{"system.history": false}
+	if !notifyPowWanted(3) {
+		t.Fatal("muting history must not silence the gate notice")
+	}
+	// No config at all must not silence anything.
+	ClientCfg = nil
+	if !notifyPowWanted(1) {
+		t.Fatal("a nil config must announce the gate notice")
+	}
+}
+
+// TestNotifyPowWantedHonoursQuietFlag: --quiet must reach the pre-connect
+// gate notice as well as the in-chat one. It is parsed before the dial, so
+// it is the one gate both flows can see; leaving it out made the same switch
+// behave differently for the same notice depending on when it fired.
+func TestNotifyPowWantedHonoursQuietFlag(t *testing.T) {
+	oldCfg, oldQuiet := ClientCfg, CLI.Quiet
+	t.Cleanup(func() { ClientCfg, CLI.Quiet = oldCfg, oldQuiet })
+	ClientCfg = config.DefaultClientConfig()
+
+	CLI.Quiet = nil
+	if !notifyPowWanted(1) {
+		t.Fatal("no --quiet must announce the gate notice")
+	}
+	CLI.Quiet = []string{"system.pow"}
+	if notifyPowWanted(1) {
+		t.Fatal("--quiet system.pow must silence the gate notice")
+	}
+	CLI.Quiet = []string{"all"}
+	if notifyPowWanted(1) {
+		t.Fatal("--quiet all must silence the gate notice")
+	}
+	CLI.Quiet = []string{"system"}
+	if notifyPowWanted(1) {
+		t.Fatal("--quiet system must silence the gate notice")
+	}
+	CLI.Quiet = []string{"system.history"}
+	if !notifyPowWanted(1) {
+		t.Fatal("--quiet on an unrelated branch must leave the gate notice")
+	}
+	// An unknown name is ignored, so a flag written for a newer build does
+	// not stop the ones this build understands.
+	CLI.Quiet = []string{"system.pow", "not-a-tag"}
+	if notifyPowWanted(1) {
+		t.Fatal("--quiet system.pow must still apply alongside an unknown name")
 	}
 }
