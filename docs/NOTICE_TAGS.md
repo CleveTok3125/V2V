@@ -231,13 +231,18 @@ of `web/app.ts` and compares it to `AllTags()`, so the two cannot drift.
 
 None. `sys_kind` was replaced, not versioned.
 
-- **A new client against an old server** works. The old server sends raw
-  strings and no `sys_kind`; those frames have no tags, so they are
-  treated as generic (Tab 2, gated by `system`), except non-JSON frames,
-  which print ungated in Tab 1.
-- **An old client against a new server** loses the gates it had. It reads
-  no `tags`, so notices arrive untagged and its own text matching either
-  fails or misclassifies them.
+- **A mismatched binary pair is not safe**, in either direction, and fails
+  quietly rather than loudly. Upgrade the server and the client together.
+  - *New client, old server.* Notices arrive without tags and render as
+    generic system lines. Replay **markers** arrive as plain strings, which
+    the client no longer recognises, so the replay window state never
+    raises: the fork check gets nothing to compare against and is disabled,
+    historical echoes get stashed instead of consumed, and the initial load
+    pages further than it should.
+  - *Old client, new server.* Markers now unmarshal as `type:"system"`
+    wires, so the old client renders them and never arms its own window
+    tracking — the same three consequences. Notices also lose their
+    classification, since the old client reads `sys_kind`.
 - **A history file written by an older build** loads as untagged records.
   Its join/leave notices replay to every client regardless of its join
   filter and no longer answer `/notify`. **Deploy against an empty

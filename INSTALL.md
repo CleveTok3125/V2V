@@ -143,6 +143,11 @@ To roll back, set `IMAGE_NAME` to the previous version and repeat. Data
 lives in `instances/prod/data/` and is untouched by image changes, with one
 exception: the chat history file.
 
+Roll the server and the client back together. A version pair that disagrees
+about the wire format does not fail visibly — see
+[docs/NOTICE_TAGS.md](docs/NOTICE_TAGS.md#compatibility) for what silently
+stops working.
+
 ### History file format change
 
 Notice classification moved from a `sys_kind` field to a `tags` chain, and

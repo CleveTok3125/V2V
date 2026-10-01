@@ -40,24 +40,44 @@ func notifyStateFromConfig() NotifyState {
 	return NotifyState{Muted: configMutedTags(), PowMinTier: ClientCfg.NotifyPowMinTier()}
 }
 
-// quietNames returns the --quiet names as a muted set, applying the same
+// quietNames turns the --quiet names into a muted set, applying the same
 // subtree rule as the config gates. The flag is parsed before either the
-// dial or the gate flow, so it is the one gate both can see.
+// dial or the gate flow, so it is the one gate both can see. A name outside
+// the taxonomy is ignored, so a flag written for a newer build does not stop
+// the ones this build understands.
 func quietNames() map[string]bool {
 	muted := map[string]bool{}
-	for _, name := range CLI.Quiet {
-		name = strings.ToLower(strings.TrimSpace(name))
-		if name == "all" {
+	for _, name := range quietTagNames() {
+		if name == "" {
+			// "all": the whole taxonomy, which the caller cannot express
+			// as a set of named nodes.
 			for _, tag := range wire.AllTags() {
 				muted[tag] = true
 			}
 			continue
 		}
-		if wire.HasTag(wire.AllTags(), name) {
-			muted[name] = true
-		}
+		muted[name] = true
 	}
 	return muted
+}
+
+// quietTagNames normalises the --quiet names into tag paths, with "" standing
+// for "all". A name outside the taxonomy is dropped. The pre-connect gate
+// reads these before a session exists, so both callers go through here
+// rather than each parsing the flag its own way.
+func quietTagNames() []string {
+	names := wire.AllTags()
+	var out []string
+	for _, raw := range CLI.Quiet {
+		name := strings.ToLower(strings.TrimSpace(raw))
+		if name == "all" {
+			return []string{""}
+		}
+		if wire.HasTag(names, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // notifyPowWanted reports whether the "solving PoW" notice for a tier may
@@ -183,13 +203,10 @@ func (s *Session) notifySetPowMinTier(tier int) {
 }
 
 // applyQuietFlags applies the repeatable --quiet names on top of the config
-// gates. The names are tag paths, and "all" mutes the whole taxonomy. An
-// unknown name is ignored, so a --quiet written for a newer build does not
-// stop the ones that are understood.
+// gates, through the same parsing the pre-connect gate uses.
 func (s *Session) applyQuietFlags() {
-	for _, name := range CLI.Quiet {
-		name = strings.ToLower(strings.TrimSpace(name))
-		if name == "all" {
+	for _, name := range quietTagNames() {
+		if name == "" {
 			s.notifySetAll(false)
 			continue
 		}

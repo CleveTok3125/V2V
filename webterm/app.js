@@ -247,14 +247,15 @@ import { gateFetch } from "./pow_bridge.js";
     // any ancestor of it, is off. The list is the tree order, so a parent is
     // always known by the time its children are read.
     function notifyTagEnabled(tag) {
+        // Walk the ancestors, which are earlier in the list, and stop at the tag
+        // itself. A prefix match is enough: NOTIFY_TAGS is in tree order, so
+        // every ancestor of a tag has already been seen.
         for (var i = 0; i < NOTIFY_TAGS.length; i++) {
             var cur = NOTIFY_TAGS[i];
             if (cur === tag)
                 break;
-            if (tag === cur || tag.indexOf(cur + ".") === 0) {
-                if (opts.notify[cur] === false)
-                    return false;
-            }
+            if (tag.indexOf(cur + ".") === 0 && opts.notify[cur] === false)
+                return false;
         }
         return opts.notify[tag] !== false;
     }

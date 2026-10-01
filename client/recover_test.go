@@ -76,6 +76,14 @@ func recoverTestChain(anchor [32]byte, start uint64, n int) []WireMessage {
 	return out
 }
 
+// replayMarker builds a replay window marker the way the server sends it.
+// Only the wording is ever drawn; the tags are what the client reads, so a
+// test that fed a plain marker string would no longer arm the replay state
+// machine and would pass without checking any window behaviour.
+func replayMarker(tags []string, text string) WireMessage {
+	return WireMessage{Type: "system", Tags: tags, Text: text}
+}
+
 func recoverTestSession(t *testing.T, tip byte, conn *captureConn) *Session {
 	t.Helper()
 	sess := chainTestSession(t, tip)
@@ -457,10 +465,10 @@ func TestGreetingAfterCatchup(t *testing.T) {
 		return raw
 	}
 	conn.frames <- frame(HistoryInfo{Type: "history_info", MinSeq: 1, MaxSeq: 2, MinHeight: 100, MaxHeight: 101, Count: 2})
-	conn.frames <- []byte("--- Lịch sử chat gần đây ---\n")
+	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistoryBegin), "--- Lịch sử chat gần đây ---"))
 	conn.frames <- frame(wires[0])
 	conn.frames <- frame(wires[1])
-	conn.frames <- []byte("--- Kết thúc lịch sử (2/2) ---\n")
+	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistory, wire.TagHistoryEnd), "--- Kết thúc lịch sử (2/2) ---"))
 	conn.frames <- frame(HistorySync{Type: "history_sync", Direction: "after", FirstSeq: 1, LastSeq: 2, Sent: 2, Total: 2})
 
 	go sess.runPump()
@@ -514,14 +522,14 @@ func TestLoadPagesUntilMaxSeq(t *testing.T) {
 		return raw
 	}
 	conn.frames <- frame(HistoryInfo{Type: "history_info", MinSeq: 1, MaxSeq: 3, MinHeight: 1, MaxHeight: 3, Count: 3})
-	conn.frames <- []byte("--- Lịch sử chat gần đây ---\n")
+	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistoryBegin), "--- Lịch sử chat gần đây ---"))
 	conn.frames <- frame(wires[0])
 	conn.frames <- frame(wires[1])
-	conn.frames <- []byte("--- Kết thúc lịch sử (2/3) ---\n")
+	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistory, wire.TagHistoryEnd), "--- Kết thúc lịch sử (2/3) ---"))
 	conn.frames <- frame(HistorySync{Type: "history_sync", Direction: "after", FirstSeq: 1, LastSeq: 2, NextSeq: 2, More: true, Sent: 2, Total: 2})
-	conn.frames <- []byte("--- Lịch sử chat gần đây ---\n")
+	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistoryBegin), "--- Lịch sử chat gần đây ---"))
 	conn.frames <- frame(wires[2])
-	conn.frames <- []byte("--- Kết thúc lịch sử (1/1) ---\n")
+	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistory, wire.TagHistoryEnd), "--- Kết thúc lịch sử (1/1) ---"))
 	conn.frames <- frame(HistorySync{Type: "history_sync", Direction: "after", FirstSeq: 3, LastSeq: 3, NextSeq: 3, More: false, Sent: 1, Total: 1})
 
 	go sess.runPump()
@@ -564,10 +572,6 @@ func TestLoadAnnouncesSync(t *testing.T) {
 	sess.Display.ActiveTab = TabChat
 	anchor := [32]byte{9}
 	wires := recoverTestChain(anchor, 1, 1)
-	// Markers arrive as tagged wires now; only the wording is ever drawn.
-	replayMarker := func(tags []string, text string) WireMessage {
-		return WireMessage{Type: "system", Tags: tags, Text: text}
-	}
 	frame := func(v any) []byte {
 		raw, err := json.Marshal(v)
 		if err != nil {

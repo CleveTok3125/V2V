@@ -20,14 +20,11 @@ interface V2VConfig {
   passkeyRole?: string;
   showMeta?: boolean;
   autoVerify?: boolean;
-  notify?: {
-    pow?: boolean;
-    powMinTier?: number;
-    history?: boolean;
-    join?: boolean;
-    date?: boolean;
-    system?: boolean;
-  };
+  // Notice gates, keyed by the tag the server publishes. An absent tag
+  // means shown, so this map only carries what the user turned off. It is
+  // built from NOTIFY_TAGS in app.ts; see docs/NOTICE_TAGS.md.
+  notify?: Record<string, boolean>;
+  powMinTier?: number;
 }
 
 interface Window {

@@ -471,17 +471,34 @@ func (g *NotifyGates) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	gates := NotifyGates{}
-	for key, value := range raw {
+	set := func(key string, value json.RawMessage) {
 		var on bool
 		if err := json.Unmarshal(value, &on); err != nil {
-			continue
+			return
 		}
-		tags, legacy := legacyNotifyTags[key]
-		if !legacy {
-			tags = []string{key}
+		if tags, legacy := legacyNotifyTags[key]; legacy {
+			// Only where nothing already spoke for that tag. A config can
+			// carry both a legacy name and the tag it maps to, and map
+			// iteration order is random, so the winner cannot depend on
+			// which key is visited last. The explicit tag wins: it is the
+			// current form and the more specific statement.
+			for _, tag := range tags {
+				if _, taken := gates[tag]; !taken {
+					gates[tag] = on
+				}
+			}
+			return
 		}
-		for _, tag := range tags {
-			gates[tag] = on
+		gates[key] = on
+	}
+	for key, value := range raw {
+		if _, legacy := legacyNotifyTags[key]; !legacy {
+			set(key, value)
+		}
+	}
+	for key, value := range raw {
+		if _, legacy := legacyNotifyTags[key]; legacy {
+			set(key, value)
 		}
 	}
 	*g = gates

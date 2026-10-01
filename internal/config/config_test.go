@@ -475,3 +475,30 @@ func TestNotifyIgnoresNonBooleanValues(t *testing.T) {
 		t.Error("a boolean false must still be honored")
 	}
 }
+
+// TestNotifyDecodeIsOrderIndependent: a legacy name and the tag it maps to
+// can both appear in one config, and map iteration order is random, so which
+// one wins has to be decided by something other than visit order. The
+// explicit tag wins: the user wrote it last and it is the current form.
+func TestNotifyDecodeIsOrderIndependent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.jsonc")
+	// join=false is the old switch that covered join and leave; the
+	// explicit system.leave=true puts leave back on.
+	raw := []byte(`{"ui":{"notify":{"join":false,"system.leave":true}}}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 200; i++ {
+		c, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.NotifyTag("system.join") {
+			t.Fatal("legacy join=false must still mute system.join")
+		}
+		if !c.NotifyTag("system.leave") {
+			t.Fatal("an explicit system.leave must win over the legacy join name")
+		}
+	}
+}
