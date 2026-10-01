@@ -11,7 +11,7 @@ import (
 // must be a conscious protocol change reviewed here first.
 func TestWireJSONKeySet(t *testing.T) {
 	full := WireMessage{
-		Type: "system", Time: "12:00", DisplayName: "Bob#1234", SysKind: "join", Text: "hi",
+		Type: "system", Time: "12:00", DisplayName: "Bob#1234", Tags: []string{"system", "system.join"}, SysDate: "2026-01-02", Text: "hi",
 		Trip:        &TripMeta{Pub: "p", Seq: 1, Prev: "q", Sig: "s", ServerPub: "sp", MsgHash: "m", DisplayName: "Bob#1234", TmpID: 2, ReplyTo: 3},
 		TmpID:       2,
 		ReplyTo:     3,
@@ -30,7 +30,7 @@ func TestWireJSONKeySet(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	wantTop := []string{"type", "time", "displayName", "sys_kind", "text", "trip", "tmp_id", "reply_to", "chain_prev", "chain_hash", "chain_height", "chain_ver", "seq", "sent_at"}
+	wantTop := []string{"type", "time", "displayName", "tags", "sys_date", "text", "trip", "tmp_id", "reply_to", "chain_prev", "chain_hash", "chain_height", "chain_ver", "seq", "sent_at"}
 	if len(got) != len(wantTop) {
 		t.Fatalf("top-level keys = %v, want %v", keysOf(got), wantTop)
 	}
@@ -127,10 +127,13 @@ func TestWireJSONKeySet(t *testing.T) {
 		}
 	}
 
-	// SysKind round-trips on system lines.
+	// Tags and sys_date round-trip on system lines.
 	var sys WireMessage
-	if err := json.Unmarshal([]byte(`{"type":"system","sys_kind":"join","text":"x"}`), &sys); err != nil || sys.SysKind != "join" {
-		t.Fatalf("sys_kind lost: %+v %v", sys, err)
+	if err := json.Unmarshal([]byte(`{"type":"system","tags":["system","join"],"sys_date":"2026-01-02","text":"x"}`), &sys); err != nil || len(sys.Tags) != 2 || sys.Tags[1] != "join" {
+		t.Fatalf("tags lost: %+v %v", sys, err)
+	}
+	if sys.SysDate != "2026-01-02" {
+		t.Fatalf("sys_date lost: %+v %v", sys.SysDate, err)
 	}
 }
 

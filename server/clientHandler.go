@@ -14,6 +14,7 @@ import (
 	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/trip"
 	"github.com/CleveTok3125/V2V/internal/trustedproxy"
+	"github.com/CleveTok3125/V2V/internal/wire"
 
 	"github.com/gorilla/websocket"
 )
@@ -113,7 +114,7 @@ func (h *Hub) registerClient(session *ClientSession, clientIP string) {
 		}
 	}
 
-	joinTime := time.Now().In(Cfg.Static.Timezone)
+	joinTime := time.Now().In(serverLocation())
 	h.CheckAndBroadcastDate(joinTime)
 
 	joinMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã tham gia phòng chat!", joinTime.Format("15:04"), session.DisplayName)
@@ -121,7 +122,7 @@ func (h *Hub) registerClient(session *ClientSession, clientIP string) {
 	// The joiner receives its own join too (nil sender): chain continuity
 	// requires every client to see every link; display gating (!showJoin)
 	// still hides it locally.
-	h.BroadcastNotice(joinMsg, "join", nil)
+	h.BroadcastNotice(joinMsg, []string{wire.TagJoin}, nil)
 	h.BroadcastMu.Unlock()
 }
 
@@ -153,12 +154,12 @@ func (h *Hub) unregisterClient(session *ClientSession, clientIP string) {
 
 	close(session.Send)
 
-	leaveTime := time.Now().In(Cfg.Static.Timezone)
+	leaveTime := time.Now().In(serverLocation())
 	h.CheckAndBroadcastDate(leaveTime)
 
 	leaveMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã rời phòng chat.", leaveTime.Format("15:04"), session.DisplayName)
 	logInfof("🔴 [LEAVE] %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
-	h.BroadcastNotice(leaveMsg, "leave", nil)
+	h.BroadcastNotice(leaveMsg, []string{wire.TagLeave}, nil)
 }
 
 // releaseDisplayName frees the serial slot held by a generated display
@@ -229,10 +230,7 @@ func (s *ChatServer) allowSlowSend(session *ClientSession, clientIP string, base
 	}
 	d := base * time.Duration(mult)
 	if !s.SlowCooldown.Allow(clientIP, d) {
-		select {
-		case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Kênh đang ở chế độ chậm (tier %d). Vui lòng đợi %v.", tier, d)):
-		default:
-		}
+		s.unicastNotice(session, fmt.Sprintf("[Hệ thống]: Kênh đang ở chế độ chậm (tier %d). Vui lòng đợi %v.", tier, d), wire.TagLimit)
 		return false
 	}
 	return true
@@ -325,10 +323,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 					cost = limit * (1 + dynCfg.HistoryDiskLookup)
 				}
 				if !s.allowHistoryRequest(clientIP, cost) {
-					select {
-					case session.Send <- []byte("[Hệ thống]: Yêu cầu lịch sử quá nhanh, thử lại sau."):
-					default:
-					}
+					s.unicastNotice(session, "[Hệ thống]: Yêu cầu lịch sử quá nhanh, thử lại sau.", wire.TagLimit)
 					updateReadDeadline()
 					continue
 				}
@@ -352,10 +347,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		// Muted clients keep reading (history above stays open) but may
 		// not send chat until a PoW challenge passes.
 		if s.Screener != nil && s.Screener.IsMuted(session.Conn) {
-			select {
-			case session.Send <- []byte("[Hệ thống]: Chat của bạn tạm dừng chờ xác minh. Hoàn thành thử thách PoW để tiếp tục."):
-			default:
-			}
+			s.unicastNotice(session, "[Hệ thống]: Chat của bạn tạm dừng chờ xác minh. Hoàn thành thử thách PoW để tiếp tục.", wire.TagPowGate)
 			updateReadDeadline()
 			continue
 		}
@@ -380,10 +372,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		if err := json.Unmarshal([]byte(raw), &tripMsg); err == nil && (tripMsg.Sig != "" || tripMsg.TmpID != 0 || strings.TrimSpace(tripMsg.Text+tripMsg.Msg) != "") {
 			if tripMsg.TmpID == 0 {
 				s.observeErr(clientIP, "env:tmpid-missing")
-				select {
-				case session.Send <- []byte("[Hệ thống]: Tin nhắn thiếu ID phiên (tmp_id). Hãy update client bản mới."):
-				default:
-				}
+				s.unicastNotice(session, "[Hệ thống]: Tin nhắn thiếu ID phiên (tmp_id). Hãy update client bản mới.", wire.TagEnvelope)
 				updateReadDeadline()
 				continue
 			}
@@ -396,10 +385,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			s.Chain.Mu.RUnlock()
 			if msgReplyTo != 0 && tipReady && msgReplyTo > tipHeight {
 				s.observeErr(clientIP, "env:reply-future")
-				select {
-				case session.Send <- []byte("[Hệ thống]: Tin reply dẫn tới ID chưa tồn tại."):
-				default:
-				}
+				s.unicastNotice(session, "[Hệ thống]: Tin reply dẫn tới ID chưa tồn tại.", wire.TagEnvelope)
 				updateReadDeadline()
 				continue
 			}
@@ -410,19 +396,13 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 					t = tripMsg.Msg
 				}
 				if t == "" {
-					select {
-					case session.Send <- []byte("[Hệ thống]: Tin nhắn trống."):
-					default:
-					}
+					s.unicastNotice(session, "[Hệ thống]: Tin nhắn trống.", wire.TagEnvelope)
 					updateReadDeadline()
 					continue
 				}
 				text = t
 				if err := filter.ValidateMessage(text); err != nil {
-					select {
-					case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
-					default:
-					}
+					s.unicastNotice(session, fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err), wire.TagFilter)
 					logFilterReject(session, clientIP, err, raw)
 					s.observeErr(clientIP, "proto:filter-reject")
 					updateReadDeadline()
@@ -433,10 +413,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				text = ""
 			}
 		} else {
-			select {
-			case session.Send <- []byte("[Hệ thống]: Định dạng tin nhắn cũ không còn hỗ trợ. Hãy update client bản mới."):
-			default:
-			}
+			s.unicastNotice(session, "[Hệ thống]: Định dạng tin nhắn cũ không còn hỗ trợ. Hãy update client bản mới.", wire.TagEnvelope)
 			updateReadDeadline()
 			continue
 		}
@@ -447,20 +424,14 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				t = tripMsg.Msg
 			}
 			if t == "" {
-				select {
-				case session.Send <- []byte("[Hệ thống]: Tin nhắn trip thiếu nội dung."):
-				default:
-				}
+				s.unicastNotice(session, "[Hệ thống]: Tin nhắn trip thiếu nội dung.", wire.TagTrip)
 				updateReadDeadline()
 				continue
 			}
 			text = t
 			// Validate text content
 			if err := filter.ValidateMessage(text); err != nil {
-				select {
-				case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
-				default:
-				}
+				s.unicastNotice(session, fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err), wire.TagFilter)
 				logFilterReject(session, clientIP, err, raw)
 				s.observeErr(clientIP, "proto:filter-reject")
 				updateReadDeadline()
@@ -469,20 +440,14 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			// Trip verification
 			if session.TripPub != "" && !strings.EqualFold(session.TripPub, tripMsg.Pub) {
 				s.observeErr(clientIP, "proto:trip-pub")
-				select {
-				case session.Send <- []byte("[Hệ thống]: Pubkey trip không khớp phiên đăng nhập."):
-				default:
-				}
+				s.unicastNotice(session, "[Hệ thống]: Pubkey trip không khớp phiên đăng nhập.", wire.TagTrip)
 				updateReadDeadline()
 				continue
 			}
 			pubHex := strings.ToLower(tripMsg.Pub)
 			// Quick hex length check before heavy verify
 			if len(pubHex) != 64 || len(tripMsg.Sig) != 128 || len(tripMsg.Prev) != 64 {
-				select {
-				case session.Send <- []byte("[Hệ thống]: Chữ ký trip không hợp lệ."):
-				default:
-				}
+				s.unicastNotice(session, "[Hệ thống]: Chữ ký trip không hợp lệ.", wire.TagTrip)
 				updateReadDeadline()
 				continue
 			}
@@ -501,20 +466,14 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			if tripMsg.Seq != expectedSeq {
 				s.TripChainsMu.Unlock()
 				s.observeErr(clientIP, "proto:trip-seq")
-				select {
-				case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Sai thứ tự trip seq %d, mong đợi %d.", tripMsg.Seq, expectedSeq)):
-				default:
-				}
+				s.unicastNotice(session, fmt.Sprintf("[Hệ thống]: Sai thứ tự trip seq %d, mong đợi %d.", tripMsg.Seq, expectedSeq), wire.TagTrip)
 				updateReadDeadline()
 				continue
 			}
 			if !strings.EqualFold(tripMsg.Prev, hex.EncodeToString(expectedPrev)) {
 				s.TripChainsMu.Unlock()
 				s.observeErr(clientIP, "proto:trip-prev")
-				select {
-				case session.Send <- []byte("[Hệ thống]: Chuỗi trip bị đứt (prev không khớp)."):
-				default:
-				}
+				s.unicastNotice(session, "[Hệ thống]: Chuỗi trip bị đứt (prev không khớp).", wire.TagTrip)
 				updateReadDeadline()
 				continue
 			}
@@ -540,10 +499,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			if err != nil {
 				s.TripChainsMu.Unlock()
 				s.observeErr(clientIP, "proto:trip-sig")
-				select {
-				case session.Send <- []byte("[Hệ thống]: Chữ ký trip không hợp lệ."):
-				default:
-				}
+				s.unicastNotice(session, "[Hệ thống]: Chữ ký trip không hợp lệ.", wire.TagTrip)
 				updateReadDeadline()
 				continue
 			}
@@ -572,18 +528,12 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		} else {
 			// Non-trip message: if user has TripPub, they must sign (enforce)
 			if session.TripPub != "" {
-				select {
-				case session.Send <- []byte("[Hệ thống]: Tin nhắn trip phải được ký."):
-				default:
-				}
+				s.unicastNotice(session, "[Hệ thống]: Tin nhắn trip phải được ký.", wire.TagTrip)
 				updateReadDeadline()
 				continue
 			}
 			if err := filter.ValidateMessage(text); err != nil {
-				select {
-				case session.Send <- []byte(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err)):
-				default:
-				}
+				s.unicastNotice(session, fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err), wire.TagFilter)
 				logFilterReject(session, clientIP, err, raw)
 				s.observeErr(clientIP, "proto:filter-reject")
 				updateReadDeadline()
@@ -599,28 +549,24 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			MaxMessageLine:   dynCfg.MaxMessageLine,
 			MessageCooldown:  dynCfg.MessageCooldown,
 		}, session.Perms.CanMessageUnlimited); err != nil {
-			// Unicast warnings must never block ReadPump: if WritePump is
-			// wedged and Send is full, drop the warning instead of leaking
-			// the goroutine and pinning the IP slot.
-			warn := func(msg string) {
-				select {
-				case session.Send <- []byte(msg):
-				default:
-				}
+			// unicastNotice drops rather than blocks when Send is full, so
+			// a wedged WritePump cannot pin ReadPump and the IP slot.
+			warn := func(msg, tag string) {
+				s.unicastNotice(session, msg, tag)
 			}
 			switch err {
 			case guard.ErrTooLong:
-				warn(fmt.Sprintf("[Hệ thống]: Tin nhắn của bạn quá dài (tối đa %d ký tự).", dynCfg.MaxMessageLength))
+				warn(fmt.Sprintf("[Hệ thống]: Tin nhắn của bạn quá dài (tối đa %d ký tự).", dynCfg.MaxMessageLength), wire.TagLimit)
 			case guard.ErrTooManyLines:
-				warn("[Hệ thống]: Tin nhắn chứa quá nhiều dòng. Vui lòng gộp lại!")
+				warn("[Hệ thống]: Tin nhắn chứa quá nhiều dòng. Vui lòng gộp lại!", wire.TagLimit)
 			case guard.ErrTooFast:
 				// Refresh the stamp so an edge-spammer cannot hold the
 				// maximum allowed rate: each rejected attempt pushes the
 				// next allowed one out by a full cooldown.
 				lastMessageTime = time.Now()
-				warn(fmt.Sprintf("[Hệ thống]: Bạn đang chat quá nhanh! Vui lòng đợi %v.", dynCfg.MessageCooldown))
+				warn(fmt.Sprintf("[Hệ thống]: Bạn đang chat quá nhanh! Vui lòng đợi %v.", dynCfg.MessageCooldown), wire.TagLimit)
 			default:
-				warn(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err))
+				warn(fmt.Sprintf("[Hệ thống]: Tin nhắn chứa ký tự không hợp lệ và đã bị từ chối (%v).", err), wire.TagFilter)
 			}
 			continue
 		}
@@ -636,7 +582,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		lastMessageTime = time.Now()
 
 		s.observeMessage(clientIP)
-		now := time.Now().In(Cfg.Static.Timezone)
+		now := time.Now().In(serverLocation())
 		s.Hub.CheckAndBroadcastDate(now)
 
 		wire := WireMessage{

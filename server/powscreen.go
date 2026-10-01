@@ -174,22 +174,6 @@ const (
 	behaviorSaveInterval = 5 * time.Minute
 )
 
-// unicast delivers msg to sess only while it is still registered,
-// holding ClientsMu across the liveness check and the send: unregister
-// deletes under the same lock, so a send outside it can race
-// close(Send) and panic (same convention as alertConcurrentIdentity).
-func (s *ChatServer) unicast(sess *ClientSession, msg string) {
-	s.Hub.ClientsMu.RLock()
-	defer s.Hub.ClientsMu.RUnlock()
-	if _, alive := s.Hub.Clients[sess.Conn]; !alive {
-		return
-	}
-	select {
-	case sess.Send <- []byte(msg):
-	default:
-	}
-}
-
 // unicastData is unicast for an already-marshaled frame.
 func (s *ChatServer) unicastData(sess *ClientSession, data []byte) {
 	s.Hub.ClientsMu.RLock()
@@ -201,6 +185,23 @@ func (s *ChatServer) unicastData(sess *ClientSession, data []byte) {
 	case sess.Send <- data:
 	default:
 	}
+}
+
+// unicastNotice delivers a system line to one client as a tagged wire.
+// leaves names the tag leaves, and the root-to-leaf chain is built here so
+// the client filters the line by tag instead of matching its wording.
+//
+// The line is not stored and not chained: a notice is per-client and
+// live-only, so it carries no evidence and never enters a replay. Text
+// keeps the "[Hệ thống]: " prefix so the display is unchanged. The queue
+// write stays non-blocking: a warning dropped because
+// WritePump is wedged beats a wedged ReadPump.
+func (s *ChatServer) unicastNotice(sess *ClientSession, text string, leaves ...string) {
+	data, err := json.Marshal(noticeWire(time.Now(), text, leaves...))
+	if err != nil {
+		return
+	}
+	s.unicastData(sess, data)
 }
 
 // behaviorScheduler re-scores connected IPs and hands out PoW.
@@ -266,7 +267,7 @@ func (s *ChatServer) behaviorTick(now time.Time, lastSave, lastStats *time.Time)
 		if sess, ok := byConn[c]; ok {
 			// Letting the challenge expire is non-compliance too.
 			s.observeChallenge(sess.IP)
-			s.unicast(sess, "[Hệ thống]: Quá hạn xác minh, chat tạm dừng cho tới khi bạn hoàn thành thử thách PoW mới.")
+			s.unicastNotice(sess, "[Hệ thống]: Quá hạn xác minh, chat tạm dừng cho tới khi bạn hoàn thành thử thách PoW mới.", wire.TagPowScreen)
 		}
 	}
 	for _, c := range kick {
@@ -317,7 +318,7 @@ func (s *ChatServer) issueScreenChallenge(sess *ClientSession, ip string, tier i
 	// muting nothing, so hit-and-run floods would never face mute.
 	deadline := now.Add(a.ScreenDeadline)
 	s.Screener.Issue(sess.Conn, ip, tier, preset, salt, id, deadline)
-	s.unicast(sess, "[Hệ thống]: Máy chủ yêu cầu xác minh chống spam (mức PoW "+strconv.Itoa(tier)+"). Client đang giải nền, có thể đơ tạm thời — đây là hoạt động bình thường, không phải lỗi.")
+	s.unicastNotice(sess, "[Hệ thống]: Máy chủ yêu cầu xác minh chống spam (mức PoW "+strconv.Itoa(tier)+"). Client đang giải nền, có thể đơ tạm thời — đây là hoạt động bình thường, không phải lỗi.", wire.TagPowScreen)
 	offer := pow.Offer{Tier: tier, Preset: preset, Salt: salt, Expires: deadline.Unix(), ChallengeID: id}
 	sig := ""
 	if s.ServerID != nil {
@@ -340,12 +341,6 @@ func (s *ChatServer) handlePowFrame(session *ClientSession, raw string) {
 	if s.Screener == nil {
 		return
 	}
-	unicast := func(msg string) {
-		select {
-		case session.Send <- []byte(msg):
-		default:
-		}
-	}
 	if strings.Contains(raw, `"pow_result"`) {
 		var res wire.PowResult
 		if err := json.Unmarshal([]byte(raw), &res); err != nil || res.Type != "pow_result" {
@@ -353,9 +348,9 @@ func (s *ChatServer) handlePowFrame(session *ClientSession, raw string) {
 		}
 		conn, ok := s.Screener.Resolve(res.ChallengeID, res.Nonce)
 		if ok && conn == session.Conn {
-			unicast("[Hệ thống]: Xác minh PoW xong, chat mở lại bình thường.")
+			s.unicastNotice(session, "[Hệ thống]: Xác minh PoW xong, chat mở lại bình thường.", wire.TagPowScreen)
 		} else {
-			unicast("[Hệ thống]: Đáp án PoW không hợp lệ, bạn sẽ nhận thử thách mới.")
+			s.unicastNotice(session, "[Hệ thống]: Đáp án PoW không hợp lệ, bạn sẽ nhận thử thách mới.", wire.TagPowScreen)
 		}
 		return
 	}
@@ -368,7 +363,7 @@ func (s *ChatServer) handlePowFrame(session *ClientSession, raw string) {
 			// Declining a challenge is non-compliance: feed the
 			// challenge feature so sustained refusal escalates.
 			s.observeChallenge(session.IP)
-			unicast("[Hệ thống]: Đã ghi nhận từ chối, chat tạm dừng cho tới khi xác minh.")
+			s.unicastNotice(session, "[Hệ thống]: Đã ghi nhận từ chối, chat tạm dừng cho tới khi xác minh.", wire.TagPowScreen)
 		}
 	}
 }

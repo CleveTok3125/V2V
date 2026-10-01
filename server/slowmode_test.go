@@ -17,6 +17,7 @@ func slowServer(t *testing.T) *ChatServer {
 	t.Helper()
 	eng := NewBehaviorEngine(behavior.NewStore(100), behavior.NewStats(), stubGeo{}, "")
 	s := &ChatServer{Behavior: eng, Screener: NewPowScreener(eng), SlowCooldown: guard.NewCooldownMap()}
+	s.Hub.Clients = map[*websocket.Conn]*ClientSession{}
 	bc := testBehaviorConfig()
 	bc.SlowmodeMult = []int{0, 0, 10, 60}
 	old := Cfg.Abuse.Load()
@@ -25,13 +26,18 @@ func slowServer(t *testing.T) *ChatServer {
 	return s
 }
 
-func slowSession(ip string) *ClientSession {
-	return &ClientSession{
+// slowSession builds a session registered with s, because a notice is
+// only delivered to a live one: unicast skips a session that is not in
+// Hub.Clients, which is what keeps a send from racing close(Send).
+func slowSession(s *ChatServer, ip string) *ClientSession {
+	sess := &ClientSession{
 		Conn:        &websocket.Conn{},
 		IP:          ip,
 		DisplayName: "u",
 		Send:        make(chan []byte, 8),
 	}
+	s.Hub.Clients[sess.Conn] = sess
+	return sess
 }
 
 func drainNotices(sess *ClientSession) []string {
@@ -48,7 +54,7 @@ func drainNotices(sess *ClientSession) []string {
 
 func TestAllowSlowSend(t *testing.T) {
 	s := slowServer(t)
-	sess := slowSession("10.9.9.10")
+	sess := slowSession(s, "10.9.9.10")
 	base := time.Second
 	// Tier 0: always allowed, never recorded.
 	for i := 0; i < 3; i++ {

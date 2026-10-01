@@ -31,11 +31,27 @@ type WireMessage struct {
 	Type        string `json:"type"`
 	Time        string `json:"time,omitempty"`
 	DisplayName string `json:"displayName,omitempty"`
-	// SysKind classifies system lines at the source: "join", "leave",
-	// "date", or "audit". History replay filters join/leave unless the
-	// client asked for them; dates, audits and untagged lines (old disk
-	// records) are always sent. Only "audit" lines chain like chat.
-	SysKind string    `json:"sys_kind,omitempty"`
+	// Tags classify a line at the source, most general first: a notice
+	// carries its leaf tags and the ancestors they imply, e.g. a
+	// screening challenge is
+	// ["system","system.pow","system.pow.screening"]. The client
+	// filters on tags instead of matching message text, and muting a
+	// node hides its whole subtree. History replay filters join/leave
+	// unless the client asked for them; dates, audits and untagged lines
+	// are always sent. Only audit lines chain.
+	//
+	// There is no backward compatibility with the sys_kind field this
+	// replaced, so a history file written by an older build yields
+	// untagged notices: its join/leave records replay as ordinary system
+	// lines and ignore the client's join filters. Deploy against an
+	// empty history.
+	Tags []string `json:"tags,omitempty"`
+	// SysDate is the calendar day a date banner announces, as
+	// "2006-01-02". The banner text alone is a pre-rendered string, so
+	// without this the client could only recognise a repeat by comparing
+	// the text it had already drawn. Not covered by the chain hash:
+	// date notices are unchained, and this is display metadata.
+	SysDate string    `json:"sys_date,omitempty"`
 	Text    string    `json:"text,omitempty"`
 	Trip    *TripMeta `json:"trip,omitempty"`
 	// TmpID is the sender's per-session counter, relayed verbatim and

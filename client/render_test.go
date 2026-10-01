@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/CleveTok3125/V2V/internal/filter"
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 func TestParseHistoryBoundary(t *testing.T) {
@@ -29,37 +30,34 @@ func TestParseHistoryBoundary(t *testing.T) {
 	}
 }
 
-func TestIsJoinLeaveTagFirst(t *testing.T) {
-	if !isJoinLeave(WireMessage{Type: "system", SysKind: "join", Text: "unrelated"}) {
-		t.Error("tagged join must match regardless of text")
+// Tab routing is decided by the wire's type and tags. The server tags a
+// line at the source, so matching wording here would only be a second,
+// drifting copy of that decision: a line whose text happens to look like a
+// marker is still just a system line.
+func TestTabForWire(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  WireMessage
+		want int
+	}{
+		{"chat", WireMessage{Type: "chat", Text: "hi"}, TabChat},
+		// A marker frames the chat stream, so it belongs beside it.
+		{"history end", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagHistoryEnd), Text: "--- Kết thúc lịch sử ---"}, TabChat},
+		{"history begin", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagHistoryBegin)}, TabChat},
+		{"date", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagDate)}, TabSystem},
+		{"join", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagJoin)}, TabSystem},
+		{"limit", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagLimit)}, TabSystem},
+		{"screening", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagPowScreen)}, TabSystem},
+		// Marker-shaped text without the tag is an ordinary system line.
+		{"marker wording untagged", WireMessage{Type: "system", Text: "--- Lịch sử chat gần đây ---"}, TabSystem},
+		// Tagged system line with marker wording still goes to the tab its
+		// tags name, not the tab its words suggest.
+		{"screening with marker wording", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagPowScreen), Text: "--- Kết thúc lịch sử ---"}, TabSystem},
 	}
-	if !isJoinLeave(WireMessage{Type: "system", SysKind: "leave", Text: "unrelated"}) {
-		t.Error("tagged leave must match regardless of text")
-	}
-	if isJoinLeave(WireMessage{Type: "system", SysKind: "audit", Text: "x đã tham gia"}) {
-		t.Error("audit must not match even with join-like text")
-	}
-	if isJoinLeave(WireMessage{Type: "system", SysKind: "date", Text: "x"}) {
-		t.Error("date must not match")
-	}
-	// Legacy untagged lines fall back to text sniffing.
-	if !isJoinLeave(WireMessage{Type: "system", Text: "12:00 [Hệ thống]: a đã tham gia phòng chat!"}) {
-		t.Error("untagged join text must match")
-	}
-	if isJoinLeave(WireMessage{Type: "system", Text: "plain notice"}) {
-		t.Error("plain text must not match")
-	}
-}
-
-func TestIsDateBannerTagFirst(t *testing.T) {
-	if !isDateBanner(WireMessage{Type: "system", SysKind: "date", Text: "x"}) {
-		t.Error("tagged date must match")
-	}
-	if isDateBanner(WireMessage{Type: "system", SysKind: "join", Text: "--- Ngày x ---"}) {
-		t.Error("join must not match even with date-like text")
-	}
-	if !isDateBanner(WireMessage{Type: "system", Text: "--- Ngày 01/01/2026 ---"}) {
-		t.Error("untagged date text must match")
+	for _, tc := range cases {
+		if got := tabForWire(tc.msg); got != tc.want {
+			t.Errorf("%s: tabForWire = %d, want %d", tc.name, got, tc.want)
+		}
 	}
 }
 

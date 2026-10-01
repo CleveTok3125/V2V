@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/CleveTok3125/V2V/internal/config"
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // testSeq assigns increasing history cursors to lines seeded directly in
@@ -19,11 +20,29 @@ var testSeq atomic.Uint64
 
 func testNextSeq() uint64 { return testSeq.Add(1) }
 
+// testTags maps a test's "kind" shorthand onto the wire tag tree, so the
+// tests keep reading in join/date/leave terms while the wire carries tags.
+// An empty kind means a pre-split legacy system record: no tags at all.
+func testTags(kind string) []string {
+	switch kind {
+	case "":
+		return nil
+	case "join":
+		return wire.WithTags(wire.TagJoin)
+	case "leave":
+		return wire.WithTags(wire.TagLeave)
+	case "date":
+		return wire.WithTags(wire.TagDate)
+	default:
+		return wire.WithTags(kind)
+	}
+}
+
 // tagLine builds one stored history line with chain fields and kind
 // (chat, audit, or pre-split system records).
 func tagLine(height uint64, typ, kind, text string) string {
 	raw, _ := json.Marshal(WireMessage{
-		Type: typ, Time: "12:00", SysKind: kind, Text: text,
+		Type: typ, Time: "12:00", Tags: testTags(kind), Text: text,
 		ChainHash:   fmt.Sprintf("%064x", height),
 		ChainHeight: height, ChainVer: 2, Seq: testNextSeq(),
 	})
@@ -34,7 +53,7 @@ func tagLine(height uint64, typ, kind, text string) string {
 // no chain fields, no height. The chain never advances over these.
 func noticeLine(kind, text string) string {
 	raw, _ := json.Marshal(WireMessage{
-		Type: "system", Time: "12:00", SysKind: kind, Text: text, Seq: testNextSeq(),
+		Type: "system", Time: "12:00", Tags: testTags(kind), Text: text, Seq: testNextSeq(),
 	})
 	return string(raw)
 }
@@ -299,7 +318,7 @@ func TestAudit_LiveAndReplay(t *testing.T) {
 	select {
 	case m := <-peer.Send:
 		var w WireMessage
-		if err := json.Unmarshal(m, &w); err != nil || w.SysKind != "audit" || w.ChainHeight != 1 {
+		if err := json.Unmarshal(m, &w); err != nil || !wire.HasTag(w.Tags, wire.TagAudit) || w.ChainHeight != 1 {
 			t.Fatalf("live audit mangled: %q", m)
 		}
 	case <-time.After(2 * time.Second):

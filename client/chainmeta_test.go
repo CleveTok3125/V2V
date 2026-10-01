@@ -11,6 +11,7 @@ import (
 
 	"github.com/CleveTok3125/V2V/internal/chain"
 	"github.com/CleveTok3125/V2V/internal/tripcolor"
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // chainedTripWire wraps a trip meta in a valid v2 chained wire for tests.
@@ -149,8 +150,8 @@ func TestStashEchoRoundtrip(t *testing.T) {
 
 func TestReapStaleEchoes(t *testing.T) {
 	stash := []pendingEcho{
-		{wire: WireMessage{TmpID: 1}, at: time.Now().Add(-time.Hour)},
-		{wire: WireMessage{TmpID: 2}, at: time.Now()},
+		{msg: WireMessage{TmpID: 1}, at: time.Now().Add(-time.Hour)},
+		{msg: WireMessage{TmpID: 2}, at: time.Now()},
 	}
 	kept, stale := reapStaleEchoes(stash, 10*time.Second)
 	if len(kept) != 1 || len(stale) != 1 || stale[0].TmpID != 1 {
@@ -849,12 +850,12 @@ func TestTrackReplayWindow(t *testing.T) {
 func TestTrackReplayWindowFooterFlushesBanner(t *testing.T) {
 	sess := sessionForDispatch(t)
 	sess.Chain.RenderCache = newRenderCache(8)
-	banner := WireMessage{Type: "system", Time: "12:00", SysKind: "date", Text: "day marker"}
+	banner := WireMessage{Type: "system", Time: "12:00", Tags: wire.WithTags(wire.TagDate), SysDate: "2026-01-02", Text: "day marker"}
 	sess.Display.DisplayMu.Lock()
 	defer sess.Display.DisplayMu.Unlock()
 	sess.Pending.PendingDateBannerWire = &banner
 	sess.trackReplayWindow("| --- Kết thúc lịch sử (1/2) ---", false)
-	if sess.Pending.PendingDateBannerWire != nil || sess.Pending.PendingDateBanner != "" {
+	if sess.Pending.PendingDateBannerWire != nil {
 		t.Fatal("footer must clear the stashed banner")
 	}
 	for _, l := range append(sess.Display.TabChat.lines, sess.Display.TabSys.lines...) {

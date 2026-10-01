@@ -9,6 +9,7 @@ import (
 
 	"github.com/CleveTok3125/V2V/internal/config"
 	"github.com/CleveTok3125/V2V/internal/pow"
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 var screenPreset = pow.Preset{Time: 1, Memory: 8 * 1024, Threads: 1, Difficulty: 8}
@@ -104,25 +105,35 @@ func TestScreenDropConn(t *testing.T) {
 	}
 }
 
-func TestUnicastSkipsUnregistered(t *testing.T) {
+func TestUnicastNoticeSkipsUnregistered(t *testing.T) {
+	defer testChainCfg()()
+	Cfg.Static.Timezone = time.UTC
 	s := NewChatServer()
 	conn := &websocket.Conn{}
 	sess := &ClientSession{Conn: conn, Send: make(chan []byte, 1)}
 	// Not in Hub.Clients: must drop silently, never send (a send here
 	// would race unregisterClient's close(Send)).
-	s.unicast(sess, "hello")
+	s.unicastNotice(sess, "[Hệ thống]: hello", wire.TagPowScreen)
 	select {
 	case <-sess.Send:
 		t.Fatal("must not send to an unregistered session")
 	default:
 	}
-	// Registered: delivers.
+	// Registered: delivers a tagged wire, not a bare string, so the client
+	// can filter it without reading the text.
 	s.Hub.Clients[conn] = sess
-	s.unicast(sess, "world")
+	s.unicastNotice(sess, "[Hệ thống]: world", wire.TagPowScreen)
 	select {
 	case got := <-sess.Send:
-		if string(got) != "world" {
-			t.Fatalf("got %q", got)
+		var notice WireMessage
+		if err := json.Unmarshal(got, &notice); err != nil {
+			t.Fatalf("notice must be a wire, got %q: %v", got, err)
+		}
+		if notice.Text != "[Hệ thống]: world" {
+			t.Fatalf("text = %q", notice.Text)
+		}
+		if !wire.HasTag(notice.Tags, wire.TagPowScreen) {
+			t.Fatalf("notice must carry %q, got %v", wire.TagPowScreen, notice.Tags)
 		}
 	default:
 		t.Fatal("registered session must receive")

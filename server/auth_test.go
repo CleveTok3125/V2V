@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/config"
+	"github.com/CleveTok3125/V2V/internal/wire"
 	"github.com/gorilla/websocket"
 )
 
@@ -214,7 +215,7 @@ func TestJoinBroadcast_IncludesJoiner(t *testing.T) {
 	sessB := &ClientSession{Conn: b, Send: make(chan []byte, 256), DisplayName: "B#1111", Perms: GetDefaultPermission()}
 	s.Hub.Clients[a] = sessA
 	s.Hub.Clients[b] = sessB
-	s.Hub.BroadcastNotice("X đã tham gia phòng chat!", "join", nil)
+	s.Hub.BroadcastNotice("X đã tham gia phòng chat!", []string{wire.TagJoin}, nil)
 	for _, sess := range []*ClientSession{sessA, sessB} {
 		select {
 		case msg := <-sess.Send:

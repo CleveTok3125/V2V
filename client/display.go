@@ -197,11 +197,12 @@ func (s *Session) emitLocalFeedback(line string) {
 	s.Display.PrintGen++
 }
 
-// emitLocalFeedbackKind is emitLocalFeedback for informational notices
+// emitLocalFeedbackTags is emitLocalFeedback for informational notices
 // that /notify can mute: the line always lands in Tab 2, but the live
-// print is skipped while its kind is muted. Caller must hold DisplayMu.
-func (s *Session) emitLocalFeedbackKind(kind, line string) {
-	s.emitLocalFeedbackLive(s.notifyKindAllowed(kind), line)
+// print is skipped while any of its tags is muted. Caller must hold
+// DisplayMu.
+func (s *Session) emitLocalFeedbackTags(tags []string, line string) {
+	s.emitLocalFeedbackLive(s.notifyTagsAllowed(tags), line)
 }
 
 // emitLocalFeedbackLive buffers a local line in TabSystem and prints it

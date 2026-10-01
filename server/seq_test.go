@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // TestHistorySeqMonotonic: notices and chained lines share one monotonic
@@ -15,9 +17,9 @@ import (
 func TestHistorySeqMonotonic(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
-	s.Hub.BroadcastNotice("day 1", "date", nil)
+	s.Hub.BroadcastNotice("day 1", []string{wire.TagDate}, nil)
 	w, _ := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "12:00", DisplayName: "A", Text: "hi"}, "")
-	s.Hub.BroadcastNotice("A joined", "join", nil)
+	s.Hub.BroadcastNotice("A joined", []string{wire.TagJoin}, nil)
 
 	if w.Seq != 2 {
 		t.Fatalf("chained seq = %d, want 2", w.Seq)
@@ -48,9 +50,9 @@ func TestHistorySeqPersists(t *testing.T) {
 	if err := s1.InitHistoryStore(path, 50); err != nil {
 		t.Fatal(err)
 	}
-	s1.Hub.BroadcastNotice("day 1", "date", nil)
+	s1.Hub.BroadcastNotice("day 1", []string{wire.TagDate}, nil)
 	s1.Chain.linkAndStore(WireMessage{Type: "chat", Time: "12:00", DisplayName: "A", Text: "hi"}, "")
-	s1.Hub.BroadcastNotice("A joined", "join", nil)
+	s1.Hub.BroadcastNotice("A joined", []string{wire.TagJoin}, nil)
 	// Close does not drain the async write queue; wait until the records
 	// land on disk before closing.
 	deadline := time.Now().Add(3 * time.Second)
@@ -91,7 +93,7 @@ func TestHistorySeqPersists(t *testing.T) {
 // seedSeqLines stores n notices, giving them seqs 1..n.
 func seedSeqLines(s *ChatServer, n int) {
 	for i := 1; i <= n; i++ {
-		s.Hub.BroadcastNotice(fmt.Sprintf("n%d", i), "date", nil)
+		s.Hub.BroadcastNotice(fmt.Sprintf("n%d", i), []string{wire.TagDate}, nil)
 	}
 }
 

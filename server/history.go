@@ -13,6 +13,7 @@ import (
 
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/trip"
+	"github.com/CleveTok3125/V2V/internal/wire"
 
 	"github.com/gorilla/websocket"
 )
@@ -225,11 +226,6 @@ func (h *Hub) sendWithRetry(conn *websocket.Conn, client *ClientSession, msg []b
 	}
 }
 
-// BroadcastNotice sends a server-originated notification (join/leave/date)
-// that never enters the hash chain: it carries no authorship or ordering
-// evidence, only display text. Stored for replay, broadcast live.
-// Management lines that must serve as evidence use BroadcastAudit;
-// unicast warnings stay raw strings (per-client, never chained).
 // fanout sends one marshaled wire to every client except sender.
 // isSystem selects the retry policy; echo returns a delivery
 // confirmation to the sender itself. Callers hold BroadcastMu when
@@ -255,22 +251,64 @@ func (h *Hub) fanout(data []byte, sender *websocket.Conn, isSystem, echo bool) {
 	}
 }
 
-// BroadcastNotice sends a server-originated notification (join/leave/date)
+// BroadcastNotice sends a server-originated notification (join/leave)
 // that never enters the hash chain: it carries no authorship or ordering
 // evidence, only display text. Stored for replay, broadcast live.
 // Management lines that must serve as evidence use BroadcastAudit;
 // unicast warnings stay raw strings (per-client, never chained).
-func (h *Hub) BroadcastNotice(text, kind string, sender *websocket.Conn) {
-	now := time.Now().In(Cfg.Static.Timezone)
+//
+// leaves names the tag leaves, not the finished tag list: they are turned
+// into the full root-to-leaf chain here so a caller cannot publish a
+// partial chain and quietly escape a mute its parents are subject to.
+func (h *Hub) BroadcastNotice(text string, leaves []string, sender *websocket.Conn) {
+	h.broadcastSystem(text, leaves, "", sender)
+}
+
+// BroadcastDate announces a new calendar day. It carries the day as data
+// (sys_date) next to the rendered banner, so a client that already showed
+// this day — from the replay tail, or from a server that restarted and
+// re-announced it — can recognise the repeat without comparing banner text.
+func (h *Hub) BroadcastDate(text, day string, sender *websocket.Conn) {
+	h.broadcastSystem(text, []string{wire.TagDate}, day, sender)
+}
+
+// serverLocation is the timezone a notice is stamped in. Production always
+// resolves a location from config, but a zero Timezone would panic Time.In,
+// so fall back to UTC rather than trust the caller.
+func serverLocation() *time.Location {
+	if loc := Cfg.Static.Timezone; loc != nil {
+		return loc
+	}
+	return time.UTC
+}
+
+// noticeWire builds one unchained system line. leaves names the tag leaves
+// rather than the finished list, so every producer publishes the same
+// root-to-leaf chain and none of them can emit a partial chain that would
+// escape a mute on one of its parents.
+func noticeWire(now time.Time, text string, leaves ...string) WireMessage {
+	now = now.In(serverLocation())
+	return WireMessage{
+		Type: "system",
+		Time: now.Format("15:04"),
+		Tags: wire.WithTags(leaves...), Text: text,
+	}
+}
+
+// broadcastSystem stores and broadcasts one unchained system line. day is
+// the machine date a date banner announces, empty for every other notice.
+func (h *Hub) broadcastSystem(text string, leaves []string, day string, sender *websocket.Conn) {
+	now := time.Now().In(serverLocation())
 	// Seq is assigned under Chain.Mu, and the disk enqueue happens under
 	// the same lock, so persisted order always matches seq order.
 	h.chain.Mu.Lock()
-	wire := WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: kind, Text: text}
-	wire.Seq = h.chain.assignSeqLocked()
-	data, _ := json.Marshal(wire)
+	notice := noticeWire(now, text, leaves...)
+	notice.SysDate = day
+	notice.Seq = h.chain.assignSeqLocked()
+	data, _ := json.Marshal(notice)
 	h.chain.appendMessageLocked(string(data))
 	if h.chain.Store != nil {
-		h.chain.Store.EnqueueWire(wire, now)
+		h.chain.Store.EnqueueWire(notice, now)
 	}
 	h.chain.Mu.Unlock()
 	h.fanout(data, sender, true, false)
@@ -281,10 +319,13 @@ func (h *Hub) BroadcastNotice(text, kind string, sender *websocket.Conn) {
 // chat. No producers yet; the route exists so management evidence never
 // rides the notice path by mistake.
 func (h *Hub) BroadcastAudit(text string, sender *websocket.Conn, serverPub string) {
-	now := time.Now().In(Cfg.Static.Timezone)
+	now := time.Now().In(serverLocation())
 	h.BroadcastMu.Lock()
 	defer h.BroadcastMu.Unlock()
-	_, data := h.chain.linkAndStore(WireMessage{Type: "system", Time: now.Format("15:04"), SysKind: "audit", Text: text}, serverPub)
+	_, data := h.chain.linkAndStore(WireMessage{
+		Type: "system", Time: now.Format("15:04"),
+		Tags: wire.WithTags(wire.TagAudit), Text: text,
+	}, serverPub)
 
 	h.fanout(data, sender, true, false)
 }
@@ -337,7 +378,10 @@ func (h *Hub) CheckAndBroadcastDate(now time.Time) {
 
 		dateMsg := fmt.Sprintf("\x1b[36m--- Ngày %s ---\x1b[0m", currentDate)
 
-		h.BroadcastNotice(dateMsg, "date", nil)
+		// Two renderings of the same day on purpose: the banner keeps the
+		// display order, sys_date carries the machine value so a client
+		// can tell a repeat from a new day.
+		h.BroadcastDate(dateMsg, now.Format("2006-01-02"), nil)
 	}
 }
 
@@ -367,8 +411,8 @@ func (r *windowRing) feed(msgStr string, before uint64) bool {
 		return true
 	}
 	if before != 0 {
-		var wire WireMessage
-		if err := json.Unmarshal([]byte(msgStr), &wire); err == nil && wire.ChainHeight != 0 && wire.ChainHeight >= before {
+		var stored WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &stored); err == nil && stored.ChainHeight != 0 && stored.ChainHeight >= before {
 			r.done = true
 			return true
 		}
@@ -439,12 +483,12 @@ func oldestChained(lines []string) uint64 {
 	var oldest uint64
 	found := false
 	for _, msgStr := range lines {
-		var wire WireMessage
-		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil || wire.ChainHeight == 0 {
+		var stored WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &stored); err != nil || stored.ChainHeight == 0 {
 			continue
 		}
-		if !found || wire.ChainHeight < oldest {
-			oldest, found = wire.ChainHeight, true
+		if !found || stored.ChainHeight < oldest {
+			oldest, found = stored.ChainHeight, true
 		}
 	}
 	if !found {
@@ -548,15 +592,15 @@ func (c *ChainService) collectAfterSeq(afterSeq uint64, limit int) (lines []stri
 	c.Mu.RLock()
 	defer c.Mu.RUnlock()
 	for _, msgStr := range c.History {
-		var wire WireMessage
-		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil || wire.Seq <= afterSeq {
+		var stored WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &stored); err != nil || stored.Seq <= afterSeq {
 			continue
 		}
 		if len(lines) == limit {
 			return lines, true, next
 		}
 		lines = append(lines, msgStr)
-		next = wire.Seq
+		next = stored.Seq
 	}
 	return lines, false, 0
 }
@@ -575,15 +619,15 @@ func (c *ChainService) collectBeforeSeq(beforeSeq uint64, limit int) (lines []st
 	defer c.Mu.RUnlock()
 	for i := len(c.History) - 1; i >= 0; i-- {
 		msgStr := c.History[i]
-		var wire WireMessage
-		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil || wire.Seq == 0 || wire.Seq >= beforeSeq {
+		var stored WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &stored); err != nil || stored.Seq == 0 || stored.Seq >= beforeSeq {
 			continue
 		}
 		if len(lines) == limit {
 			return lines, true, next
 		}
 		lines = append(lines, msgStr)
-		next = wire.Seq
+		next = stored.Seq
 	}
 	return lines, false, 0
 }
@@ -639,11 +683,11 @@ func (c *ChainService) collectRanges(ranges []HeightRange, limit int) []string {
 	defer c.Mu.RUnlock()
 	var out []string
 	for _, msgStr := range c.History {
-		var wire WireMessage
-		if err := json.Unmarshal([]byte(msgStr), &wire); err != nil {
+		var stored WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &stored); err != nil {
 			continue
 		}
-		h := wire.ChainHeight
+		h := stored.ChainHeight
 		if h == 0 || h > maxTo {
 			continue
 		}
@@ -792,34 +836,34 @@ func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, he
 	for _, msgStr := range lines {
 		// Keep history messages as stored (could be legacy ANSI string or WireMessage JSON)
 		// For WireMessage JSON, send as is; for legacy, clean and send
-		var wire WireMessage
-		wireErr := json.Unmarshal([]byte(msgStr), &wire)
-		if wireErr == nil && wire.Type == "system" &&
-			(wire.SysKind == "join" || wire.SysKind == "leave") && !session.WantJoins {
+		var stored WireMessage
+		wireErr := json.Unmarshal([]byte(msgStr), &stored)
+		if wireErr == nil && stored.Type == "system" && !session.WantJoins &&
+			wire.HasAnyTag(stored.Tags, wire.TagJoin, wire.TagLeave) {
 			continue
 		}
 		// Window bounds cover sent chained lines only: skipped lines
 		// must not widen the range, and unchained notices (height 0)
 		// must not drag the minimum to zero.
-		if wireErr == nil && wire.ChainHeight > 0 {
-			if !haveHeight || wire.ChainHeight < minHeight {
-				minHeight = wire.ChainHeight
+		if wireErr == nil && stored.ChainHeight > 0 {
+			if !haveHeight || stored.ChainHeight < minHeight {
+				minHeight = stored.ChainHeight
 			}
-			if !haveHeight || wire.ChainHeight > maxHeight {
-				maxHeight = wire.ChainHeight
+			if !haveHeight || stored.ChainHeight > maxHeight {
+				maxHeight = stored.ChainHeight
 			}
 			haveHeight = true
 		}
-		if wireErr == nil && wire.Seq > 0 {
+		if wireErr == nil && stored.Seq > 0 {
 			if firstSeq == 0 {
-				firstSeq = wire.Seq
+				firstSeq = stored.Seq
 			}
-			lastSeq = wire.Seq
+			lastSeq = stored.Seq
 		}
 		if wireErr == nil {
 			// JSON lines are newline-free (Marshal escapes them), so
 			// they batch safely.
-			if wire.Type == "chat" {
+			if stored.Type == "chat" {
 				addBatched(msgStr)
 			} else {
 				addBatched(filter.CleanHistoryMessage(msgStr))

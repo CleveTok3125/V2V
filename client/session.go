@@ -120,9 +120,9 @@ type DisplayState struct {
 	// HoldTimer is the release timer for the current hold; stopped when
 	// the hold ends so no stale timer lingers.
 	HoldTimer *time.Timer
-	// LastDateBanner is the most recent date banner text, so a repeat
-	// (e.g. a connect announcement right after the replay's own banner)
-	// is not printed twice.
+	// LastDateBanner is the most recent announced day (sys_date), so a
+	// repeat — a connect announcement right after the replay already
+	// carried one — is not printed twice. Empty disables the dedup.
 	LastDateBanner string
 	// PendingGreeting is the startup welcome line. It is held until the
 	// catch-up history prints so it lands at the bottom of the loaded
@@ -236,7 +236,9 @@ type PendingState struct {
 	// age into a false "ID altered" warning). Bounded; oldest evicted.
 	SeenTmpIDs []uint64
 
-	PendingDateBanner     string
+	// PendingDateBannerWire holds a date banner that arrived inside a
+	// window whose chat lines are not drawn yet, so it prints just before
+	// the block that follows it rather than in the wrong place.
 	PendingDateBannerWire *WireMessage
 }
 
@@ -466,6 +468,19 @@ func (s *Session) connect() bool {
 		return false
 	case "auth_success":
 		s.Username = authSuccess.Username
+	default:
+		// The server only ever answers with auth_success or auth_failed.
+		// Anything else — a notice frame sent by mistake, a proxy, a
+		// different service on the port — means we do not actually hold
+		// a session, so refuse instead of opening a UI that will fail on
+		// its first read.
+		fmt.Println("❌ Phản hồi xác thực không hợp lệ: " + serverField(authSuccess.Type))
+		if showWasmStatus("❌ Phản hồi xác thực không hợp lệ", true) {
+			s.Conn.Close()
+			parkForever()
+		}
+		notifyQuit()
+		return false
 	}
 	return true
 }

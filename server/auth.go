@@ -19,6 +19,7 @@ import (
 
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
+	"github.com/CleveTok3125/V2V/internal/wire"
 
 	"github.com/gorilla/websocket"
 )
@@ -261,8 +262,12 @@ func (h *Hub) alertConcurrentIdentity(identityPubHex, newClientIP string) {
 	if _, alive := h.Clients[prev.Conn]; !alive {
 		return
 	}
+	alert, _ := json.Marshal(noticeWire(
+		time.Now(),
+		"\x1b[90m[He thong]: Danh tinh cua ban vua duoc dang nhap tu "+newClientIP+".\x1b[0m",
+		wire.TagAuth))
 	select {
-	case prev.Send <- []byte("\x1b[90m[He thong]: Danh tinh cua ban vua duoc dang nhap tu " + newClientIP + ".\x1b[0m"):
+	case prev.Send <- alert:
 	default:
 	}
 	logWarnf("⚠️ [IDENTITY CONCURRENT] identity đăng nhập song song từ %s (phiên cũ còn sống)", newClientIP)
@@ -450,8 +455,13 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 	}
 
 	if len(authPacket.Tripcode) > Cfg.Dynamic.Load().MaxTripcodeLength {
-		errMsg := fmt.Sprintf("[Hệ thống]: Mật khẩu Tripcode quá dài (tối đa %d byte). Bị từ chối!", Cfg.Dynamic.Load().MaxTripcodeLength)
-		conn.WriteMessage(websocket.TextMessage, []byte(errMsg))
+		// Pre-auth frames are AuthPackets, not notices: the client reads
+		// exactly one frame here and decides on its type, so a notice
+		// would read as neither success nor failure.
+		_ = conn.WriteJSON(AuthPacket{
+			Type:  "auth_failed",
+			Error: fmt.Sprintf("Mật khẩu Tripcode quá dài (tối đa %d byte). Bị từ chối!", Cfg.Dynamic.Load().MaxTripcodeLength),
+		})
 		conn.Close()
 		logWarnf("⚠️ [AUTH FAIL] %s: Tripcode secret quá dài (%d bytes) - Từ chối để chống trùng lặp.", clientIP, len(authPacket.Tripcode))
 		s.observeAuthErr(clientIP, ErrTripcodeTooLong)

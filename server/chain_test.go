@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/chain"
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 func testChainCfg() func() {
@@ -200,7 +201,7 @@ func TestNoticeAuditRoutes(t *testing.T) {
 	if w1.ChainHeight != 1 {
 		t.Fatalf("first height = %d, want 1", w1.ChainHeight)
 	}
-	s.Hub.BroadcastNotice("A joined", "join", nil)
+	s.Hub.BroadcastNotice("A joined", []string{wire.TagJoin}, nil)
 	if s.Chain.height != 1 {
 		t.Fatalf("notice advanced height to %d", s.Chain.height)
 	}
@@ -221,7 +222,7 @@ func TestNoticeAuditRoutes(t *testing.T) {
 		}
 		return w
 	}()
-	if audit.ChainHeight != 3 || audit.SysKind != "audit" {
+	if audit.ChainHeight != 3 || !wire.HasTag(audit.Tags, wire.TagAudit) {
 		t.Fatalf("audit not chained: %+v", audit)
 	}
 	_ = tipAfterNotice
@@ -234,7 +235,7 @@ func TestChainResumeSkipsNotices(t *testing.T) {
 	defer testChainCfg()()
 	s := NewChatServer()
 	s.Chain.History = append(s.Chain.History, "legacy raw line without chain")
-	notice, _ := json.Marshal(WireMessage{Type: "system", Time: "15:04", SysKind: "join", Text: "A joined"})
+	notice, _ := json.Marshal(WireMessage{Type: "system", Time: "15:04", Tags: wire.WithTags(wire.TagJoin), Text: "A joined"})
 	s.Chain.History = append(s.Chain.History, string(notice))
 	w1, _ := s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
 	if w1.ChainHeight != 1 {
@@ -302,7 +303,7 @@ func TestChainResumeAuditAndDate(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	s.Chain.linkAndStore(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "one", TmpID: 1}, "")
-	s.Hub.BroadcastNotice("day marker", "date", nil)
+	s.Hub.BroadcastNotice("day marker", []string{wire.TagDate}, nil)
 	s.Hub.BroadcastAudit("moderation note", nil, "")
 	if s.Chain.height != 2 {
 		t.Fatalf("height = %d, want 2 (chat+audit only)", s.Chain.height)
