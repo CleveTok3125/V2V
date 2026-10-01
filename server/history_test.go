@@ -242,3 +242,25 @@ func TestTripcodeTooLongRejectsWithAuthPacket(t *testing.T) {
 		t.Fatalf("HandleAuth err = %v, want ErrTripcodeTooLong", err)
 	}
 }
+
+// TestNoticeWireWithoutConfiguredTimezone: a notice stamps itself in the
+// configured timezone, and Time.In panics on a nil location. Config always
+// resolves one in production, so this only bites a caller that builds a
+// server without it — but a panic there takes down whatever goroutine
+// happened to send the notice, so the fallback is pinned.
+func TestNoticeWireWithoutConfiguredTimezone(t *testing.T) {
+	old := Cfg.Static.Timezone
+	Cfg.Static.Timezone = nil
+	t.Cleanup(func() { Cfg.Static.Timezone = old })
+
+	got := noticeWire(time.Now(), "[Hệ thống]: x", wire.TagLimit)
+	if got.Type != "system" {
+		t.Fatalf("type = %q, want system", got.Type)
+	}
+	if !wire.HasTag(got.Tags, wire.TagLimit) {
+		t.Fatalf("tags = %v, want the limit leaf", got.Tags)
+	}
+	if _, err := time.Parse("15:04", got.Time); err != nil {
+		t.Fatalf("time %q must be a clock time: %v", got.Time, err)
+	}
+}

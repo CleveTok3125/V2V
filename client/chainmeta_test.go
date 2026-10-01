@@ -855,7 +855,7 @@ func TestTrackReplayWindowFooterFlushesBanner(t *testing.T) {
 	defer sess.Display.DisplayMu.Unlock()
 	sess.Pending.PendingDateBannerWire = &banner
 	sess.trackReplayWindow("| --- Kết thúc lịch sử (1/2) ---", false)
-	if sess.Pending.PendingDateBannerWire != nil || sess.Pending.PendingDateBanner != "" {
+	if sess.Pending.PendingDateBannerWire != nil {
 		t.Fatal("footer must clear the stashed banner")
 	}
 	for _, l := range append(sess.Display.TabChat.lines, sess.Display.TabSys.lines...) {

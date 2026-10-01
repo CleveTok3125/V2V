@@ -1077,7 +1077,7 @@ func (s *Session) finishRecovery() {
 	}
 	if len(p.Missing) == 0 && !p.Failed {
 		s.Chain.RecoverPending = nil
-		s.emitLocalFeedbackKind(NotifyKindHistory, fmt.Sprintf("| [Local]: ↩ Đã bù %d tin bị lỡ.\n", p.Received))
+		s.emitLocalFeedbackTags(historyTags(), fmt.Sprintf("| [Local]: ↩ Đã bù %d tin bị lỡ.\n", p.Received))
 		s.releaseCatchupLocked()
 		return
 	}
@@ -1110,7 +1110,7 @@ func (s *Session) abandonRecoveryLocked(p *recoverWindow) {
 		return
 	}
 	s.Chain.RecoverPending = nil
-	s.emitLocalFeedbackKind(NotifyKindHistory, fmt.Sprintf("| [Local]: ↩ Không bù đủ tin (nhận %d/%d).\n", p.Received, p.Received+len(p.Missing)))
+	s.emitLocalFeedbackTags(historyTags(), fmt.Sprintf("| [Local]: ↩ Không bù đủ tin (nhận %d/%d).\n", p.Received, p.Received+len(p.Missing)))
 	s.releaseCatchupLocked()
 }
 

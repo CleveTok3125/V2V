@@ -236,7 +236,9 @@ type PendingState struct {
 	// age into a false "ID altered" warning). Bounded; oldest evicted.
 	SeenTmpIDs []uint64
 
-	PendingDateBanner     string
+	// PendingDateBannerWire holds a date banner that arrived inside a
+	// window whose chat lines are not drawn yet, so it prints just before
+	// the block that follows it rather than in the wrong place.
 	PendingDateBannerWire *WireMessage
 }
 

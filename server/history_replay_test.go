@@ -318,7 +318,7 @@ func TestAudit_LiveAndReplay(t *testing.T) {
 	select {
 	case m := <-peer.Send:
 		var w WireMessage
-		if err := json.Unmarshal(m, &w); err != nil || !wire.HasTag(w.Tags, "system.audit") || w.ChainHeight != 1 {
+		if err := json.Unmarshal(m, &w); err != nil || !wire.HasTag(w.Tags, wire.TagAudit) || w.ChainHeight != 1 {
 			t.Fatalf("live audit mangled: %q", m)
 		}
 	case <-time.After(2 * time.Second):

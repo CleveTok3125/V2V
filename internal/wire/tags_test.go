@@ -140,14 +140,106 @@ func TestDeclaredTagsAreInTheTree(t *testing.T) {
 	// Tags the server publishes, paired with the constant that names them.
 	produced := map[string]string{
 		"join": TagJoin, "leave": TagLeave, "date": TagDate,
-		"audit": TagAudit,
-		"gate":  TagPowGate, "screening": TagPowScreen,
-		"limit": TagLimit, "envelope": TagEnvelope, "trip": TagTrip,
+		"audit":           TagAudit,
+		"history":         TagHistory,
+		"history begin":   TagHistoryBegin,
+		"history older":   TagHistoryOlder,
+		"history recover": TagHistoryRecover,
+		"history end":     TagHistoryEnd,
+		"history used up": TagHistoryExhausted,
+		"pow":             TagPow,
+		"gate":            TagPowGate,
+		"screening":       TagPowScreen,
+		"limit":           TagLimit, "envelope": TagEnvelope, "trip": TagTrip,
 		"filter": TagFilter, "auth": TagAuth, "transport": TagTransport,
 	}
 	for kind, tag := range produced {
 		if !declared[tag] {
 			t.Errorf("notice kind %q uses %q, which AllTags does not list", kind, tag)
+		}
+	}
+}
+
+// TestBlockedByMatchesAncestors: muting a node has to hide everything
+// below it, which only works if a line is tested against its ancestors and
+// not just the tags it names.
+func TestBlockedByMatchesAncestors(t *testing.T) {
+	cases := []struct {
+		name    string
+		tags    []string
+		muted   []string
+		wantHit string
+	}{
+		{"nothing muted", WithTags(TagPowScreen), nil, ""},
+		{"root muted hides a notice", WithTags(TagPowScreen), []string{TagRoot}, TagRoot},
+		{"intermediate muted hides child", WithTags(TagPowScreen), []string{TagPow}, TagPow},
+		{"own tag muted", WithTags(TagPowScreen), []string{TagPowScreen}, TagPowScreen},
+		{"unrelated tag does not block", WithTags(TagPowScreen), []string{TagJoin, TagDate}, ""},
+		{"sibling subtree does not block", WithTags(TagHistoryEnd), []string{TagPow}, ""},
+		{"one of several tags muted", WithTags(TagHistoryRecover, TagPowScreen), []string{TagPowScreen}, TagPowScreen},
+		{"muted ancestor of one of several", WithTags(TagHistoryRecover, TagPowScreen), []string{TagHistory}, TagHistory},
+		{"untagged line is never blocked", nil, []string{TagRoot}, ""},
+	}
+	for _, tc := range cases {
+		muted := map[string]bool{}
+		for _, m := range tc.muted {
+			muted[m] = true
+		}
+		blocked := BlockedBy(tc.tags, muted)
+		if tc.wantHit == "" {
+			if len(blocked) != 0 {
+				t.Errorf("%s: BlockedBy(%v, %v) = %v, want none", tc.name, tc.tags, tc.muted, blocked)
+			}
+			continue
+		}
+		if len(blocked) != 1 || blocked[0] != tc.wantHit {
+			t.Errorf("%s: BlockedBy(%v, %v) = %v, want [%s]", tc.name, tc.tags, tc.muted, blocked, tc.wantHit)
+		}
+	}
+}
+
+// TestBlockedByIsDeterministic: the result feeds a user-facing "muted by"
+// message, so the same inputs must not produce a different order run to run.
+func TestBlockedByIsDeterministic(t *testing.T) {
+	muted := map[string]bool{TagRoot: true, TagPow: true, TagPowScreen: true}
+	tags := WithTags(TagPowScreen, TagJoin)
+	want := []string{TagRoot, TagPow, TagPowScreen}
+	for i := 0; i < 50; i++ {
+		got := BlockedBy(tags, muted)
+		if len(got) != len(want) {
+			t.Fatalf("BlockedBy = %v, want %v", got, want)
+		}
+		for j := range want {
+			if got[j] != want[j] {
+				t.Fatalf("BlockedBy = %v, want %v", got, want)
+			}
+		}
+	}
+}
+
+// TestBlockedByUnknownTagStopsAtKnownAncestor: a peer may publish a tag
+// this build does not know. Its ancestors below the known part still
+// apply, and the walk must terminate at the root.
+func TestBlockedByUnknownTagStopsAtKnownAncestor(t *testing.T) {
+	muted := map[string]bool{TagRoot: true}
+	blocked := BlockedBy([]string{TagRoot, "system.pow.future"}, muted)
+	if len(blocked) != 1 || blocked[0] != TagRoot {
+		t.Fatalf("BlockedBy = %v, want [%s]", blocked, TagRoot)
+	}
+}
+
+// TestBlockedByAlwaysTestsTheRoot: a peer can publish a chain that stops
+// below anything this build knows. Muting the root has to still hide it,
+// otherwise a partial chain is a way to stay visible while muted.
+func TestBlockedByAlwaysTestsTheRoot(t *testing.T) {
+	for _, chain := range [][]string{
+		{"system.pow.screening"},
+		{"system.future.leaf"},
+		{"system"},
+	} {
+		blocked := BlockedBy(chain, map[string]bool{TagRoot: true})
+		if len(blocked) != 1 || blocked[0] != TagRoot {
+			t.Errorf("BlockedBy(%v, root muted) = %v, want [%s]", chain, blocked, TagRoot)
 		}
 	}
 }

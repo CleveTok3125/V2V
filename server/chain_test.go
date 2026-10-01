@@ -222,7 +222,7 @@ func TestNoticeAuditRoutes(t *testing.T) {
 		}
 		return w
 	}()
-	if audit.ChainHeight != 3 || !wire.HasTag(audit.Tags, "system.audit") {
+	if audit.ChainHeight != 3 || !wire.HasTag(audit.Tags, wire.TagAudit) {
 		t.Fatalf("audit not chained: %+v", audit)
 	}
 	_ = tipAfterNotice

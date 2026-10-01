@@ -197,7 +197,7 @@ func (s *ChatServer) unicastData(sess *ClientSession, data []byte) {
 // write stays non-blocking: a warning dropped because
 // WritePump is wedged beats a wedged ReadPump.
 func (s *ChatServer) unicastNotice(sess *ClientSession, text string, leaves ...string) {
-	data, err := json.Marshal(noticeWire(time.Now().In(Cfg.Static.Timezone), text, leaves...))
+	data, err := json.Marshal(noticeWire(time.Now(), text, leaves...))
 	if err != nil {
 		return
 	}

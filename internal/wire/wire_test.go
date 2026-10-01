@@ -11,7 +11,7 @@ import (
 // must be a conscious protocol change reviewed here first.
 func TestWireJSONKeySet(t *testing.T) {
 	full := WireMessage{
-		Type: "system", Time: "12:00", DisplayName: "Bob#1234", Tags: []string{"system", "join"}, SysDate: "2026-01-02", Text: "hi",
+		Type: "system", Time: "12:00", DisplayName: "Bob#1234", Tags: []string{"system", "system.join"}, SysDate: "2026-01-02", Text: "hi",
 		Trip:        &TripMeta{Pub: "p", Seq: 1, Prev: "q", Sig: "s", ServerPub: "sp", MsgHash: "m", DisplayName: "Bob#1234", TmpID: 2, ReplyTo: 3},
 		TmpID:       2,
 		ReplyTo:     3,

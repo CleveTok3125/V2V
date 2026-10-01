@@ -121,6 +121,42 @@ func HasAnyTag(tags []string, wanted ...string) bool {
 	return false
 }
 
+// BlockedBy returns the muted keys that hide a line carrying tags: a key
+// matches when it is one of the tags or an ancestor of one. A caller hides
+// the line when the result is non-empty, which is what makes muting a node
+// mute its whole subtree.
+//
+// Keys that are not part of the taxonomy simply never match, so a caller can
+// pass whatever gate names it holds. Results follow the order of tags, so the
+// same input always yields the same output.
+func BlockedBy(tags []string, muted map[string]bool) []string {
+	if len(muted) == 0 || len(tags) == 0 {
+		return nil
+	}
+	var blocked []string
+	seen := make(map[string]bool, len(tags))
+	// Every notice sits under the root, so test it even for a chain that
+	// omits it: a peer publishing only "system.a.b" would otherwise stop
+	// the walk at the first ancestor this build does not know and escape
+	// a muted root.
+	walk := func(tag string) {
+		for at := tag; at != ""; at = ParentTag(at) {
+			if seen[at] {
+				continue
+			}
+			seen[at] = true
+			if muted[at] {
+				blocked = append(blocked, at)
+			}
+		}
+	}
+	walk(TagRoot)
+	for _, tag := range tags {
+		walk(tag)
+	}
+	return blocked
+}
+
 // WithTags returns tags plus the ancestors each one implies, ordered from
 // the root down so the result reads the way the tree does. Producers call
 // it to publish a leaf without spelling out the whole chain by hand.
