@@ -390,3 +390,84 @@ func TestNotifyPowWantedHonoursQuietFlag(t *testing.T) {
 		t.Fatal("--quiet system.pow must still apply alongside an unknown name")
 	}
 }
+
+// TestPowMinTierScope pins the one asymmetry in the PoW tier floor. There
+// are two "solving PoW" notices: the pre-connect join gate, printed by a
+// free function during dial, and the in-chat challenge, printed by the
+// session. The floor in ui.powMinTier gates both. A floor set at runtime
+// with /notify can only gate the in-chat one, because the gate notice is
+// emitted by the very connection that has not created a session yet — so
+// there is no runtime state to read. That is structural, not an oversight,
+// and it is why /notify says which notice it governs.
+func TestPowMinTierScope(t *testing.T) {
+	oldCfg, oldQuiet := ClientCfg, CLI.Quiet
+	t.Cleanup(func() { ClientCfg, CLI.Quiet = oldCfg, oldQuiet })
+	CLI.Quiet = nil
+
+	t.Run("config floor gates both", func(t *testing.T) {
+		ClientCfg = config.DefaultClientConfig()
+		floor := 3
+		ClientCfg.UI.PowMinTier = &floor
+		sess := NewSession()
+		sess.Display.Notify = NotifyState{Muted: map[string]bool{}, PowMinTier: ClientCfg.NotifyPowMinTier()}
+
+		for _, tier := range []int{1, 2, 3} {
+			if sess.notifyPowLive(tier) != (tier >= floor) {
+				t.Errorf("in-chat tier %d: live=%v, want %v", tier, sess.notifyPowLive(tier), tier >= floor)
+			}
+			if notifyPowWanted(tier) != (tier >= floor) {
+				t.Errorf("gate tier %d: live=%v, want %v", tier, notifyPowWanted(tier), tier >= floor)
+			}
+		}
+	})
+
+	t.Run("runtime floor gates the in-chat notice only", func(t *testing.T) {
+		ClientCfg = config.DefaultClientConfig() // floor 1
+		sess := NewSession()
+		sess.Display.Notify = NotifyState{Muted: map[string]bool{}, PowMinTier: 1}
+		sess.notifySetPowMinTier(3)
+
+		if sess.notifyPowLive(1) || sess.notifyPowLive(2) {
+			t.Error("a runtime floor must hide the in-chat notice below it")
+		}
+		if !sess.notifyPowLive(3) {
+			t.Error("a runtime floor must keep the in-chat notice at it")
+		}
+		// The gate notice was already printed by this point, so it keeps
+		// following the config.
+		if !notifyPowWanted(1) {
+			t.Error("the gate notice follows ui.powMinTier, not a runtime change")
+		}
+	})
+}
+
+// TestCmdNotifyReportsPowMinScope: /notify has to say which notice a tier
+// floor governs. The gate notice is printed by the connection that has not
+// built a session yet, so a floor set here cannot reach it; without the
+// note, "/notify powmin 3" reads as a promise it does not keep.
+func TestCmdNotifyReportsPowMinScope(t *testing.T) {
+	sess, out := queueTestSession(t)
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{}, PowMinTier: 1}
+
+	// cmdNotify takes DisplayMu itself.
+	if !sess.cmdNotify("/notify powmin 3") {
+		t.Fatal("/notify powmin should be handled")
+	}
+	sess.flushOutputNow()
+	if !strings.Contains(out.String(), "trong phòng") {
+		t.Errorf("the confirmation must scope the change to the in-chat notice: %q", out.String())
+	}
+
+	out.Reset()
+	if !sess.cmdNotify("/notify") {
+		t.Fatal("/notify with no argument should list the gates")
+	}
+	sess.flushOutputNow()
+	text := out.String()
+	if !strings.Contains(text, "powmin = 3") {
+		t.Errorf("the listing must report the floor just set: %q", text)
+	}
+	if !strings.Contains(text, "ui.powMinTier") {
+		t.Errorf("the listing must say the gate notice follows the config: %q", text)
+	}
+}

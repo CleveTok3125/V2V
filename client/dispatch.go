@@ -268,6 +268,7 @@ func (s *Session) cmdNotify(text string) bool {
 		}
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: powmin = %d\n", s.notifyPowMinTier()))
 		s.emitLocalFeedback("| [Local]: Dùng /notify <tag> on|off | all on|off | powmin <N> (off: ẩn live, vẫn lưu tab 2)\n")
+		s.emitLocalFeedback("| [Local]: powmin ẩn thông báo PoW trong phòng; thông báo PoW lúc vào cửa theo ui.powMinTier\n")
 		return true
 	}
 	if fields[0] == "powmin" {
@@ -281,7 +282,7 @@ func (s *Session) cmdNotify(text string) bool {
 			return true
 		}
 		s.notifySetPowMinTier(tier)
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Notify powmin = %d.\n", tier))
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Notify powmin = %d (áp dụng từ giờ cho PoW trong phòng).\n", tier))
 		return true
 	}
 	if len(fields) != 2 {

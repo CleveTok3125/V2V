@@ -181,7 +181,13 @@ it:
 An absent key means **shown**, so a notice kind this build does not know
 is not silenced by omission, and a partial config cannot mute a room by
 accident. `powMinTier` (default 1) hides the "solving PoW" notice for
-tiers below it.
+tiers below it. It gates both such notices — the pre-connect join gate
+and the in-chat challenge — but they are not reachable the same way.
+`/notify powmin <N>` changes the floor for the session, so it gates the
+in-chat challenge; the join-gate notice is printed by the dial that is about
+to create the session, before any runtime state exists to read, so it
+follows `ui.powMinTier` from the config. `TestPowMinTierScope` pins both
+halves.
 
 `/notify` (or `/nt`) lists the taxonomy as a tree and toggles a path:
 
