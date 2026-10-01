@@ -258,10 +258,10 @@ func NewSession() *Session {
 		Chain: ChainState{
 			SyncHeights: map[uint64][32]byte{},
 		},
-		// Default notification gates to shown so a Session that never
-		// runs initUI (tests, embedded use) still prints notices.
+		// No muted tags, so a Session that never runs initUI (tests,
+		// embedded use) still prints every notice.
 		Display: DisplayState{
-			Notify: NotifyState{Pow: true, PowMinTier: 1, History: true, Join: true, Date: true, System: true},
+			Notify: NotifyState{Muted: map[string]bool{}, PowMinTier: 1},
 		},
 	}
 }

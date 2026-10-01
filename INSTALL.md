@@ -157,6 +157,29 @@ verification, so deleting it discards the old window and nothing else.
 New history files can be read by the version that wrote them and by later
 ones, but not by earlier versions.
 
+### Config notice gates
+
+`ui.notify` now takes a map keyed by notice tag instead of one field per
+kind, and `ui.powMinTier` moved from inside `notify` to sit beside it:
+
+```jsonc
+"ui": {
+  "notify": {"system.pow": false, "system.join": true},
+  "powMinTier": 1
+}
+```
+
+An existing `config.jsonc` keeps working. A `notify` value that is not a
+boolean is ignored rather than rejected, and the old kind names `pow`,
+`history`, `join`, `leave` and `date` are read as the tag they correspond to,
+so `{"pow": false}` still mutes the proof-of-work notices. The old `system`
+name is also a tag now, but it means "every notice" where it used to mean "the
+catch-all kind" — it mutes more than it used to. Replace it with the specific
+tags you want muted.
+
+List the tags `/notify` prints; each line shows the state that actually
+applies, so a child of a muted parent reads as off.
+
 ## Bare metal
 
 1. Extract the bundle and enter its directory.

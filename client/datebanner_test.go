@@ -142,7 +142,7 @@ func TestStashedBannerSkipsAlreadyShownDay(t *testing.T) {
 // switching it off keeps the line in Tab 2 without printing it live.
 func TestDateBannerGatedByDateSwitch(t *testing.T) {
 	sess, out := dateSession(t)
-	sess.Display.Notify = NotifyState{Pow: true, PowMinTier: 1, History: true, Join: true, Date: false, System: true}
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagDate: true}, PowMinTier: 1}
 	banner := dateBanner("2026-01-02", "--- Ngày 02/01/2026 ---")
 
 	sess.Display.DisplayMu.Lock()

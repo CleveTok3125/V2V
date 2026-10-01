@@ -1,6 +1,12 @@
 package wire
 
-import "testing"
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"regexp"
+	"testing"
+)
 
 // TestWithTagsImpliesAncestors: a producer names the leaf and the wire
 // carries the whole chain, root first. This is what lets the client mute
@@ -290,5 +296,42 @@ func TestOffTreeTagStaysOffTree(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("WithTags invented a chain for an off-tree tag: %v", got)
+	}
+}
+
+// The web settings panel cannot call into Go, so it carries its own copy of
+// the taxonomy. Nothing in the build would otherwise notice the two drifting
+// apart, and the symptom is a mute in the panel that toggles nothing — or a
+// tag in the panel the client has never heard of. This compares them.
+func TestWebPanelTagListMatchesTaxonomy(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("..", "..", "web", "app.ts"))
+	if err != nil {
+		// Not a skip: this file's only job is to catch the panel drifting
+		// from the taxonomy, and a checkout without the panel is exactly
+		// the case where the guard silently stops guarding.
+		t.Fatalf("web/app.ts unavailable, cannot check for drift: %v", err)
+	}
+	start := bytes.Index(source, []byte("var NOTIFY_TAGS = ["))
+	if start < 0 {
+		t.Fatal("web/app.ts no longer declares NOTIFY_TAGS")
+	}
+	end := bytes.Index(source[start:], []byte("];"))
+	if end < 0 {
+		t.Fatal("the NOTIFY_TAGS list is not terminated")
+	}
+	found := regexp.MustCompile(`"([a-z.]+)"`).FindAllStringSubmatch(string(source[start:start+end]), -1)
+	listed := make([]string, 0, len(found))
+	for _, m := range found {
+		listed = append(listed, m[1])
+	}
+	want := AllTags()
+	if len(listed) != len(want) {
+		t.Fatalf("web/app.ts lists %d tags, the taxonomy has %d:\nlisted %v\ntree   %v", len(listed), len(want), listed, want)
+	}
+	for i := range want {
+		if listed[i] != want[i] {
+			t.Fatalf("web/app.ts tag %d = %q, taxonomy = %q\nlisted %v\ntree   %v",
+				i, listed[i], want[i], listed, want)
+		}
 	}
 }

@@ -166,7 +166,8 @@ label.check input {
 
 /* Dim the whole row when the switch is disabled, not just the node after
    the input: most of a .check label is a bare text node. */
-#config-panel label:has(input:disabled) {
+#config-panel label:has(input:disabled),
+#config-panel label.dimmed {
   opacity: 0.5;
   cursor: default;
 }

@@ -202,21 +202,20 @@ type ClientConfig struct {
 			Mode    string `json:"mode"`
 			Expect  string `json:"expect"`
 		} `json:"versionCheck"`
-		// Notify gates informational notices: a false value mutes the
-		// line on screen while it still lands in the system tab, so
+		// Notify gates informational notices by tag: a false value mutes
+		// the line on screen while it still lands in the system tab, so
 		// nothing is lost. Critical warnings (chain integrity, send
 		// guards, connection loss, command output) are never gated.
-		// Each bool is a pointer so an absent section backfills to the
-		// default (shown) instead of silently muting. PowMinTier hides
-		// the "solving PoW" notice for tiers below it (default 1).
-		Notify struct {
-			Pow        *bool `json:"pow"`
-			PowMinTier *int  `json:"powMinTier"`
-			History    *bool `json:"history"`
-			Join       *bool `json:"join"`
-			Date       *bool `json:"date"`
-			System     *bool `json:"system"`
-		} `json:"notify"`
+		//
+		// Keys are the tag paths the server publishes — "system",
+		// "system.pow", "system.join" and so on — so a new notice kind
+		// needs no new switch here. Muting a node hides its whole
+		// subtree. An absent key means shown, so a notice kind this
+		// build does not know about is not silenced by omission.
+		Notify NotifyGates `json:"notify"`
+		// PowMinTier hides the "solving PoW" notice for tiers below it
+		// (default 1).
+		PowMinTier *int `json:"powMinTier"`
 	} `json:"ui"`
 	Commands map[string][]string `json:"commands"`
 	Tabs     struct {
@@ -343,12 +342,8 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.VersionCheck.Enabled = boolPtr(true)
 	c.UI.VersionCheck.Mode = "warn"
 	c.UI.VersionCheck.Expect = ""
-	c.UI.Notify.Pow = boolPtr(true)
-	c.UI.Notify.PowMinTier = intPtr(1)
-	c.UI.Notify.History = boolPtr(true)
-	c.UI.Notify.Join = boolPtr(true)
-	c.UI.Notify.Date = boolPtr(true)
-	c.UI.Notify.System = boolPtr(true)
+	c.UI.Notify = map[string]bool{}
+	c.UI.PowMinTier = intPtr(1)
 	c.Commands = map[string][]string{
 		"quit":         {"/quit", "/q"},
 		"clear":        {"/clear", "/c"},
@@ -440,55 +435,71 @@ func (c *ClientConfig) VersionCheckExpect() string {
 	return c.UI.VersionCheck.Expect
 }
 
-// NotifyPow reports whether in-chat PoW progress notices print live.
-func (c *ClientConfig) NotifyPow() bool {
-	if c == nil || c.UI.Notify.Pow == nil {
+// NotifyGates is the set of muted tag paths from a config. It decodes
+// leniently, because the alternative is worse than losing one setting: a
+// value the strict decoder rejects makes the whole file unparseable, and the
+// caller then falls back to the defaults, losing the username, the server and
+// every other setting with no message.
+//
+// So a value that is not a boolean is dropped rather than rejected, and the
+// short kind names a config written before the tag change used ("pow",
+// "history", "join", "date") are read as the tag they correspond to. That
+// keeps an existing config's gates meaning what its author intended instead
+// of quietly muting more or less than they asked for.
+type NotifyGates map[string]bool
+
+// legacyNotifyTags maps the pre-tag kind names onto tag paths. "join" drove
+// join and leave together, so it mutes both. "system" is absent on purpose:
+// that name is also a tag, but it meant "the catch-all kind" before and
+// means "everything" now, and widening a user's mute is not a safe guess.
+var legacyNotifyTags = map[string]string{
+	"pow":     "system.pow",
+	"history": "system.history",
+	"join":    "system.join",
+	"leave":   "system.leave",
+	"date":    "system.date",
+}
+
+// UnmarshalJSON reads a gate per entry, skipping any value that is not a
+// boolean.
+func (g *NotifyGates) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	gates := NotifyGates{}
+	for key, value := range raw {
+		var on bool
+		if err := json.Unmarshal(value, &on); err != nil {
+			continue
+		}
+		if tag, legacy := legacyNotifyTags[key]; legacy {
+			key = tag
+		}
+		gates[key] = on
+	}
+	*g = gates
+	return nil
+}
+
+// NotifyTag reports whether notices carrying tag print live. An absent key
+// means shown, so a notice kind this build does not know is not silenced by
+// omission. Muting is decided per tag, and a muted node covers its subtree.
+func (c *ClientConfig) NotifyTag(tag string) bool {
+	if c == nil {
 		return true
 	}
-	return *c.UI.Notify.Pow
+	enabled, ok := c.UI.Notify[tag]
+	return !ok || enabled
 }
 
 // NotifyPowMinTier returns the lowest PoW tier whose "solving" notice
 // prints (default 1: every tier).
 func (c *ClientConfig) NotifyPowMinTier() int {
-	if c == nil || c.UI.Notify.PowMinTier == nil {
+	if c == nil || c.UI.PowMinTier == nil {
 		return 1
 	}
-	return *c.UI.Notify.PowMinTier
-}
-
-// NotifyHistory reports whether history load/recovery notices print live.
-func (c *ClientConfig) NotifyHistory() bool {
-	if c == nil || c.UI.Notify.History == nil {
-		return true
-	}
-	return *c.UI.Notify.History
-}
-
-// NotifyJoin reports whether join/leave notices print live.
-func (c *ClientConfig) NotifyJoin() bool {
-	if c == nil || c.UI.Notify.Join == nil {
-		return true
-	}
-	return *c.UI.Notify.Join
-}
-
-// NotifyDate reports whether date banners print live.
-func (c *ClientConfig) NotifyDate() bool {
-	if c == nil || c.UI.Notify.Date == nil {
-		return true
-	}
-	return *c.UI.Notify.Date
-}
-
-// NotifySystem reports whether informational "[Hệ thống]" lines from the
-// server print live. Per-client warnings that fail a send still land in
-// the system tab regardless.
-func (c *ClientConfig) NotifySystem() bool {
-	if c == nil || c.UI.Notify.System == nil {
-		return true
-	}
-	return *c.UI.Notify.System
+	return *c.UI.PowMinTier
 }
 
 // CollapseEnabled reports whether long blocks fold.
@@ -758,24 +769,12 @@ func parse(data []byte) (*ClientConfig, error) {
 	if c.UI.VersionCheck.Mode == "" {
 		c.UI.VersionCheck.Mode = def.UI.VersionCheck.Mode
 	}
-	// Backfill notify gates (absent means default: shown).
-	if c.UI.Notify.Pow == nil {
-		c.UI.Notify.Pow = def.UI.Notify.Pow
+	// Notify needs no backfill: an absent key already means shown.
+	if c.UI.Notify == nil {
+		c.UI.Notify = map[string]bool{}
 	}
-	if c.UI.Notify.PowMinTier == nil {
-		c.UI.Notify.PowMinTier = def.UI.Notify.PowMinTier
-	}
-	if c.UI.Notify.History == nil {
-		c.UI.Notify.History = def.UI.Notify.History
-	}
-	if c.UI.Notify.Join == nil {
-		c.UI.Notify.Join = def.UI.Notify.Join
-	}
-	if c.UI.Notify.Date == nil {
-		c.UI.Notify.Date = def.UI.Notify.Date
-	}
-	if c.UI.Notify.System == nil {
-		c.UI.Notify.System = def.UI.Notify.System
+	if c.UI.PowMinTier == nil {
+		c.UI.PowMinTier = def.UI.PowMinTier
 	}
 	// Backfill collapse knobs (absent means default: enabled 10/5).
 	if c.UI.Collapse.Enabled == nil {

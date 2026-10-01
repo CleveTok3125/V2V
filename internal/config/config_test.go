@@ -302,24 +302,59 @@ func TestHistoryPagingDefaults(t *testing.T) {
 	}
 }
 
+// TestNotifyDefaults: an absent key means shown, so a notice kind this
+// build does not know is not silenced by omission.
 func TestNotifyDefaults(t *testing.T) {
 	c := DefaultClientConfig()
-	if !c.NotifyPow() || !c.NotifyHistory() || !c.NotifyJoin() || !c.NotifyDate() || !c.NotifySystem() {
-		t.Fatal("notify gates must default to shown")
+	for _, tag := range []string{"system", "system.pow", "system.join", "system.date", "system.history"} {
+		if !c.NotifyTag(tag) {
+			t.Errorf("notify[%q] must default to shown", tag)
+		}
 	}
 	if got := c.NotifyPowMinTier(); got != 1 {
 		t.Fatalf("default powMinTier = %d, want 1", got)
 	}
 	var nilCfg *ClientConfig
-	if !nilCfg.NotifyPow() || nilCfg.NotifyPowMinTier() != 1 {
+	if !nilCfg.NotifyTag("system") || nilCfg.NotifyPowMinTier() != 1 {
 		t.Fatal("nil config must fall back to shown / tier 1")
 	}
 }
 
-func TestNotifyBackfillAndExplicitFalse(t *testing.T) {
+func TestNotifyByTag(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.jsonc")
-	// Absent notify section backfills to shown.
+	raw, _ := json.Marshal(map[string]any{"ui": map[string]any{
+		"notify":     map[string]any{"system.pow": false, "system.join": false},
+		"powMinTier": 3,
+	}})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range []string{"system.pow", "system.join"} {
+		if c.NotifyTag(tag) {
+			t.Errorf("notify[%q]=false must be honored", tag)
+		}
+	}
+	for _, tag := range []string{"system", "system.date", "system.limit", "system.unknown"} {
+		if !c.NotifyTag(tag) {
+			t.Errorf("notify[%q] absent must mean shown", tag)
+		}
+	}
+	if got := c.NotifyPowMinTier(); got != 3 {
+		t.Fatalf("explicit powMinTier = %d, want 3", got)
+	}
+}
+
+// TestNotifyAbsentSectionMeansShown: a config with no ui.notify at all
+// must not mute anything, which is what keeps a partial config from
+// silencing the room.
+func TestNotifyAbsentSectionMeansShown(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.jsonc")
 	raw, _ := json.Marshal(map[string]any{"defaults": map[string]any{"username": "A"}})
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
@@ -328,25 +363,11 @@ func TestNotifyBackfillAndExplicitFalse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !c.NotifyPow() || !c.NotifySystem() {
-		t.Fatal("absent notify section must backfill to shown")
+	if !c.NotifyTag("system") || !c.NotifyTag("system.pow") {
+		t.Fatal("absent notify section must show everything")
 	}
-	// Explicit false survives the round trip; powMinTier is honored.
-	raw, _ = json.Marshal(map[string]any{"ui": map[string]any{"notify": map[string]any{
-		"pow": false, "powMinTier": 3, "history": false, "join": false, "date": false, "system": false,
-	}}})
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	c, err = Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.NotifyPow() || c.NotifyHistory() || c.NotifyJoin() || c.NotifyDate() || c.NotifySystem() {
-		t.Fatal("explicit false must be honored for every gate")
-	}
-	if got := c.NotifyPowMinTier(); got != 3 {
-		t.Fatalf("explicit powMinTier = %d, want 3", got)
+	if got := c.NotifyPowMinTier(); got != 1 {
+		t.Fatalf("absent powMinTier = %d, want 1", got)
 	}
 }
 
@@ -384,5 +405,68 @@ func TestDefaultAutoVerifyBackfill(t *testing.T) {
 	}
 	if c.DefaultAutoVerify() {
 		t.Fatal("explicit false must be honored")
+	}
+}
+
+// TestNotifyToleratesPreTagConfig: configs written before the tag change
+// put powMinTier (a number) and short kind names inside ui.notify. A strict
+// map[string]bool rejects the number, and the caller replaces a config that
+// fails to parse with the defaults — silently losing the username, the
+// server and every other setting. The old keys are translated instead, so
+// an existing config keeps the gates it asked for.
+func TestNotifyToleratesPreTagConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.jsonc")
+	raw := []byte(`{"defaults":{"username":"Alice"},"serverUrl":"example.com","ui":{"notify":{
+		"pow": false, "powMinTier": 1, "history": true,
+		"join": false, "date": false, "system": true}}}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatalf("a pre-tag config must still load: %v", err)
+	}
+	if c.Defaults.Username != "Alice" {
+		t.Fatalf("the rest of the config was discarded, username = %q", c.Defaults.Username)
+	}
+	for _, tag := range []string{"system.pow", "system.join", "system.date"} {
+		if c.NotifyTag(tag) {
+			t.Errorf("pre-tag %q=false must become a mute of the matching tag", tag)
+		}
+	}
+	for _, tag := range []string{"system.history", "system"} {
+		if !c.NotifyTag(tag) {
+			t.Errorf("pre-tag %q=true must stay shown", tag)
+		}
+	}
+	// powMinTier sat inside notify; it now lives beside it, so the number
+	// left behind must be dropped rather than kept as a gate.
+	if _, kept := c.UI.Notify["powMinTier"]; kept {
+		t.Errorf("a number in notify must not be kept as a gate: %v", c.UI.Notify)
+	}
+	if got := c.NotifyPowMinTier(); got != 1 {
+		t.Errorf("powMinTier = %d, want the default 1", got)
+	}
+}
+
+// TestNotifyIgnoresNonBooleanValues: a hand-edited value of the wrong type
+// is not a gate. It must be dropped rather than coerced or rejected.
+func TestNotifyIgnoresNonBooleanValues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.jsonc")
+	raw := []byte(`{"ui":{"notify":{"system":true,"system.pow":"yes","system.date":false,"system.join":1}}}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatalf("a wrong-typed gate must not reject the file: %v", err)
+	}
+	if !c.NotifyTag("system.pow") || !c.NotifyTag("system.join") {
+		t.Error("a non-boolean value must leave the tag shown")
+	}
+	if c.NotifyTag("system.date") {
+		t.Error("a boolean false must still be honored")
 	}
 }

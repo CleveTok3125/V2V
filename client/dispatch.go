@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // Session input-loop dispatch (moved from main).
@@ -186,7 +188,7 @@ func (s *Session) cmdHelp(text string) bool {
 	s.emitLocalFeedback("    - /whoami, /w    : Thông tin danh tính và quyền hiện tại\n")
 	s.emitLocalFeedback("    - /status        : Trạng thái kết nối và phiên bản client\n")
 	s.emitLocalFeedback("    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
-	s.emitLocalFeedback("    - /notify, /nt [<cat> on|off | all on|off | powmin <N>]: Ẩn/hiện thông báo thông tin (pow/history/join/date/system)\n")
+	s.emitLocalFeedback("    - /notify, /nt [<tag> on|off | all on|off | powmin <N>]: Ẩn/hiện thông báo theo tag\n")
 	s.emitLocalFeedback("    - /info <n>[:hash]: Xem đầy đủ metadata tin nhắn (verify lại tại local)\n")
 	s.emitLocalFeedback("    - /expand <n>, /xpan  : Mở đầy đủ tin bị thu gọn (vd /expand 1234)\n")
 	s.emitLocalFeedback("    - /copy <n>[:hash]: Copy nội dung thô tin nhắn vào clipboard\n")
@@ -255,16 +257,17 @@ func (s *Session) cmdNotify(text string) bool {
 		fields[0] = strings.ToLower(fields[0])
 	}
 	if len(fields) == 0 {
-		n := s.notifySnapshot()
-		onoff := func(b bool) string {
-			if b {
-				return "on"
-			}
-			return "off"
+		for _, tag := range wire.AllTags() {
+			state := onOffLabel(s.notifyTagEnabled(tag))
+			// Indent by depth so the subtree reads as one, and show the
+			// gate that actually applies: a child of a muted parent is off
+			// whether or not its own key is set.
+			depth := strings.Count(tag, ".")
+			s.emitLocalFeedback(fmt.Sprintf("| [Local]: %s%-28s %s\n",
+				strings.Repeat("  ", depth), tag, state))
 		}
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Notify: pow=%s(tier>=%d) history=%s join=%s date=%s system=%s\n",
-			onoff(n.Pow), n.PowMinTier, onoff(n.History), onoff(n.Join), onoff(n.Date), onoff(n.System)))
-		s.emitLocalFeedback("| [Local]: Dùng /notify <cat> on|off | all on|off | powmin <N> (off: ẩn live, vẫn lưu tab 2)\n")
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: powmin = %d\n", s.notifyPowMinTier()))
+		s.emitLocalFeedback("| [Local]: Dùng /notify <tag> on|off | all on|off | powmin <N> (off: ẩn live, vẫn lưu tab 2)\n")
 		return true
 	}
 	if fields[0] == "powmin" {
@@ -295,8 +298,8 @@ func (s *Session) cmdNotify(text string) bool {
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Notify all = %s.\n", onOffLabel(on)))
 		return true
 	}
-	if !s.notifySetKind(fields[0], on) {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Không rõ loại thông báo: %s.\n", fields[0]))
+	if !s.notifySetTag(fields[0], on) {
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Không rõ tag thông báo: %s (xem /notify)\n", fields[0]))
 		return true
 	}
 	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Notify %s = %s.\n", fields[0], onOffLabel(on)))

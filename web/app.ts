@@ -83,28 +83,42 @@ import { gateFetch } from "./pow_bridge.js";
   // connecting, so the panel is the pre-connect surface for these; the live
   // session still owns them afterwards through /meta, /showjoin,
   // /autoverify, /notify.
+  // The notice taxonomy, mirroring internal/wire AllTags(): parents before
+  // children, so the panel reads as the tree and muting a node covers its
+  // subtree. Keep the two in step; a Go test compares them.
+  var NOTIFY_TAGS = [
+    "system",
+    "system.join", "system.leave", "system.date",
+    "system.history",
+    "system.history.begin", "system.history.older", "system.history.recover",
+    "system.history.end", "system.history.exhausted",
+    "system.pow", "system.pow.gate", "system.pow.screening",
+    "system.audit",
+    "system.limit", "system.envelope", "system.trip",
+    "system.filter", "system.auth",
+  ];
   var OPT_DEFAULTS = {
     meta: true,
     showJoin: false,
     autoVerify: true,
-    notify: { pow: true, powMinTier: 1, history: true, join: true, date: true, system: true },
+    notify: {},
+    powMinTier: 1,
   };
+  // Every tag defaults to shown; the map only carries the ones a user
+  // turned off, so a tag added later is never silenced by omission.
+  NOTIFY_TAGS.forEach(function (t) { OPT_DEFAULTS.notify[t] = true; });
   var OPT_KEY = "v2v.config";
   var opts = cloneOpts(OPT_DEFAULTS);
 
   function cloneOpts(src) {
+    var notify = {};
+    Object.keys(src.notify).forEach(function (k) { notify[k] = src.notify[k]; });
     return {
       meta: src.meta,
       showJoin: src.showJoin,
       autoVerify: src.autoVerify,
-      notify: {
-        pow: src.notify.pow,
-        powMinTier: src.notify.powMinTier,
-        history: src.notify.history,
-        join: src.notify.join,
-        date: src.notify.date,
-        system: src.notify.system,
-      },
+      notify: notify,
+      powMinTier: src.powMinTier,
     };
   }
 
@@ -124,11 +138,11 @@ import { gateFetch } from "./pow_bridge.js";
           if (typeof got[k] === "boolean") opts[k] = got[k];
         });
         if (got.notify && typeof got.notify === "object") {
-          ["pow", "history", "join", "date", "system"].forEach(function (k) {
+          NOTIFY_TAGS.forEach(function (k) {
             if (typeof got.notify[k] === "boolean") opts.notify[k] = got.notify[k];
           });
-          if (typeof got.notify.powMinTier === "number" && got.notify.powMinTier >= 1) {
-            opts.notify.powMinTier = Math.floor(got.notify.powMinTier);
+          if (typeof got.powMinTier === "number" && got.powMinTier >= 1) {
+            opts.powMinTier = Math.floor(got.powMinTier);
           }
         }
       }
@@ -157,23 +171,52 @@ import { gateFetch } from "./pow_bridge.js";
   function el(id) { return document.getElementById(id); }
 
   function syncJoinDep() {
-    // notify.join only has meaning while join/leave render at all.
-    var row = el("opt-notifyjoin-row");
-    if (!row) return;
-    var input = el("opt-notifyjoin");
-    input.disabled = !opts.showJoin;
+    // The join rows only have meaning while join/leave render at all.
+    ["opt-notifyjoin-row", "opt-notifyleave-row"].forEach(function (id) {
+      var row = el(id);
+      if (row) row.classList.toggle("dimmed", !opts.showJoin);
+    });
+  }
+
+  // notifyLeaf is the part of the path below its parent, so a row reads
+  // "screening" under "system.pow" rather than repeating the whole path.
+  function notifyLeaf(tag) {
+    var cut = tag.lastIndexOf(".");
+    return cut < 0 ? tag : tag.slice(cut + 1);
+  }
+
+  // The rows are generated from NOTIFY_TAGS so the panel cannot drift from
+  // the taxonomy the way a hand-written row per tag would.
+  function buildNotifyRows() {
+    var host = el("notify-tree");
+    if (!host) return;
+    host.textContent = "";
+    NOTIFY_TAGS.forEach(function (tag) {
+      var label = document.createElement("label");
+      label.className = "check" + (tag.indexOf(".") < 0 ? "" : " nested");
+      var input = document.createElement("input");
+      input.type = "checkbox";
+      input.id = "opt-notify-" + tag;
+      if (tag === "system.join") label.id = "opt-notifyjoin-row";
+      if (tag === "system.leave") label.id = "opt-notifyleave-row";
+      input.dataset.notifyTag = tag;
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(notifyLeaf(tag)));
+      host.appendChild(label);
+    });
   }
 
   function applyOptsToUI() {
     el("opt-meta").checked = opts.meta;
     el("opt-showjoin").checked = opts.showJoin;
     el("opt-autoverify").checked = opts.autoVerify;
-    el("opt-notifypow").checked = opts.notify.pow;
-    el("opt-powmintier").value = String(opts.notify.powMinTier);
-    el("opt-notifyhistory").checked = opts.notify.history;
-    el("opt-notifyjoin").checked = opts.notify.join;
-    el("opt-notifydate").checked = opts.notify.date;
-    el("opt-notify-system").checked = opts.notify.system;
+    el("opt-powmintier").value = String(opts.powMinTier);
+    NOTIFY_TAGS.forEach(function (tag) {
+      var input = el("opt-notify-" + tag);
+      // A tag whose parent is muted reads as off even if its own key says
+      // on, so the panel shows the gate that actually applies.
+      if (input) input.checked = notifyTagEnabled(tag);
+    });
     el("opt-persist").checked = persistEnabled();
     syncJoinDep();
   }
@@ -184,12 +227,21 @@ import { gateFetch } from "./pow_bridge.js";
     ["meta", "opt-meta"],
     ["showJoin", "opt-showjoin"],
     ["autoVerify", "opt-autoverify"],
-    ["notify.pow", "opt-notifypow"],
-    ["notify.history", "opt-notifyhistory"],
-    ["notify.join", "opt-notifyjoin"],
-    ["notify.date", "opt-notifydate"],
-    ["notify.system", "opt-notify-system"],
   ];
+
+  // notifyTagEnabled mirrors the client's gating: a tag is on unless it, or
+  // any ancestor of it, is off. The list is the tree order, so a parent is
+  // always known by the time its children are read.
+  function notifyTagEnabled(tag) {
+    for (var i = 0; i < NOTIFY_TAGS.length; i++) {
+      var cur = NOTIFY_TAGS[i];
+      if (cur === tag) break;
+      if (tag === cur || tag.indexOf(cur + ".") === 0) {
+        if (opts.notify[cur] === false) return false;
+      }
+    }
+    return opts.notify[tag] !== false;
+  }
 
   function readOpt(path) {
     var parts = path.split(".");
@@ -210,6 +262,7 @@ import { gateFetch } from "./pow_bridge.js";
     var btn = el("config-btn");
     var panel = el("config-panel");
     if (!btn || !panel) return;
+    buildNotifyRows();
     loadOpts();
     applyOptsToUI();
     btn.addEventListener("click", function () {
@@ -229,9 +282,21 @@ import { gateFetch } from "./pow_bridge.js";
     var tier = el("opt-powmintier");
     if (tier) {
       tier.addEventListener("change", function () {
-        writeOpt("notify.powMinTier", Math.max(1, Math.floor(Number(this.value) || 1)));
-        this.value = String(readOpt("notify.powMinTier"));
+        writeOpt("powMinTier", Math.max(1, Math.floor(Number(this.value) || 1)));
+        this.value = String(readOpt("powMinTier"));
         saveOpts();
+      });
+    }
+    // Toggling a node re-syncs the whole tree, because a child of a muted
+    // parent reads as off even when its own key is untouched.
+    var tree = el("notify-tree");
+    if (tree) {
+      tree.addEventListener("change", function (ev) {
+        var tag = ev.target && ev.target.dataset && ev.target.dataset.notifyTag;
+        if (!tag) return;
+        opts.notify[tag] = ev.target.checked;
+        saveOpts();
+        applyOptsToUI();
       });
     }
     var persist = el("opt-persist");
@@ -695,14 +760,8 @@ import { gateFetch } from "./pow_bridge.js";
       showJoin: opts.showJoin,
       showMeta: opts.meta,
       autoVerify: opts.autoVerify,
-      notify: {
-        pow: opts.notify.pow,
-        powMinTier: opts.notify.powMinTier,
-        history: opts.notify.history,
-        join: opts.notify.join,
-        date: opts.notify.date,
-        system: opts.notify.system,
-      },
+      powMinTier: opts.powMinTier,
+      notify: opts.notify,
     };
     // Clear passphrase from DOM immediately after copying to WASM
     tripInput.value = "";

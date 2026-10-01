@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/CleveTok3125/V2V/internal/config"
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // installWebCfg writes a window.v2vConfig carrying only the listed notify
@@ -20,6 +21,10 @@ func installWebCfg(t *testing.T, showMeta, autoVerify *bool, notify map[string]a
 	}
 	if autoVerify != nil {
 		cfg.Set("autoVerify", *autoVerify)
+	}
+	if tier, ok := notify["powMinTier"]; ok {
+		cfg.Set("powMinTier", tier)
+		delete(notify, "powMinTier")
 	}
 	if notify != nil {
 		obj := js.Global().Get("Object").New()
@@ -50,9 +55,10 @@ func TestWasmWebOptsAbsentKeepsDefaults(t *testing.T) {
 	if !ClientCfg.DefaultAutoVerify() {
 		t.Fatal("absent autoVerify must keep the default (enabled)")
 	}
-	if !ClientCfg.NotifyPow() || !ClientCfg.NotifyHistory() || !ClientCfg.NotifyJoin() ||
-		!ClientCfg.NotifyDate() || !ClientCfg.NotifySystem() {
-		t.Fatal("absent notify gates must keep the defaults (shown)")
+	for _, tag := range wire.AllTags() {
+		if !ClientCfg.NotifyTag(tag) {
+			t.Errorf("absent notify must keep %q shown", tag)
+		}
 	}
 	if got := ClientCfg.NotifyPowMinTier(); got != 1 {
 		t.Fatalf("absent powMinTier = %d, want 1", got)
@@ -63,11 +69,11 @@ func TestWasmWebOptsExplicitFalseWins(t *testing.T) {
 	// The whole point of the presence check: JS false is falsy, so a
 	// truthiness test would read these as absent and leave the defaults on.
 	installWebCfg(t, boolp(false), boolp(false), map[string]any{
-		"pow":     false,
-		"history": false,
-		"join":    false,
-		"date":    false,
-		"system":  false,
+		"system.pow":     false,
+		"system.history": false,
+		"system.join":    false,
+		"system.date":    false,
+		"system":         false,
 	})
 
 	if ClientCfg.ShowMeta() {
@@ -76,27 +82,27 @@ func TestWasmWebOptsExplicitFalseWins(t *testing.T) {
 	if ClientCfg.DefaultAutoVerify() {
 		t.Fatal("autoVerify=false must turn auto-verify off")
 	}
-	if ClientCfg.NotifyPow() || ClientCfg.NotifyHistory() || ClientCfg.NotifyJoin() ||
-		ClientCfg.NotifyDate() || ClientCfg.NotifySystem() {
-		t.Fatal("notify=false must mute every gate")
+	for _, tag := range []string{"system", "system.pow", "system.history", "system.join", "system.date"} {
+		if ClientCfg.NotifyTag(tag) {
+			t.Errorf("notify[%q]=false must be honored", tag)
+		}
 	}
 }
 
 func TestWasmWebOptsExplicitTrueWins(t *testing.T) {
-	installWebCfg(t, boolp(true), boolp(true), map[string]any{"pow": true, "join": true})
+	installWebCfg(t, boolp(true), boolp(true), map[string]any{"system": true, "system.join": true})
 	// Turn everything off behind the page's back, then replay the same
 	// payload: a present true has to actively restore each switch.
 	off := false
 	ClientCfg.UI.Meta.Show = &off
 	ClientCfg.Defaults.AutoVerify = &off
-	ClientCfg.UI.Notify.Pow = &off
-	ClientCfg.UI.Notify.Join = &off
+	ClientCfg.UI.Notify = map[string]bool{"system": false, "system.join": false}
 	applyWebClientOpts(js.Global().Get("v2vConfig"))
 
 	if !ClientCfg.ShowMeta() || !ClientCfg.DefaultAutoVerify() {
 		t.Fatal("explicit true must be honored")
 	}
-	if !ClientCfg.NotifyPow() || !ClientCfg.NotifyJoin() {
+	if !ClientCfg.NotifyTag("system") || !ClientCfg.NotifyTag("system.join") {
 		t.Fatal("explicit notify true must be honored")
 	}
 }
@@ -106,18 +112,17 @@ func TestWasmWebOptsExplicitTrueWins(t *testing.T) {
 // not panic.
 func TestWasmWebOptsWrongTypeFallsBack(t *testing.T) {
 	notify := js.Global().Get("Object").New()
-	notify.Set("pow", "yes")
-	notify.Set("powMinTier", "3")
+	notify.Set("system.pow", "yes")
 
-	cases := []js.Value{js.ValueOf("x"), js.ValueOf(1), js.Null(), notify, js.Undefined()}
-	fields := []string{"showMeta", "autoVerify", "notify", "showMeta", "notify"}
+	cases := []js.Value{js.ValueOf("x"), js.ValueOf(1), js.Null(), notify, js.Undefined(), js.ValueOf("3")}
+	fields := []string{"showMeta", "autoVerify", "notify", "showMeta", "notify", "powMinTier"}
 	for i, bad := range cases {
 		cfg := js.Global().Get("Object").New()
 		cfg.Set(fields[i], bad)
 		applyWebClientOpts(cfg)
 
 		if !ClientCfg.ShowMeta() || !ClientCfg.DefaultAutoVerify() ||
-			!ClientCfg.NotifyPow() || ClientCfg.NotifyPowMinTier() != 1 {
+			!ClientCfg.NotifyTag("system.pow") || ClientCfg.NotifyPowMinTier() != 1 {
 			t.Fatalf("%s=%#v must leave the compiled defaults in place", fields[i], bad)
 		}
 		ClientCfg = config.DefaultClientConfig()

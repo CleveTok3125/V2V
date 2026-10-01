@@ -50,35 +50,16 @@
         <input id="opt-showjoin" type="checkbox" />
         Thông báo người dùng ra/vào phòng
       </label>
-      <label class="check nested" id="opt-notifyjoin-row">
-        <input id="opt-notifyjoin" type="checkbox" />
-        …in ra màn hình <span class="hint-inline">(vẫn lưu ở tab 2)</span>
-      </label>
       <label class="check">
         <input id="opt-autoverify" type="checkbox" />
         Auto-verify trip
       </label>
 
-      <div class="cfg-group">Thông báo <span class="hint-inline">(tắt = ẩn khi hiện, vẫn lưu ở tab 2)</span></div>
-      <label class="check">
-        <input id="opt-notifypow" type="checkbox" />
-        PoW
-      </label>
+      <div class="cfg-group">Thông báo <span class="hint-inline">(tắt = ẩn khi hiện, vẫn lưu ở tab 2; tắt nhóm = tắt cả nhóm con)</span></div>
+      <div id="notify-tree"></div>
       <label class="cfg-inline">
         <span>Ngưỡng tier PoW</span>
         <input id="opt-powmintier" type="number" min="1" step="1" />
-      </label>
-      <label class="check">
-        <input id="opt-notifyhistory" type="checkbox" />
-        Lịch sử tải / bù
-      </label>
-      <label class="check">
-        <input id="opt-notifydate" type="checkbox" />
-        Ngày
-      </label>
-      <label class="check">
-        <input id="opt-notify-system" type="checkbox" />
-        [Hệ thống]
       </label>
 
       <div class="cfg-group">Lưu</div>

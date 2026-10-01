@@ -81,11 +81,16 @@
     // Pre-dial server version check: mode disabled|warn|enforce (default warn);
     // expect pins a fork version, "" compares against this client's own stamp.
     "versionCheck": {"enabled": true, "mode": "warn", "expect": ""},
-    // Informational notice gates: false mutes the line on screen but it still
-    // lands in the system tab. powMinTier hides the "solving PoW" notice below
-    // that tier. Critical warnings (chain/fork, send guards, connection loss)
-    // always show. /notify toggles these at runtime.
-    "notify": {"pow": true, "powMinTier": 1, "history": true, "join": true, "date": true, "system": true}
+    // Informational notice gates, keyed by the tag the server publishes.
+    // false mutes the line on screen but it still lands in the system tab.
+    // Muting a node hides its whole subtree, so "system": false silences
+    // everything, "system.pow": false only the proof-of-work flow. An absent
+    // key means shown, so a notice kind you have not heard of stays visible.
+    // Critical warnings (chain/fork, send guards, connection loss) always show.
+    // /notify toggles these at runtime.
+    "notify": {},
+    // Hides the "solving PoW" notice for tiers below this.
+    "powMinTier": 1
   },
   // Per-tab memory caps.
  "tabs": {

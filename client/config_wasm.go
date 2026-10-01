@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/config"
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // ClientCfg mirrors the desktop default config; the web build has no
@@ -75,15 +76,21 @@ func applyWebClientOpts(cfg js.Value) {
 	}
 	setBool(&ClientCfg.UI.Meta.Show, cfg.Get("showMeta"))
 	setBool(&ClientCfg.Defaults.AutoVerify, cfg.Get("autoVerify"))
+	// notify is a flat map keyed by tag path. Read every key the taxonomy
+	// knows rather than whatever the page happened to send, so an unknown
+	// key cannot add a gate that no notice would ever match.
 	notify := cfg.Get("notify")
 	if notify.Type() == js.TypeObject {
-		setBool(&ClientCfg.UI.Notify.Pow, notify.Get("pow"))
-		setBool(&ClientCfg.UI.Notify.History, notify.Get("history"))
-		setBool(&ClientCfg.UI.Notify.Join, notify.Get("join"))
-		setBool(&ClientCfg.UI.Notify.Date, notify.Get("date"))
-		setBool(&ClientCfg.UI.Notify.System, notify.Get("system"))
-		setInt(&ClientCfg.UI.Notify.PowMinTier, notify.Get("powMinTier"))
+		if ClientCfg.UI.Notify == nil {
+			ClientCfg.UI.Notify = map[string]bool{}
+		}
+		for _, tag := range wire.AllTags() {
+			if v := notify.Get(tag); v.Type() == js.TypeBoolean {
+				ClientCfg.UI.Notify[tag] = v.Bool()
+			}
+		}
 	}
+	setInt(&ClientCfg.UI.PowMinTier, cfg.Get("powMinTier"))
 }
 
 // assertionCh carries the JSON assertion produced by the page's

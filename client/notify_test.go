@@ -43,29 +43,37 @@ func TestNotifyTagsForWire(t *testing.T) {
 // subtree, which is the reason the tags travel as a chain.
 func TestNotifyTagsAllowedAncestorGating(t *testing.T) {
 	sess := NewSession()
-	all := NotifyState{Pow: true, PowMinTier: 1, History: true, Join: true, Date: true, System: true}
+	all := NotifyState{Muted: map[string]bool{}, PowMinTier: 1}
 
 	sess.Display.Notify = all
 	if !sess.notifyTagsAllowed(wire.WithTags(wire.TagPowScreen)) {
 		t.Fatal("all gates on must allow a screening notice")
 	}
 
-	// Muting the leaf hides only that leaf.
+	// Muting a node hides its whole subtree.
 	sess.Display.Notify = all
-	sess.Display.Notify.Pow = false
-	if sess.notifyTagsAllowed(wire.WithTags(wire.TagPowScreen)) {
-		t.Fatal("muted pow must hide the screening notice")
+	sess.Display.Notify.Muted[wire.TagPow] = true
+	for _, tag := range []string{wire.TagPow, wire.TagPowGate, wire.TagPowScreen} {
+		if sess.notifyTagsAllowed(wire.WithTags(tag)) {
+			t.Errorf("muting system.pow must hide %q", tag)
+		}
 	}
 	if !sess.notifyTagsAllowed(wire.WithTags(wire.TagLimit)) {
 		t.Fatal("muting pow must not hide an unrelated notice")
 	}
 
-	// The system switch is the root: it hides every notice.
-	sess.Display.Notify = all
-	sess.Display.Notify.System = false
+	// Muting the root hides every notice.
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagRoot: true}, PowMinTier: 1}
 	for _, tag := range []string{wire.TagJoin, wire.TagDate, wire.TagLimit, wire.TagPowScreen, wire.TagHistoryEnd, wire.TagAuth} {
 		if sess.notifyTagsAllowed(wire.WithTags(tag)) {
 			t.Errorf("muting the root must hide %q", tag)
+		}
+	}
+	// ...and a child of a muted parent reads as off even though its own
+	// key was never set, which is what /notify reports per row.
+	for _, tag := range wire.AllTags() {
+		if tag != wire.TagRoot && sess.notifyTagEnabled(tag) {
+			t.Errorf("child %q of a muted root must read as off", tag)
 		}
 	}
 
@@ -76,46 +84,55 @@ func TestNotifyTagsAllowedAncestorGating(t *testing.T) {
 	}
 }
 
-func TestNotifyKindAllowedDefaultsAndToggles(t *testing.T) {
+func TestNotifyTagToggles(t *testing.T) {
 	sess := NewSession()
-	sess.Display.Notify = NotifyState{Pow: true, PowMinTier: 1, History: true, Join: true, Date: true, System: true}
-	for _, tag := range []string{wire.TagPow, wire.TagHistory, wire.TagJoin, wire.TagDate, wire.TagRoot} {
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{}, PowMinTier: 1}
+	for _, tag := range wire.AllTags() {
 		if !sess.notifyTagsAllowed(wire.WithTags(tag)) {
 			t.Fatalf("tag %q must default to allowed", tag)
 		}
 	}
-	if sess.notifySetKind("bogus", false) {
-		t.Fatal("unknown kind must not be settable")
+	// A path outside the taxonomy cannot be gated: a switch that no notice
+	// would ever match is a lie in the config.
+	for _, bad := range []string{"bogus", "system.bogus", "", "join"} {
+		if sess.notifySetTag(bad, false) {
+			t.Errorf("%q must not be settable", bad)
+		}
 	}
-	if !sess.notifySetKind(NotifyKindPow, false) {
-		t.Fatal("known kind must be settable")
+	if !sess.notifySetTag(wire.TagPow, false) {
+		t.Fatal("a tag path must be settable")
 	}
 	if sess.notifyTagsAllowed(wire.WithTags(wire.TagPowScreen)) {
-		t.Fatal("muted kind must be disallowed")
+		t.Fatal("muted node must be disallowed")
+	}
+	if !sess.notifySetTag(wire.TagPow, true) {
+		t.Fatal("unmuting must be settable")
+	}
+	if !sess.notifyTagsAllowed(wire.WithTags(wire.TagPowScreen)) {
+		t.Fatal("unmuting must restore the subtree")
 	}
 	sess.notifySetAll(false)
-	n := sess.notifySnapshot()
-	if n.Pow || n.History || n.Join || n.Date || n.System {
-		t.Fatal("all-off must clear every gate")
+	if got := len(sess.notifySnapshot()); got != len(wire.AllTags()) {
+		t.Fatalf("all-off must mute every tag, muted %d of %d", got, len(wire.AllTags()))
 	}
 	sess.notifySetAll(true)
-	if !sess.notifyTagsAllowed(wire.WithTags(wire.TagLimit)) {
-		t.Fatal("all-on must restore every gate")
+	if got := len(sess.notifySnapshot()); got != 0 {
+		t.Fatalf("all-on must clear the muted set, got %d", got)
 	}
 }
 
 func TestNotifyPowMinTier(t *testing.T) {
 	sess := NewSession()
-	sess.Display.Notify = NotifyState{Pow: true, PowMinTier: 3}
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{}, PowMinTier: 3}
 	if sess.notifyPowLive(2) {
 		t.Fatal("tier below floor must stay quiet")
 	}
 	if !sess.notifyPowLive(3) {
 		t.Fatal("tier at floor must be announced")
 	}
-	sess.notifySetKind(NotifyKindPow, false)
+	sess.notifySetTag(wire.TagPow, false)
 	if sess.notifyPowLive(5) {
-		t.Fatal("pow off must mute every tier")
+		t.Fatal("muting system.pow must mute every tier")
 	}
 }
 
@@ -123,7 +140,7 @@ func TestNotifyPowMinTier(t *testing.T) {
 // a muted notice never reaches the terminal but still lands in Tab 2.
 func TestEmitLocalFeedbackTagsMutesLiveButBuffers(t *testing.T) {
 	sess, out := queueTestSession(t)
-	sess.Display.Notify = NotifyState{Pow: false, History: true, Join: true, Date: true, System: true}
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagPow: true}}
 
 	sess.Display.DisplayMu.Lock()
 	sess.emitLocalFeedbackTags(wire.WithTags(wire.TagPow), "| [Local]: muted\n")
@@ -137,7 +154,7 @@ func TestEmitLocalFeedbackTagsMutesLiveButBuffers(t *testing.T) {
 		t.Fatal("muted notice must still be buffered in Tab 2")
 	}
 
-	sess.notifySetKind(NotifyKindPow, true)
+	sess.notifySetTag(wire.TagPow, true)
 	sess.Display.DisplayMu.Lock()
 	sess.emitLocalFeedbackTags(wire.WithTags(wire.TagPow), "| [Local]: loud\n")
 	sess.Display.DisplayMu.Unlock()
@@ -152,7 +169,7 @@ func TestEmitLocalFeedbackTagsMutesLiveButBuffers(t *testing.T) {
 // command output) is never muted even with every gate off.
 func TestCriticalNoticeBypassesGates(t *testing.T) {
 	sess, out := queueTestSession(t)
-	sess.Display.Notify = NotifyState{Pow: false, History: false, Join: false, Date: false, System: false}
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagPow: true, wire.TagHistory: true, wire.TagJoin: true, wire.TagDate: true, wire.TagRoot: true}}
 
 	sess.Display.DisplayMu.Lock()
 	sess.emitLocalFeedback("| [Local]: Chuỗi tin bị đứt\n")
@@ -169,7 +186,7 @@ func TestApplyQuietFlags(t *testing.T) {
 	defer func() { CLI.Quiet = old }()
 
 	sess := NewSession()
-	sess.Display.Notify = NotifyState{Pow: true, PowMinTier: 1, History: true, Join: true, Date: true, System: true}
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{}, PowMinTier: 1}
 	CLI.Quiet = []string{"history", "ALL"}
 	sess.applyQuietFlags()
 
@@ -200,7 +217,7 @@ func TestRenderChatBlockMutedSystemBuffersTabSys(t *testing.T) {
 	sess, out := queueTestSession(t)
 	sess.Chain.WireIdx = newWireIndex(10)
 	sess.Chain.RenderCache = newRenderCache(10)
-	sess.Display.Notify = NotifyState{Pow: true, PowMinTier: 1, History: true, Join: true, Date: true, System: false}
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagRoot: true}, PowMinTier: 1}
 
 	sysWire := WireMessage{Type: "system", Tags: wire.WithTags(wire.TagLimit), Text: "[Hệ thống]: rate limit"}
 
@@ -216,7 +233,7 @@ func TestRenderChatBlockMutedSystemBuffersTabSys(t *testing.T) {
 		t.Fatal("muted system wire must still be buffered in Tab 2")
 	}
 
-	sess.notifySetKind(NotifyKindSystem, true)
+	sess.notifySetTag(wire.TagRoot, true)
 	sess.Display.DisplayMu.Lock()
 	sess.renderChatBlock(WireMessage{Type: "system", Tags: wire.WithTags(wire.TagLimit), Text: "[Hệ thống]: live now"})
 	sess.Display.DisplayMu.Unlock()
@@ -231,7 +248,7 @@ func TestRenderChatBlockMutedSystemBuffersTabSys(t *testing.T) {
 // Tab 2 (only the live print is suppressed), unlike the old early return.
 func TestPowNoticeMutedStillBuffers(t *testing.T) {
 	sess, out := queueTestSession(t)
-	sess.Display.Notify = NotifyState{Pow: false, PowMinTier: 1, History: true, Join: true, Date: true, System: true}
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagPow: true}, PowMinTier: 1}
 
 	sess.Display.DisplayMu.Lock()
 	sess.emitLocalFeedbackLive(sess.notifyPowLive(1), "| [Local]: Đang giải PoW (tier 1)…\n")
@@ -253,7 +270,7 @@ func TestPowNoticeMutedStillBuffers(t *testing.T) {
 // rather than guessed at.
 func TestRawFrameIsNotClassifiedByWording(t *testing.T) {
 	sess, out := queueTestSession(t)
-	sess.Display.Notify = NotifyState{Pow: true, PowMinTier: 1, History: true, Join: true, Date: true, System: false}
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagRoot: true}, PowMinTier: 1}
 	sess.Chain.WireIdx = newWireIndex(10)
 	sess.Chain.RenderCache = newRenderCache(10)
 
@@ -267,5 +284,25 @@ func TestRawFrameIsNotClassifiedByWording(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(sess.Display.TabSys.lines, ""), "quá nhanh") {
 		t.Fatal("a raw frame must not be routed to the system tab by its wording")
+	}
+}
+
+// TestNotifyPowLiveRespectsMutedParent: the tier floor is not the only
+// gate on the PoW notice, and the subtree test has to walk ancestors. A
+// direct lookup of the system.pow key would leave this line printing after
+// the root was muted, which is exactly what the user asked it not to do.
+func TestNotifyPowLiveRespectsMutedParent(t *testing.T) {
+	sess := NewSession()
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagRoot: true}, PowMinTier: 1}
+	if sess.notifyPowLive(5) {
+		t.Fatal("a muted root must suppress the pow notice")
+	}
+	if sess.notifyTagEnabled(wire.TagPow) {
+		t.Fatal("the /notify listing must agree that system.pow is off")
+	}
+	// Muting an unrelated branch leaves it alone.
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagHistory: true}, PowMinTier: 1}
+	if !sess.notifyPowLive(5) {
+		t.Fatal("muting history must not suppress the pow notice")
 	}
 }
