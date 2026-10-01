@@ -46,6 +46,13 @@ type WireMessage struct {
 	// lines and ignore the client's join filters. Deploy against an
 	// empty history.
 	Tags []string `json:"tags,omitempty"`
+	// SysPowTier is the proof-of-work tier a server-sent challenge is
+	// worth, so the client can apply ui.powMinTier to it. The notice's
+	// text also names the tier, but that is a pre-rendered string and
+	// nothing parses it. Zero means the notice carries no tier: a
+	// deadline or a result is not filtered by a floor that only says how
+	// much work to announce. Same shape and same reasoning as SysDate.
+	SysPowTier int `json:"sys_pow_tier,omitempty"`
 	// SysDate is the calendar day a date banner announces, as
 	// "2006-01-02". The banner text alone is a pre-rendered string, so
 	// without this the client could only recognise a repeat by comparing

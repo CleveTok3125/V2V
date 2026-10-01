@@ -282,6 +282,17 @@ func serverLocation() *time.Location {
 	return time.UTC
 }
 
+// powNoticeWire is noticeWire for a notice whose text names a
+// proof-of-work tier. The tier travels as a field as well as in the text,
+// so the client can apply ui.powMinTier to the notice without parsing the
+// banner — the floor says how much work to announce, so a challenge below
+// it is exactly the line a user asking for a higher floor wants gone.
+func powNoticeWire(text string, tier int, leaves ...string) WireMessage {
+	notice := noticeWire(time.Now(), text, leaves...)
+	notice.SysPowTier = tier
+	return notice
+}
+
 // markerWire builds a replay window marker. Unlike a notice it carries no
 // server time — it is a frame for the client's replay state machine, not a
 // line to read — and the text is only what an older client would print.

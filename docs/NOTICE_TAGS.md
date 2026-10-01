@@ -98,6 +98,23 @@ A date banner also carries `sys_date`, the announced day as
 }
 ```
 
+A proof-of-work challenge notice carries its tier the same way:
+
+```jsonc
+{
+  "type": "system",
+  "tags": ["system", "system.pow", "system.pow.screening"],
+  "sys_pow_tier": 3,
+  "text": "[Hệ thống]: Máy chủ yêu cầu xác minh chống spam (mức PoW 3). …"
+}
+```
+
+Without the field the tier would exist only inside the banner text, and
+nothing parses that, so `ui.powMinTier` could not act on a notice the
+server sent. Only the challenge carries one: a deadline, a result or a
+decline has no tier, and those are never filtered by the floor, which says
+how much work to announce rather than which outcome to hide.
+
 The banner text alone is a pre-rendered string. Without a machine value
 next to it, a client that already showed a day — from the replay tail, or
 from a server that restarted and re-announced it — could only recognise
@@ -180,14 +197,16 @@ it:
 
 An absent key means **shown**, so a notice kind this build does not know
 is not silenced by omission, and a partial config cannot mute a room by
-accident. `powMinTier` (default 1) hides the "solving PoW" notice for
-tiers below it. It gates both such notices — the pre-connect join gate
-and the in-chat challenge — but they are not reachable the same way.
-`/notify powmin <N>` changes the floor for the session, so it gates the
-in-chat challenge; the join-gate notice is printed by the dial that is about
-to create the session, before any runtime state exists to read, so it
-follows `ui.powMinTier` from the config. `TestPowMinTierScope` pins both
-halves.
+accident. `powMinTier` (default 1) hides a proof-of-work notice for tiers
+below it — the challenge the server announces, and the "solving PoW" line
+the client prints about the same challenge. A notice with no tier is not
+filtered by it.
+
+The floor from config reaches every one of them. The floor set at runtime
+with `/notify powmin <N>` reaches all but the pre-connect join-gate notice:
+that one is printed by the dial which is about to create the session, so
+there is no runtime state to read when it fires. `/notify` says so in its
+listing and its confirmation. `TestPowMinTierScope` pins the split.
 
 `/notify` (or `/nt`) lists the taxonomy as a tree and toggles a path:
 

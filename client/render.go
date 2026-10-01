@@ -458,7 +458,7 @@ func (s *Session) renderChatBlock(msg WireMessage) {
 	s.Display.ShowMetaMu.RUnlock()
 	// Notify gates live printing of informational system notices; the
 	// lines still land in their tab buffer when muted.
-	live := s.notifyTagsAllowed(notifyTagsForWire(msg))
+	live := s.notifyWireAllowed(msg)
 	emit := func(tab int, line string) { s.emitTabLive(live, tab, line) }
 	// Replay and tab switches re-render the same immutable wires;
 	// the chain hash covers the content, so it is a safe cache key

@@ -471,3 +471,76 @@ func TestCmdNotifyReportsPowMinScope(t *testing.T) {
 		t.Errorf("the listing must say the gate notice follows the config: %q", text)
 	}
 }
+
+// TestPowFloorAppliesToServerNotices: the tier floor has to reach the
+// challenge notice the server sends, not only the line the client prints
+// itself. Both are the same event, and the floor exists to keep quiet about
+// cheap work — a floor that hides the local line while the server's
+// announcement of the same challenge still prints is not a floor.
+func TestPowFloorAppliesToServerNotices(t *testing.T) {
+	screen := func(tier int) WireMessage {
+		return WireMessage{
+			Type: "system", Tags: wire.WithTags(wire.TagPowScreen),
+			SysPowTier: tier, Text: "[Hệ thống]: Máy chủ yêu cầu xác minh chống spam (mức PoW 3).",
+		}
+	}
+
+	sess := NewSession()
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{}, PowMinTier: 3}
+
+	for _, tier := range []int{1, 2, 3} {
+		if sess.notifyWireAllowed(screen(tier)) != (tier >= 3) {
+			t.Errorf("server notice at tier %d allowed=%v, want %v", tier,
+				sess.notifyWireAllowed(screen(tier)), tier >= 3)
+		}
+	}
+
+	// A notice with no tier is a deadline, a result or a decline. The floor
+	// says how much work to announce, not which outcome to hide, so these
+	// are never filtered by it.
+	for _, notice := range []WireMessage{
+		{Type: "system", Tags: wire.WithTags(wire.TagPowScreen), Text: "quá hạn"},
+		{Type: "system", Tags: wire.WithTags(wire.TagPowScreen), Text: "PoW xong"},
+		{Type: "system", Tags: wire.WithTags(wire.TagPowScreen), Text: "đáp án không hợp lệ"},
+	} {
+		if !sess.notifyWireAllowed(notice) {
+			t.Errorf("a tierless notice must not be filtered by the floor: %q", notice.Text)
+		}
+	}
+
+	// Muting the subtree still hides it regardless of tier.
+	sess.Display.Notify.Muted[wire.TagPow] = true
+	if sess.notifyWireAllowed(screen(5)) {
+		t.Error("a muted system.pow must hide the notice whatever its tier")
+	}
+}
+
+// TestPowFloorEndToEnd drives it through renderChatBlock, which is where the
+// live-or-buffered decision actually happens.
+func TestPowFloorEndToEnd(t *testing.T) {
+	sess, out := queueTestSession(t)
+	sess.Chain.WireIdx = newWireIndex(8)
+	sess.Chain.RenderCache = newRenderCache(8)
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{}, PowMinTier: 3}
+
+	for _, tc := range []struct {
+		tier int
+		want bool
+	}{{1, false}, {2, false}, {4, true}} {
+		notice := WireMessage{
+			Type: "system", Tags: wire.WithTags(wire.TagPowScreen),
+			SysPowTier: tc.tier, Text: "CHALLENGE" + string(rune('0'+tc.tier)),
+		}
+		sess.Display.DisplayMu.Lock()
+		sess.renderChatBlock(notice)
+		sess.Display.DisplayMu.Unlock()
+		sess.flushOutputNow()
+	}
+	text := out.String()
+	if strings.Contains(text, "CHALLENGE1") || strings.Contains(text, "CHALLENGE2") {
+		t.Errorf("notices below the floor printed live: %q", text)
+	}
+	if !strings.Contains(text, "CHALLENGE4") {
+		t.Errorf("a notice at the floor must print: %q", text)
+	}
+}

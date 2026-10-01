@@ -11,7 +11,7 @@ import (
 // must be a conscious protocol change reviewed here first.
 func TestWireJSONKeySet(t *testing.T) {
 	full := WireMessage{
-		Type: "system", Time: "12:00", DisplayName: "Bob#1234", Tags: []string{"system", "system.join"}, SysDate: "2026-01-02", Text: "hi",
+		Type: "system", Time: "12:00", DisplayName: "Bob#1234", Tags: []string{"system", "system.join"}, SysDate: "2026-01-02", SysPowTier: 3, Text: "hi",
 		Trip:        &TripMeta{Pub: "p", Seq: 1, Prev: "q", Sig: "s", ServerPub: "sp", MsgHash: "m", DisplayName: "Bob#1234", TmpID: 2, ReplyTo: 3},
 		TmpID:       2,
 		ReplyTo:     3,
@@ -30,7 +30,7 @@ func TestWireJSONKeySet(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	wantTop := []string{"type", "time", "displayName", "tags", "sys_date", "text", "trip", "tmp_id", "reply_to", "chain_prev", "chain_hash", "chain_height", "chain_ver", "seq", "sent_at"}
+	wantTop := []string{"type", "time", "displayName", "tags", "sys_pow_tier", "sys_date", "text", "trip", "tmp_id", "reply_to", "chain_prev", "chain_hash", "chain_height", "chain_ver", "seq", "sent_at"}
 	if len(got) != len(wantTop) {
 		t.Fatalf("top-level keys = %v, want %v", keysOf(got), wantTop)
 	}
@@ -143,4 +143,34 @@ func keysOf(m map[string]any) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestSysPowTierRoundTrip: a server-sent proof-of-work notice has to carry
+// its tier as a field. The tier decides whether the notice prints, and the
+// only other place it appears is inside the pre-rendered banner text, which
+// nothing parses.
+func TestSysPowTierRoundTrip(t *testing.T) {
+	raw := `{"type":"system","tags":["system","system.pow","system.pow.screening"],"sys_pow_tier":3,"text":"x"}`
+	var got WireMessage
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.SysPowTier != 3 {
+		t.Fatalf("SysPowTier = %d, want 3", got.SysPowTier)
+	}
+	out, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"sys_pow_tier":3`) {
+		t.Fatalf("tier did not survive the round trip: %s", out)
+	}
+	// A notice with no tier omits the field rather than sending a zero.
+	noTier, err := json.Marshal(WireMessage{Type: "system", Text: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(noTier), "sys_pow_tier") {
+		t.Fatalf("a notice with no tier must omit the field: %s", noTier)
+	}
 }

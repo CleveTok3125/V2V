@@ -204,6 +204,16 @@ func (s *ChatServer) unicastNotice(sess *ClientSession, text string, leaves ...s
 	s.unicastData(sess, data)
 }
 
+// unicastNoticeTier is unicastNotice for a notice carrying a proof-of-work
+// tier, so the client's tier floor can act on it.
+func (s *ChatServer) unicastNoticeTier(sess *ClientSession, text string, tier int, leaves ...string) {
+	data, err := json.Marshal(powNoticeWire(text, tier, leaves...))
+	if err != nil {
+		return
+	}
+	s.unicastData(sess, data)
+}
+
 // behaviorScheduler re-scores connected IPs and hands out PoW.
 func (s *ChatServer) behaviorScheduler() {
 	tick := time.NewTicker(behaviorTickInterval)
@@ -318,7 +328,7 @@ func (s *ChatServer) issueScreenChallenge(sess *ClientSession, ip string, tier i
 	// muting nothing, so hit-and-run floods would never face mute.
 	deadline := now.Add(a.ScreenDeadline)
 	s.Screener.Issue(sess.Conn, ip, tier, preset, salt, id, deadline)
-	s.unicastNotice(sess, "[Hệ thống]: Máy chủ yêu cầu xác minh chống spam (mức PoW "+strconv.Itoa(tier)+"). Client đang giải nền, có thể đơ tạm thời — đây là hoạt động bình thường, không phải lỗi.", wire.TagPowScreen)
+	s.unicastNoticeTier(sess, "[Hệ thống]: Máy chủ yêu cầu xác minh chống spam (mức PoW "+strconv.Itoa(tier)+"). Client đang giải nền, có thể đơ tạm thời — đây là hoạt động bình thường, không phải lỗi.", tier, wire.TagPowScreen)
 	offer := pow.Offer{Tier: tier, Preset: preset, Salt: salt, Expires: deadline.Unix(), ChallengeID: id}
 	sig := ""
 	if s.ServerID != nil {

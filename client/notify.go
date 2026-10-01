@@ -116,6 +116,19 @@ func (s *Session) notifyTagsAllowedLocked(tags []string) bool {
 	return len(wire.BlockedBy(tags, s.Display.Notify.Muted)) == 0
 }
 
+// powTierAllowed reports whether a proof-of-work notice of this tier may
+// print. A tier of zero means the notice carries none — a deadline, a
+// result, a decline — and those are not filtered: the floor says how much
+// work to announce, not which outcome to hide.
+func (s *Session) powTierAllowed(tier int) bool {
+	if tier <= 0 {
+		return true
+	}
+	s.Display.NotifyMu.RLock()
+	defer s.Display.NotifyMu.RUnlock()
+	return tier >= s.Display.Notify.PowMinTier
+}
+
 // notifyPowLive reports whether the "solving PoW" notice for a tier
 // prints live: it is gated both by the pow subtree and the tier floor. The
 // subtree test has to walk ancestors like every other gate — a direct lookup
@@ -126,6 +139,19 @@ func (s *Session) notifyPowLive(tier int) bool {
 	defer s.Display.NotifyMu.RUnlock()
 	return len(wire.BlockedBy(wire.WithTags(wire.TagPow), s.Display.Notify.Muted)) == 0 &&
 		tier >= s.Display.Notify.PowMinTier
+}
+
+// notifyWireAllowed reports whether a system wire may print live: no tag it
+// carries, and no ancestor of one, is muted; and a proof-of-work notice is
+// not below the tier floor. The floor has to be checked here and not only
+// where the client emits its own solving line, or ui.powMinTier would
+// appear to work while a server-sent challenge below it still printed.
+func (s *Session) notifyWireAllowed(msg WireMessage) bool {
+	tags := notifyTagsForWire(msg)
+	if !s.notifyTagsAllowed(tags) {
+		return false
+	}
+	return !wire.HasTag(tags, wire.TagPow) || s.powTierAllowed(msg.SysPowTier)
 }
 
 // notifyTagsForWire returns the tags a wire is gated on, or nil for content

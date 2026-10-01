@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -327,5 +328,55 @@ func TestReplayMarkersCarryTags(t *testing.T) {
 	}
 	if !wire.HasAnyTag(got[1], wire.TagHistoryEnd, wire.TagHistoryExhausted) {
 		t.Errorf("footer tags = %v, want an end or exhausted leaf", got[1])
+	}
+}
+
+// TestPowNoticeCarriesItsTier: the tier in a challenge notice is what the
+// client's ui.powMinTier acts on, so it has to travel as a field. The text
+// names it too, but nothing parses the text — that is the whole point of
+// the tag change.
+func TestPowNoticeCarriesItsTier(t *testing.T) {
+	defer testChainCfg()()
+	Cfg.Static.Timezone = time.UTC
+	s := NewChatServer()
+	conn := &websocket.Conn{}
+	sess := &ClientSession{Conn: conn, Send: make(chan []byte, 8)}
+	s.Hub.Clients[conn] = sess
+
+	s.unicastNoticeTier(sess, "[Hệ thống]: Máy chủ yêu cầu xác minh chống spam (mức PoW 2).", 2, wire.TagPowScreen)
+
+	select {
+	case payload := <-sess.Send:
+		var notice WireMessage
+		if err := json.Unmarshal(payload, &notice); err != nil {
+			t.Fatal(err)
+		}
+		if notice.SysPowTier != 2 {
+			t.Errorf("sys_pow_tier = %d, want 2", notice.SysPowTier)
+		}
+		if !wire.HasTag(notice.Tags, wire.TagPowScreen) {
+			t.Errorf("tags = %v, want the screening leaf", notice.Tags)
+		}
+	default:
+		t.Fatal("nothing delivered")
+	}
+
+	// A notice with no tier must not send the field at all, so the client
+	// can tell "no tier" from "tier zero".
+	s.unicastNotice(sess, "[Hệ thống]: Xác minh PoW xong, chat mở lại bình thường.", wire.TagPowScreen)
+	select {
+	case payload := <-sess.Send:
+		var notice WireMessage
+		if err := json.Unmarshal(payload, &notice); err != nil {
+			t.Fatal(err)
+		}
+		if notice.SysPowTier != 0 {
+			t.Errorf("a notice with no tier must send none, got %d", notice.SysPowTier)
+		}
+		if bytes.Contains(payload, []byte("sys_pow_tier")) {
+			t.Errorf("the field must be omitted when there is no tier: %s", payload)
+		}
+	default:
+		t.Fatal("nothing delivered")
 	}
 }
