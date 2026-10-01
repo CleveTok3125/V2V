@@ -67,7 +67,7 @@ func TestReplayFilterUsesTags(t *testing.T) {
 
 	replayed := func(wantJoins bool) []WireMessage {
 		session := &ClientSession{WantJoins: wantJoins, Send: make(chan []byte, 64)}
-		s.Chain.sendReplayPage(session, s.Chain.History, "", replayJoin, pageMeta{})
+		s.Chain.sendReplayPage(session, s.Chain.History, replayJoin, pageMeta{})
 		close(session.Send)
 		var got []WireMessage
 		for payload := range session.Send {
@@ -262,5 +262,70 @@ func TestNoticeWireWithoutConfiguredTimezone(t *testing.T) {
 	}
 	if _, err := time.Parse("15:04", got.Time); err != nil {
 		t.Fatalf("time %q must be a clock time: %v", got.Time, err)
+	}
+}
+
+// TestReplayMarkersCarryTags: the client runs its replay state machine on
+// these markers, and so does the fork check. Which window a marker opens or
+// closes has to be readable from the wire, not from the wording, or the
+// state machine is one reworded string away from tracking the wrong window.
+func TestReplayMarkersCarryTags(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	seedReplayHistory(s)
+
+	// Collect every marker a segment replay emits, in order.
+	var markerText string
+	markers := func() [][]string {
+		sess := &ClientSession{Send: make(chan []byte, 4096), Perms: GetDefaultPermission()}
+		go s.Chain.SendChatSegment(sess, 0, 3)
+		var got [][]string
+		timeout := time.After(10 * time.Second)
+		for {
+			select {
+			case frame := <-sess.Send:
+				closing := false
+				for _, line := range replayFrameLines(frame) {
+					if tags := markerTags(line); wire.HasTag(tags, wire.TagHistory) {
+						got = append(got, tags)
+						markerText += line
+						if wire.HasAnyTag(tags, wire.TagHistoryEnd, wire.TagHistoryExhausted) {
+							closing = true
+						}
+					}
+				}
+				if closing {
+					return got
+				}
+			case <-timeout:
+				t.Fatal("segment replay stalled before its footer")
+			}
+		}
+	}
+
+	got := markers()
+	if len(got) != 2 {
+		t.Fatalf("segment replay should open and close with one marker each, got %d", len(got))
+	}
+	// A marker with no text draws as a blank line in the client, so the
+	// banner has to travel even though the tag is what the client reads.
+	for _, text := range []string{"--- Lịch sử cũ ---", "--- Kết thúc lịch sử"} {
+		if !strings.Contains(markerText, text) {
+			t.Errorf("segment markers lost the banner %q, got %q", text, markerText)
+		}
+	}
+	if !wire.HasTag(got[0], wire.TagHistoryOlder) {
+		t.Errorf("header tags = %v, want the older leaf", got[0])
+	}
+	if wire.HasAnyTag(got[0], wire.TagHistoryEnd, wire.TagHistoryExhausted) {
+		t.Errorf("header must not claim to close a window: %v", got[0])
+	}
+	// The footer names the window it closes as well as how it closed, so
+	// the client can settle the right state without reading the text.
+	if !wire.HasTag(got[1], wire.TagHistoryOlder) {
+		t.Errorf("footer must name the window it closes, got %v", got[1])
+	}
+	if !wire.HasAnyTag(got[1], wire.TagHistoryEnd, wire.TagHistoryExhausted) {
+		t.Errorf("footer tags = %v, want an end or exhausted leaf", got[1])
 	}
 }

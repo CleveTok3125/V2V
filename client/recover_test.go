@@ -13,6 +13,7 @@ import (
 
 	"github.com/CleveTok3125/V2V/internal/chain"
 	"github.com/CleveTok3125/V2V/internal/config"
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // captureConn records outbound frames for gap-recovery assertions.
@@ -481,12 +482,12 @@ func TestGreetingAfterCatchup(t *testing.T) {
 func TestTrackRecoveryWindow(t *testing.T) {
 	sess := chainTestSession(t, 9)
 	sess.Display.DisplayMu.Lock()
-	sess.trackReplayWindow("--- Lịch sử bù ---", true)
+	sess.trackReplayWindow(wire.WithTags(wire.TagHistoryRecover), true)
 	if !sess.Chain.InRecover || sess.Chain.InSync || sess.Chain.InOlder {
 		sess.Display.DisplayMu.Unlock()
 		t.Fatal("recovery header must raise only InRecover")
 	}
-	sess.trackReplayWindow("--- Kết thúc lịch sử bù (2/2) ---", false)
+	sess.trackReplayWindow(wire.WithTags(wire.TagHistoryRecover, wire.TagHistoryEnd), false)
 	if sess.Chain.InRecover {
 		sess.Display.DisplayMu.Unlock()
 		t.Fatal("recovery footer must clear InRecover")
@@ -563,6 +564,10 @@ func TestLoadAnnouncesSync(t *testing.T) {
 	sess.Display.ActiveTab = TabChat
 	anchor := [32]byte{9}
 	wires := recoverTestChain(anchor, 1, 1)
+	// Markers arrive as tagged wires now; only the wording is ever drawn.
+	replayMarker := func(tags []string, text string) WireMessage {
+		return WireMessage{Type: "system", Tags: tags, Text: text}
+	}
 	frame := func(v any) []byte {
 		raw, err := json.Marshal(v)
 		if err != nil {
@@ -571,9 +576,9 @@ func TestLoadAnnouncesSync(t *testing.T) {
 		return raw
 	}
 	conn.frames <- frame(HistoryInfo{Type: "history_info", MinSeq: 1, MaxSeq: 1, MinHeight: 1, MaxHeight: 1, Count: 1})
-	conn.frames <- []byte("--- Lịch sử chat gần đây ---\n")
+	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistoryBegin), "--- Lịch sử chat gần đây ---"))
 	conn.frames <- frame(wires[0])
-	conn.frames <- []byte("--- Kết thúc lịch sử (1/1) ---\n")
+	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistory, wire.TagHistoryEnd), "--- Kết thúc lịch sử (1/1) ---"))
 	conn.frames <- frame(HistorySync{Type: "history_sync", Direction: "after", FirstSeq: 1, LastSeq: 1, NextSeq: 1, Sent: 1, Total: 1})
 
 	go sess.runPump()

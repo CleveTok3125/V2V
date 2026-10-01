@@ -114,7 +114,7 @@ func (h *Hub) registerClient(session *ClientSession, clientIP string) {
 		}
 	}
 
-	joinTime := time.Now().In(Cfg.Static.Timezone)
+	joinTime := time.Now().In(serverLocation())
 	h.CheckAndBroadcastDate(joinTime)
 
 	joinMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã tham gia phòng chat!", joinTime.Format("15:04"), session.DisplayName)
@@ -154,7 +154,7 @@ func (h *Hub) unregisterClient(session *ClientSession, clientIP string) {
 
 	close(session.Send)
 
-	leaveTime := time.Now().In(Cfg.Static.Timezone)
+	leaveTime := time.Now().In(serverLocation())
 	h.CheckAndBroadcastDate(leaveTime)
 
 	leaveMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã rời phòng chat.", leaveTime.Format("15:04"), session.DisplayName)
@@ -582,7 +582,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		lastMessageTime = time.Now()
 
 		s.observeMessage(clientIP)
-		now := time.Now().In(Cfg.Static.Timezone)
+		now := time.Now().In(serverLocation())
 		s.Hub.CheckAndBroadcastDate(now)
 
 		wire := WireMessage{

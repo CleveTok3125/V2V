@@ -150,8 +150,8 @@ func TestStashEchoRoundtrip(t *testing.T) {
 
 func TestReapStaleEchoes(t *testing.T) {
 	stash := []pendingEcho{
-		{wire: WireMessage{TmpID: 1}, at: time.Now().Add(-time.Hour)},
-		{wire: WireMessage{TmpID: 2}, at: time.Now()},
+		{msg: WireMessage{TmpID: 1}, at: time.Now().Add(-time.Hour)},
+		{msg: WireMessage{TmpID: 2}, at: time.Now()},
 	}
 	kept, stale := reapStaleEchoes(stash, 10*time.Second)
 	if len(kept) != 1 || len(stale) != 1 || stale[0].TmpID != 1 {
@@ -826,19 +826,19 @@ func TestTrackReplayWindow(t *testing.T) {
 	sess.Display.DisplayMu.Lock()
 	defer sess.Display.DisplayMu.Unlock()
 
-	sess.trackReplayWindow("| --- Lịch sử cũ ---", true)
+	sess.trackReplayWindow(wire.WithTags(wire.TagHistoryOlder), true)
 	if !sess.Chain.InOlder || sess.Chain.InSync {
 		t.Fatalf("segment header = InOlder %v InSync %v, want true/false", sess.Chain.InOlder, sess.Chain.InSync)
 	}
-	sess.trackReplayWindow("| --- Kết thúc lịch sử (2/2) ---", false)
+	sess.trackReplayWindow(wire.WithTags(wire.TagHistory, wire.TagHistoryEnd), false)
 	if sess.Chain.InOlder || sess.Chain.InSync {
 		t.Fatal("footer must clear both windows")
 	}
-	sess.trackReplayWindow("| --- Lịch sử chat gần đây ---", true)
+	sess.trackReplayWindow(wire.WithTags(wire.TagHistoryBegin), true)
 	if sess.Chain.InOlder || !sess.Chain.InSync {
 		t.Fatalf("join header = InOlder %v InSync %v, want false/true", sess.Chain.InOlder, sess.Chain.InSync)
 	}
-	sess.trackReplayWindow("| --- Kết thúc lịch sử (2/2) ---", false)
+	sess.trackReplayWindow(wire.WithTags(wire.TagHistory, wire.TagHistoryEnd), false)
 	if sess.Chain.InOlder || sess.Chain.InSync {
 		t.Fatal("footer must clear both windows")
 	}
@@ -854,7 +854,7 @@ func TestTrackReplayWindowFooterFlushesBanner(t *testing.T) {
 	sess.Display.DisplayMu.Lock()
 	defer sess.Display.DisplayMu.Unlock()
 	sess.Pending.PendingDateBannerWire = &banner
-	sess.trackReplayWindow("| --- Kết thúc lịch sử (1/2) ---", false)
+	sess.trackReplayWindow(wire.WithTags(wire.TagHistory, wire.TagHistoryEnd), false)
 	if sess.Pending.PendingDateBannerWire != nil {
 		t.Fatal("footer must clear the stashed banner")
 	}

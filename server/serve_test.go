@@ -11,6 +11,8 @@ import (
 
 	"github.com/CleveTok3125/V2V/internal/config"
 	"github.com/gorilla/websocket"
+
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // readLimitFor must never yield a negative limit (gorilla treats a
@@ -166,7 +168,7 @@ func TestReadPump_HistoryRequest(t *testing.T) {
 			trailer = hs
 			break
 		}
-		if strings.Contains(string(msg), "Lịch sử cũ") {
+		if wire.HasTag(markerTags(string(msg)), wire.TagHistoryOlder) {
 			sawOldHeader = true
 		}
 	}

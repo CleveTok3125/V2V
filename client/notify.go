@@ -60,6 +60,11 @@ func (s *Session) notifyMutedTagsLocked() map[string]bool {
 // muted, so switching off a node hides its whole subtree. A line with no
 // tags is always live.
 func (s *Session) notifyTagsAllowed(tags []string) bool {
+	// Chat carries no tags and is never gated. Short-circuiting here keeps
+	// the render path off the lock and off a per-call map.
+	if len(tags) == 0 {
+		return true
+	}
 	s.Display.NotifyMu.RLock()
 	defer s.Display.NotifyMu.RUnlock()
 	return s.notifyTagsAllowedLocked(tags)
@@ -75,13 +80,6 @@ func (s *Session) notifyPowLive(tier int) bool {
 	s.Display.NotifyMu.RLock()
 	defer s.Display.NotifyMu.RUnlock()
 	return s.Display.Notify.Pow && tier >= s.Display.Notify.PowMinTier
-}
-
-// historyTags is the tag set for local notices about history progress, so
-// callers in files whose own parameters are named after the wire package
-// need not import it.
-func historyTags() []string {
-	return wire.WithTags(wire.TagHistory)
 }
 
 // notifyTagsForWire returns the tags a wire is gated on, or nil for content

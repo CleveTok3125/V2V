@@ -140,7 +140,22 @@ docker compose -p v2v-prod --env-file instances/prod/.env pull
 ```
 
 To roll back, set `IMAGE_NAME` to the previous version and repeat. Data
-lives in `instances/prod/data/` and is untouched by image changes.
+lives in `instances/prod/data/` and is untouched by image changes, with one
+exception: the chat history file.
+
+### History file format change
+
+Notice classification moved from a `sys_kind` field to a `tags` chain, and
+there is no compatibility with the old shape. Stop the instance and delete
+`history.jsonl` (and `history.jsonl.old` / `history.jsonl.old.zst` if
+present) before starting a version that uses tags. Left in place, those
+records load with no tags, so the join/leave notices in them replay to every
+client regardless of its join filter and no longer answer `/notify join`.
+Chained messages and the chain hash are unaffected; the archive is kept for
+verification, so deleting it discards the old window and nothing else.
+
+New history files can be read by the version that wrote them and by later
+ones, but not by earlier versions.
 
 ## Bare metal
 

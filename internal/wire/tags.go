@@ -42,12 +42,11 @@ const (
 	// below it and nothing to group it with.
 	TagAudit = "system.audit"
 
-	TagLimit     = "system.limit"
-	TagEnvelope  = "system.envelope"
-	TagTrip      = "system.trip"
-	TagFilter    = "system.filter"
-	TagAuth      = "system.auth"
-	TagTransport = "system.transport"
+	TagLimit    = "system.limit"
+	TagEnvelope = "system.envelope"
+	TagTrip     = "system.trip"
+	TagFilter   = "system.filter"
+	TagAuth     = "system.auth"
 )
 
 // tagTree lists every known tag, parents before children, in the order
@@ -72,7 +71,6 @@ var tagTree = []string{
 	TagTrip,
 	TagFilter,
 	TagAuth,
-	TagTransport,
 }
 
 // AllTags returns every known tag in tree order: parents before children,
@@ -99,6 +97,39 @@ func ParentTag(tag string) string {
 		}
 	}
 	return ""
+}
+
+// knownAncestor returns the closest tag enclosing this one that the
+// taxonomy knows, or "" when there is none. It keeps looking past a level it
+// does not recognise, so a leaf a newer peer published as
+// "system.pow.newflow.step" still resolves to system.pow instead of
+// detaching from the tree and escaping every gate above it.
+func knownAncestor(tag string) string {
+	for at := syntacticParent(tag); at != ""; at = syntacticParent(at) {
+		if HasTag(tagTree, at) {
+			return at
+		}
+	}
+	return ""
+}
+
+// syntacticParent returns tag up to its last dot, whether or not that
+// parent is part of the taxonomy.
+func syntacticParent(tag string) string {
+	if cut := strings.LastIndex(tag, "."); cut > 0 {
+		return tag[:cut]
+	}
+	return ""
+}
+
+// knownChain returns tag and the known ancestors enclosing it, ordered from
+// the root down and skipping levels the taxonomy does not define.
+func knownChain(tag string) []string {
+	var chain []string
+	for at := tag; at != ""; at = knownAncestor(at) {
+		chain = append([]string{at}, chain...)
+	}
+	return chain
 }
 
 // HasTag reports whether tags contains tag.
@@ -140,7 +171,10 @@ func BlockedBy(tags []string, muted map[string]bool) []string {
 	// the walk at the first ancestor this build does not know and escape
 	// a muted root.
 	walk := func(tag string) {
-		for at := tag; at != ""; at = ParentTag(at) {
+		// knownChain reaches past a level this build does not know, so a
+		// peer chain that skips a level is still matched against the
+		// ancestors it does sit under.
+		for _, at := range knownChain(tag) {
 			if seen[at] {
 				continue
 			}
@@ -175,12 +209,7 @@ func WithTags(leaves ...string) []string {
 	}
 	add(TagRoot)
 	for _, leaf := range leaves {
-		// Walk root → leaf so ancestors land before their child.
-		chain := []string{}
-		for t := leaf; t != ""; t = ParentTag(t) {
-			chain = append([]string{t}, chain...)
-		}
-		for _, t := range chain {
+		for _, t := range knownChain(leaf) {
 			add(t)
 		}
 	}

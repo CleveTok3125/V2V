@@ -148,43 +148,16 @@ func tabForWire(msg WireMessage) int {
 	return TabSystem
 }
 
-func isHistoryBoundaryLine(line string) bool {
-	return strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Lịch sử cũ ---") || isRecoveryHeader(line) || strings.Contains(line, "--- Kết thúc lịch sử")
-}
-
-// isOlderSegmentHeader reports the on-demand segment header. Segment
-// lines render and index only: they predate the running tip, so link
-// verification and echo matching must skip them.
-func isOlderSegmentHeader(line string) bool {
-	return strings.Contains(line, "--- Lịch sử cũ ---")
-}
-
-// isRecoveryHeader reports the recovery window header. Recovery lines
-// refill heights the running tip already passed, so they verify
-// against their own anchor instead of the running tip.
-func isRecoveryHeader(line string) bool {
-	return strings.Contains(line, "--- Lịch sử bù ---")
-}
-
-// isRecoveryFooter reports the recovery window footer, which settles
-// its refill at arrival (content frames precede it in order).
-func isRecoveryFooter(line string) bool {
-	return strings.Contains(line, "Kết thúc lịch sử bù")
-}
-
-// parseHistoryBoundary reports whether line opens (header) or closes
-// (footer) a history replay. Sync tracking must run regardless of the
-// join-display toggle: gating it on showJoin leaves inSync unset, which
-// both disables the fork check and feeds replay lines to echo matching.
-func parseHistoryBoundary(line string) (boundary bool, start bool) {
-	if strings.Contains(line, "--- Lịch sử chat gần đây ---") || strings.Contains(line, "--- Lịch sử cũ ---") || isRecoveryHeader(line) {
-		return true, true
+// parseHistoryBoundary reports whether a replay marker opens (header) or
+// closes (footer) a window. The server tags each marker with the window it
+// names and, for a footer, how it closed, so this reads the wire instead of
+// the wording — which is what keeps the state machine, the fork check and
+// echo matching from depending on a string a copy edit could change.
+func parseHistoryBoundary(tags []string) (boundary bool, start bool) {
+	if !wire.HasTag(tags, wire.TagHistory) {
+		return false, false
 	}
-	// No trailing " ---": counted footers read "(sent/total) ---".
-	if strings.Contains(line, "--- Kết thúc lịch sử") {
-		return true, false
-	}
-	return false, false
+	return true, !wire.HasAnyTag(tags, wire.TagHistoryEnd, wire.TagHistoryExhausted)
 }
 
 // collectCodeblock gathers a fenced code block after its opening line.

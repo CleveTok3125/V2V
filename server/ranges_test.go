@@ -3,9 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 func seedHeights(s *ChatServer, heights ...uint64) {
@@ -60,7 +61,7 @@ func drainRanges(t *testing.T, s *ChatServer, ranges []HeightRange, limit int) (
 					<-done
 					return contents, hs
 				}
-				if strings.Contains(line, "Lịch sử bù") || strings.Contains(line, "Kết thúc lịch sử") {
+				if wire.HasTag(markerTags(line), wire.TagHistory) {
 					continue
 				}
 				contents = append(contents, line)

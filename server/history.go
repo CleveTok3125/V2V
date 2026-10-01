@@ -282,6 +282,15 @@ func serverLocation() *time.Location {
 	return time.UTC
 }
 
+// markerWire builds a replay window marker. Unlike a notice it carries no
+// server time — it is a frame for the client's replay state machine, not a
+// line to read — and the text is only what an older client would print.
+// Callers pass the full chain via WithTags, since a marker names both the
+// window it opens or closes and, for a footer, how it closed.
+func markerWire(tags []string, text string) WireMessage {
+	return WireMessage{Type: "system", Tags: tags, Text: text}
+}
+
 // noticeWire builds one unchained system line. leaves names the tag leaves
 // rather than the finished list, so every producer publishes the same
 // root-to-leaf chain and none of them can emit a partial chain that would
@@ -319,7 +328,7 @@ func (h *Hub) broadcastSystem(text string, leaves []string, day string, sender *
 // chat. No producers yet; the route exists so management evidence never
 // rides the notice path by mistake.
 func (h *Hub) BroadcastAudit(text string, sender *websocket.Conn, serverPub string) {
-	now := time.Now().In(Cfg.Static.Timezone)
+	now := time.Now().In(serverLocation())
 	h.BroadcastMu.Lock()
 	defer h.BroadcastMu.Unlock()
 	_, data := h.chain.linkAndStore(WireMessage{
@@ -357,14 +366,14 @@ func (s *ChatServer) serveHistorySegment(session *ClientSession, before uint64, 
 	s.Chain.Mu.RUnlock()
 	if before != 0 && ready && before > tip {
 		s.Hub.BroadcastMu.Lock()
-		s.Chain.sendReplay(session, nil, "--- Lịch sử cũ ---", replaySegment)
+		s.Chain.sendReplay(session, nil, replaySegment)
 		s.Hub.BroadcastMu.Unlock()
 		return
 	}
 	lines := s.Chain.collectSegment(before, limit)
 	s.Hub.BroadcastMu.Lock()
 	defer s.Hub.BroadcastMu.Unlock()
-	s.Chain.sendReplay(session, lines, "--- Lịch sử cũ ---", replaySegment)
+	s.Chain.sendReplay(session, lines, replaySegment)
 }
 
 func (h *Hub) CheckAndBroadcastDate(now time.Time) {
@@ -578,7 +587,7 @@ func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, li
 	if limit <= 0 {
 		return
 	}
-	c.sendReplay(session, c.collectSegment(before, limit), "--- Lịch sử cũ ---", replaySegment)
+	c.sendReplay(session, c.collectSegment(before, limit), replaySegment)
 }
 
 // collectAfterSeq returns up to limit stored lines with seq > afterSeq,
@@ -642,21 +651,20 @@ func (s *ChatServer) serveHistorySeq(session *ClientSession, afterSeq, beforeSeq
 	}
 	var lines []string
 	var meta pageMeta
-	var header string
 	var mode replayMode
 	switch {
 	case afterSeq != nil:
 		l, more, next := s.Chain.collectAfterSeq(*afterSeq, limit)
-		lines, meta, header, mode = l, pageMeta{Direction: "after", NextSeq: next, More: more}, "--- Lịch sử chat gần đây ---", replayJoin
+		lines, meta, mode = l, pageMeta{Direction: "after", NextSeq: next, More: more}, replayJoin
 	case beforeSeq != nil:
 		l, more, next := s.Chain.collectBeforeSeq(*beforeSeq, limit)
-		lines, meta, header, mode = l, pageMeta{Direction: "before", NextSeq: next, More: more}, "--- Lịch sử cũ ---", replaySegment
+		lines, meta, mode = l, pageMeta{Direction: "before", NextSeq: next, More: more}, replaySegment
 	default:
 		return
 	}
 	s.Hub.BroadcastMu.Lock()
 	defer s.Hub.BroadcastMu.Unlock()
-	s.Chain.sendReplayPage(session, lines, header, mode, meta)
+	s.Chain.sendReplayPage(session, lines, mode, meta)
 }
 
 // collectRanges returns up to limit chained lines whose chain_height
@@ -722,7 +730,7 @@ func (s *ChatServer) serveHistoryRanges(session *ClientSession, ranges []HeightR
 	lines := s.Chain.collectRanges(ranges, limit)
 	s.Hub.BroadcastMu.Lock()
 	defer s.Hub.BroadcastMu.Unlock()
-	s.Chain.sendReplayPage(session, lines, "--- Lịch sử bù ---", replayRecovery, pageMeta{})
+	s.Chain.sendReplayPage(session, lines, replayRecovery, pageMeta{})
 }
 
 // sendReplay renders stored lines in replay format: header, content,
@@ -765,11 +773,26 @@ const (
 	replayRecovery
 )
 
-func (c *ChainService) sendReplay(session *ClientSession, lines []string, header string, mode replayMode) {
-	c.sendReplayPage(session, lines, header, mode, pageMeta{})
+func (c *ChainService) sendReplay(session *ClientSession, lines []string, mode replayMode) {
+	c.sendReplayPage(session, lines, mode, pageMeta{})
 }
 
-func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, header string, mode replayMode, meta pageMeta) {
+// replayHeader returns the wording and the tag leaf of the marker that
+// opens a window of the given kind. The text is what a client draws; the
+// tag is what it reads, and deriving both from the mode keeps a wording
+// change from drifting away from the window it names.
+func replayHeader(mode replayMode) (text string, leaf string) {
+	switch mode {
+	case replaySegment:
+		return "--- Lịch sử cũ ---", wire.TagHistoryOlder
+	case replayRecovery:
+		return "--- Lịch sử bù ---", wire.TagHistoryRecover
+	default:
+		return "--- Lịch sử chat gần đây ---", wire.TagHistoryBegin
+	}
+}
+
+func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, mode replayMode, meta pageMeta) {
 	// Replay filters join/leave unless the session asked for them.
 	// Dates, audits and untagged lines always go. Filtered lines never
 	// occupied chain positions, so the replayed window has no gaps.
@@ -830,7 +853,9 @@ func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, he
 		batchN++
 	}
 
-	if !replaySend([]byte(header)) {
+	headerText, headerLeaf := replayHeader(mode)
+	headerLine, _ := json.Marshal(markerWire(wire.WithTags(headerLeaf), headerText))
+	if !replaySend(headerLine) {
 		dropped++
 	}
 	for _, msgStr := range lines {
@@ -880,7 +905,18 @@ func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, he
 		}
 	}
 	flushBatch()
+	// The footer carries both the window it closes and how it closed, so
+	// the client can tell a counted end from an exhausted one without
+	// reading the wording.
+	window := []string{wire.TagHistory}
+	switch mode {
+	case replaySegment:
+		window = append(window, wire.TagHistoryOlder)
+	case replayRecovery:
+		window = append(window, wire.TagHistoryRecover)
+	}
 	footer := fmt.Sprintf("--- Kết thúc lịch sử (%d/%d) ---", sent, len(lines))
+	closer := wire.TagHistoryEnd
 	if mode != replayJoin {
 		noun := "lịch sử cũ"
 		exhausted := "--- Kết thúc lịch sử cũ: không còn tin cũ hơn ---"
@@ -891,9 +927,11 @@ func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, he
 		footer = fmt.Sprintf("--- Kết thúc %s (%d/%d) ---", noun, sent, len(lines))
 		if !haveHeight {
 			footer = exhausted
+			closer = wire.TagHistoryExhausted
 		}
 	}
-	if !replaySend([]byte(footer)) {
+	footerLine, _ := json.Marshal(markerWire(wire.WithTags(append(window, closer)...), footer))
+	if !replaySend(footerLine) {
 		dropped++
 	}
 	if !replaySend(historySyncTrailer(minHeight, maxHeight, sent, len(lines), dropped, firstSeq, lastSeq, meta)) {

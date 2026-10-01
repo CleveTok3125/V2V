@@ -129,7 +129,7 @@ func TestWireJSONKeySet(t *testing.T) {
 
 	// Tags and sys_date round-trip on system lines.
 	var sys WireMessage
-	if err := json.Unmarshal([]byte(`{"type":"system","tags":["system","join"],"sys_date":"2026-01-02","text":"x"}`), &sys); err != nil || len(sys.Tags) != 2 || sys.Tags[1] != "join" {
+	if err := json.Unmarshal([]byte(`{"type":"system","tags":["system","system.join"],"sys_date":"2026-01-02","text":"x"}`), &sys); err != nil || len(sys.Tags) != 2 || sys.Tags[1] != TagJoin {
 		t.Fatalf("tags lost: %+v %v", sys, err)
 	}
 	if sys.SysDate != "2026-01-02" {

@@ -9,24 +9,32 @@ import (
 	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
+// TestParseHistoryBoundary: the replay state machine, the fork check and
+// echo matching all key off this, and it must read the marker's tags. A
+// marker-shaped string with no history tag is not a marker, and a footer is
+// recognised by its end/exhausted leaf rather than by a trailing " ---".
 func TestParseHistoryBoundary(t *testing.T) {
-	// Sync tracking must not depend on the join-display toggle: with -j
-	// the old gated block never set inSync, silently disabling the fork
-	// check and feeding replay lines to echo matching.
-	if b, start := parseHistoryBoundary("| --- Lịch sử chat gần đây ---"); !b || !start {
-		t.Errorf("header = (%v,%v), want (true,true)", b, start)
+	cases := []struct {
+		name     string
+		tags     []string
+		boundary bool
+		start    bool
+	}{
+		{"join header", wire.WithTags(wire.TagHistoryBegin), true, true},
+		{"segment header", wire.WithTags(wire.TagHistoryOlder), true, true},
+		{"recovery header", wire.WithTags(wire.TagHistoryRecover), true, true},
+		{"counted footer", wire.WithTags(wire.TagHistory, wire.TagHistoryEnd), true, false},
+		{"exhausted footer", wire.WithTags(wire.TagHistoryOlder, wire.TagHistoryExhausted), true, false},
+		{"recovery footer", wire.WithTags(wire.TagHistoryRecover, wire.TagHistoryEnd), true, false},
+		{"chat", nil, false, false},
+		{"ordinary notice", wire.WithTags(wire.TagLimit), false, false},
 	}
-	if b, start := parseHistoryBoundary("| --- Lịch sử cũ ---"); !b || !start {
-		t.Errorf("segment header = (%v,%v), want (true,true)", b, start)
-	}
-	if b, start := parseHistoryBoundary("| --- Kết thúc lịch sử (32/142) ---"); !b || start {
-		t.Errorf("footer = (%v,%v), want (true,false)", b, start)
-	}
-	if b, _ := parseHistoryBoundary("| 12:00 Alice: hello"); b {
-		t.Error("chat line detected as boundary")
-	}
-	if b, _ := parseHistoryBoundary(""); b {
-		t.Error("empty line detected as boundary")
+	for _, tc := range cases {
+		gotBoundary, gotStart := parseHistoryBoundary(tc.tags)
+		if gotBoundary != tc.boundary || gotStart != tc.start {
+			t.Errorf("%s: parseHistoryBoundary = (%v,%v), want (%v,%v)",
+				tc.name, gotBoundary, gotStart, tc.boundary, tc.start)
+		}
 	}
 }
 
@@ -178,4 +186,95 @@ func TestBadgeVerifyURLCarriesHeightAndSentAt(t *testing.T) {
 			t.Fatalf("verify url lost signed param %q: %q", k, urlStr)
 		}
 	}
+}
+
+// TestHandleReplayMarkerTracksWindows: the marker drives the replay state
+// machine, the fork check and the recovery refill. Each header must raise
+// its own window and leave the others alone, any footer must clear all of
+// them, and a recovery window must settle its refill on its own footer.
+func TestHandleReplayMarkerTracksWindows(t *testing.T) {
+	marker := func(tags ...string) WireMessage {
+		return WireMessage{Type: "system", Tags: wire.WithTags(tags...), Text: "marker"}
+	}
+
+	cases := []struct {
+		name    string
+		open    []string
+		inOlder bool
+		inSync  bool
+		inRecov bool
+	}{
+		{"join", []string{wire.TagHistoryBegin}, false, true, false},
+		{"segment", []string{wire.TagHistoryOlder}, true, false, false},
+		{"recovery", []string{wire.TagHistoryRecover}, false, false, true},
+	}
+	for _, tc := range cases {
+		sess := sessionForDispatch(t)
+		sess.handleReplayMarker(marker(tc.open...))
+		if sess.Chain.InOlder != tc.inOlder || sess.Chain.InSync != tc.inSync || sess.Chain.InRecover != tc.inRecov {
+			t.Errorf("%s header: InOlder %v InSync %v InRecover %v, want %v/%v/%v",
+				tc.name, sess.Chain.InOlder, sess.Chain.InSync, sess.Chain.InRecover,
+				tc.inOlder, tc.inSync, tc.inRecov)
+		}
+		// A counted footer closes whatever window was open.
+		sess.handleReplayMarker(marker(wire.TagHistory, wire.TagHistoryEnd))
+		if sess.Chain.InOlder || sess.Chain.InSync || sess.Chain.InRecover {
+			t.Errorf("%s footer must clear every window, got %v/%v/%v",
+				tc.name, sess.Chain.InOlder, sess.Chain.InSync, sess.Chain.InRecover)
+		}
+		// So does an exhausted one: it closes the window just as firmly.
+		sess.handleReplayMarker(marker(wire.TagHistoryOlder))
+		sess.handleReplayMarker(marker(wire.TagHistoryOlder, wire.TagHistoryExhausted))
+		if sess.Chain.InOlder || sess.Chain.InSync || sess.Chain.InRecover {
+			t.Errorf("%s exhausted footer must clear every window, got %v/%v/%v",
+				tc.name, sess.Chain.InOlder, sess.Chain.InSync, sess.Chain.InRecover)
+		}
+	}
+}
+
+// TestHandleReplayMarkerHidesRecoveryAndLoading: markers are noise while a
+// load is in progress, and a recovery window's markers are noise on their
+// own because the merge draws its own summary.
+func TestHandleReplayMarkerHidesRecoveryAndLoading(t *testing.T) {
+	marker := func(tags ...string) WireMessage {
+		return WireMessage{Type: "system", Tags: wire.WithTags(tags...), Text: "MARKERTEXT"}
+	}
+
+	sess := sessionForDispatch(t)
+	sess.handleReplayMarker(marker(wire.TagHistoryOlder))
+	if !containsLine(sess.Display.TabChat.lines, "MARKERTEXT") {
+		t.Fatal("a plain segment marker must be drawn in the chat tab")
+	}
+
+	sess = sessionForDispatch(t)
+	sess.handleReplayMarker(marker(wire.TagHistoryRecover))
+	if containsLine(sess.Display.TabChat.lines, "MARKERTEXT") {
+		t.Fatal("recovery markers must stay hidden")
+	}
+
+	sess = sessionForDispatch(t)
+	sess.Chain.Loading = true
+	sess.handleReplayMarker(marker(wire.TagHistoryBegin))
+	if containsLine(sess.Display.TabChat.lines, "MARKERTEXT") {
+		t.Fatal("markers must stay hidden while a load is in progress")
+	}
+}
+
+// TestHandleReplayMarkerIgnoresWording: only the tags decide. A marker with
+// no history tag is an ordinary notice and must not move the state machine.
+func TestHandleReplayMarkerIgnoresWording(t *testing.T) {
+	sess := sessionForDispatch(t)
+	sess.handleReplayMarker(WireMessage{Type: "system", Text: "--- Lịch sử cũ ---"})
+	if sess.Chain.InOlder || sess.Chain.InSync || sess.Chain.InRecover {
+		t.Fatal("an untagged marker-shaped line must not open a replay window")
+	}
+}
+
+func containsLine(lines []string, needle string) bool {
+	for _, line := range lines {
+		if strings.Contains(line, needle) {
+			return true
+		}
+	}
+	return false
 }

@@ -151,7 +151,7 @@ func TestDeclaredTagsAreInTheTree(t *testing.T) {
 		"gate":            TagPowGate,
 		"screening":       TagPowScreen,
 		"limit":           TagLimit, "envelope": TagEnvelope, "trip": TagTrip,
-		"filter": TagFilter, "auth": TagAuth, "transport": TagTransport,
+		"filter": TagFilter, "auth": TagAuth,
 	}
 	for kind, tag := range produced {
 		if !declared[tag] {
@@ -241,5 +241,54 @@ func TestBlockedByAlwaysTestsTheRoot(t *testing.T) {
 		if len(blocked) != 1 || blocked[0] != TagRoot {
 			t.Errorf("BlockedBy(%v, root muted) = %v, want [%s]", chain, blocked, TagRoot)
 		}
+	}
+}
+
+// TestWithTagsKeepsKnownAncestorsOfUnknownLeaf: a peer on a newer vocabulary
+// can publish a leaf below a level this build does not know. The known
+// ancestors of that leaf must still travel, otherwise the line detaches
+// from the tree and no gate on its real ancestors can ever hide it.
+func TestWithTagsKeepsKnownAncestorsOfUnknownLeaf(t *testing.T) {
+	got := WithTags("system.pow.unknown.deep")
+	for _, want := range []string{TagRoot, TagPow, "system.pow.unknown.deep"} {
+		if !HasTag(got, want) {
+			t.Errorf("WithTags = %v, want it to carry %q", got, want)
+		}
+	}
+	if got[0] != TagRoot {
+		t.Errorf("root must come first, got %v", got)
+	}
+	if HasTag(got, "system.pow.unknown") {
+		t.Errorf("an unknown level must not be invented, got %v", got)
+	}
+}
+
+// TestBlockedByReachesAncestorsPastUnknownLevels: the same peer chain must
+// still be hidden by a mute on a known ancestor, which is the whole point
+// of carrying the chain rather than the leaf.
+func TestBlockedByReachesAncestorsPastUnknownLevels(t *testing.T) {
+	leaf := WithTags("system.pow.unknown.deep")
+	for _, mutedKey := range []string{TagRoot, TagPow} {
+		blocked := BlockedBy(leaf, map[string]bool{mutedKey: true})
+		if len(blocked) != 1 || blocked[0] != mutedKey {
+			t.Errorf("BlockedBy(%v, %q muted) = %v, want [%s]", leaf, mutedKey, blocked, mutedKey)
+		}
+	}
+	// A mute on an unrelated branch must still leave it visible.
+	if blocked := BlockedBy(leaf, map[string]bool{TagHistory: true}); len(blocked) != 0 {
+		t.Errorf("BlockedBy = %v, want none", blocked)
+	}
+}
+
+// TestOffTreeTagStaysOffTree: a chain that never reaches a known level is
+// carried as given and only the root applies, rather than being attached
+// to some branch it does not belong to.
+func TestOffTreeTagStaysOffTree(t *testing.T) {
+	got := WithTags("elsewhere.thing")
+	if !HasTag(got, TagRoot) || !HasTag(got, "elsewhere.thing") {
+		t.Fatalf("WithTags = %v, want root plus the tag as given", got)
+	}
+	if len(got) != 2 {
+		t.Fatalf("WithTags invented a chain for an off-tree tag: %v", got)
 	}
 }

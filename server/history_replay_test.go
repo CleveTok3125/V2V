@@ -80,11 +80,14 @@ func drainReplay(t *testing.T, s *ChatServer, wantJoins bool) (contents []string
 					<-done
 					return contents, footer, trailer
 				}
-				if strings.Contains(line, "Kết thúc lịch sử") {
-					footer = line
-					continue
-				}
-				if strings.Contains(line, "Lịch sử chat gần đây") {
+				// Markers are tagged now, so the window they open or
+				// close is read off the tags rather than the wording.
+				var marker WireMessage
+				if err := json.Unmarshal([]byte(line), &marker); err == nil &&
+					wire.HasTag(marker.Tags, wire.TagHistory) {
+					if wire.HasAnyTag(marker.Tags, wire.TagHistoryEnd, wire.TagHistoryExhausted) {
+						footer = line
+					}
 					continue
 				}
 				contents = append(contents, line)
@@ -366,11 +369,10 @@ func drainSegment(t *testing.T, s *ChatServer, before uint64, limit int) (conten
 					<-done
 					return contents, footer, trailer
 				}
-				if strings.Contains(line, "Kết thúc lịch sử") {
-					footer = line
-					continue
-				}
-				if strings.Contains(line, "Lịch sử") {
+				if tags := markerTags(line); wire.HasTag(tags, wire.TagHistory) {
+					if wire.HasAnyTag(tags, wire.TagHistoryEnd, wire.TagHistoryExhausted) {
+						footer = line
+					}
 					continue
 				}
 				contents = append(contents, line)
@@ -533,4 +535,15 @@ func TestAllowHistoryRequestBudget(t *testing.T) {
 	if !s.allowHistoryRequest(ip, 100) {
 		t.Fatal("a refilled charge must pass")
 	}
+}
+
+// markerTags returns the tag set of a replay line, or nil when the line is
+// not a wire. Replay tests read the window a marker names from its tags, so
+// a change to the wording cannot silently stop a marker being recognised.
+func markerTags(line string) []string {
+	var marker WireMessage
+	if err := json.Unmarshal([]byte(line), &marker); err != nil {
+		return nil
+	}
+	return marker.Tags
 }

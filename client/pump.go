@@ -72,13 +72,14 @@ func (s *Session) emitRawLineLocked(line string) {
 // the refill anchor). Any footer flushes a stashed date banner first
 // (otherwise a banner closing the window is silently dropped) and then
 // clears all three. Caller must hold DisplayMu.
-func (s *Session) trackReplayWindow(line string, start bool) {
+func (s *Session) trackReplayWindow(tags []string, start bool) {
 	if start {
-		if isOlderSegmentHeader(line) {
+		switch {
+		case wire.HasTag(tags, wire.TagHistoryOlder):
 			s.Chain.InOlder = true
-		} else if isRecoveryHeader(line) {
+		case wire.HasTag(tags, wire.TagHistoryRecover):
 			s.Chain.InRecover = true
-		} else {
+		default:
 			s.Chain.InSync = true
 		}
 		return
@@ -88,6 +89,37 @@ func (s *Session) trackReplayWindow(line string, start bool) {
 	s.Chain.InRecover = false
 	s.Pending.PendingDateBannerWire = nil
 	s.Chain.InSync = false
+}
+
+// handleReplayMarker applies one replay window marker. Markers are tagged,
+// so which window a line opens or closes comes from the wire rather than
+// from its wording; the text is only ever drawn.
+func (s *Session) handleReplayMarker(msg WireMessage) {
+	tags := msg.Tags
+	boundary, start := parseHistoryBoundary(tags)
+	if !boundary {
+		// Without the history tag a line is an ordinary notice, and treating
+		// it as a header would raise InSync on whatever text it carried.
+		return
+	}
+
+	s.Display.DisplayMu.Lock()
+	s.trackReplayWindow(tags, start)
+	// A page during the client-driven load closes with its own
+	// header/footer; printing them per page would pepper the stream with
+	// markers. The load prints one banner up front and the merge hides
+	// recovery markers, so all of them stay hidden while Loading.
+	recovery := wire.HasTag(tags, wire.TagHistoryRecover)
+	if !(s.Chain.Loading || recovery) {
+		s.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(msg.Text)))
+	}
+	// A recovery footer settles its refill after the footer line, so the
+	// confirmation reads as a result of the window instead of preceding its
+	// own footer.
+	if !start && recovery {
+		s.finishRecovery()
+	}
+	s.Display.DisplayMu.Unlock()
 }
 
 // handleHistoryInfo starts the client-driven initial load: the server
@@ -281,6 +313,11 @@ func (s *Session) runPump() {
 		}
 		var sysWire WireMessage
 		if err := json.Unmarshal(msg, &sysWire); err == nil && sysWire.Type == "system" {
+			if wire.HasTag(sysWire.Tags, wire.TagHistory) {
+				s.handleReplayMarker(sysWire)
+				s.refreshCoalesced()
+				continue
+			}
 			s.Display.DisplayMu.Lock()
 			rendered := s.verifyReplayWire(sysWire, false)
 			if !rendered && !isShowingJoin && wire.HasTag(sysWire.Tags, wire.TagDate) {
@@ -337,6 +374,10 @@ func (s *Session) runPump() {
 				continue
 			}
 			if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
+				if wire.HasTag(wl.Tags, wire.TagHistory) {
+					s.handleReplayMarker(wl)
+					continue
+				}
 				s.Display.DisplayMu.Lock()
 				rendered := s.verifyReplayWire(wl, wl.Type == "chat")
 				if !rendered && wl.Type == "system" && !isShowingJoin && wire.HasTag(wl.Tags, wire.TagDate) {
@@ -351,27 +392,6 @@ func (s *Session) runPump() {
 				if !rendered {
 					s.flushDateBannerLocked()
 					s.renderChatBlock(wl)
-				}
-				s.Display.DisplayMu.Unlock()
-				continue
-			}
-			if boundary, start := parseHistoryBoundary(line); boundary {
-				s.Display.DisplayMu.Lock()
-				s.trackReplayWindow(line, start)
-				// A page during the client-driven load closes with its
-				// own header/footer; printing them per page would pepper
-				// the stream with markers. The load prints one banner up
-				// front and the merge hides recovery markers, so all of
-				// them stay hidden while Loading.
-				hide := s.Chain.Loading || isRecoveryHeader(line) || isRecoveryFooter(line)
-				if !hide {
-					s.emitTab(TabChat, fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line)))
-				}
-				// A recovery footer settles its refill after the footer
-				// line, so the confirmation reads as a result of the
-				// window instead of preceding its own footer.
-				if !start && isRecoveryFooter(line) {
-					s.finishRecovery()
 				}
 				s.Display.DisplayMu.Unlock()
 				continue
