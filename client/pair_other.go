@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/CleveTok3125/V2V/internal/tui"
 )
 
 // pairOpener builds the command that opens a URL, without running it. The
@@ -53,19 +55,24 @@ func openPairURL(url string) bool {
 	return true
 }
 
-// printPairURL shows the link and tries to open it. Printing comes first so
-// the user always has the link even if the opener is missing or hangs.
+// printPairURL shows the link and, when there is a terminal to open it from,
+// also asks the desktop to open it. Printing comes first so the user always
+// has the link even if the opener is missing or hangs.
+//
+// Without a controlling terminal there is nobody watching: the client is
+// piped, backgrounded, or headless. Spawning a browser then would open a
+// window on a machine with nobody in front of it.
 func printPairURL(url string) {
 	fmt.Println()
 	fmt.Println("🔗 Mở link này trên trình duyệt để xác thực bằng passkey:")
 	fmt.Println()
 	fmt.Println("   " + url)
 	fmt.Println()
-	if openPairURL(url) {
-		fmt.Println("Đã thử mở trình duyệt. Nếu không có gì xảy ra, hãy dán link trên.")
-	} else {
-		fmt.Println("Không tìm thấy trình duyệt để mở tự động — hãy dán link trên.")
+	if !tui.HasControllingTTY() || !openPairURL(url) {
+		fmt.Println("Không mở được trình duyệt tự động — hãy dán link trên.")
+		return
 	}
+	fmt.Println("Đã thử mở trình duyệt. Nếu không có gì xảy ra, hãy dán link trên.")
 }
 
 // pairWaitPrompt is what the client shows while the browser has the floor.
