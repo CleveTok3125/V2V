@@ -143,6 +143,10 @@ type AuthPacket struct {
 	// 10s handshake nonce it was requested during.
 	PairTicket string `json:"pair_ticket,omitempty"`
 	PairURL    string `json:"pair_url,omitempty"`
+
+	// PairTTLSec tells the client how long its link stays valid, so the
+	// wait it reports cannot drift from the server's own budget.
+	PairTTLSec int `json:"pair_ttl_sec,omitempty"`
 }
 
 // AuthPacket types. The pre-auth exchange is a small state machine:

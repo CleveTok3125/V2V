@@ -62,6 +62,7 @@ func (s *ChatServer) awaitPairAssertion(conn *websocket.Conn, clientIP string, r
 		Type:       wire.AuthPair,
 		PairTicket: ticket,
 		PairURL:    WAConfig.Origin + "/web/#pair=" + ticket,
+		PairTTLSec: int(pairTicketTTL.Seconds()),
 	}); err != nil {
 		s.PairSessions.Delete(ticket)
 		return perms, req, err

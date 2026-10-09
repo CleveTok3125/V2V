@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/strutil"
+	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // Session carries the chat session state shared by the read pump, the
@@ -269,6 +270,13 @@ func NewSession() *Session {
 // connect dials, resolves secrets and authenticates. False means
 // main must stop; a non-nil Conn is closed by the caller.
 func (s *Session) connect() bool {
+	// Before anything interactive: a login that names two credentials has
+	// no valid interpretation.
+	if err := validateAuthFlags(); err != nil {
+		fmt.Println("❌ " + err.Error() + ".")
+		notifyQuit()
+		return false
+	}
 	s.WSURL = normalizeURL(CLI.Server)
 	s.Username = strings.TrimSpace(CLI.Username)
 
@@ -345,7 +353,10 @@ func (s *Session) connect() bool {
 		respPacket.Tripcode = CLI.Tripcode
 	}
 
-	if CLI.KeyFile != "" {
+	if CLI.Passkey != "" {
+		respPacket.Type = wire.AuthPairRequest
+		respPacket.Role = CLI.Passkey
+	} else if CLI.KeyFile != "" {
 		idf, lerr := LoadIdentityFile(CLI.KeyFile)
 		if lerr != nil {
 			fmt.Printf("❌ %v\n", lerr)
@@ -429,10 +440,8 @@ func (s *Session) connect() bool {
 		return false
 	}
 
-	var authSuccess AuthPacket
-	err = s.Conn.ReadJSON(&authSuccess)
+	authSuccess, err := readAuthResult(s, &respPacket)
 	if err != nil {
-		fmt.Println("❌ Lỗi đọc phản hồi xác thực:", err)
 		notifyQuit()
 		return false
 	}

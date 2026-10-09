@@ -37,6 +37,7 @@ var CLI struct {
 
 	UseKey    bool   `help:"Dùng key mặc định trong config-dir" short:"k"`
 	KeyFile   string `help:"Đường dẫn file chứa khóa xác thực" short:"K" name:"key-file"`
+	Passkey   string `help:"Đăng nhập bằng passkey của role này qua link trình duyệt" short:"P" name:"passkey"`
 	Proxy     string `help:"Proxy http/https/socks5"`
 	AskProxy  bool   `help:"Hỏi thông tin proxy bằng prompt" name:"ask-proxy"`
 	ConfigDir string `help:"Thư mục config" short:"c" env:"V2V_CONFIG_DIR"`
