@@ -497,40 +497,51 @@ import { gateFetch } from "./pow_bridge.js";
         })
             .catch(function () { respond({}); });
     };
-    // --- Desktop pair mode (#pair=<nonce>) ----------------------------------
-    // Desktop prints this URL; the assertion is posted back to the server so
-    // the desktop's own handshake can consume the same nonce.
-    function runPairMode(nonce, role) {
+    // --- Desktop pair mode (#pair=<ticket>) ---------------------------------
+    // The desktop printed this link and is waiting with its socket open. The
+    // ticket is the challenge: the page signs it and posts the assertion back
+    // to the server, which hands it to the handshake that asked for it. The
+    // page never names a role — the server already decided one.
+    function runPairMode(ticket) {
         panel.style.display = "none";
         wrap.style.display = "block";
         setStatus("Đang chờ passkey cho desktop…");
-        sha256b64url(nonce).then(function (challenge) {
+        sha256b64url(ticket)
+            .then(function (challenge) {
             return navigator.credentials.get({
                 publicKey: {
                     challenge: challenge,
                     rpId: location.hostname,
-                    userVerification: "preferred",
+                    userVerification: "required",
                     timeout: 120000
                 }
             });
-        }).then(function (cred) {
-            return fetch("/pair/submit", {
+        })
+            .then(function (cred) {
+            return gateFetch("/pair/submit", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    nonce: nonce,
-                    role: role || "",
+                    ticket: ticket,
                     passkey_id: b64url(cred.rawId),
                     auth_data: b64url(cred.response.authenticatorData),
                     client_data: b64url(cred.response.clientDataJSON),
                     sig: b64url(cred.response.signature)
                 })
-            });
-        }).then(function (resp) {
-            if (!resp.ok)
-                throw new Error("server từ chối (" + resp.status + ")");
+            }, setStatus);
+        })
+            .then(function (resp) {
+            if (!resp.ok) {
+                return resp.text().then(function (t) {
+                    throw new Error(t || resp.status);
+                });
+            }
+            return resp.json();
+        })
+            .then(function () {
             setStatus("✅ Đã xác thực — quay lại cửa sổ V2V trên máy của bạn.");
-        }).catch(function (e) {
+        })
+            .catch(function (e) {
             setStatus("Lỗi pair: " + e.message, true);
         });
     }
@@ -595,11 +606,10 @@ import { gateFetch } from "./pow_bridge.js";
     var initialHash = location.hash || "";
     if (initialHash.indexOf("#pair=") === 0) {
         var params = new URLSearchParams(initialHash.slice(1));
-        var pairNonce = params.get("pair") || "";
-        var pairRole = params.get("role") || "";
+        var pairTicket = params.get("pair") || "";
         location.hash = ""; // clean up so reloads start fresh
-        if (pairNonce)
-            runPairMode(pairNonce, pairRole);
+        if (pairTicket)
+            runPairMode(pairTicket);
     }
     else if (initialHash.indexOf("#enroll=") === 0) {
         var eParams = new URLSearchParams(initialHash.slice(1));
