@@ -81,6 +81,36 @@ func TestReadAuthResultSkipsThePairTicket(t *testing.T) {
 	}
 }
 
+// TestReadAuthResultShowsTheLinkToTheUser: the server sends a ticket, and
+// the person at the terminal has to end up holding the link. This is the one
+// output the whole flow depends on — the browser may be a phone, so nothing
+// else reaches them.
+func TestReadAuthResultShowsTheLinkToTheUser(t *testing.T) {
+	const link = "https://chat.example.com/web/#pair=abcdef"
+	sess := scriptedSocket(t,
+		ticketFrame("abcdef", link),
+		verdictFrame(wire.AuthSuccess),
+	)
+
+	out := captureStdout(t, func() {
+		if _, err := readAuthResult(sess, &AuthPacket{Role: "member"}); err != nil {
+			t.Errorf("readAuthResult: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, link) {
+		t.Errorf("the link never reached the terminal:\n%s", out)
+	}
+	// The quoted wait comes from the server, and the role is named so a
+	// person signing the wrong passkey notices.
+	if !strings.Contains(out, "5 phút") {
+		t.Errorf("the server's wait budget was not shown:\n%s", out)
+	}
+	if !strings.Contains(out, "member") {
+		t.Errorf("the role was not shown:\n%s", out)
+	}
+}
+
 // TestReadAuthResultPassesThroughAFailure: a refused handshake has no middle
 // step, and its reason must survive to the caller.
 func TestReadAuthResultPassesThroughAFailure(t *testing.T) {
