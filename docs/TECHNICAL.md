@@ -243,6 +243,21 @@ Every chat and audit message links to the previous one (`internal/chain`, `serve
 - Breaking change: all pre-rebuild credentials (soft key.json slots, roles.json `passkeys[]`, v1 store) are rejected — re-enroll every passkey.
 - RP binding is a single pair: `RPID: WAConfig.RPID` and `RPOrigins: []string{WAConfig.Origin}`, so exactly one origin can run the ceremony. Serving the web client from a different host (e.g. the standalone `serve.py` bundle on `127.0.0.1`/`localhost` over HTTP) disables passkey there; guest, tripcode and ed25519 key logins are unaffected. Passkey on such a page requires serving it from the exact `WEBAUTHN_ORIGIN` hostname over HTTPS, which cannot also serve another production origin.
 
+#### Desktop pairing (`-P`)
+A desktop client cannot run a WebAuthn ceremony: the private key is inside an authenticator the process cannot reach. The client therefore asks the server for a browser ceremony and waits with its socket open while the browser signs.
+
+- Two challenges, deliberately separate. The handshake nonce is the anti-replay and IP-binding token with a 10s TTL; the **pair ticket** is what the authenticator signs (`challenge = SHA-256(ticket)`) and it lives `pairTicketTTL` (5 min). A person needs minutes to open a browser and confirm, which is why the ticket cannot be the nonce.
+- `auth_pair_request` → server validates the nonce through the same `consumeNonce` gate as every other pre-auth path, mints a ticket, replies `auth_pair{ticket, url, ttl_sec}`, and blocks inside that same `HandleAuth` call. The pairing therefore belongs to one connection, not to an address that merely matches.
+- The ticket rides in the URL **fragment**, which browsers never place in a request line, so it stays out of server and proxy logs.
+- `POST /pair/submit` verifies the assertion against the role the **desktop** named. The submission carries no role: the role is a property of the pairing session, and a value the page can edit is a second, weaker way to say it.
+- `/pair/submit` is the one unauthenticated endpoint in this flow and is **not** IP-bound, because the browser may be a phone on another network. It is safe because a submission can only ever be verified, never trusted, and the ticket names one live handshake. It is metered per IP before any store read.
+- Cost control: every pending pairing pins a pre-auth socket, so the in-flight count is capped globally (`maxPendingPairs` 64) and per client IP (`maxPendingPairsPerIP` 4), and abandoned pairings are swept in the same pass that expires handshake nonces.
+- A ticket is claimable exactly once. A link that is opened twice logs the first attempt in and refuses the second.
+- `-P` and `-K` are refused together: `-P` owns the whole pre-auth exchange, `-K` owns the packet body, and naming both leaves the server guessing which decided the role.
+- The client prints the link and only then tries to open a browser — the browser may be a phone, so printing is the channel that always works. The wait it quotes comes from the server's own TTL (`pair_ttl_sec`), so it cannot drift.
+- The web build has no pairing: its page already runs the ceremony against the same nonce, so `-P` there reports that the 🔑 Passkey button is the path.
+- A pairing request that also carries assertion material is treated as a login attempt, not as a pairing request.
+
 ### Display name — uniform hash, serial, dynamic length, per-session salt
 `server/auth.go:generateDisplayName` validates `username` via `filter.ValidateDisplayName`, trims and caps to `MaxUsernameLength`, then **always** appends a hash suffix — even for roles with `CustomPrefix` (`roles.json`). No role is exempt:
 
