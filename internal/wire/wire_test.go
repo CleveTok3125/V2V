@@ -174,3 +174,53 @@ func TestSysPowTierRoundTrip(t *testing.T) {
 		t.Fatalf("a notice with no tier must omit the field: %s", noTier)
 	}
 }
+
+// TestAuthPacketPairFields pins the desktop passkey pairing fields. The
+// desktop asks for a browser ceremony with auth_pair_request, and the server
+// answers with the ticket to sign and the URL to open. A client that lost
+// either key would sit there waiting for a ceremony that can never arrive,
+// so the names are pinned here rather than left to the JSON default.
+func TestAuthPacketPairFields(t *testing.T) {
+	raw, err := json.Marshal(AuthPacket{
+		Type:       AuthPairRequest,
+		Role:       "member",
+		PairTicket: "aa",
+		PairURL:    "https://chat.example.com/web/#pair=aa",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"type", "role", "pair_ticket", "pair_url"} {
+		if _, ok := got[k]; !ok {
+			t.Errorf("missing key %q in %s", k, raw)
+		}
+	}
+	// The handshake nonce must stay absent on a pair request: the pair
+	// request carries the handshake nonce under its own name so the two
+	// challenges can never be confused for one another.
+	if _, ok := got["nonce"]; ok {
+		t.Errorf("pair request must not smuggle a handshake nonce: %s", raw)
+	}
+
+	var back AuthPacket
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.PairTicket != "aa" || back.PairURL != "https://chat.example.com/web/#pair=aa" || back.Role != "member" {
+		t.Fatalf("pair fields lost: %+v", back)
+	}
+
+	// A client that sends neither pair field must stay silent about them, so
+	// the ed25519 and guest paths serialize byte-for-byte as before.
+	plain, err := json.Marshal(AuthPacket{Type: "auth", Nonce: "n", Role: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(plain), "pair_") {
+		t.Fatalf("a non-pair auth packet must omit the pair fields: %s", plain)
+	}
+}

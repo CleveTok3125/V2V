@@ -134,7 +134,28 @@ type AuthPacket struct {
 	// server can offer platform-fitting PoW presets. Absent means
 	// native.
 	Platform string `json:"platform,omitempty"`
+
+	// PairTicket and PairURL carry the desktop passkey pairing handshake:
+	// the desktop asks with auth_pair_request, the server answers with the
+	// ticket the authenticator must sign (challenge = SHA-256 of it) and
+	// the page URL that runs the ceremony. The ticket is deliberately a
+	// different value from Nonce, because the browser ceremony outlives the
+	// 10s handshake nonce it was requested during.
+	PairTicket string `json:"pair_ticket,omitempty"`
+	PairURL    string `json:"pair_url,omitempty"`
 }
+
+// AuthPacket types. The pre-auth exchange is a small state machine:
+// a client that wants a role either answers auth_challenge directly or
+// asks for a browser ceremony, and the server may reply with the pairing
+// ticket before the terminal auth_success/auth_failed answer.
+const (
+	AuthChallenge   = "auth_challenge"
+	AuthPairRequest = "auth_pair_request"
+	AuthPair        = "auth_pair"
+	AuthSuccess     = "auth_success"
+	AuthFailed      = "auth_failed"
+)
 
 // HistorySync is the machine-readable trailer closing a history
 // response, sent after the human footer. Fork-check logic keys off its
