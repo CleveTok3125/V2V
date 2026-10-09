@@ -229,7 +229,9 @@ func (s *ChatServer) StartCleanupTasks() {
 	}()
 
 	// Sweep expired pre-auth nonces on a slow ticker instead of one
-	// timer per connection.
+	// timer per connection. Pairing sessions are swept in the same pass:
+	// they are created by the same handshake and would otherwise hold
+	// their slot against the pairing cap until the next process restart.
 	go func() {
 		nonceSweep := time.NewTicker(30 * time.Second)
 		defer nonceSweep.Stop()
@@ -241,6 +243,7 @@ func (s *ChatServer) StartCleanupTasks() {
 				}
 				return true
 			})
+			s.prunePairSessions(now)
 		}
 	}()
 }

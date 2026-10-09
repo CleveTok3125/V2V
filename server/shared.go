@@ -173,6 +173,12 @@ type ChatServer struct {
 	ActiveNonces sync.Map
 	Upgrader     websocket.Upgrader
 
+	// PairSessions holds desktop passkey pairings in flight, keyed by the
+	// ticket the browser ceremony signs. Unlike ActiveNonces these outlive
+	// the handshake window, so each one pins a socket for the ceremony and
+	// the count is capped; see pair.go.
+	PairSessions sync.Map
+
 	TripChains   sync.Map // pub hex -> TripChain
 	TripChainsMu sync.Mutex
 
