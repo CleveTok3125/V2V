@@ -90,21 +90,19 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 
 	// Validate the nonce for every client (guest or role) so replayed, expired
 	// or cross-IP nonces are rejected uniformly.
-	metaRaw, exists := s.ActiveNonces.LoadAndDelete(resp.Nonce)
-	if !exists {
-		logWarnf("⚠️ [AUTH ALERT] %s: Nonce không tồn tại hoặc đã bị sử dụng (Dấu hiệu Replay Attack).", clientIP)
-		return perms, resp, fmt.Errorf("%w", ErrInvalidNonce)
+	if err := s.consumeNonce(clientIP, resp.Nonce); err != nil {
+		return perms, resp, err
 	}
 
-	meta := metaRaw.(NonceMeta)
-
-	if time.Now().After(meta.ExpiresAt) {
-		logWarnf("⚠️ [AUTH FAIL] %s: Nonce đã hết hạn.", clientIP)
-		return perms, resp, fmt.Errorf("%w", ErrExpiredNonce)
-	}
-	if meta.IP != clientIP {
-		logErrorf("🚨 [SECURITY BREACH] %s đang cố sử dụng Nonce được cấp cho IP %s! (Dấu hiệu cướp Token/MITM).", clientIP, meta.IP)
-		return perms, resp, fmt.Errorf("%w", ErrIPMismatch)
+	// Desktop passkey pairing: the client cannot run the ceremony itself, so
+	// it asks for a ticket, receives a URL to open and waits with this socket
+	// open while a browser completes it.
+	//
+	// A packet that also carries assertion material is a login attempt, not a
+	// pairing request. Opening a ceremony window for it would park a pending
+	// slot for a client that plainly meant to authenticate right here.
+	if resp.Type == wire.AuthPairRequest && resp.PasskeyID == "" && resp.PasskeySig == "" {
+		return s.awaitPairAssertion(conn, clientIP, resp, onion)
 	}
 
 	// WebAuthn passkey branch: an assertion in the packet is verified against
@@ -231,6 +229,27 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 
 	logErrorf("🚨 [BRUTE-FORCE ALERT] %s: Sai Key/HMAC khi cố lấy quyền [%s]!", clientIP, resp.Role)
 	return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
+}
+
+// consumeNonce spends a handshake nonce. It is the single gate every
+// pre-auth path shares, so pairing cannot skip the IP binding or the
+// single-use rule that the guest and key paths obey.
+func (s *ChatServer) consumeNonce(clientIP, nonceHex string) error {
+	metaRaw, exists := s.ActiveNonces.LoadAndDelete(nonceHex)
+	if !exists {
+		logWarnf("⚠️ [AUTH ALERT] %s: Nonce không tồn tại hoặc đã bị sử dụng (Dấu hiệu Replay Attack).", clientIP)
+		return fmt.Errorf("%w", ErrInvalidNonce)
+	}
+	meta := metaRaw.(NonceMeta)
+	if time.Now().After(meta.ExpiresAt) {
+		logWarnf("⚠️ [AUTH FAIL] %s: Nonce đã hết hạn.", clientIP)
+		return fmt.Errorf("%w", ErrExpiredNonce)
+	}
+	if meta.IP != clientIP {
+		logErrorf("🚨 [SECURITY BREACH] %s đang cố sử dụng Nonce được cấp cho IP %s! (Dấu hiệu cướp Token/MITM).", clientIP, meta.IP)
+		return fmt.Errorf("%w", ErrIPMismatch)
+	}
+	return nil
 }
 
 // clientHost extracts the lowercase hostname the client connected through.

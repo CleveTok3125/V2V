@@ -16,9 +16,68 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"time"
+
+	"github.com/CleveTok3125/V2V/internal/strutil"
+	"github.com/CleveTok3125/V2V/internal/wire"
+
+	"github.com/gorilla/websocket"
 )
+
+// awaitPairAssertion runs the browser half of a desktop passkey login.
+// The client has already proved it holds a live handshake nonce; from here
+// the socket simply waits while a browser signs the pair ticket.
+func (s *ChatServer) awaitPairAssertion(conn *websocket.Conn, clientIP string, req AuthPacket, onion bool) (Permission, AuthPacket, error) {
+	perms := GetDefaultPermission()
+	if !WAConfig.Enabled {
+		logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt (thiếu WEBAUTHN_RPID/ORIGIN).", clientIP)
+		return perms, req, fmt.Errorf("%w", ErrPasskeyDisabled)
+	}
+	if passkeyDisabledForOnion(onion) {
+		logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt trên onion (ONION_ALLOW_PASSKEY=false).", clientIP)
+		return perms, req, fmt.Errorf("%w", ErrPasskeyDisabled)
+	}
+	// The role is named by the client and confirmed here, so the browser
+	// page never gets to decide which role the ceremony is for.
+	if req.Role == "" {
+		return perms, req, fmt.Errorf("%w", ErrInvalidRole)
+	}
+	s.RoleRegistryMu.RLock()
+	roleDef, exists := s.RoleRegistry[req.Role]
+	s.RoleRegistryMu.RUnlock()
+	if !exists {
+		logWarnf("⚠️ [AUTH FAIL] %s: Yêu cầu Role không tồn tại [%s]", clientIP, req.Role)
+		return perms, req, fmt.Errorf("%w", ErrInvalidRole)
+	}
+
+	ticket, sess, err := s.newPairSession(req.Role, clientIP)
+	if err != nil {
+		return perms, req, err
+	}
+	// The ticket rides in the URL fragment, which browsers never put in a
+	// request line, so it stays out of server and proxy logs.
+	if err := conn.WriteJSON(AuthPacket{
+		Type:       wire.AuthPair,
+		PairTicket: ticket,
+		PairURL:    WAConfig.Origin + "/web/#pair=" + ticket,
+	}); err != nil {
+		s.PairSessions.Delete(ticket)
+		return perms, req, err
+	}
+	logInfof("🔗 [PAIR] %s yêu cầu ceremony cho role [%s], ticket=%s…", clientIP, req.Role, strutil.Short(ticket))
+
+	verdict := sess.await(pairTicketTTL)
+	s.PairSessions.Delete(ticket)
+	if !verdict.OK {
+		logWarnf("⚠️ [AUTH FAIL] %s: ceremony passkey thất bại: %v", clientIP, verdict.Err)
+		return perms, req, verdict.Err
+	}
+	logInfof("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey thật qua browser, role: [%s]", clientIP, req.Role)
+	req.AuthType = "passkey"
+	return roleDef.Permission, req, nil
+}
 
 const (
 	// pairTicketTTL is how long a person has to open the link and confirm
