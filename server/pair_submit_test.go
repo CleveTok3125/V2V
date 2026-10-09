@@ -106,7 +106,7 @@ func TestPairSubmitRequiresFields(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing credential = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
-	if _, ok := s.lookupPairSession(ticket); !ok {
+	if _, ok := s.claimPairSession(ticket); !ok {
 		t.Fatal("a malformed submission consumed the ticket")
 	}
 }
@@ -152,17 +152,17 @@ func TestPairSubmitRejectsSecondSubmission(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The first submission spends the ticket even though the assertion is
-	// bogus, so the failure has to be reported as one.
+	// A bogus assertion is rejected and leaves the ticket alone, so the test
+	// for "one login, one grant" has to use assertions that actually verify.
 	first := postPairFrom(s, "198.51.100.1", pairBody(t, ticket, nil))
 	if first.Code == http.StatusAccepted {
 		t.Fatal("a bogus assertion was accepted")
 	}
-	// A retry from the same browser is metered, not verified; a fresh
-	// address sees the spent ticket instead.
+	// The ticket is still there: a second bogus attempt is verified again,
+	// not told the pairing is spent.
 	second := postPairFrom(s, "198.51.100.2", pairBody(t, ticket, nil))
-	if second.Code != http.StatusGone {
-		t.Fatalf("second submission = %d, want %d (the ticket is spent)", second.Code, http.StatusGone)
+	if second.Code == http.StatusGone {
+		t.Fatal("a failed assertion spent the ticket; the person cannot try another passkey")
 	}
 
 	v := sess.await(2 * time.Second)
@@ -231,8 +231,10 @@ func TestPairSubmitAcceptsVerifiedAssertion(t *testing.T) {
 	if !v.OK {
 		t.Fatalf("verdict = %+v, want granted", v)
 	}
-	if _, ok := s.lookupPairSession(ticket); ok {
-		t.Fatal("a consumed pairing still resolves")
+	// The ticket is spent now: a second verified assertion over it must not
+	// resolve the handshake a second time.
+	if s.commitPairSession(ticket) {
+		t.Fatal("a spent pairing was committed again")
 	}
 
 	// The counter must have advanced, so a replay of the same assertion is
@@ -319,4 +321,73 @@ func TestPairTicketChallengeMatchesTheNonceContract(t *testing.T) {
 		t.Fatal("challenge is not a SHA-256 digest")
 	}
 	var _ = wire.AuthPair
+}
+
+// TestPairSubmitRetryAfterABadAssertion: a person who taps the wrong passkey,
+// or whose phone drops the response, must be able to try again on the same
+// link. Spending the ticket on the first failure means restarting the client
+// and waiting out the ceremony again.
+func TestPairSubmitRetryAfterABadAssertion(t *testing.T) {
+	s := pairServer(t)
+	store := NewWebAuthnStore(t.TempDir() + "/webauthn.json")
+	s.WebAuthn = store
+	auth := newTestPasskey(t, store, "member")
+
+	ticket, sess, err := s.newPairSession("member", "203.0.113.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A mangled signature: the credential is right, the proof is not.
+	bad := auth.assert(t, ticket)
+	bad["passkey_id"] = auth.credentialID()
+	bad["sig"] = base64.RawURLEncoding.EncodeToString([]byte("not a signature"))
+	if rec := postPairFrom(s, "198.51.100.1", pairBody(t, ticket, bad)); rec.Code == http.StatusAccepted {
+		t.Fatal("a mangled signature was accepted")
+	}
+	if v := sess.await(2 * time.Second); v.OK {
+		t.Fatal("the handshake was granted on a bad signature")
+	}
+
+	// The ticket must still be there for a second attempt.
+	good := auth.assert(t, ticket)
+	good["passkey_id"] = auth.credentialID()
+	rec := postPairFrom(s, "198.51.100.2", pairBody(t, ticket, good))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("retry after a bad signature = %d, want %d (%s)", rec.Code, http.StatusAccepted, rec.Body)
+	}
+}
+
+// TestPairSubmitAcceptedResponseIsJSON: a 202 is still a response the browser
+// parses with resp.json(), so it has to say it is JSON.
+func TestPairSubmitAcceptedResponseIsJSON(t *testing.T) {
+	s := pairServer(t)
+	store := NewWebAuthnStore(t.TempDir() + "/webauthn.json")
+	s.WebAuthn = store
+	auth := newTestPasskey(t, store, "member")
+	ticket, _, err := s.newPairSession("member", "203.0.113.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := auth.assert(t, ticket)
+	doc["passkey_id"] = auth.credentialID()
+
+	// Through a real server: a recorder would rewrite headers WriteHeader
+	// already sent and hide the problem.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.handlePairSubmit(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	body := pairBody(t, ticket, doc)
+	resp, err := http.Post(srv.URL, "application/json", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
 }

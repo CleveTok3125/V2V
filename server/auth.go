@@ -8,6 +8,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -229,6 +230,29 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 
 	logErrorf("🚨 [BRUTE-FORCE ALERT] %s: Sai Key/HMAC khi cố lấy quyền [%s]!", clientIP, resp.Role)
 	return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
+}
+
+// penalizeAuthFailure decides whether a rejected handshake counts toward the
+// IP ban. Two rules, both deliberate:
+//
+//   - A packet with no role carries no penalty, unchanged from before.
+//   - A pairing that ran out of time carries no penalty either. The ceremony
+//     is finished by a human on another device, and five minutes is a normal
+//     amount of time for a phone to wake up, unlock and find an
+//     authenticator. Counting it would ban an address for not answering a
+//     link it may never have seen, and the next attempt would be counted too.
+//
+// A rejected signature is a real failure and still counts, including when it
+// arrives through a pairing.
+func penalizeAuthFailure(resp AuthPacket, err error) bool {
+	if resp.Role == "" {
+		return false
+	}
+	switch {
+	case errors.Is(err, ErrPairExpired), errors.Is(err, ErrPairRateLimited):
+		return false
+	}
+	return true
 }
 
 // consumeNonce spends a handshake nonce. It is the single gate every
@@ -463,7 +487,7 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 	perms, authPacket, err := s.HandleAuth(conn, clientIP, expectedHost, onion)
 	if err != nil {
 		s.observeAuthErr(clientIP, err)
-		if authPacket.Role != "" {
+		if penalizeAuthFailure(authPacket, err) {
 			s.handleAuthPenalty(clientIP)
 		}
 		// Structured rejection: clients show the reason instead of a

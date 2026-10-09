@@ -29,12 +29,22 @@ func TestNewPairSessionBindsTheCaller(t *testing.T) {
 		t.Fatalf("expires %v, want within (0, %v]", time.Until(sess.ExpiresAt), pairTicketTTL)
 	}
 
-	got, ok := s.lookupPairSession(ticket)
+	got, ok := s.claimPairSession(ticket)
 	if !ok || got != sess {
 		t.Fatalf("lookup(%q) = %v, %v; want the same session", ticket, got, ok)
 	}
-	if _, ok := s.lookupPairSession(ticket[:len(ticket)-1] + "0"); ok && ticket[len(ticket)-1] == '0' {
-		t.Fatal("a one-character ticket change must not resolve")
+	// A different ticket must not reach this session. The replacement has to
+	// differ from the current character: flipping the last hex digit to a
+	// fixed "0" leaves the ticket unchanged one time in sixteen, which is how
+	// this assertion used to fail at random.
+	flipped := ticket[:len(ticket)-1]
+	if ticket[len(ticket)-1] == '0' {
+		flipped += "1"
+	} else {
+		flipped += "0"
+	}
+	if other, ok := s.claimPairSession(flipped); ok {
+		t.Fatalf("a different ticket resolved to role %q; tickets are not unique", other.Role)
 	}
 }
 
@@ -98,13 +108,17 @@ func TestPairTicketIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPairSession: %v", err)
 	}
-	if _, ok := s.lookupPairSession(ticket); !ok {
-		t.Fatal("first claim refused")
+	if _, ok := s.claimPairSession(ticket); !ok {
+		t.Fatal("claim refused")
 	}
-	if _, ok := s.lookupPairSession(ticket); ok {
-		t.Fatal("a ticket claimed twice: replaying the link would ride in on the first login")
+	if !s.commitPairSession(ticket) {
+		t.Fatal("the first commit refused")
 	}
-	if _, ok := s.lookupPairSession(ticket); ok {
+	// Replaying the link must not ride in on the login that just happened.
+	if s.commitPairSession(ticket) {
+		t.Fatal("a ticket was committed twice: one login, two grants")
+	}
+	if s.commitPairSession(ticket) {
 		t.Fatal("a consumed ticket came back")
 	}
 }
@@ -190,7 +204,7 @@ func TestPairSessionCapsPending(t *testing.T) {
 			t.Fatalf("pairing after the sweep: %v", err)
 		}
 	}
-	if _, ok := s.lookupPairSession(ticket); !ok {
+	if _, ok := s.claimPairSession(ticket); !ok {
 		t.Fatal("fresh pairing refused right after the sweep")
 	}
 	if _, _, err := s.newPairSession("member", "198.51.100.252"); err != nil {
@@ -220,10 +234,10 @@ func TestPrunePairSessionsDropsExpired(t *testing.T) {
 	}
 
 	s.prunePairSessions(time.Now())
-	if _, ok := s.lookupPairSession(dead); ok {
+	if _, ok := s.claimPairSession(dead); ok {
 		t.Fatal("an expired pairing survived the sweep")
 	}
-	if _, ok := s.lookupPairSession(live); !ok {
+	if _, ok := s.claimPairSession(live); !ok {
 		t.Fatal("the sweep dropped a live pairing")
 	}
 }
@@ -243,7 +257,7 @@ func TestPairSessionsConcurrent(t *testing.T) {
 				return
 			}
 			sess.resolve(pairVerdict{OK: true})
-			if _, ok := s.lookupPairSession(ticket); ok {
+			if _, ok := s.claimPairSession(ticket); ok {
 				s.PairSessions.Delete(ticket)
 			}
 		}(i)

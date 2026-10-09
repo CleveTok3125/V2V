@@ -1,3 +1,5 @@
+//go:build !js
+
 package main
 
 // The pre-auth read loop. It has to tolerate the server's middle step

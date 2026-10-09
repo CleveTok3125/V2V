@@ -89,7 +89,7 @@ func TestHandleAuthPairRequestGrantsAfterCeremony(t *testing.T) {
 	}
 
 	// The ticket must name this handshake and no other.
-	sess, ok := s.lookupPairSession(reply.PairTicket)
+	sess, ok := s.claimPairSession(reply.PairTicket)
 	if !ok {
 		t.Fatal("the issued ticket does not resolve")
 	}
@@ -97,9 +97,11 @@ func TestHandleAuthPairRequestGrantsAfterCeremony(t *testing.T) {
 		t.Fatalf("session = %+v, want the admin role from 127.0.0.1", sess)
 	}
 
-	// A wrong role must not be able to claim somebody else's pairing.
-	if _, ok := s.lookupPairSession(reply.PairTicket); ok {
-		t.Fatal("the ticket resolved twice")
+	// One ticket, one grant: a second submission must not resolve the same
+	// handshake again.
+	s.commitPairSession(reply.PairTicket)
+	if s.commitPairSession(reply.PairTicket) {
+		t.Fatal("the ticket was committed twice")
 	}
 	sess.resolve(pairVerdict{OK: true})
 
@@ -141,7 +143,7 @@ func TestHandleAuthPairRequestCarriesTheCeremonyFailure(t *testing.T) {
 	if err := client.ReadJSON(&reply); err != nil {
 		t.Fatal(err)
 	}
-	sess, ok := s.lookupPairSession(reply.PairTicket)
+	sess, ok := s.claimPairSession(reply.PairTicket)
 	if !ok {
 		t.Fatal("the issued ticket does not resolve")
 	}
@@ -279,7 +281,7 @@ func TestHandleAuthPairRequestReleasesTheSlot(t *testing.T) {
 	if err := client.ReadJSON(&reply); err != nil {
 		t.Fatal(err)
 	}
-	sess, ok := s.lookupPairSession(reply.PairTicket)
+	sess, ok := s.claimPairSession(reply.PairTicket)
 	if !ok {
 		t.Fatal("the issued ticket does not resolve")
 	}
@@ -287,7 +289,7 @@ func TestHandleAuthPairRequestReleasesTheSlot(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("pairing failed: %v", err)
 	}
-	if _, ok := s.lookupPairSession(reply.PairTicket); ok {
+	if _, ok := s.claimPairSession(reply.PairTicket); ok {
 		t.Fatal("a finished pairing still resolves")
 	}
 }
@@ -353,7 +355,60 @@ func TestPairURLHasNoRoleParameter(t *testing.T) {
 	if _, err := json.Marshal(reply); err != nil {
 		t.Fatalf("pairing reply is not serializable: %v", err)
 	}
-	sess, _ := s.lookupPairSession(reply.PairTicket)
+	sess, _ := s.claimPairSession(reply.PairTicket)
 	sess.resolve(pairVerdict{OK: true})
 	<-done
+}
+
+// TestAbandonedCeremonyIsNotAnAuthFailure: a person who never opens the link
+// has done nothing wrong. Timing out must not count toward the ban, or six
+// slow phones lock an address out of the server for five minutes at a time.
+func TestAbandonedCeremonyIsNotAnAuthFailure(t *testing.T) {
+	s := pairServer(t)
+	s.AuthFails = map[string]RateLimitRecord{}
+
+	for i := 0; i < 8; i++ {
+		resp := AuthPacket{Role: "member"}
+		if !penalizeAuthFailure(resp, ErrPairExpired) {
+			continue
+		}
+		s.handleAuthPenalty("203.0.113.5")
+	}
+
+	s.AuthFailsMu.Lock()
+	rec := s.AuthFails["203.0.113.5"]
+	s.AuthFailsMu.Unlock()
+	if !rec.UnlockTime.IsZero() {
+		t.Fatalf("8 abandoned ceremonies banned the IP for %v", time.Until(rec.UnlockTime))
+	}
+}
+
+// TestRealAuthFailuresStillPenalize: the exemption must not become a hole.
+// A rejected signature is a real failure and has to keep counting.
+func TestRealAuthFailuresStillPenalize(t *testing.T) {
+	s := pairServer(t)
+	s.AuthFails = map[string]RateLimitRecord{}
+
+	for i := 0; i < 5; i++ {
+		resp := AuthPacket{Role: "member"}
+		if !penalizeAuthFailure(resp, ErrVerificationFailed) {
+			t.Fatalf("attempt %d: a rejected signature was not counted", i+1)
+		}
+		s.handleAuthPenalty("203.0.113.6")
+	}
+
+	s.AuthFailsMu.Lock()
+	rec := s.AuthFails["203.0.113.6"]
+	s.AuthFailsMu.Unlock()
+	if rec.UnlockTime.IsZero() {
+		t.Fatal("5 rejected signatures did not ban the IP")
+	}
+}
+
+// TestGuestFailuresStayExempt: the existing rule is that a packet without a
+// role carries no penalty. Pairing must not change that.
+func TestGuestFailuresStayExempt(t *testing.T) {
+	if penalizeAuthFailure(AuthPacket{}, ErrVerificationFailed) {
+		t.Fatal("a guest packet was penalized")
+	}
 }

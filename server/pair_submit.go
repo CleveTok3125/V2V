@@ -58,11 +58,12 @@ func (s *ChatServer) handlePairSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, ok := s.lookupPairSession(sub.Ticket)
+	// The ticket is claimed, not spent: a rejected assertion leaves the link
+	// usable so the person can pick another passkey instead of restarting
+	// the client and the whole ceremony.
+	sess, ok := s.claimPairSession(sub.Ticket)
 	if !ok {
-		// Unknown, expired or already claimed all look the same from out
-		// here: the pairing is spent either way.
-		http.Error(w, "unknown or spent pairing", http.StatusGone)
+		http.Error(w, "unknown or expired pairing", http.StatusGone)
 		return
 	}
 
@@ -98,7 +99,16 @@ func (s *ChatServer) handlePairSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logInfof("✅ [PAIR SUBMIT] %s xác thực được, role=[%s], ticket=%s…", clientIP, sess.Role, strutil.Short(sub.Ticket))
+	if !s.commitPairSession(sub.Ticket) {
+		// Another submission verified the same ticket first. This assertion
+		// is real but the handshake has already been granted elsewhere.
+		http.Error(w, "unknown or spent pairing", http.StatusGone)
+		return
+	}
 	sess.resolve(pairVerdict{OK: true})
+	// Content-Type before the status: WriteHeader snapshots the header map,
+	// so setting it afterwards leaves the browser with text/plain.
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, map[string]any{"ok": true})
 }

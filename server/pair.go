@@ -171,10 +171,10 @@ func (s *ChatServer) newPairSession(role, clientIP string) (string, *pairSession
 	return ticket, sess, nil
 }
 
-// lookupPairSession returns a live, unconsumed session for a ticket.
-// Expired and already-resolved sessions are removed here so a second
-// attempt with the same link fails like an unknown one.
-func (s *ChatServer) lookupPairSession(ticket string) (*pairSession, bool) {
+// claimPairSession returns a live session for a ticket, without deciding the
+// ticket's fate. A failed verification must leave the link usable, so the
+// one-shot latch is set by commitPairSession instead of here.
+func (s *ChatServer) claimPairSession(ticket string) (*pairSession, bool) {
 	raw, ok := s.PairSessions.Load(ticket)
 	if !ok {
 		return nil, false
@@ -188,11 +188,27 @@ func (s *ChatServer) lookupPairSession(ticket string) (*pairSession, bool) {
 		s.PairSessions.Delete(ticket)
 		return nil, false
 	}
+	return sess, true
+}
+
+// commitPairSession spends a ticket once an assertion has been verified. The
+// latch is what makes one login one login: a browser that reloads, or a link
+// that is opened twice, cannot resolve the same handshake a second time.
+func (s *ChatServer) commitPairSession(ticket string) bool {
+	raw, ok := s.PairSessions.Load(ticket)
+	if !ok {
+		return false
+	}
+	sess, ok := raw.(*pairSession)
+	if !ok {
+		s.PairSessions.Delete(ticket)
+		return false
+	}
 	if sess.consumed.Swap(true) {
 		s.PairSessions.Delete(ticket)
-		return nil, false
+		return false
 	}
-	return sess, true
+	return true
 }
 
 // countPairSessions and countPairSessionsForIP walk the store. The map is
