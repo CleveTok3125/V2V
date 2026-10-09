@@ -91,11 +91,74 @@ func captureStdout(t *testing.T, fn func()) string {
 	return <-done
 }
 
-// TestOpenPairURLRejectsGarbage: the URL comes off the wire. A shell metachar
-// in it must not reach a shell, and exec.Command takes the URL as one
-// argument, never through a shell, so nothing to expand.
-func TestOpenPairURLNeverGoesThroughAShell(t *testing.T) {
-	// On a machine with no opener this returns false; with one it opens a
-	// window. Either way it must return promptly and not panic.
-	_ = openPairURL("https://chat.example.com/web/#pair=;rm -rf /")
+// TestPairOpenerPicksThePlatformOpener pins which opener each platform gets.
+// rundll32 rather than Start-Process because the cmdlet is PowerShell-only.
+func TestPairOpenerPicksThePlatformOpener(t *testing.T) {
+	const url = "https://chat.example.com/web/#pair=ab"
+	cases := []struct {
+		goos string
+		name string
+		args []string
+	}{
+		{"darwin", "open", []string{url}},
+		{"windows", "rundll32", []string{"url.dll,FileProtocolHandler", url}},
+		{"linux", "xdg-open", []string{url}},
+		{"freebsd", "xdg-open", []string{url}},
+	}
+	for _, c := range cases {
+		name, args, ok := pairOpener(c.goos, url)
+		if !ok {
+			t.Errorf("pairOpener(%q) refused a URL", c.goos)
+			continue
+		}
+		if name != c.name {
+			t.Errorf("pairOpener(%q) = %q, want %q", c.goos, name, c.name)
+		}
+		if strings.Join(args, " ") != strings.Join(c.args, " ") {
+			t.Errorf("pairOpener(%q) args = %q, want %q", c.goos, args, c.args)
+		}
+	}
+}
+
+// TestPairOpenerKeepsTheURLAsOneArgument is the reason the opener is built
+// separately from running it. The URL arrives over the socket, so it must
+// reach the process as a single argument: no word splitting, no expansion,
+// and no way for it to become more than one argv entry.
+func TestPairOpenerKeepsTheURLAsOneArgument(t *testing.T) {
+	// Every metacharacter that a shell would act on, in one URL.
+	hostile := "https://chat.example.com/web/#pair=$(id);rm -rf / `whoami` \"x\""
+	for _, goos := range []string{"darwin", "windows", "linux"} {
+		_, args, ok := pairOpener(goos, hostile)
+		if !ok {
+			t.Fatalf("pairOpener(%q) refused the URL", goos)
+		}
+		if got := args[len(args)-1]; got != hostile {
+			t.Errorf("pairOpener(%q): URL was rewritten\n got %q\nwant %q", goos, got, hostile)
+		}
+		// Nothing was split off it: the URL is still exactly one element.
+		total := 0
+		for _, a := range args {
+			total += len(a)
+		}
+		fixed := 0
+		switch goos {
+		case "windows":
+			fixed = len("url.dll,FileProtocolHandler")
+		default:
+			fixed = 0
+		}
+		if total != len(hostile)+fixed {
+			t.Errorf("pairOpener(%q): args = %q, the URL was split or padded", goos, args)
+		}
+	}
+}
+
+// TestPairOpenerRefusesAnEmptyURL: an empty link is not a link, and opening
+// one would hand the opener a bare program name.
+func TestPairOpenerRefusesAnEmptyURL(t *testing.T) {
+	for _, goos := range []string{"darwin", "windows", "linux"} {
+		if _, _, ok := pairOpener(goos, ""); ok {
+			t.Errorf("pairOpener(%q, \"\") built a command", goos)
+		}
+	}
 }

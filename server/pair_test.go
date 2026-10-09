@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -244,9 +245,12 @@ func TestPrunePairSessionsDropsExpired(t *testing.T) {
 
 // TestPairSessionsConcurrent: pairing is reached from every accepted
 // socket and from the sweep timer, so the store is exercised under -race.
+// The race detector is the real assertion here; the count at the end is what
+// keeps the test from passing by doing nothing.
 func TestPairSessionsConcurrent(t *testing.T) {
 	s := &ChatServer{}
 	var wg sync.WaitGroup
+	var minted, claimed atomic.Int64
 	for i := 0; i < 32; i++ {
 		wg.Add(1)
 		go func(n int) {
@@ -256,8 +260,10 @@ func TestPairSessionsConcurrent(t *testing.T) {
 			if err != nil {
 				return
 			}
+			minted.Add(1)
 			sess.resolve(pairVerdict{OK: true})
 			if _, ok := s.claimPairSession(ticket); ok {
+				claimed.Add(1)
 				s.PairSessions.Delete(ticket)
 			}
 		}(i)
@@ -270,4 +276,14 @@ func TestPairSessionsConcurrent(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+
+	if got := minted.Load(); got == 0 {
+		t.Fatal("no pairing was minted; the storm never reached the store")
+	}
+	if claimed.Load() != minted.Load() {
+		t.Errorf("claimed %d of %d minted tickets", claimed.Load(), minted.Load())
+	}
+	if left := s.countPairSessions(); left != 0 {
+		t.Errorf("%d pairings left in the store after every ticket was dropped", left)
+	}
 }

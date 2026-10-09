@@ -14,21 +14,36 @@ import (
 	"strings"
 )
 
+// pairOpener builds the command that opens a URL, without running it. The
+// URL reaches the process as its own argv entry and never through a shell,
+// so nothing in it can be word-split or expanded. Splitting this from
+// openPairURL is what lets the choice be tested at all: running an opener
+// from a test spawns a real process and a real browser.
+func pairOpener(goos, url string) (string, []string, bool) {
+	if url == "" {
+		return "", nil, false
+	}
+	switch goos {
+	case "darwin":
+		return "open", []string{url}, true
+	case "windows":
+		// rundll32 is the handler every supported Windows version ships,
+		// unlike the Start-Process cmdlet which is PowerShell-only.
+		return "rundll32", []string{"url.dll,FileProtocolHandler", url}, true
+	default:
+		return "xdg-open", []string{url}, true
+	}
+}
+
 // openPairURL hands a URL to the desktop's browser. It reports whether an
 // opener was found; a false return is informational, never fatal, because
 // the link has already been printed for this exact case.
 func openPairURL(url string) bool {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		// rundll32 is the handler every supported Windows version ships,
-		// unlike the Start-Process cmdlet which is PowerShell-only.
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
+	name, args, ok := pairOpener(runtime.GOOS, url)
+	if !ok {
+		return false
 	}
+	cmd := exec.Command(name, args...)
 	if err := cmd.Start(); err != nil {
 		return false
 	}
