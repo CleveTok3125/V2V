@@ -483,6 +483,19 @@ func main() {
 		chatApp.handleEnrollFinish(w, r)
 	}))
 
+	// The desktop pairing endpoint. The browser posting here may be on a
+	// different network from the desktop that is waiting, so there is no
+	// untrusted-proxy rejection: a submission can only ever be verified,
+	// never trusted, and the ticket binds it to one live handshake.
+	mux.HandleFunc("/pair/submit", chatApp.instrumentHTTP("pair_submit", func(w http.ResponseWriter, r *http.Request) {
+		if !passkeyAllowed(r) {
+			logWarnf("⛔ [ONION] Chặn pair từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))
+			http.NotFound(w, r)
+			return
+		}
+		chatApp.handlePairSubmit(w, r)
+	}))
+
 	mux.HandleFunc("/api/server_pubkey", chatApp.instrumentHTTP("meta", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")

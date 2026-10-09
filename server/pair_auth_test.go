@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/go-webauthn/webauthn/webauthn"
 )
 
 // pairServer wires a server whose role registry and passkey config are set
@@ -21,11 +24,29 @@ func pairServer(t *testing.T) *ChatServer {
 	// deployment default and the case the refusal test exercises.
 	Cfg.Static.Onion.AllowPasskey = false
 
+	// LoadWebauthnEnv would overwrite WAConfig from the environment; the
+	// library instance has to match the config the tests set up.
+	var err error
+	oldWebAuth := WebAuth
+	WebAuth, err = webauthn.New(&webauthn.Config{
+		RPDisplayName:         "V2V",
+		RPID:                  WAConfig.RPID,
+		RPOrigins:             []string{WAConfig.Origin},
+		AttestationPreference: protocol.PreferNoAttestation,
+	})
+	if err != nil {
+		t.Fatalf("webauthn init: %v", err)
+	}
+	t.Cleanup(func() { WebAuth = oldWebAuth })
+
 	s := NewChatServer()
 	s.RoleRegistry = map[string]RoleDefinition{
 		"member": {Permission: GetDefaultPermission()},
 		"admin":  {Permission: Permission{CanMessageUnlimited: true, CustomPrefix: "*"}},
 	}
+	// The submission limiter is package-level state keyed by client IP,
+	// and httptest requests all arrive from the same one.
+	pairSubmitCooldowns.Reset()
 	return s
 }
 
