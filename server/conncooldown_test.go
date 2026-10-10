@@ -8,8 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/CleveTok3125/V2V/internal/guard"
 )
 
 // retryAfterSeconds reads the header and returns it as a number, failing the
@@ -73,4 +76,81 @@ func TestBanSaysHowLong(t *testing.T) {
 	if got < 80 || got > 90 {
 		t.Fatalf("Retry-After = %d, want the remaining ~90s of the ban", got)
 	}
+}
+
+// TestHandlerCooldownsSayHowLong: every 429 the server raises should carry
+// the wait. These three are unauthenticated and unread by the desktop, but
+// their clients still retry, and a bare refusal makes them guess exactly as
+// the connection cooldown used to.
+func TestHandlerCooldownsSayHowLong(t *testing.T) {
+	// These meters are package-level and keyed by client IP, and httptest
+	// requests all arrive from the same one. Hand them back empty: a refusal
+	// left here would greet the next test that touches the same handler.
+	meters := []*guard.CooldownMap{
+		enrollBeginCooldowns, enrollFinishCooldowns, pairStatusCooldowns,
+	}
+	for _, meter := range meters {
+		meter.Reset()
+		t.Cleanup(meter.Reset)
+	}
+
+	t.Run("pair status", func(t *testing.T) {
+		s := pairServer(t)
+		ticket := strings.Repeat("ab", pairTicketBytes)
+
+		first := httptest.NewRecorder()
+		s.handlePairStatus(first, httptest.NewRequest(http.MethodGet, "/pair/status?ticket="+ticket, nil))
+		if first.Code == http.StatusTooManyRequests {
+			t.Fatal("the first poll was metered")
+		}
+		rec := httptest.NewRecorder()
+		s.handlePairStatus(rec, httptest.NewRequest(http.MethodGet, "/pair/status?ticket="+ticket, nil))
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("second poll = %d, want %d", rec.Code, http.StatusTooManyRequests)
+		}
+		if got := retryAfterSeconds(t, rec); got > int(pairStatusCooldown.Seconds()) {
+			t.Fatalf("Retry-After = %d, want at most the %v cooldown", got, pairStatusCooldown)
+		}
+	})
+
+	t.Run("enroll begin", func(t *testing.T) {
+		s := pairServer(t)
+		// handleEnrollBegin prunes the store before it answers, and the
+		// default store lives under the repository root: without this the
+		// test writes webauthn.json into the working tree.
+		s.WebAuthn = NewWebAuthnStore(t.TempDir() + "/webauthn.json")
+
+		first := httptest.NewRecorder()
+		s.handleEnrollBegin(first, httptest.NewRequest(http.MethodGet, "/webauthn/enroll/begin?ticket=x", nil))
+		if first.Code == http.StatusTooManyRequests {
+			t.Fatal("the first begin was metered")
+		}
+		rec := httptest.NewRecorder()
+		s.handleEnrollBegin(rec, httptest.NewRequest(http.MethodGet, "/webauthn/enroll/begin?ticket=x", nil))
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("second begin = %d, want %d", rec.Code, http.StatusTooManyRequests)
+		}
+		if got := retryAfterSeconds(t, rec); got > int(enrollBeginCooldown.Seconds()) {
+			t.Fatalf("Retry-After = %d, want at most the %v cooldown", got, enrollBeginCooldown)
+		}
+	})
+
+	t.Run("enroll finish", func(t *testing.T) {
+		s := pairServer(t)
+		s.WebAuthn = NewWebAuthnStore(t.TempDir() + "/webauthn.json")
+
+		first := httptest.NewRecorder()
+		s.handleEnrollFinish(first, httptest.NewRequest(http.MethodPost, "/webauthn/enroll/finish", strings.NewReader("{}")))
+		if first.Code == http.StatusTooManyRequests {
+			t.Fatal("the first finish was metered")
+		}
+		rec := httptest.NewRecorder()
+		s.handleEnrollFinish(rec, httptest.NewRequest(http.MethodPost, "/webauthn/enroll/finish", strings.NewReader("{}")))
+		if rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("second finish = %d, want %d", rec.Code, http.StatusTooManyRequests)
+		}
+		if got := retryAfterSeconds(t, rec); got > int(enrollFinishCooldown.Seconds()) {
+			t.Fatalf("Retry-After = %d, want at most the %v cooldown", got, enrollFinishCooldown)
+		}
+	})
 }

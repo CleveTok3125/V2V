@@ -29,6 +29,7 @@ func (s *ChatServer) handlePairStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	clientIP := getClientIP(r)
 	if !pairStatusCooldowns.Allow(clientIP, pairStatusCooldown) {
+		setRetryAfter(w, pairStatusCooldowns.RetryAfter(clientIP, pairStatusCooldown))
 		http.Error(w, "too many attempts", http.StatusTooManyRequests)
 		return
 	}
