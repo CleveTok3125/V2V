@@ -386,10 +386,11 @@ func (s *Session) badgeForWire(msg WireMessage, av bool) (colored, urlStr string
 	return colored, urlStr
 }
 
-// renderChatBlock renders one wire message as content rows plus exactly
-// one trailing meta line ("  └─  #height:hash | ✍️ badge"). Legacy
-// lines without chain fields render content only. System wires render
-// sanitized text to their classified tab. Caller must hold s.Display.DisplayMu.
+// renderChatBlock renders one wire message as one block: an author header
+// ("| HH:MM name • #height:hash • ✍️ badge") and the text as indented rows
+// under it. Legacy lines without chain fields lose only the number. System
+// wires render sanitized text as a single row in their classified tab.
+// Caller must hold s.Display.DisplayMu.
 
 // resolveMentionLocked reports whether @#height names a buffered
 // message (suffix checksum when given). Unresolved mentions render
@@ -454,7 +455,7 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (quote []st
 				badge = fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", urlStr, colored)
 			}
 		}
-		header += " | " + metaLineFor(msg.ChainHeight, msg.ChainHash, badge)
+		header += " • " + metaLineFor(msg.ChainHeight, msg.ChainHash, badge)
 	}
 	mentionOpen, mentionClose := mentionSGR(ClientCfg.MentionColor())
 	body := renderMentions(renderChatText(msg.Text), s.resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose)

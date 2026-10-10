@@ -34,20 +34,31 @@ func chainedTripWire(tm *TripMeta, text string) WireMessage {
 // indent. Fixtures use this rather than pasting the shape, so a layout
 // change touches one place.
 func chatBlockForTest(height uint64, hashHex, clock, name, body string) string {
-	return fmt.Sprintf("| %s %s | %s\n%s\n",
+	return fmt.Sprintf("| %s %s • %s\n%s\n",
 		clock, name, metaLineFor(height, hashHex, ""), chatBodyIndent(body))
 }
 
 func TestMetaLineFor(t *testing.T) {
-	// No corner glyph: this rides the header row beside the author, and the
-	// "└─" it used to open with is a bottom-left corner.
 	got := metaLineFor(1234, "abcdef0123456789", "")
 	if got != "#1234:abcd" {
 		t.Fatalf("got %q", got)
 	}
+	// The badge rides inside the strip, not behind another separator: the
+	// only "•" belongs to the author/meta boundary the caller draws.
 	got = metaLineFor(7, "ABCDEF", "◆ ab12")
-	if got != "#7:abcd | ✍️ ◆ ab12" {
-		t.Fatalf("badge must append after separator, got %q", got)
+	if got != "#7:abcd ✍️ ◆ ab12" {
+		t.Fatalf("badge must append after the number, got %q", got)
+	}
+}
+
+// TestHeaderMetaIgnoresANameThatLooksLikeOne: display names are free text,
+// and a name sits between the header's "| HH:MM " and its number. A name
+// carrying "#1:ffff" must not stand in for the number the renderer wrote
+// after it, or quoting and /find would address the wrong message.
+func TestHeaderMetaIgnoresANameThatLooksLikeOne(t *testing.T) {
+	m := headerMetaRe.FindStringSubmatch("| 15:04 #1:ffff • #42:abcd")
+	if m == nil || m[1] != "42" {
+		t.Fatalf("a display name stood in for the message number: %v", m)
 	}
 }
 
@@ -207,8 +218,8 @@ func TestParseFindArg(t *testing.T) {
 
 func TestFindMetaMatches(t *testing.T) {
 	lines := []string{
-		"| 15:04 Alice | #1234:abcd\n|   hello\n",
-		"| 15:05 Bob | #1235:abce | ✍️ \x1b[38;2;1;2;3m◆ x9y8\x1b[0m\n|   quoted \"#1234:abcd\" text\n",
+		"| 15:04 Alice • #1234:abcd\n|   hello\n",
+		"| 15:05 Bob • #1235:abce ✍️ \x1b[38;2;1;2;3m◆ x9y8\x1b[0m\n|   quoted \"#1234:abcd\" text\n",
 		"| [Local]: something\n",
 	}
 	// Only the header names a height. The body above quotes the same
@@ -332,9 +343,14 @@ func TestFormatQuote(t *testing.T) {
 	if got != "|   ┌─  ↩ #12: 15:04 Alice: hello world" {
 		t.Fatalf("got %q", got)
 	}
-	got = formatQuote(12, "\x1b[90m| Bạn: x ⏳\x1b[0m\n", true, 80)
-	if !strings.HasPrefix(got, "\x1b[90m|   ┌─  ↩ #12:") || !strings.HasSuffix(got, "⏳\x1b[0m") {
-		t.Fatalf("pending quote must be grey with hourglass: %q", got)
+	// The quote source carries no mark of its own, so any hourglass here
+	// would come from the wrapper rather than from the text.
+	got = formatQuote(12, "| 15:04 Alice: x\n", true, 80)
+	if !strings.HasPrefix(got, "\x1b[90m|   ┌─  ↩ #12:") || !strings.HasSuffix(got, "\x1b[0m") {
+		t.Fatalf("pending quote must be grey: %q", got)
+	}
+	if strings.Contains(got, "⏳") {
+		t.Fatalf("the pending mark must not ride the quote: %q", got)
 	}
 	long := "| X: " + strings.Repeat("a", 200)
 	got = formatQuote(3, long, false, 80)
@@ -496,7 +512,7 @@ func TestFormatInfoBlockTripDetail(t *testing.T) {
 func TestFormatQuoteRich(t *testing.T) {
 	wire := chainedTripWire(mustTestTrip(t), "hello base msg")
 	got := formatQuoteRich(wire, false, 80)
-	want := "|   ┌─  ↩ #50 | 15:04 Alice: hello base msg"
+	want := "|   ┌─  ↩ #50 • 15:04 Alice: hello base msg"
 	// Hook alignment: ┌ sits where the content time-colon sits (col 4),
 	// ↩ where the username starts (col 8).
 	runes := []rune(want)
@@ -510,12 +526,15 @@ func TestFormatQuoteRich(t *testing.T) {
 		t.Fatalf("intact quote must carry no mark: %q", got)
 	}
 	got = formatQuoteRich(wire, true, 80)
-	if !strings.HasPrefix(got, "\x1b[90m") || !strings.HasSuffix(got, "⏳\x1b[0m") {
+	if !strings.HasPrefix(got, "\x1b[90m") || !strings.HasSuffix(got, "\x1b[0m") {
 		t.Fatalf("pending shape broken: %q", got)
+	}
+	if strings.Contains(got, "⏳") {
+		t.Fatalf("the pending mark must not ride the quote: %q", got)
 	}
 	// Grey must span the whole pending line: no full reset may appear
 	// before the trailing one (attribute-off codes only inside).
-	if inner := got[len("\x1b[90m") : len(got)-len("⏳\x1b[0m")]; strings.Contains(inner, "\x1b[0m") {
+	if inner := got[len("\x1b[90m") : len(got)-len("\x1b[0m")]; strings.Contains(inner, "\x1b[0m") {
 		t.Fatalf("pending grey broken mid-line: %q", got)
 	}
 	// Tampered target appends a bright-red mark, trip-tamper style.

@@ -138,11 +138,15 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 		}
 	}
 	header := "\x1b[90m| Bạn"
+	// One separator, between the author and the meta strip, and only when
+	// the echo will draw that strip: /meta off shows neither the number nor
+	// the badge. The number is unknown until the server assigns it, so the
+	// strip carries only what is already known, and ⏳ marks the row pending.
 	if pmMeta {
-		header += " | ···"
-	}
-	if badgePlaceholder != "" {
-		header += " | ✍️ ◆ " + badgePlaceholder
+		header += " •"
+		if badgePlaceholder != "" {
+			header += " ✍️ ◆ " + badgePlaceholder
+		}
 	}
 	header += " ⏳\x1b[0m\n"
 	s.emitTab(TabChat, header)

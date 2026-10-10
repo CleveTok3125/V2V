@@ -162,13 +162,19 @@ func TestSendMessageTripWriteJSONOK(t *testing.T) {
 // below the placeholder's first row. The expectation is summed from the
 // buffer entries themselves by an independent pass, so an accounting that
 // counted entries instead of rows fails here.
-func assertSwapEraseCoversDrawnRows(t *testing.T, body string) {
+func assertSwapEraseCoversDrawnRows(t *testing.T, body string, replyTo uint64) {
 	t.Helper()
 	sess, out := queueTestSession(t)
 	sess.Username = "A#1"
 	sess.Chain.WireIdx = newWireIndex(1000)
 	sess.Chain.RenderCache = newRenderCache(200)
 	sess.Pending.TmpSeq = 7
+	if replyTo > 0 {
+		// A pending reply prints its quote above the author row, so the
+		// region's first row is a preview of another message.
+		sess.Chain.WireIdx.put(chainWireWithText(replyTo, "tin được trả lời", 0x05))
+		sess.Pending.PendingReplyTo = replyTo
+	}
 
 	phRows, phScreenRows, shown, bufEnd := sess.renderPlaceholder(body, 1)
 	if !shown || phRows == 0 {
@@ -176,7 +182,8 @@ func assertSwapEraseCoversDrawnRows(t *testing.T, body string) {
 	}
 	phEntries := append([]string{}, sess.Display.TabChat.lines[bufEnd-phRows:bufEnd]...)
 	sess.Pending.PendingPlaceholders = append(sess.Pending.PendingPlaceholders, pendingMsg{
-		text: body, rows: phRows, screenRows: phScreenRows, shown: shown, bufEnd: bufEnd, tmpID: sess.Pending.TmpSeq,
+		text: body, rows: phRows, screenRows: phScreenRows, shown: shown, bufEnd: bufEnd,
+		tmpID: sess.Pending.TmpSeq, replyTo: replyTo,
 	})
 	// Everything queued so far must be on the wire before the measurement,
 	// or the input-line wipe would be counted as part of the echo.
@@ -186,6 +193,7 @@ func assertSwapEraseCoversDrawnRows(t *testing.T, body string) {
 	echo := WireMessage{
 		Type: "chat", Time: "12:00", DisplayName: "A#1", Text: body,
 		TmpID: sess.Pending.TmpSeq, ChainHeight: 1, ChainHash: "ab", ChainVer: 2,
+		ReplyTo: replyTo,
 	}
 	sess.Display.DisplayMu.Lock()
 	sess.renderChatBlock(echo)
@@ -218,11 +226,19 @@ func assertSwapEraseCoversDrawnRows(t *testing.T, body string) {
 // many lines it has, so counting intervening entries moved the cursor up
 // short and left the tail on screen; and the region guard demanded the
 // pending mark on every row, which the body's continuation rows never
-// carried, so a multi-line placeholder was never erased at all.
+// carried, so a multi-line placeholder was never erased at all. A third
+// shape reached the same guard: a pending reply prints its quote first, and
+// the quote is a preview of another message, so it carries no mark.
 func TestPlaceholderEraseCoversWhatWasDrawn(t *testing.T) {
-	t.Run("two lines", func(t *testing.T) { assertSwapEraseCoversDrawnRows(t, "line1\nline2") })
-	t.Run("one line", func(t *testing.T) { assertSwapEraseCoversDrawnRows(t, "single-line") })
+	t.Run("two lines", func(t *testing.T) { assertSwapEraseCoversDrawnRows(t, "line1\nline2", 0) })
+	t.Run("one line", func(t *testing.T) { assertSwapEraseCoversDrawnRows(t, "single-line", 0) })
 	t.Run("line long enough to wrap", func(t *testing.T) {
-		assertSwapEraseCoversDrawnRows(t, strings.Repeat("x", 200))
+		assertSwapEraseCoversDrawnRows(t, strings.Repeat("x", 200), 0)
+	})
+	// The quote carries no pending mark of its own, so a guard that only
+	// reads the region's first row would refuse to erase this placeholder
+	// and leave it on screen for good.
+	t.Run("with a reply quote", func(t *testing.T) {
+		assertSwapEraseCoversDrawnRows(t, "trả lời", 5)
 	})
 }

@@ -33,7 +33,7 @@ func TestEstimateRows(t *testing.T) {
 }
 
 func TestCollapseHead(t *testing.T) {
-	const header = "| 15:04 Alice | #42:abcd"
+	const header = "| 15:04 Alice • #42:abcd"
 	// mk builds n body rows; a block is that body under one author header.
 	mk := func(n int) string {
 		var b strings.Builder
@@ -57,13 +57,13 @@ func TestCollapseHead(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
 	if len(lines) != 6 {
-		t.Fatalf("folded block = %d lines, want 5 preview rows plus the header", len(lines))
+		t.Fatalf("folded block = %d lines, want header + 5 preview", len(lines))
 	}
 	if lines[0] != header {
 		t.Fatalf("the header must survive folding, got %q", lines[0])
 	}
 	if !strings.Contains(lines[5], "/expand #42") {
-		t.Fatalf("trailer must address height on the last line, got %q", lines[5])
+		t.Fatalf("trailer must address height on the last preview row, got %q", lines[5])
 	}
 	// Height-less wires never fold (no /expand address exists).
 	if _, folded := collapseHead(blk(mk(30)), 0, 10, 5, 80); folded {
@@ -82,8 +82,10 @@ func TestCollapseHead(t *testing.T) {
 	if strings.Contains(out, strings.Repeat("y", 900)) {
 		t.Fatal("single wall survived unfolded")
 	}
-	if got := estimateRows(out, 80); got > 5+2 {
-		t.Fatalf("folded wall = %d rows, want ≤ header + preview + trailer row", got)
+	// header + the cut wall's 5 preview rows + the trailer wrapping onto a
+	// 6th.
+	if got := estimateRows(out, 80); got > 7 {
+		t.Fatalf("folded wall = %d rows, want ≤ header + preview + wrapped trailer", got)
 	}
 	if !strings.Contains(out, "/expand #7]") {
 		t.Fatalf("folded wall must carry trailer, got %q", out[len(out)-60:])
@@ -100,7 +102,7 @@ func TestCollapseHead(t *testing.T) {
 	// Cut happens on line boundaries: preview rows respected.
 	out, _ = collapseHead(blk(mk(30)), 9, 10, 5, 80)
 	if got := len(strings.Split(strings.TrimSuffix(out, "\n"), "\n")); got != 6 {
-		t.Fatalf("preview cut = %d lines, want 5 preview rows plus the header", got)
+		t.Fatalf("preview cut = %d lines, want header + 5 preview", got)
 	}
 }
 

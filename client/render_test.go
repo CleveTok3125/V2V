@@ -316,3 +316,29 @@ func TestHandleReplayMarkerRespectsNotifyGates(t *testing.T) {
 		t.Error("muting join must not silence a replay marker")
 	}
 }
+
+// TestChatBlockShape pins what a rendered block looks like: the author and
+// chain position share one header row, the body hangs below it under a
+// shared indent, and a notice is a single row. No blank rows are added here;
+// spacing between groups is not this function's business.
+func TestChatBlockShape(t *testing.T) {
+	sess := chainTestSession(t, 0)
+
+	chat := WireMessage{Type: "chat", Time: "14:19", DisplayName: "Alice#a11c", Text: "hi"}
+	_, head, _, _, _ := sess.buildChatBlock(chat, false, false)
+	if !strings.HasSuffix(head, "\n") || strings.HasSuffix(head, "\n\n") {
+		t.Fatalf("a chat line must end in one newline, got %q", head)
+	}
+	if !strings.Contains(head, "\n"+chatBodyPrefix) {
+		t.Fatalf("a chat body must be indented, got %q", head)
+	}
+	if !strings.HasPrefix(head, "| 14:19 Alice#a11c") {
+		t.Fatalf("the author row must lead, got %q", head)
+	}
+
+	sys := WireMessage{Type: "system", Time: "14:19", Tags: []string{"system", wire.TagJoin}, Text: "ai đó đã tham gia"}
+	_, head, _, _, _ = sess.buildChatBlock(sys, false, false)
+	if head != "| ai đó đã tham gia\n" {
+		t.Fatalf("a notice is one row, got %q", head)
+	}
+}

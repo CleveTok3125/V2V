@@ -46,12 +46,12 @@ type pendingMsg struct {
 }
 
 // metaLineFor builds the metadata that rides the header row next to the
-// author: "#height:hash4", with " | ✍️ badge" appended for trip messages.
+// author: "#1234:abcd", with " ✍️ badge" appended for trip messages.
 // badgePart is the already-colored badge (with hyperlink when available).
 //
-// It carries no corner glyph: the header is the top of the block, and the
-// "└─" this used to open with is a bottom-left corner, which would point
-// away from the text it introduces.
+// The caller puts a " • " before each part, so the author's own "#hash"
+// tail and this reference are visibly separate runs. The row is the top of
+// the block, so it carries no corner glyph either.
 func metaLineFor(height uint64, hashHex, badgePart string) string {
 	var sb strings.Builder
 	sb.WriteString("#")
@@ -67,7 +67,9 @@ func metaLineFor(height uint64, hashHex, badgePart string) string {
 		}
 	}
 	if badgePart != "" {
-		sb.WriteString(" | ✍️ ")
+		// No separator before the badge: "•" marks where the author ends
+		// and the meta strip begins, and there is only one such boundary.
+		sb.WriteString(" ✍️ ")
 		sb.WriteString(badgePart)
 	}
 	return sb.String()
@@ -236,12 +238,16 @@ func (c *renderCache) put(key string, b renderedBlock) {
 	}
 }
 
-// headerMetaRe matches the chain position inside a message header row
+// headerMetaRe matches the message number inside a header row
 // ("| 14:19 Name#83e4 | #1234:abcd"). It anchors on the "| HH:MM " the
-// header opens with, so neither a body row that happens to contain "#12:"
-// nor the author's own "name#hash" (no colon follows it) can be mistaken
-// for it. The hash part may be empty while scanning and is compared apart.
-var headerMetaRe = regexp.MustCompile(`\| \d\d:\d\d [^\n]*?#(\d+):([0-9a-fA-F]*)`)
+// header opens with, so a body row that happens to contain "#12:" cannot
+// be mistaken for one.
+//
+// The ".*" is greedy on purpose. A display name may itself contain "#1:ff"
+// (names allow "#" and ":"), and the renderer's reference is the last one
+// on the row, so matching the last keeps a name from standing in for it.
+// The hash part may be empty while scanning and is compared apart.
+var headerMetaRe = regexp.MustCompile(`\| \d\d:\d\d .*#(\d+):([0-9a-fA-F]*)`)
 
 // mentionRe matches @-mentions of message heights ("@#1234", "@#1234:abcd").
 // The @ prefix keeps them distinct from server-stamped "name#hash"
@@ -423,7 +429,9 @@ func findMetaMatches(lines []string, height uint64, suffix string) []int {
 func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) string {
 	line := fmt.Sprintf("|   ┌─  ↩ #%d: %s", height, quoteFirstLine(headEntry, maxRunes))
 	if pending {
-		return "\x1b[90m" + line + " ⏳\x1b[0m"
+		// Grey marks it as part of a block still on its way; the "⏳" belongs
+		// on the author row, which is the message itself.
+		return "\x1b[90m" + line + "\x1b[0m"
 	}
 	return line
 }
@@ -440,11 +448,13 @@ func formatQuoteRich(msg WireMessage, pending bool, maxRunes int) string {
 	if err := verifyWireContent(msg); err != nil {
 		mark = " \x1b[91m✗\x1b[39m"
 	}
-	line := fmt.Sprintf("|   ┌─  ↩ #%d | %s %s: %s%s",
+	line := fmt.Sprintf("|   ┌─  ↩ #%d • %s %s: %s%s",
 		msg.ChainHeight, filter.SanitizeSingleLine(msg.Time), filter.SanitizeSingleLine(msg.DisplayName),
 		quoteFirstLine(msg.Text, maxRunes), mark)
 	if pending {
-		return "\x1b[90m" + line + " ⏳\x1b[0m"
+		// Grey marks it as part of a block still on its way; the "⏳" belongs
+		// on the author row, which is the message itself.
+		return "\x1b[90m" + line + "\x1b[0m"
 	}
 	return line
 }
@@ -1141,14 +1151,21 @@ func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
 	if start < 0 || pm.bufEnd > len(s.Display.TabChat.lines) {
 		return
 	}
-	// Verify the region still starts with our placeholder (eviction or
-	// concurrent appends may have shifted it); otherwise leave the screen
-	// alone and render the echo normally. Only the first row is checked:
-	// the region is contiguous and eviction drops from the front, so the
-	// head proves the region is ours. Requiring the mark on every row is
-	// what left a multi-line message's placeholder on screen forever —
-	// the body's continuation rows carry no pending mark of their own.
-	if !strings.Contains(s.Display.TabChat.lines[start], "⏳") {
+	// Verify the region still holds our placeholder (eviction or concurrent
+	// appends may have shifted it); otherwise leave the screen alone and
+	// render the echo normally. The mark is looked for anywhere in the
+	// region, not only on its first row: a pending reply prints its quote
+	// above the author row, and the quote is a preview of another message,
+	// so it carries no mark of its own. Requiring a mark on every row is
+	// what once left a multi-line placeholder on screen forever.
+	ours := false
+	for _, l := range s.Display.TabChat.lines[start:pm.bufEnd] {
+		if strings.Contains(l, "⏳") {
+			ours = true
+			break
+		}
+	}
+	if !ours {
 		return
 	}
 	intervening := append([]string{}, s.Display.TabChat.lines[pm.bufEnd:]...)
