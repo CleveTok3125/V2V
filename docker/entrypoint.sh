@@ -120,6 +120,25 @@ require_readable_owned() {
 require_readable "$V2V_ROOT/.env" "make v2vctl && v2vctl config sync --dir . --to <instance dir>"
 require_readable_owned "$V2V_ROOT/config/roles.json" "make v2vctl && v2vctl config sync --dir . --to <instance dir>"
 
+# The identity stores are written by v2vctl on the host and read by the
+# server, so a correct owner is not enough: an odd mode or an ACL still
+# denies the read, and the server then dies at boot holding a bare path.
+# Ownership was already handled above; this proves the read itself.
+# Absent files are legitimate, the first boot creates them.
+require_readable_if_present() {
+	path=$1
+	if [ ! -e "$path" ]; then
+		return 0
+	fi
+	if ! "$SU_EXEC_BIN" "$APP_USER:$APP_GROUP" test -r "$path"; then
+		name=$(basename "$path")
+		echo "FATAL: $path unreadable by $APP_USER (owner $(stat -c %u:%g "$path"), mode $(stat -c %a "$path")); on the host run: chown $want <instance>/data/$name && chmod 600 <instance>/data/$name"
+		exit 1
+	fi
+}
+require_readable_if_present "$DATA_DIR/webauthn.json"
+require_readable_if_present "$DATA_DIR/server_identity.json"
+
 # Writability probe: without it the server dies on its first write
 # with a bare "permission denied". Fail here instead, with the fix.
 if ! "$SU_EXEC_BIN" "$APP_USER:$APP_GROUP" sh -c 'touch "$1/.wtest" && rm "$1/.wtest"' _ "$DATA_DIR"; then

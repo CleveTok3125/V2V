@@ -136,6 +136,32 @@ echo "$out" | grep -q "fixed inside: webauthn.json server_identity.json" && ok "
 grep -q "SERVER_INVOKED" "$CALL_LOG" && ok "fastpath-ids: execs" || bad "fastpath-ids: exec"
 rm -rf "$ROOT"
 
+# T-store-mode: an identity store owned by the app user but unreadable by
+# mode. The ownership pass has nothing to fix, so without a read probe the
+# entrypoint reports everything fine and the server dies at boot with a
+# bare path. The probe must name the file and the mode instead.
+sandbox; ROOT=$SANDBOX_ROOT
+readable_mounts
+chown -R nobody:"$NOBODY_GROUP" "$APP_ROOT/data"
+echo '{}' > "$APP_ROOT/data/webauthn.json"
+chown nobody:"$NOBODY_GROUP" "$APP_ROOT/data/webauthn.json"
+chmod 000 "$APP_ROOT/data/webauthn.json"
+if run_entry; then
+	bad "store-mode: must exit nonzero"
+else
+	echo "$RUN_OUT" | grep -q "webauthn.json unreadable" && ok "store-mode: names the file" || bad "store-mode: msg"
+	echo "$RUN_OUT" | grep -q "mode 0" && ok "store-mode: prints the mode" || bad "store-mode: no mode in msg"
+fi
+rm -rf "$ROOT"
+
+# T-store-absent: no store yet is the ordinary first boot, not a failure.
+sandbox; ROOT=$SANDBOX_ROOT
+readable_mounts
+chown -R nobody:"$NOBODY_GROUP" "$APP_ROOT/data"
+run_entry || bad "store-absent: entrypoint failed"
+grep -q "SERVER_INVOKED" "$CALL_LOG" && ok "store-absent: execs" || bad "store-absent: exec"
+rm -rf "$ROOT"
+
 # T-missing-env: absent .env names the bootstrap, not chmod.
 sandbox; ROOT=$SANDBOX_ROOT
 echo '{}' > "$APP_ROOT/config/roles.json"
