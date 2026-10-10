@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"runtime"
 	"strings"
-	"time"
 )
 
 type versionVerdict int
@@ -82,16 +81,10 @@ func httpBaseFromWS(wsURL string) (string, error) {
 	return u.String(), nil
 }
 
-// fetchServerVersion GETs /api/version over a direct connection.
-// Empty string means unknown (old server, fork without the endpoint,
-// or network error).
-func fetchServerVersion(httpBase string) string {
-	return fetchServerVersionVia(httpBase, &http.Client{Timeout: 5 * time.Second})
-}
-
-// fetchServerVersionVia is fetchServerVersion over a caller-supplied
-// client, so the pre-dial check can ride the session proxy (tor)
-// instead of always going direct.
+// fetchServerVersionVia GETs /api/version over a caller-supplied client, so
+// the pre-dial check rides the session proxy (tor) instead of always going
+// direct. Empty string means unknown: an old server, a fork without the
+// endpoint, or a network error.
 func fetchServerVersionVia(httpBase string, client *http.Client) string {
 	resp, err := client.Get(httpBase + "/api/version")
 	if err != nil {

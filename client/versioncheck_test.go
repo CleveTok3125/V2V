@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/CleveTok3125/V2V/internal/config"
 )
@@ -35,27 +36,32 @@ func TestDecideVersionCheck(t *testing.T) {
 	}
 }
 
-func TestFetchServerVersion(t *testing.T) {
+// TestFetchServerVersionVia covers the reading and the refusals. The client
+// is supplied here because this test is about parsing a response, not about
+// which transport carries it; routing has its own tests.
+func TestFetchServerVersionVia(t *testing.T) {
+	client := &http.Client{Timeout: 5 * time.Second}
+
 	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"version":"s1"}`))
 	}))
 	defer ok.Close()
-	if got := fetchServerVersion(ok.URL); got != "s1" {
+	if got := fetchServerVersionVia(ok.URL, client); got != "s1" {
 		t.Fatalf("version = %q, want s1", got)
 	}
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer bad.Close()
-	if got := fetchServerVersion(bad.URL); got != "" {
+	if got := fetchServerVersionVia(bad.URL, client); got != "" {
 		t.Fatalf("404 must yield unknown, got %q", got)
 	}
 	junk := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("not json"))
 	}))
 	defer junk.Close()
-	if got := fetchServerVersion(junk.URL); got != "" {
+	if got := fetchServerVersionVia(junk.URL, client); got != "" {
 		t.Fatalf("bad JSON must yield unknown, got %q", got)
 	}
 }
