@@ -225,8 +225,8 @@ func main() {
 			sess.Pending.PendingReplyTo = 0
 			continue
 		}
-		phRows, phShown, phBufEnd := sess.renderPlaceholder(body, lines)
-		if serr := sess.sendMessage(body, phRows, phShown, phBufEnd); serr != nil {
+		phRows, phScreenRows, phShown, phBufEnd := sess.renderPlaceholder(body, lines)
+		if serr := sess.sendMessage(body, phRows, phScreenRows, phShown, phBufEnd); serr != nil {
 			break
 		}
 

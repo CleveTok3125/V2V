@@ -119,7 +119,7 @@ func TestInputLoopCodeblockCancelClearsTarget(t *testing.T) {
 func TestInputLoopSendConsumesTarget(t *testing.T) {
 	sess := smokeSession()
 	sess.Pending.PendingReplyTo = 9
-	if err := sess.sendMessage("hi", 1, false, 0); err != nil {
+	if err := sess.sendMessage("hi", 1, 1, false, 0); err != nil {
 		t.Fatalf("sendMessage: %v", err)
 	}
 	if sess.Pending.PendingReplyTo != 0 {
@@ -132,7 +132,7 @@ func TestInputLoopSendConsumesTarget(t *testing.T) {
 	sess = smokeSession()
 	sess.Conn = &stubConn{writeErr: errors.New("connection unavailable")}
 	sess.Pending.PendingReplyTo = 9
-	if err := sess.sendMessage("hi", 1, false, 0); err == nil {
+	if err := sess.sendMessage("hi", 1, 1, false, 0); err == nil {
 		t.Fatal("failed send must return an error")
 	}
 	if sess.Pending.PendingReplyTo != 0 {

@@ -7,10 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/gorilla/websocket"
 )
 
@@ -60,7 +63,7 @@ func TestSendMessagePlainLoopback(t *testing.T) {
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabChat = newTabBuffer(100, 100000)
 	sess.Pending.PendingReplyTo = 7
-	if err := sess.sendMessage("hello", 1, true, 0); err != nil {
+	if err := sess.sendMessage("hello", 1, 1, true, 0); err != nil {
 		t.Fatalf("sendMessage: %v", err)
 	}
 	select {
@@ -118,7 +121,7 @@ func TestSendMessageTripWriteJSONError(t *testing.T) {
 	sess.Pending.TmpSeq = 10
 	prev := append([]byte(nil), sess.TripPrev...)
 	sess.Pending.PendingReplyTo = 7
-	err := sess.sendMessage("hello", 1, true, 0)
+	err := sess.sendMessage("hello", 1, 1, true, 0)
 	if err == nil {
 		t.Fatal("WriteJSON fail must return err")
 	}
@@ -142,7 +145,7 @@ func TestSendMessageTripWriteJSONError(t *testing.T) {
 func TestSendMessageTripWriteJSONOK(t *testing.T) {
 	conn := &stubConn{}
 	sess := tripSessionForSend(t, conn)
-	if err := sess.sendMessage("hello", 1, true, 0); err != nil {
+	if err := sess.sendMessage("hello", 1, 1, true, 0); err != nil {
 		t.Fatalf("sendMessage: %v", err)
 	}
 	tm, ok := conn.wrote.(TripMessage)
@@ -152,4 +155,74 @@ func TestSendMessageTripWriteJSONOK(t *testing.T) {
 	if len(sess.Pending.PendingPlaceholders) != 1 {
 		t.Fatalf("placeholder not tracked: %+v", sess.Pending.PendingPlaceholders)
 	}
+}
+
+// assertSwapEraseCoversDrawnRows drives one placeholder -> echo swap and
+// checks that the erase moves up exactly the terminal rows that were drawn
+// below the placeholder's first row. The expectation is summed from the
+// buffer entries themselves by an independent pass, so an accounting that
+// counted entries instead of rows fails here.
+func assertSwapEraseCoversDrawnRows(t *testing.T, body string) {
+	t.Helper()
+	sess, out := queueTestSession(t)
+	sess.Username = "A#1"
+	sess.Chain.WireIdx = newWireIndex(1000)
+	sess.Chain.RenderCache = newRenderCache(200)
+	sess.Pending.TmpSeq = 7
+
+	phRows, phScreenRows, shown, bufEnd := sess.renderPlaceholder(body, 1)
+	if !shown || phRows == 0 {
+		t.Fatalf("placeholder did not render: rows=%d shown=%v", phRows, shown)
+	}
+	phEntries := append([]string{}, sess.Display.TabChat.lines[bufEnd-phRows:bufEnd]...)
+	sess.Pending.PendingPlaceholders = append(sess.Pending.PendingPlaceholders, pendingMsg{
+		text: body, rows: phRows, screenRows: phScreenRows, shown: shown, bufEnd: bufEnd, tmpID: sess.Pending.TmpSeq,
+	})
+	// Everything queued so far must be on the wire before the measurement,
+	// or the input-line wipe would be counted as part of the echo.
+	sess.flushOutputNow()
+	beforeEcho := out.Len()
+
+	echo := WireMessage{
+		Type: "chat", Time: "12:00", DisplayName: "A#1", Text: body,
+		TmpID: sess.Pending.TmpSeq, ChainHeight: 1, ChainHash: "ab", ChainVer: 2,
+	}
+	sess.Display.DisplayMu.Lock()
+	sess.renderChatBlock(echo)
+	echoEntries := append([]string{}, sess.Display.TabChat.lines[bufEnd:]...)
+	sess.consumeEchoLocked(echo, false)
+	sess.Display.DisplayMu.Unlock()
+	sess.flushOutputNow()
+
+	drawn := out.String()[beforeEcho:]
+	if !strings.Contains(drawn, "\x1b[") {
+		t.Fatalf("no erase sequence was emitted, so the placeholder is still on screen:\n%q", drawn)
+	}
+	moved, err := strconv.Atoi(regexp.MustCompile(`\x1b\[(\d+)A`).FindStringSubmatch(drawn)[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 0
+	for _, entry := range append(append([]string{}, phEntries...), echoEntries...) {
+		want += estimateRows(ansi.Strip(entry), termWidth())
+	}
+	if moved != want {
+		t.Fatalf("erase moved up %d rows, want %d (placeholder %d entries / %d rows, echo %d entries)\nbody=%q",
+			moved, want, phRows, phScreenRows, len(echoEntries), body)
+	}
+}
+
+// TestPlaceholderEraseCoversWhatWasDrawn pins the arithmetic the echo swap
+// depends on: the erase must move up exactly as many terminal rows as were
+// drawn. Two shapes broke it. A message block is one buffer entry however
+// many lines it has, so counting intervening entries moved the cursor up
+// short and left the tail on screen; and the region guard demanded the
+// pending mark on every row, which the body's continuation rows never
+// carried, so a multi-line placeholder was never erased at all.
+func TestPlaceholderEraseCoversWhatWasDrawn(t *testing.T) {
+	t.Run("two lines", func(t *testing.T) { assertSwapEraseCoversDrawnRows(t, "line1\nline2") })
+	t.Run("one line", func(t *testing.T) { assertSwapEraseCoversDrawnRows(t, "single-line") })
+	t.Run("line long enough to wrap", func(t *testing.T) {
+		assertSwapEraseCoversDrawnRows(t, strings.Repeat("x", 200))
+	})
 }

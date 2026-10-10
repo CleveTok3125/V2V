@@ -29,17 +29,20 @@ import (
 
 // pendingMsg tracks a grey placeholder awaiting server echo.
 type pendingMsg struct {
-	text    string
-	rows    int
-	shown   bool
-	gen     uint64
-	bufEnd  int
-	seq     uint32
-	pub     string
-	hasTrip bool
-	sentAt  time.Time
-	tmpID   uint64
-	replyTo uint64
+	text string
+	rows int
+	// screenRows is how many terminal rows rows above occupies: the buffer
+	// splice counts entries, the screen erase counts rows.
+	screenRows int
+	shown      bool
+	gen        uint64
+	bufEnd     int
+	seq        uint32
+	pub        string
+	hasTrip    bool
+	sentAt     time.Time
+	tmpID      uint64
+	replyTo    uint64
 }
 
 // metaLineFor builds the trailing metadata line of a message block:
@@ -1119,25 +1122,39 @@ func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
 	if !pm.shown || s.Display.ActiveTab != TabChat || pm.rows <= 0 {
 		return
 	}
+	// Entries for the buffer splice, terminal rows for the cursor move.
+	screenRows := pm.screenRows
+	if screenRows <= 0 {
+		screenRows = pm.rows
+	}
 	start := pm.bufEnd - pm.rows
 	if start < 0 || pm.bufEnd > len(s.Display.TabChat.lines) {
 		return
 	}
-	// Verify the region still holds our placeholder (eviction or
-	// concurrent appends may have shifted it); otherwise leave the
-	// screen alone and render the echo normally.
-	for _, l := range s.Display.TabChat.lines[start:pm.bufEnd] {
-		if !strings.Contains(l, "⏳") {
-			return
-		}
+	// Verify the region still starts with our placeholder (eviction or
+	// concurrent appends may have shifted it); otherwise leave the screen
+	// alone and render the echo normally. Only the first row is checked:
+	// the region is contiguous and eviction drops from the front, so the
+	// head proves the region is ours. Requiring the mark on every row is
+	// what left a multi-line message's placeholder on screen forever —
+	// the body's continuation rows carry no pending mark of their own.
+	if !strings.Contains(s.Display.TabChat.lines[start], "⏳") {
+		return
 	}
 	intervening := append([]string{}, s.Display.TabChat.lines[pm.bufEnd:]...)
 	s.Display.TabChat.spliceOut(start, pm.bufEnd)
 	// Rows on screen: placeholder block plus intervening lines printed after it.
+	// The count must be in terminal rows, not buffer entries: a message block
+	// is one entry however many lines it has, so counting entries moves the
+	// cursor up short and leaves the tail of the placeholder on screen.
 	// Enqueued (not written) so a slow terminal never stalls the caller;
 	// the order against previously queued lines keeps the erase math valid.
+	interveningRows := 0
+	for _, l := range intervening {
+		interveningRows += estimateRows(l, termWidth())
+	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "\x1b[%dA", pm.rows+len(intervening))
+	fmt.Fprintf(&sb, "\x1b[%dA", screenRows+interveningRows)
 	sb.WriteString("\x1b[J")
 	for _, l := range intervening {
 		sb.WriteString(l)

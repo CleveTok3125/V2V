@@ -913,3 +913,61 @@ func TestFormatInfoBlockSentAtMissing(t *testing.T) {
 		t.Fatalf("missing sent_at must be explicit:\n%s", joined)
 	}
 }
+
+// chainWireWithText is chainTestWire with distinct text, so a test can say
+// which block a line came from.
+func chainWireWithText(height uint64, text string, seed byte) WireMessage {
+	var prev [32]byte
+	prev[0] = seed
+	w := WireMessage{Type: "chat", Time: "12:00", DisplayName: "A", Text: text, ChainHeight: height, ChainVer: 2}
+	w.ChainPrev = hex.EncodeToString(prev[:])
+	h := chain.Hash(prev, height, 0, 0, "chat", "12:00", "A", text, "")
+	w.ChainHash = hex.EncodeToString(h[:])
+	return w
+}
+
+// TestRecoveredBlockGoesAfterItsPredecessor pins the invariant the catch-up
+// merge rests on: a recovered message is spliced directly after its chain
+// predecessor so the buffer reads in height order, instead of being appended
+// at the bottom. That anchor is what metaHeightIndex computes, and it has to
+// survive a change to how a message block is shaped — in the current layout
+// the meta line is a block's last row, which is why "the line after the meta
+// line" happens to mean "the line after the block".
+func TestRecoveredBlockGoesAfterItsPredecessor(t *testing.T) {
+	sess := chainTestSession(t, 9)
+	sess.Display.ShowMeta = true
+	// renderChatBlock indexes every wire it renders; the helper builds a bare
+	// session, so the index it expects is wired here.
+	sess.Chain.WireIdx = newWireIndex(1000)
+	sess.Chain.RenderCache = newRenderCache(200)
+
+	sess.Display.DisplayMu.Lock()
+	sess.renderChatBlock(chainWireWithText(100, "first-message", 0x21))
+	sess.emitTab(TabChat, "| [Local]: notice-after-block\n")
+	sess.Display.DisplayMu.Unlock()
+
+	sess.Display.DisplayMu.Lock()
+	sess.renderRecoveredInPlace(chainWireWithText(101, "recovered-message", 0x31))
+	lines := append([]string{}, sess.Display.TabChat.lines...)
+	sess.Display.DisplayMu.Unlock()
+
+	idx := func(needle string) int {
+		for i, l := range lines {
+			if strings.Contains(l, needle) {
+				return i
+			}
+		}
+		return -1
+	}
+	first, recovered, notice := idx("first-message"), idx("recovered-message"), idx("notice-after-block")
+	if first < 0 {
+		t.Fatalf("predecessor never rendered:\n%s", strings.Join(lines, "\n"))
+	}
+	if recovered < 0 {
+		t.Fatalf("recovered block never rendered:\n%s", strings.Join(lines, "\n"))
+	}
+	if !(first < recovered && recovered < notice) {
+		t.Fatalf("recovered block not spliced after its predecessor\n  first=%d recovered=%d notice=%d\n%s",
+			first, recovered, notice, strings.Join(lines, "\n"))
+	}
+}
