@@ -29,9 +29,11 @@ import (
 // hundred bytes, not a connection.
 const pairTicketTTL = 5 * time.Minute
 
-// pairTicketBytes matches the handshake nonce, so the challenge both sides
-// derive from it is already oversized for preimage resistance.
-const pairTicketBytes = 64
+// pairTicketBytes is the ticket's entropy. The challenge a browser signs is
+// SHA-256 of this value, so the digest decides preimage resistance and this
+// only has to make the ticket unguessable: 256 bits does that, and a shorter
+// ticket keeps the page URL small enough to render as a scannable QR code.
+const pairTicketBytes = 32
 
 var (
 	// ErrPairCapacity is the memory guard. A ticket costs nothing to hold
