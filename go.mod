@@ -23,6 +23,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24
 	github.com/mattn/go-runewidth v0.0.30
 	github.com/muesli/termenv v0.16.0
+	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	github.com/yuin/goldmark v1.8.6
@@ -30,6 +31,7 @@ require (
 	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.59.0
 	mvdan.cc/xurls v1.1.0
+	rsc.io/qr v0.2.0
 )
 
 require (
@@ -54,7 +56,6 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/mvdan/xurls v1.1.0 // indirect
-	github.com/oschwald/geoip2-golang v1.13.0 // indirect
 	github.com/oschwald/maxminddb-golang v1.13.0 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect

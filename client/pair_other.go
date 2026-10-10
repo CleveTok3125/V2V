@@ -13,13 +13,27 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/tui"
+
+	"rsc.io/qr"
+
+	xterm "github.com/charmbracelet/x/term"
 )
+
+// termHeight is the terminal's row count, or 0 when there is no terminal to
+// measure — piped, redirected, or a size the terminal will not report.
+func termHeight() int {
+	if _, h, err := xterm.GetSize(os.Stdout.Fd()); err == nil && h > 0 {
+		return h
+	}
+	return 0
+}
 
 // pairPollInterval is how long the desktop waits between asks. Polling
 // short keeps the server free of anything held for the ceremony's
@@ -119,6 +133,92 @@ func openPairURL(url string) bool {
 	return true
 }
 
+// The cells draw two module rows each: the top half takes the foreground
+// colour and the bottom half the background, so both are set per cell.
+// Relying on the terminal's own palette would draw a light-on-dark code on a
+// dark theme, and some scanners refuse an inverted code.
+const (
+	qrBothDark  = "\x1b[30;40m▀\x1b[0m" // top dark, bottom dark
+	qrTopDark   = "\x1b[30;47m▀\x1b[0m" // top dark, bottom light
+	qrBothLight = "\x1b[37;47m▀\x1b[0m" // top light, bottom light
+	qrTopLight  = "\x1b[37;40m▀\x1b[0m" // top light, bottom dark
+)
+
+// qrQuiet is the margin the code needs on every side. Without it a scanner
+// has no way to find the symbol's edge.
+const qrQuiet = 4
+
+// qrLevel is the error-correction level. M over L: a code read off a screen
+// has to survive glare and the screen's own pixel grid, neither of which
+// affects a printed one, and the two rows it costs are affordable where the
+// code is shown at all.
+const qrLevel = qr.M
+
+// qrCellText picks the cell for two stacked modules. The drawing is ours
+// because a terminal code has to own its quiet zone: the cells carry explicit
+// colours, and a library that draws that margin as light-on-dark halves puts
+// a black band under the code.
+func qrCellText(topDark, bottomDark bool) string {
+	switch {
+	case topDark && bottomDark:
+		return qrBothDark
+	case topDark:
+		return qrTopDark
+	case bottomDark:
+		return qrTopLight
+	default:
+		return qrBothLight
+	}
+}
+
+// qrModule reports whether the module at (x, y) is dark. Anything inside the
+// quiet zone, or past the symbol, is background.
+func qrModule(code *qr.Code, x, y int) bool {
+	x -= qrQuiet
+	y -= qrQuiet
+	if x < 0 || y < 0 || x >= code.Size || y >= code.Size {
+		return false
+	}
+	return code.Black(x, y)
+}
+
+// renderPairQR draws the link as a code for a phone to scan, and reports
+// whether it fits the room given. Both dimensions matter: a code wider than
+// the window wraps, and a wrapped code cannot be scanned any more than one
+// that has to scroll. The encoding is rsc.io/qr's; only the drawing is here.
+func renderPairQR(url string, maxRows, maxCols int) (string, bool) {
+	if maxRows < 1 || maxCols < 1 {
+		return "", false
+	}
+	code, err := qr.Encode(url, qrLevel)
+	if err != nil {
+		return "", false
+	}
+	span := code.Size + qrQuiet*2
+	rows := (span + 1) / 2
+	if rows > maxRows || span > maxCols {
+		return "", false
+	}
+	var b strings.Builder
+	for y := 0; y < span; y += 2 {
+		for x := 0; x < span; x++ {
+			b.WriteString(qrCellText(qrModule(code, x, y), qrModule(code, x, y+1)))
+		}
+		b.WriteByte('\n')
+	}
+	return b.String(), true
+}
+
+// hasGraphicalSession reports whether this machine has anywhere to open a
+// browser. The opener runs where the client runs, so over SSH this is the
+// remote host's display, not the screen the person is looking at.
+func hasGraphicalSession(goos, display, wayland string) bool {
+	if goos == "darwin" || goos == "windows" {
+		return true
+	}
+	return display != "" || wayland != ""
+}
+
 // printPairURL shows the link and, when there is a terminal to open it from,
 // also asks the desktop to open it. Printing comes first so the user always
 // has the link even if the opener is missing or hangs.
@@ -128,11 +228,33 @@ func openPairURL(url string) bool {
 // window on a machine with nobody in front of it.
 func printPairURL(url string) {
 	fmt.Println(pairLinkText(url))
-	if !tui.HasControllingTTY() || !openPairURL(url) {
-		fmt.Println("Không mở được trình duyệt tự động — hãy dán link trên.")
+	printPairQR(url)
+	if !hasGraphicalSession(runtime.GOOS, os.Getenv("DISPLAY"), os.Getenv("WAYLAND_DISPLAY")) {
+		fmt.Println("🖥️ Máy này không có màn hình đồ họa — hãy quét mã bằng điện thoại, hoặc dán link trên.")
 		return
 	}
-	fmt.Println("Đã thử mở trình duyệt. Nếu không có gì xảy ra, hãy dán link trên.")
+	if !tui.HasControllingTTY() || !openPairURL(url) {
+		fmt.Println("Không mở được trình duyệt tự động — hãy quét mã bằng điện thoại, hoặc dán link trên.")
+		return
+	}
+	fmt.Println("Đã thử mở trình duyệt. Nếu không có gì xảy ra, hãy quét mã bằng điện thoại hoặc dán link trên.")
+}
+
+// printPairQR adds the code when the window can hold it and says why when it
+// cannot, so a person on a short terminal knows the option exists.
+func printPairQR(url string) {
+	rows := termHeight()
+	if rows <= 0 {
+		return // no terminal to measure: piped, redirected, or unknown size
+	}
+	// Room for the link above and the hint below.
+	const reservedRows = 6
+	code, ok := renderPairQR(url, rows-reservedRows, termWidth())
+	if !ok {
+		fmt.Println("💡 Cửa sổ không đủ chỗ để hiện mã QR — phóng to cửa sổ rồi chạy lại, hoặc dán link trên.")
+		return
+	}
+	fmt.Print(code)
 }
 
 // pairLinkText is everything the person needs to read: the link, and why

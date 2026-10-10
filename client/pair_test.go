@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"rsc.io/qr"
 )
 
 // TestHumanDuration reads the way a person would say it. A client that
@@ -158,4 +160,174 @@ func TestPairOpenerRefusesAnEmptyURL(t *testing.T) {
 			t.Errorf("pairOpener(%q, \"\") built a command", goos)
 		}
 	}
+}
+
+// TestRenderPairQRFitsOrRefuses: a code that scrolls or wraps cannot be
+// scanned, so the renderer refuses rather than emitting something unusable.
+// The level and the size it produces are both asserted, not derived: the
+// level trades scan tolerance against rows, so moving it changes whether the
+// code fits a real window and has to be a deliberate act rather than a
+// silent one.
+func TestRenderPairQRFitsOrRefuses(t *testing.T) {
+	if qrLevel != qr.M {
+		t.Fatal("error-correction level changed: the size below and the threshold in the docs assume M")
+	}
+	url := "https://chat.example.com/web/#pair=" + strings.Repeat("ab", 32)
+	const wantRows, wantCols = 25, 49
+
+	drawn, ok := renderPairQR(url, wantRows, wantCols)
+	if !ok {
+		t.Fatalf("refused a window of exactly %dx%d", wantRows, wantCols)
+	}
+	lines := strings.Split(strings.TrimRight(drawn, "\n"), "\n")
+	if len(lines) != wantRows {
+		t.Errorf("drew %d rows, want %d", len(lines), wantRows)
+	}
+	for i, line := range lines {
+		if got := len([]rune(qrStripColour(line))); got != wantCols {
+			t.Fatalf("row %d is %d columns, want %d", i, got, wantCols)
+		}
+	}
+	if _, ok := renderPairQR(url, wantRows-1, wantCols); ok {
+		t.Error("a window one row short still got a code")
+	}
+	if _, ok := renderPairQR(url, wantRows, wantCols-1); ok {
+		t.Error("a window one column short got a code, which the terminal would wrap")
+	}
+}
+
+// TestRenderPairQRMatchesTheEncoder: the drawing is ours, so a swapped half
+// or a shifted margin would produce a code that still looks like a QR and
+// still refuses to scan. Rebuilding the module grid from the glyphs and
+// comparing it with the encoder is what proves the picture is the symbol.
+func TestRenderPairQRMatchesTheEncoder(t *testing.T) {
+	url := "https://chat.example.com/web/#pair=abcd"
+	drawn, ok := renderPairQR(url, 200, 200)
+	if !ok {
+		t.Fatal("refused with a huge room")
+	}
+	want, err := qr.Encode(url, qrLevel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(drawn, "\n"), "\n")
+
+	// The margin is checked against the picture with the width the standard
+	// requires, not with the drawing's own constant: a scanner finds the
+	// symbol's edge in that margin, so shrinking it has to fail here.
+	const specQuiet = 4
+	for row, line := range lines {
+		mods := qrLineModules(t, line)
+		if len(mods) < specQuiet*2 {
+			t.Fatalf("row %d is only %d cells wide", row, len(mods))
+		}
+		for col, cell := range mods {
+			if col >= specQuiet && col < len(mods)-specQuiet {
+				continue
+			}
+			if cell[0] || cell[1] {
+				t.Fatalf("row %d column %d is not background", row, col)
+			}
+		}
+	}
+
+	// And the symbol itself is the encoder's, module for module.
+	for row, line := range lines {
+		for col, cell := range qrLineModules(t, line) {
+			if got := qrModule(want, col, row*2); got != cell[0] {
+				t.Fatalf("module (%d,%d): drawn %v, encoder says %v", col, row*2, cell[0], got)
+			}
+			if got := qrModule(want, col, row*2+1); got != cell[1] {
+				t.Fatalf("module (%d,%d): drawn %v, encoder says %v", col, row*2+1, cell[1], got)
+			}
+		}
+	}
+}
+
+// TestRenderPairQRCarriesItsOwnColours: the cell colours must be explicit.
+// Half-block cells take their top from the foreground and their bottom from
+// the background, so relying on the terminal's palette draws a light-on-dark
+// code on a dark theme, which some scanners refuse.
+func TestRenderPairQRCarriesItsOwnColours(t *testing.T) {
+	code, ok := renderPairQR("https://chat.example.com/web/#pair="+strings.Repeat("cd", 32), 60, 80)
+	if !ok {
+		t.Fatal("refused")
+	}
+	for _, want := range []string{"\x1b[30;40m", "\x1b[30;47m", "\x1b[37;47m", "\x1b[37;40m"} {
+		if !strings.Contains(code, want) {
+			t.Errorf("missing cell colour %q", want)
+		}
+	}
+}
+
+// TestRenderPairQRRefusesNoRoom: a window with no rows at all is not an
+// invitation to draw.
+func TestRenderPairQRRefusesNoRoom(t *testing.T) {
+	if code, ok := renderPairQR("https://chat.example.com/web/#pair=x", 0, 0); ok || code != "" {
+		t.Fatal("a zero-row window got a code")
+	}
+}
+
+// TestHasGraphicalSession: the browser opener runs on the machine the client
+// runs on, so a Linux box with no display has nothing to open into and must
+// not be told otherwise. macOS and Windows always have a session.
+func TestHasGraphicalSession(t *testing.T) {
+	cases := []struct {
+		goos, display, wayland string
+		want                   bool
+	}{
+		{"linux", "", "", false},
+		{"linux", ":0", "", true},
+		{"linux", "", "wayland-0", true},
+		{"linux", ":0", "wayland-0", true},
+		{"freebsd", "", "", false},
+		{"darwin", "", "", true},
+		{"windows", "", "", true},
+	}
+	for _, c := range cases {
+		if got := hasGraphicalSession(c.goos, c.display, c.wayland); got != c.want {
+			t.Errorf("hasGraphicalSession(%q,%q,%q) = %v, want %v",
+				c.goos, c.display, c.wayland, got, c.want)
+		}
+	}
+}
+
+// qrStripColour replaces each cell with its glyph, so a line can be measured
+// in columns rather than in bytes.
+func qrStripColour(line string) string {
+	for _, cell := range []string{qrBothDark, qrTopDark, qrBothLight, qrTopLight} {
+		line = strings.ReplaceAll(line, cell, "▀")
+	}
+	return line
+}
+
+// qrReadCell is the inverse of the drawing: it reports the two modules a cell
+// stands for, and the cell text itself so a walk can advance.
+func qrReadCell(s string) (topDark, bottomDark bool, cell string) {
+	switch {
+	case strings.HasPrefix(s, qrBothDark):
+		return true, true, qrBothDark
+	case strings.HasPrefix(s, qrTopDark):
+		return true, false, qrTopDark
+	case strings.HasPrefix(s, qrBothLight):
+		return false, false, qrBothLight
+	case strings.HasPrefix(s, qrTopLight):
+		return false, true, qrTopLight
+	}
+	return false, false, ""
+}
+
+// qrLineModules parses one drawn line into the module pairs its cells encode.
+func qrLineModules(t *testing.T, line string) [][2]bool {
+	t.Helper()
+	var out [][2]bool
+	for rest := line; rest != ""; {
+		top, bottom, cell := qrReadCell(rest)
+		if cell == "" {
+			t.Fatalf("unreadable cell in %q", rest)
+		}
+		out = append(out, [2]bool{top, bottom})
+		rest = rest[len(cell):]
+	}
+	return out
 }
