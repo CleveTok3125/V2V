@@ -117,6 +117,9 @@ func TestRoleAddIdentityManualAndPaste(t *testing.T) {
 }
 
 func TestRoleImportAndEnrollWarn(t *testing.T) {
+	// Enrollment now refuses to mint a ticket without an origin, so the
+	// command needs one even though this test is not about the link.
+	t.Setenv("WEBAUTHN_ORIGIN", "https://chat.example.com")
 	withTempDir(t, func() {
 		// import full roles.json via file
 		full := `{"imported":{"can_message_unlimited":true,"custom_prefix":"[Imp] ","identities":[{"public_key":"ff00","hmac_shield":"aa","server_pubkey":"bb"}]}}`
@@ -289,6 +292,7 @@ func TestRoleWriteTightensLooseRolesFile(t *testing.T) {
 // TestEnrollCreatesTicket: flag-driven enroll writes a pending ticket
 // without a TTY.
 func TestEnrollCreatesTicket(t *testing.T) {
+	t.Setenv("WEBAUTHN_ORIGIN", "https://chat.example.com")
 	withTempDir(t, func() {
 		if err := (&EnrollCmd{Role: "member", Label: "t", TTL: time.Minute}).Run(); err != nil {
 			t.Fatalf("enroll: %v", err)
@@ -346,6 +350,7 @@ func TestEd25519KeygenRoundtrip(t *testing.T) {
 }
 
 func TestEnrollWritesV2Store(t *testing.T) {
+	t.Setenv("WEBAUTHN_ORIGIN", "https://chat.example.com")
 	withTempDir(t, func() {
 		c := &EnrollCmd{Role: "member", TTL: time.Minute}
 		if err := c.Run(); err != nil {

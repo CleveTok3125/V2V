@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -53,6 +54,14 @@ func (e *EnrollCmd) Run() error {
 	if _, err := rand.Read(b); err != nil {
 		return err
 	}
+	// Resolved before the ticket is written: a ticket whose link cannot be
+	// used is worse than no ticket, because it occupies the store and looks
+	// like a working invitation.
+	origin := enrollOrigin()
+	if origin == "" {
+		return fmt.Errorf("WEBAUTHN_ORIGIN chưa đặt (biến môi trường hoặc %s) — không tạo được link enroll", filepath.Join(v2vctlRoot, ".env"))
+	}
+
 	code := hex.EncodeToString(b)
 	f.Pending = append(f.Pending, waPending{
 		Code:      code,
@@ -63,10 +72,45 @@ func (e *EnrollCmd) Run() error {
 	if err := saveStore(e.Store, f); err != nil {
 		return err
 	}
-	origin := env.WebauthnOrigin()
 	fmt.Println("✅ Ticket đã tạo (single-use, TTL " + e.TTL.String() + ").")
 	fmt.Printf("Gửi link sau cho người được cấp:\n\n  %s/web/#enroll=%s\n\n", origin, code)
 	return nil
+}
+
+// enrollOrigin resolves the origin enrollment links point at. The ambient
+// variable wins as an explicit override; otherwise the instance .env is
+// consulted, because that is the file the server reads and an operator
+// running this tool on the host rarely has the value exported. An empty
+// result means no link can be built, and the caller must refuse rather than
+// print a bare path.
+func enrollOrigin() string {
+	if v := strings.TrimSpace(env.WebauthnOrigin()); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	data, err := os.ReadFile(filepath.Join(v2vctlRoot, ".env"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(activeEnvValue(data, "WEBAUTHN_ORIGIN"), "/")
+}
+
+// activeEnvValue reads one key from an .env document, ignoring commented
+// lines: the shipped template has every key commented out, and treating one
+// as set would advertise an origin nobody configured.
+func activeEnvValue(data []byte, key string) string {
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		name, value, found := strings.Cut(line, "=")
+		if !found || strings.TrimSpace(name) != key {
+			continue
+		}
+		return strings.Trim(strings.TrimSpace(value), `"'`)
+	}
+	return ""
 }
 
 // --- migrate ----------------------------------------------------------------
