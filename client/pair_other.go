@@ -36,7 +36,14 @@ func pollPairStatus(httpBase, ticket string, ttlSec int) bool {
 		budget = 5 * time.Minute
 	}
 	deadline := time.Now().Add(budget)
-	client := &http.Client{Timeout: 10 * time.Second}
+	// The same client the rest of the flow uses: a bare http.Client would
+	// fall back to the environment proxy variables, which the session's
+	// --proxy never reaches, so the poll would connect from the real address.
+	client, err := versionHTTPClient()
+	if err != nil {
+		fmt.Println("❌ Không tạo được kết nối tới server:", err)
+		return false
+	}
 	statusURL := httpBase + "/pair/status?ticket=" + url.QueryEscape(ticket)
 
 	// Ask before waiting: a browser on another device may already have

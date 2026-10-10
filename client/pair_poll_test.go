@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -243,4 +245,70 @@ func scriptedClosedSocket(t *testing.T) *Session {
 	t.Cleanup(func() { client.Close() })
 	<-ready
 	return &Session{Conn: client}
+}
+
+// TestPollGoesThroughTheConfiguredProxy is the leak this pins: the poll used
+// a bare http.Client, whose nil Transport falls back to
+// http.DefaultTransport and therefore to the HTTP_PROXY environment
+// variables. The session proxy from --proxy is never exported there, so a
+// fresh client quietly connected from the real address while every other
+// request in the pairing flow went through the proxy.
+func TestPollGoesThroughTheConfiguredProxy(t *testing.T) {
+	// The target must never be reached: reaching it means the poll went
+	// direct.
+	var targetHits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"state":"pending"}`))
+	}))
+	t.Cleanup(target.Close)
+
+	// The proxy answers on behalf of the target, so a routed poll finishes
+	// on the first ask.
+	var proxyHits atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHits.Add(1)
+		if r.URL.Scheme == "" || r.URL.Host == "" {
+			t.Errorf("proxy received a non-absolute request URI %q", r.URL)
+			http.Error(w, "not a proxy request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"state":"verified"}`))
+	}))
+	t.Cleanup(proxy.Close)
+
+	host, port := splitHostPort(t, proxy.URL)
+	savedProxy, savedResolved, savedErr := resolvedProxy, proxyResolved, proxyResolveErr
+	t.Cleanup(func() {
+		resolvedProxy, proxyResolved, proxyResolveErr = savedProxy, savedResolved, savedErr
+	})
+	resolvedProxy = &proxyConfig{Scheme: "http", Host: host, Port: port}
+	proxyResolved = true
+	proxyResolveErr = nil
+
+	if !pollPairStatus(target.URL, "ticket", 5) {
+		t.Fatal("the poll did not report a verified ceremony")
+	}
+	if proxyHits.Load() == 0 {
+		t.Fatal("the poll bypassed the configured proxy")
+	}
+	if got := targetHits.Load(); got != 0 {
+		t.Fatalf("the poll reached the target directly %d time(s)", got)
+	}
+}
+
+// splitHostPort pulls the host and numeric port out of an httptest URL.
+func splitHostPort(t *testing.T, raw string) (string, int) {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.Hostname(), port
 }

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -437,6 +438,7 @@ func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string)
 	if guard.IsBanned(rec, now) {
 		s.AuthFailsMu.Unlock()
 		logWarnf("⛔ [BAN] Từ chối %s. Vui lòng đợi đến %s.", clientIP, rec.UnlockTime.Format("15:04:05"))
+		setRetryAfter(w, rec.UnlockTime.Sub(now))
 		http.Error(w, "IP của bạn đang bị khóa tạm thời do xác thực sai nhiều lần.", http.StatusTooManyRequests)
 		return false
 	}
@@ -444,9 +446,11 @@ func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string)
 
 	s.LastConnectMu.Lock()
 	if lastTime, exists := s.LastConnectTime[clientIP]; exists {
-		if ok, _ := guard.CheckConnectionRate(now, rec, lastTime, Cfg.Dynamic.Load().ConnectionCooldown); !ok {
+		cooldown := Cfg.Dynamic.Load().ConnectionCooldown
+		if ok, _ := guard.CheckConnectionRate(now, rec, lastTime, cooldown); !ok {
 			s.LastConnectMu.Unlock()
 			logWarnf("⛔ Từ chối: %s kết nối ra/vào quá nhanh.\n", clientIP)
+			setRetryAfter(w, cooldown-time.Since(lastTime))
 			http.Error(w, "Bạn thao tác ra/vào quá nhanh! Vui lòng đợi vài giây rồi thử lại.", http.StatusTooManyRequests)
 			return false
 		}
@@ -455,6 +459,18 @@ func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string)
 	s.LastConnectMu.Unlock()
 
 	return true
+}
+
+// setRetryAfter answers in whole seconds, never below one: a header of "0"
+// would tell a client to retry immediately into the same refusal. The
+// remaining time is real, so a ban of two minutes is not rounded down to a
+// wait that ends too early.
+func setRetryAfter(w http.ResponseWriter, remaining time.Duration) {
+	seconds := int(remaining.Seconds())
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
 }
 
 func (s *ChatServer) handleAuthPenalty(clientIP string) {
