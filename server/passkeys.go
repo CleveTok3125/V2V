@@ -69,3 +69,10 @@ func ChallengeFromNonce(nonceHex string) []byte {
 var errPasskey = errors.New("passkey_error")
 
 func perr(reason string) error { return fmt.Errorf("%w: %s", errPasskey, reason) }
+
+// perrCause is perr with the library's own error attached. The operator is
+// the only one who can act on a rejected ceremony, and the sentinel alone
+// says which step failed without saying why.
+func perrCause(reason string, cause error) error {
+	return fmt.Errorf("%w: %s: %w", errPasskey, reason, cause)
+}

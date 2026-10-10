@@ -70,7 +70,7 @@ func verifyAssertionLib(stored *WAStoredCred, nonceHex, authDataB64, clientDataB
 	}
 	pubKeyCOSE, err := base64.RawURLEncoding.DecodeString(stored.PublicKey)
 	if err != nil {
-		return 0, perr("stored_key_malformed")
+		return 0, perrCause("stored_key_malformed", err)
 	}
 	rawID, err := base64.RawURLEncoding.DecodeString(stored.CredentialID)
 	if err != nil || len(rawID) == 0 || len(rawID) > maxCredentialIDLen {
@@ -81,7 +81,7 @@ func verifyAssertionLib(stored *WAStoredCred, nonceHex, authDataB64, clientDataB
 		credIDB64, credIDB64, authDataB64, clientDataB64, sigB64)
 	parsed, err := protocol.ParseCredentialRequestResponseBytes([]byte(doc))
 	if err != nil {
-		return 0, perr("assertion_malformed")
+		return 0, perrCause("assertion_malformed", err)
 	}
 	uidSum := sha256.Sum256([]byte(role + "\x00" + credIDB64))
 	chalSum := ChallengeFromNonce(nonceHex)
@@ -97,7 +97,7 @@ func verifyAssertionLib(stored *WAStoredCred, nonceHex, authDataB64, clientDataB
 	}}
 	cred, err := WebAuth.ValidateLogin(user, session, parsed)
 	if err != nil {
-		return 0, fmt.Errorf("%w: login_rejected", errPasskey)
+		return 0, perrCause("login_rejected", err)
 	}
 	if !parsed.Response.AuthenticatorData.Flags.UserVerified() {
 		return 0, perr("user_verification_required")
@@ -125,7 +125,7 @@ func parseCreationLib(clientDataB64, attObjB64, wantChallengeB64, claimedID stri
 		claimedID, claimedID, clientDataB64, attObjB64)
 	parsed, err := protocol.ParseCredentialCreationResponseBytes([]byte(doc))
 	if err != nil {
-		return nil, perr("creation_malformed")
+		return nil, perrCause("creation_malformed", err)
 	}
 	uidSum := sha256.Sum256([]byte("enroll\x00" + wantChallengeB64))
 	session := libSession(wantChallengeB64, uidSum[:])
@@ -133,7 +133,7 @@ func parseCreationLib(clientDataB64, attObjB64, wantChallengeB64, claimedID stri
 	user := waUser{id: uidSum[:], name: "enroll"}
 	cred, err := WebAuth.CreateCredential(user, session, parsed)
 	if err != nil {
-		return nil, fmt.Errorf("%w: registration_rejected", errPasskey)
+		return nil, perrCause("registration_rejected", err)
 	}
 	gotID := base64.RawURLEncoding.EncodeToString(cred.ID)
 	if gotID != claimedID {
