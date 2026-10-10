@@ -229,9 +229,9 @@ func (s *ChatServer) StartCleanupTasks() {
 	}()
 
 	// Sweep expired pre-auth nonces on a slow ticker instead of one
-	// timer per connection. Pairing sessions are swept in the same pass:
-	// they are created by the same handshake and would otherwise hold
-	// their slot against the pairing cap until the next process restart.
+	// timer per connection. Pairing tickets are swept in the same pass:
+	// they are minted by the same handshake and would otherwise hold
+	// their place against the pairing ceiling until the next restart.
 	go func() {
 		nonceSweep := time.NewTicker(30 * time.Second)
 		defer nonceSweep.Stop()
@@ -243,7 +243,7 @@ func (s *ChatServer) StartCleanupTasks() {
 				}
 				return true
 			})
-			s.prunePairSessions(now)
+			s.prunePairTickets(now)
 		}
 	}()
 }
@@ -496,6 +496,18 @@ func main() {
 		chatApp.handlePairSubmit(w, r)
 	}))
 
+	// The desktop polls here while a browser runs the ceremony. No IP gate:
+	// the request holds nothing and returns at once, and it is metered
+	// inside. Unlike /pair/submit it must come from the address that asked
+	// for the ticket, which the store enforces.
+	mux.HandleFunc("/pair/status", chatApp.instrumentHTTP("pair_status", func(w http.ResponseWriter, r *http.Request) {
+		if !passkeyAllowed(r) {
+			http.NotFound(w, r)
+			return
+		}
+		chatApp.handlePairStatus(w, r)
+	}))
+
 	mux.HandleFunc("/api/server_pubkey", chatApp.instrumentHTTP("meta", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
@@ -513,6 +525,7 @@ func main() {
 		chatApp.handleTripVerify(w, r)
 	}))
 	mux.HandleFunc("/api/version", chatApp.instrumentHTTP("meta", handleAPIVersion))
+	mux.HandleFunc("/api/capabilities", chatApp.instrumentHTTP("meta", handleAPICapabilities))
 
 	mux.HandleFunc("/api/join-gate", chatApp.instrumentHTTP("join_gate", func(w http.ResponseWriter, r *http.Request) {
 		chatApp.handleJoinGate(w, r)

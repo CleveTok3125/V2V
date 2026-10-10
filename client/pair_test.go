@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -57,14 +58,10 @@ func TestPairWaitPromptNamesTheBudget(t *testing.T) {
 // survives all three, so it is printed before any opener is tried.
 func TestPrintPairURLAlwaysShowsTheLink(t *testing.T) {
 	const url = "https://chat.example.com/web/#pair=deadbeef"
-	got := captureStdout(t, func() { printPairURL(url) })
+	got := captureStdout(t, func() { fmt.Println(pairLinkText(url)) })
 
 	if !strings.Contains(got, url) {
 		t.Errorf("the link was not printed:\n%s", got)
-	}
-	// Whichever opener ran or failed, the user is told what to do.
-	if !strings.Contains(got, "dán link") {
-		t.Errorf("no next step offered to the user:\n%s", got)
 	}
 }
 

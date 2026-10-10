@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/strutil"
-	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // Session carries the chat session state shared by the read pump, the
@@ -280,6 +279,21 @@ func (s *Session) connect() bool {
 	s.WSURL = normalizeURL(CLI.Server)
 	s.Username = strings.TrimSpace(CLI.Username)
 
+	// A passkey login needs a browser ceremony first, and that wait does
+	// not belong on the chat socket: it takes minutes, and a socket held
+	// that long costs a connection slot and can be cut by anything idle on
+	// the path. The ticket comes back here, and the connection below
+	// spends it.
+	var pairTicket string
+	if CLI.Passkey != "" {
+		ticket, ok := acquirePairTicket(s.WSURL, CLI.Passkey)
+		if !ok {
+			notifyQuit()
+			return false
+		}
+		pairTicket = ticket
+	}
+
 	// Fail fast on version policy before prompting for secrets.
 	if !checkServerVersion(s.WSURL) {
 		os.Exit(1)
@@ -354,8 +368,8 @@ func (s *Session) connect() bool {
 	}
 
 	if CLI.Passkey != "" {
-		respPacket.Type = wire.AuthPairRequest
 		respPacket.Role = CLI.Passkey
+		respPacket.PairTicket = pairTicket
 	} else if CLI.KeyFile != "" {
 		idf, lerr := LoadIdentityFile(CLI.KeyFile)
 		if lerr != nil {
@@ -440,7 +454,7 @@ func (s *Session) connect() bool {
 		return false
 	}
 
-	authSuccess, err := readAuthResult(s, &respPacket)
+	authSuccess, err := readAuthResult(s)
 	if err != nil {
 		notifyQuit()
 		return false

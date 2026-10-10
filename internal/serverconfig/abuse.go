@@ -21,6 +21,11 @@ type PowTier struct {
 	EstMs      int
 }
 
+// DefaultPairMaxPending bounds outstanding desktop pairing tickets when
+// PAIR_MAX_PENDING is unset. Sized for memory, not for connections: a
+// ticket is a few hundred bytes.
+const DefaultPairMaxPending = 1024
+
 // AbuseConfig holds the always-required abuse knobs (group A): global
 // cap, under-attack, PoW ladder and gate. Behavior is nil when
 // BEHAVIOR_ENABLED=false, in which case no group-B key is needed.
@@ -45,6 +50,12 @@ type AbuseConfig struct {
 	PassTTL             time.Duration
 	PassSingleUse       bool
 	Behavior            *BehaviorConfig
+
+	// PairMaxPending bounds the outstanding desktop pairing tickets. It is
+	// a memory ceiling, not a capacity reservation: a ticket holds a few
+	// hundred bytes and no connection. Optional with a default, so a
+	// deployment that predates the knob keeps booting.
+	PairMaxPending int
 }
 
 // BehaviorConfig holds the group-B knobs, required only when the
@@ -148,6 +159,22 @@ func (l *abuseLoader) raw(key string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(v), true
+}
+
+// optInt reads an optional key with a default. Unlike reqInt it does not
+// record the key as missing, so a deployment that predates the knob keeps
+// booting on the default instead of failing on a required-variable error.
+func (l *abuseLoader) optInt(key string, def int) int {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return def
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		l.bad = append(l.bad, fmt.Sprintf("%s: %v", key, err))
+		return def
+	}
+	return n
 }
 
 func (l *abuseLoader) reqInt(key string) (int, bool) {
@@ -266,6 +293,7 @@ func LoadAbuseConfig() (AbuseConfig, []string, error) {
 	cfg.GateHTTPEnabled, _ = l.reqBool("GATE_HTTP_ENABLED")
 	cfg.GateHTTPMode, _ = l.reqEnum("GATE_HTTP_MODE", "under-attack", "tier")
 	cfg.PassTTL, _ = l.reqDuration("PASS_TTL")
+	cfg.PairMaxPending = l.optInt("PAIR_MAX_PENDING", DefaultPairMaxPending)
 	cfg.PassSingleUse, _ = l.reqBool("PASS_SINGLE_USE")
 
 	if err := l.err(); err != nil {
@@ -315,6 +343,9 @@ func LoadAbuseConfig() (AbuseConfig, []string, error) {
 	}
 	if cfg.ScreenDeadline <= 0 || cfg.PowTTL <= 0 || cfg.PassTTL <= 0 {
 		return AbuseConfig{}, nil, fmt.Errorf("abuse config: SCREEN_DEADLINE/POW_TTL/PASS_TTL must be positive")
+	}
+	if cfg.PairMaxPending < 1 {
+		return AbuseConfig{}, nil, fmt.Errorf("abuse config: PAIR_MAX_PENDING must be positive")
 	}
 	if cfg.GateHTTPEnabled {
 		raw, ok := l.raw("GATE_HTTP_CLASSES")

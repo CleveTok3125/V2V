@@ -1,248 +1,219 @@
 package main
 
 // Desktop passkey pairing. A desktop client cannot run a WebAuthn
-// ceremony: the private key lives inside an authenticator the process
-// has no access to. So the desktop asks for a pair ticket, prints the
-// page URL for that ticket and waits with its socket open; a browser
-// anywhere completes the ceremony and posts the assertion back. The
-// server verifies that assertion and resolves the waiting handshake.
+// ceremony: the private key lives inside an authenticator the process has
+// no access to. So the desktop asks for a pair ticket, prints the page URL
+// for it, and lets a browser anywhere complete the ceremony.
 //
-// The session is owned by the HandleAuth call that created it, and it is
-// reachable only through an unguessable ticket. That is what keeps a
-// second connection from riding in on someone else's ceremony: the
-// ticket is the capability, and it dies with the handshake that minted it.
+// The ticket carries the evidence, not a socket. Waiting is the human's
+// job and can take minutes, so it happens over poll requests that hold
+// nothing: a socket held for the whole ceremony would cost a connection
+// slot, and an idle one can be cut by anything on the path. The ticket is
+// unguessable, single-use and tied to the address that asked for it, so a
+// second party cannot ride in on somebody else's ceremony.
+//
+// See docs/TECHNICAL.md, "Desktop pairing", for the request flow.
 
 import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
-	"sync/atomic"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/strutil"
-	"github.com/CleveTok3125/V2V/internal/wire"
-
-	"github.com/gorilla/websocket"
+	"github.com/CleveTok3125/V2V/internal/serverconfig"
 )
 
-// awaitPairAssertion runs the browser half of a desktop passkey login.
-// The client has already proved it holds a live handshake nonce; from here
-// the socket simply waits while a browser signs the pair ticket.
-func (s *ChatServer) awaitPairAssertion(conn *websocket.Conn, clientIP string, req AuthPacket, onion bool) (Permission, AuthPacket, error) {
-	perms := GetDefaultPermission()
-	if !WAConfig.Enabled {
-		logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt (thiếu WEBAUTHN_RPID/ORIGIN).", clientIP)
-		return perms, req, fmt.Errorf("%w", ErrPasskeyDisabled)
-	}
-	if passkeyDisabledForOnion(onion) {
-		logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt trên onion (ONION_ALLOW_PASSKEY=false).", clientIP)
-		return perms, req, fmt.Errorf("%w", ErrPasskeyDisabled)
-	}
-	// The role is named by the client and confirmed here, so the browser
-	// page never gets to decide which role the ceremony is for.
-	if req.Role == "" {
-		return perms, req, fmt.Errorf("%w", ErrInvalidRole)
-	}
-	s.RoleRegistryMu.RLock()
-	roleDef, exists := s.RoleRegistry[req.Role]
-	s.RoleRegistryMu.RUnlock()
-	if !exists {
-		logWarnf("⚠️ [AUTH FAIL] %s: Yêu cầu Role không tồn tại [%s]", clientIP, req.Role)
-		return perms, req, fmt.Errorf("%w", ErrInvalidRole)
-	}
+// pairTicketTTL is how long a person has to open the link and confirm the
+// passkey. It is generous because a phone has to wake up, unlock and find
+// the authenticator; the cost of holding a ticket that long is a few
+// hundred bytes, not a connection.
+const pairTicketTTL = 5 * time.Minute
 
-	ticket, sess, err := s.newPairSession(req.Role, clientIP)
-	if err != nil {
-		return perms, req, err
-	}
-	// The ticket rides in the URL fragment, which browsers never put in a
-	// request line, so it stays out of server and proxy logs.
-	if err := conn.WriteJSON(AuthPacket{
-		Type:       wire.AuthPair,
-		PairTicket: ticket,
-		PairURL:    WAConfig.Origin + "/web/#pair=" + ticket,
-		PairTTLSec: int(pairTicketTTL.Seconds()),
-	}); err != nil {
-		s.PairSessions.Delete(ticket)
-		return perms, req, err
-	}
-	logInfof("🔗 [PAIR] %s yêu cầu ceremony cho role [%s], ticket=%s…", clientIP, req.Role, strutil.Short(ticket))
-
-	verdict := sess.await(pairTicketTTL)
-	s.PairSessions.Delete(ticket)
-	if !verdict.OK {
-		logWarnf("⚠️ [AUTH FAIL] %s: ceremony passkey thất bại: %v", clientIP, verdict.Err)
-		return perms, req, verdict.Err
-	}
-	logInfof("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey thật qua browser, role: [%s]", clientIP, req.Role)
-	req.AuthType = "passkey"
-	return roleDef.Permission, req, nil
-}
-
-const (
-	// pairTicketTTL is how long a person has to open the link and confirm
-	// the passkey. It is long because a phone has to wake up, unlock and
-	// find the authenticator.
-	pairTicketTTL = 5 * time.Minute
-
-	// pairTicketBytes matches the handshake nonce, so the challenge both
-	// sides derive from it is already oversized for preimage resistance.
-	pairTicketBytes = 64
-
-	// Every pending pairing pins a pre-auth socket for the whole
-	// ceremony, so the count in flight is capped. The sockets are the
-	// expensive part; the bookkeeping is free.
-	maxPendingPairs = 64
-
-	// One client may not hold the whole global budget, or the pairing
-	// feature becomes a way to occupy every slot from a single address.
-	maxPendingPairsPerIP = 4
-)
+// pairTicketBytes matches the handshake nonce, so the challenge both sides
+// derive from it is already oversized for preimage resistance.
+const pairTicketBytes = 64
 
 var (
-	ErrPairRateLimited = errors.New("auth_error: pair_rate_limited")
-	ErrPairExpired     = errors.New("auth_error: pair_expired")
-	ErrPairUnknown     = errors.New("auth_error: pair_unknown")
-	ErrPairUsed        = errors.New("auth_error: pair_used")
+	// ErrPairCapacity is the memory guard. A ticket costs nothing to hold
+	// but nothing is free, and the only thing standing between a client
+	// and an unlimited number of them is this ceiling.
+	ErrPairCapacity = errors.New("auth_error: pair_capacity")
+
+	// errPairTicketIssued is internal: the ticket has been sent and the
+	// connection should close without an auth_failed frame. The pairing is
+	// not over, it has moved off this socket.
+	errPairTicketIssued = errors.New("pair_ticket_issued")
+
+	// ErrPairExpired reports that a link ran out of time, so the desktop
+	// can say so instead of showing a blank failure.
+	ErrPairExpired = errors.New("auth_error: pair_expired")
+
+	// ErrPairUnknown covers a ticket that is unknown, spent or no longer
+	// live. They are one answer on purpose: telling them apart would let a
+	// caller probe for tickets that exist.
+	ErrPairUnknown = errors.New("auth_error: pair_unknown")
 )
 
-// pairVerdict is what the browser's assertion turns into. A failure keeps
-// its own error so the desktop can say what the ceremony rejected rather
-// than reporting a generic timeout.
-type pairVerdict struct {
-	OK  bool
-	Err error
+// dropPairTicket removes a ticket whose reply never reached the client, so
+// a failed write does not leave a link that can never be completed.
+func (s *ChatServer) dropPairTicket(ticket string) {
+	s.PairTicketsMu.Lock()
+	defer s.PairTicketsMu.Unlock()
+	delete(s.PairTickets, ticket)
 }
 
-// pairSession is one in-flight pairing. Only its own HandleAuth goroutine
-// reads verdict; /pair/submit writes it exactly once.
-type pairSession struct {
+// notePairRejection logs a refused ceremony. The ticket survives on
+// purpose: the person may simply be holding the wrong passkey, and the
+// link should let them try another one.
+func (s *ChatServer) notePairRejection(clientIP string) {
+	logWarnf("⚠️ [PAIR SUBMIT] %s: bằng chứng không xác minh được, vé vẫn dùng được.", clientIP)
+}
+
+// pairMaxPending reads the memory ceiling. Tests build a bare server with
+// no config loaded, so the config default is the fallback rather than zero,
+// which would refuse every pairing.
+func pairMaxPending() int {
+	if a := Cfg.Abuse.Load(); a != nil && a.PairMaxPending > 0 {
+		return a.PairMaxPending
+	}
+	return serverconfig.DefaultPairMaxPending
+}
+
+// pairTicket is one outstanding pairing. Verified is set by /pair/submit
+// once a browser has proved the role; Consumed is set by the handshake that
+// spends it. Both are guarded by the store's own locking, so the type
+// carries plain fields read under PairTicketsMu.
+type pairTicket struct {
 	ExpiresAt time.Time
 	Role      string
 	IP        string
-	verdict   chan pairVerdict
-	// consumed is the one-shot latch. A ceremony may claim the pairing
-	// exactly once, so a replayed submission is refused as unknown.
-	consumed atomic.Bool
+	Verified  bool
+	Consumed  bool
 }
 
-// resolve hands the ceremony's verdict to the waiting handshake. It never
-// blocks: the waiter may already have timed out, and a duplicate
-// submission must not pin the HTTP handler.
-func (p *pairSession) resolve(v pairVerdict) {
-	select {
-	case p.verdict <- v:
-	default:
-	}
-}
+// issuePairTicket mints a ticket for one desktop. The caller has already
+// validated the handshake nonce, so the role and the address are both
+// settled by the time anything is stored.
+func (s *ChatServer) issuePairTicket(role, clientIP string) (string, error) {
+	s.PairTicketsMu.Lock()
+	defer s.PairTicketsMu.Unlock()
 
-// await blocks for budget, then reports expiry. A buffered channel of one
-// keeps a resolution that arrives just after the deadline from being lost.
-func (p *pairSession) await(budget time.Duration) pairVerdict {
-	select {
-	case v := <-p.verdict:
-		return v
-	case <-time.After(budget):
-		return pairVerdict{OK: false, Err: ErrPairExpired}
-	}
-}
-
-// newPairSession mints a ticket and its session for one desktop handshake.
-func (s *ChatServer) newPairSession(role, clientIP string) (string, *pairSession, error) {
-	if s.countPairSessions() >= maxPendingPairs {
-		return "", nil, ErrPairRateLimited
-	}
-	if s.countPairSessionsForIP(clientIP) >= maxPendingPairsPerIP {
-		return "", nil, ErrPairRateLimited
+	// Reclaim before measuring. The sweep runs on the same ticker as the
+	// nonce sweep, but a ticket that ran out of time is no longer memory
+	// worth bounding, and letting it keep its place would refuse new
+	// ceremonies for the rest of the interval.
+	s.prunePairTicketsLocked(time.Now())
+	if len(s.PairTickets) >= pairMaxPending() {
+		return "", ErrPairCapacity
 	}
 	raw := make([]byte, pairTicketBytes)
 	if _, err := rand.Read(raw); err != nil {
-		return "", nil, ErrEntropyExhaustion
+		return "", ErrEntropyExhaustion
 	}
 	ticket := hex.EncodeToString(raw)
-	sess := &pairSession{
+	s.PairTickets[ticket] = &pairTicket{
 		ExpiresAt: time.Now().Add(pairTicketTTL),
 		Role:      role,
 		IP:        clientIP,
-		verdict:   make(chan pairVerdict, 1),
 	}
-	s.PairSessions.Store(ticket, sess)
-	return ticket, sess, nil
+	return ticket, nil
 }
 
-// claimPairSession returns a live session for a ticket, without deciding the
-// ticket's fate. A failed verification must leave the link usable, so the
-// one-shot latch is set by commitPairSession instead of here.
-func (s *ChatServer) claimPairSession(ticket string) (*pairSession, bool) {
-	raw, ok := s.PairSessions.Load(ticket)
-	if !ok {
-		return nil, false
-	}
-	sess, ok := raw.(*pairSession)
-	if !ok {
-		s.PairSessions.Delete(ticket)
-		return nil, false
-	}
-	if time.Now().After(sess.ExpiresAt) {
-		s.PairSessions.Delete(ticket)
-		return nil, false
-	}
-	return sess, true
+// pairTicketFor answers the HTTP endpoints, which collapse every refusal
+// into one answer on purpose: telling them apart in a response would let a
+// caller probe for tickets that exist.
+func (s *ChatServer) pairTicketFor(ticket, clientIP string) (*pairTicket, bool) {
+	t, err := s.pairTicketState(ticket, clientIP)
+	return t, err == nil
 }
 
-// commitPairSession spends a ticket once an assertion has been verified. The
-// latch is what makes one login one login: a browser that reloads, or a link
-// that is opened twice, cannot resolve the same handshake a second time.
-func (s *ChatServer) commitPairSession(ticket string) bool {
-	raw, ok := s.PairSessions.Load(ticket)
-	if !ok {
+// pairTicketState returns a live ticket owned by the caller, and why it
+// refused. Only the login path needs the reason: a link that ran out of time
+// and a link that was never issued are different events, and filing both as
+// a probe penalises a person for taking too long.
+func (s *ChatServer) pairTicketState(ticket, clientIP string) (*pairTicket, error) {
+	s.PairTicketsMu.Lock()
+	defer s.PairTicketsMu.Unlock()
+	return s.livePairTicketLocked(ticket, clientIP)
+}
+
+func (s *ChatServer) livePairTicketLocked(ticket, clientIP string) (*pairTicket, error) {
+	t, ok := s.PairTickets[ticket]
+	if !ok || t.Consumed {
+		return nil, ErrPairUnknown
+	}
+	if time.Now().After(t.ExpiresAt) {
+		delete(s.PairTickets, ticket)
+		return nil, ErrPairExpired
+	}
+	if t.IP != clientIP {
+		return nil, ErrPairUnknown
+	}
+	return t, nil
+}
+
+// markPairVerified records that a browser proved the role for this ticket.
+// A rejected assertion deliberately does not clear a previous success and
+// does not spend the ticket: the person may simply be holding the wrong
+// passkey and should be able to try another one on the same link.
+func (s *ChatServer) markPairVerified(ticket string) bool {
+	s.PairTicketsMu.Lock()
+	defer s.PairTicketsMu.Unlock()
+	t, ok := s.PairTickets[ticket]
+	if !ok || t.Consumed || time.Now().After(t.ExpiresAt) {
 		return false
 	}
-	sess, ok := raw.(*pairSession)
-	if !ok {
-		s.PairSessions.Delete(ticket)
-		return false
-	}
-	if sess.consumed.Swap(true) {
-		s.PairSessions.Delete(ticket)
-		return false
-	}
+	t.Verified = true
 	return true
 }
 
-// countPairSessions and countPairSessionsForIP walk the store. The map is
-// capped at maxPendingPairs entries, so this stays cheap enough to run on
-// every pairing request.
-func (s *ChatServer) countPairSessions() int {
-	n := 0
-	s.PairSessions.Range(func(_, _ any) bool {
-		n++
-		return true
-	})
-	return n
+// takeVerifiedPairTicket spends a ticket. It is the only way a ticket turns
+// into a session, and it requires the proof, the same address and one use,
+// so a ticket that leaks still cannot be spent from anywhere else.
+// takeVerifiedPairTicket spends a ticket and reports why it could not. It is
+// the only way a ticket turns into a session, and it requires the proof, the
+// same address and one use, so a ticket that leaks still cannot be spent from
+// anywhere else.
+//
+// An unverified ticket is not "expired": the browser simply has not finished,
+// which is the ordinary state while a person is looking for their passkey.
+func (s *ChatServer) takeVerifiedPairTicket(ticket, clientIP string) (*pairTicket, error) {
+	s.PairTicketsMu.Lock()
+	defer s.PairTicketsMu.Unlock()
+	t, err := s.livePairTicketLocked(ticket, clientIP)
+	if err != nil {
+		return nil, err
+	}
+	if !t.Verified {
+		return nil, ErrPairUnknown
+	}
+	t.Consumed = true
+	return t, nil
 }
 
-func (s *ChatServer) countPairSessionsForIP(clientIP string) int {
-	n := 0
-	s.PairSessions.Range(func(_, v any) bool {
-		if sess, ok := v.(*pairSession); ok && sess.IP == clientIP {
-			n++
-		}
-		return true
-	})
-	return n
+// countPairTickets reports the store size. The sweep keeps it near the
+// number of live pairings, so this is a cheap read of a small map.
+func (s *ChatServer) countPairTickets() int {
+	s.PairTicketsMu.Lock()
+	defer s.PairTicketsMu.Unlock()
+	return len(s.PairTickets)
 }
 
-// prunePairSessions drops pairings nobody finished. Called from the same
-// periodic sweep that expires handshake nonces, so an abandoned ceremony
-// returns its slot to the cap.
-func (s *ChatServer) prunePairSessions(now time.Time) {
-	s.PairSessions.Range(func(k, v any) bool {
-		sess, ok := v.(*pairSession)
-		if !ok || now.After(sess.ExpiresAt) {
-			s.PairSessions.Delete(k)
+// prunePairTickets drops tickets nobody finished. Called from the same
+// periodic sweep that expires handshake nonces, so an abandoned link
+// returns its share of the memory ceiling.
+func (s *ChatServer) prunePairTickets(now time.Time) {
+	s.PairTicketsMu.Lock()
+	defer s.PairTicketsMu.Unlock()
+	s.prunePairTicketsLocked(now)
+}
+
+// prunePairTicketsLocked is the body the sweep and the issue path share.
+// Caller must hold PairTicketsMu.
+func (s *ChatServer) prunePairTicketsLocked(now time.Time) {
+	for ticket, t := range s.PairTickets {
+		if now.After(t.ExpiresAt) {
+			delete(s.PairTickets, ticket)
 		}
-		return true
-	})
+	}
 }

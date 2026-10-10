@@ -3,7 +3,7 @@ package main
 // The browser half of a desktop passkey login. The page has just run
 // navigator.credentials.get over the pair ticket and posts the assertion
 // here; the handler verifies it against the role the desktop named and
-// resolves the handshake that is waiting for it.
+// records the role as proved so the desktop's next poll can spend it.
 
 import (
 	"encoding/json"
@@ -19,7 +19,7 @@ const pairSubmitCooldown = 10 * time.Second
 var pairSubmitCooldowns = guard.NewCooldownMap()
 
 // pairSubmission is the page's POST body. It carries no role on purpose:
-// the role is a property of the pairing session, and a value the browser
+// the role is a property of the ticket, and a value the browser
 // can edit is a second, weaker way to say the same thing.
 type pairSubmission struct {
 	Ticket     string `json:"ticket"`
@@ -58,26 +58,26 @@ func (s *ChatServer) handlePairSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The ticket is claimed, not spent: a rejected assertion leaves the link
-	// usable so the person can pick another passkey instead of restarting
-	// the client and the whole ceremony.
-	sess, ok := s.claimPairSession(sub.Ticket)
+	// The ticket is read, not spent: a rejected assertion must leave the
+	// link usable so the person can pick another passkey instead of
+	// restarting the client and the whole ceremony.
+	ticket, ok := s.pairTicketFor(sub.Ticket, clientIP)
 	if !ok {
 		http.Error(w, "unknown or expired pairing", http.StatusGone)
 		return
 	}
 
-	cred, ok := s.WebAuthn.Credential(sess.Role, sub.PasskeyID)
+	cred, ok := s.WebAuthn.Credential(ticket.Role, sub.PasskeyID)
 	if !ok {
-		logWarnf("⚠️ [PAIR SUBMIT] %s: credential không thuộc role [%s]", clientIP, sess.Role)
-		sess.resolve(pairVerdict{OK: false, Err: ErrVerificationFailed})
+		logWarnf("⚠️ [PAIR SUBMIT] %s: credential không thuộc role [%s]", clientIP, ticket.Role)
+		s.notePairRejection(clientIP)
 		http.Error(w, "verification failed", http.StatusForbidden)
 		return
 	}
-	counter, verr := verifyAssertionLib(cred, sub.Ticket, sub.AuthData, sub.ClientData, sub.Sig, sess.Role)
+	counter, verr := verifyAssertionLib(cred, sub.Ticket, sub.AuthData, sub.ClientData, sub.Sig, ticket.Role)
 	if verr != nil {
 		logErrorf("🚨 [PAIR SUBMIT] %s: %v", clientIP, verr)
-		sess.resolve(pairVerdict{OK: false, Err: ErrVerificationFailed})
+		s.notePairRejection(clientIP)
 		http.Error(w, "verification failed", http.StatusForbidden)
 		return
 	}
@@ -85,27 +85,21 @@ func (s *ChatServer) handlePairSubmit(w http.ResponseWriter, r *http.Request) {
 	// advance means the same authenticator answered twice, or a copy did.
 	if counter != 0 && cred.SignCount != 0 && counter <= cred.SignCount {
 		logErrorf("🚨 [PAIR SUBMIT] %s: counter không tăng (%d <= %d)", clientIP, counter, cred.SignCount)
-		sess.resolve(pairVerdict{OK: false, Err: ErrCounterNotIncreasing})
+		s.notePairRejection(clientIP)
 		http.Error(w, "verification failed", http.StatusForbidden)
 		return
 	}
 	if counter != 0 {
-		if err := s.WebAuthn.UpdateSignCount(sess.Role, cred.CredentialID, counter); err != nil {
+		if err := s.WebAuthn.UpdateSignCount(ticket.Role, cred.CredentialID, counter); err != nil {
 			logErrorf("🚨 [PAIR SUBMIT] %s: không lưu counter: %v", clientIP, err)
-			sess.resolve(pairVerdict{OK: false, Err: ErrCounterNotIncreasing})
+			s.notePairRejection(clientIP)
 			http.Error(w, "verification failed", http.StatusForbidden)
 			return
 		}
 	}
 
-	logInfof("✅ [PAIR SUBMIT] %s xác thực được, role=[%s], ticket=%s…", clientIP, sess.Role, strutil.Short(sub.Ticket))
-	if !s.commitPairSession(sub.Ticket) {
-		// Another submission verified the same ticket first. This assertion
-		// is real but the handshake has already been granted elsewhere.
-		http.Error(w, "unknown or spent pairing", http.StatusGone)
-		return
-	}
-	sess.resolve(pairVerdict{OK: true})
+	logInfof("✅ [PAIR SUBMIT] %s xác thực được, role=[%s], ticket=%s…", clientIP, ticket.Role, strutil.Short(sub.Ticket))
+	s.markPairVerified(sub.Ticket)
 	// Content-Type before the status: WriteHeader snapshots the header map,
 	// so setting it afterwards leaves the browser with text/plain.
 	w.Header().Set("Content-Type", "application/json")

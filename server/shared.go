@@ -173,11 +173,13 @@ type ChatServer struct {
 	ActiveNonces sync.Map
 	Upgrader     websocket.Upgrader
 
-	// PairSessions holds desktop passkey pairings in flight, keyed by the
-	// ticket the browser ceremony signs. Unlike ActiveNonces these outlive
-	// the handshake window, so each one pins a socket for the ceremony and
-	// the count is capped; see pair.go.
-	PairSessions sync.Map
+	// PairTickets holds outstanding desktop passkey pairings, keyed by the
+	// ticket the browser ceremony signs. A ticket costs only memory: waiting
+	// for the human happens over poll requests, not on a held socket, so the
+	// store is bounded by pairMaxPending rather than by connection slots.
+	// See pair.go.
+	PairTickets   map[string]*pairTicket
+	PairTicketsMu sync.Mutex
 
 	TripChains   sync.Map // pub hex -> TripChain
 	TripChainsMu sync.Mutex
@@ -222,6 +224,7 @@ func NewChatServer() *ChatServer {
 		DisplaySalt:     salt,
 		Chain:           ChainService{History: make([]string, 0)},
 		RoleRegistry:    make(map[string]RoleDefinition),
+		PairTickets:     make(map[string]*pairTicket),
 		WebAuthn:        NewWebAuthnStore(env.WebauthnStore()),
 		Gate:            NewGateStore(),
 		Attack:          NewAttackState(),

@@ -15,6 +15,10 @@ func printPairURL(url string) {
 	fmt.Println("   Link này không áp dụng: " + url)
 }
 
+// pollPairStatus has nothing to do on wasm: the page runs the ceremony
+// against the same handshake, so there is no out-of-band wait to poll for.
+func pollPairStatus(string, string, int) bool { return false }
+
 func pairWaitPrompt(role string, _ int) string {
 	return fmt.Sprintf("⏳ Đang chờ xác thực passkey cho role [%s]...\n", role)
 }

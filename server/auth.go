@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
+	"github.com/CleveTok3125/V2V/internal/strutil"
 	"github.com/CleveTok3125/V2V/internal/wire"
 
 	"github.com/gorilla/websocket"
@@ -95,15 +97,22 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		return perms, resp, err
 	}
 
-	// Desktop passkey pairing: the client cannot run the ceremony itself, so
-	// it asks for a ticket, receives a URL to open and waits with this socket
-	// open while a browser completes it.
+	// Desktop passkey pairing, part one: the client cannot run the ceremony
+	// itself, so it asks for a ticket and gets a link to open. The answer is
+	// the end of this socket — the wait happens over poll requests, where
+	// nothing is held and an idle path cannot cut the ceremony short.
 	//
 	// A packet that also carries assertion material is a login attempt, not a
-	// pairing request. Opening a ceremony window for it would park a pending
-	// slot for a client that plainly meant to authenticate right here.
+	// pairing request, and is handled as one below.
 	if resp.Type == wire.AuthPairRequest && resp.PasskeyID == "" && resp.PasskeySig == "" {
-		return s.awaitPairAssertion(conn, clientIP, resp, onion)
+		return s.issuePairTicketReply(conn, clientIP, resp, onion)
+	}
+
+	// Part two: the desktop comes back with the ticket a browser ceremony
+	// proved. The nonce above already bound this connection to a live
+	// handshake and an address; the ticket supplies the role.
+	if resp.PairTicket != "" {
+		return s.loginWithPairTicket(clientIP, resp)
 	}
 
 	// WebAuthn passkey branch: an assertion in the packet is verified against
@@ -232,27 +241,129 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 	return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
 }
 
+// authErrIsProbe reports whether a rejected handshake is evidence of a
+// client asking for more than it is entitled to. The axis is direction, not
+// blame: a client that gives up returns a slot and owes nothing, while a
+// client that keeps asking past a budget, or asks with proof that does not
+// verify, is spending the server's attention. Only the second kind is worth
+// remembering.
+//
+// An event that only returns resources must never be recorded: it is the
+// outcome the server wants, so counting it would punish the behaviour the
+// server asks for. Disconnecting is the clearest case.
+//
+// Both the behaviour score and the ban read this, so the two cannot drift
+// apart as they did when each carried its own list.
+func authErrIsProbe(err error) bool {
+	if err == nil {
+		return false
+	}
+	// The client went away. Nothing about that is a demand.
+	var netErr net.Error
+	if errors.As(err, &netErr) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return false
+	}
+	switch {
+	case errors.Is(err, errPairTicketIssued):
+		// Not a failure at all: the pairing moved off this socket.
+		return false
+	case errors.Is(err, ErrPairExpired):
+		// Ran out of time. The slot came back by itself.
+		return false
+	case errors.Is(err, ErrEntropyExhaustion):
+		// The server failed, not the client.
+		return false
+	case errors.Is(err, ErrPasskeyDisabled):
+		// The server turned the feature off.
+		return false
+	}
+	return true
+}
+
 // penalizeAuthFailure decides whether a rejected handshake counts toward the
-// IP ban. Two rules, both deliberate:
-//
-//   - A packet with no role carries no penalty, unchanged from before.
-//   - A pairing that ran out of time carries no penalty either. The ceremony
-//     is finished by a human on another device, and five minutes is a normal
-//     amount of time for a phone to wake up, unlock and find an
-//     authenticator. Counting it would ban an address for not answering a
-//     link it may never have seen, and the next attempt would be counted too.
-//
-// A rejected signature is a real failure and still counts, including when it
-// arrives through a pairing.
+// IP ban. It shares one classification with the behaviour score, plus the
+// pre-existing rule that a packet with no role carries no penalty: an
+// anonymous guest has nothing to fail at.
 func penalizeAuthFailure(resp AuthPacket, err error) bool {
 	if resp.Role == "" {
 		return false
 	}
-	switch {
-	case errors.Is(err, ErrPairExpired), errors.Is(err, ErrPairRateLimited):
-		return false
+	return authErrIsProbe(err)
+}
+
+// issuePairTicketReply mints a ticket, sends it with the page URL, and ends
+// the socket. The wait is not this connection's job: a ceremony takes
+// minutes, and a socket held that long costs a connection slot and can be
+// cut by anything idle on the path.
+func (s *ChatServer) issuePairTicketReply(conn *websocket.Conn, clientIP string, req AuthPacket, onion bool) (Permission, AuthPacket, error) {
+	perms := GetDefaultPermission()
+	if !WAConfig.Enabled {
+		logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt (thiếu WEBAUTHN_RPID/ORIGIN).", clientIP)
+		return perms, req, fmt.Errorf("%w", ErrPasskeyDisabled)
 	}
-	return true
+	if passkeyDisabledForOnion(onion) {
+		logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt trên onion (ONION_ALLOW_PASSKEY=false).", clientIP)
+		return perms, req, fmt.Errorf("%w", ErrPasskeyDisabled)
+	}
+	// The role is named by the desktop and confirmed here, so the browser
+	// page never gets to decide which role the ceremony is for.
+	if req.Role == "" {
+		return perms, req, fmt.Errorf("%w", ErrInvalidRole)
+	}
+	s.RoleRegistryMu.RLock()
+	_, exists := s.RoleRegistry[req.Role]
+	s.RoleRegistryMu.RUnlock()
+	if !exists {
+		logWarnf("⚠️ [AUTH FAIL] %s: Yêu cầu Role không tồn tại [%s]", clientIP, req.Role)
+		return perms, req, fmt.Errorf("%w", ErrInvalidRole)
+	}
+
+	ticket, err := s.issuePairTicket(req.Role, clientIP)
+	if err != nil {
+		return perms, req, err
+	}
+	// The ticket rides in the URL fragment, which browsers never put in a
+	// request line, so it stays out of server and proxy logs.
+	if err := conn.WriteJSON(AuthPacket{
+		Type:       wire.AuthPair,
+		PairTicket: ticket,
+		PairURL:    WAConfig.Origin + "/web/#pair=" + ticket,
+		PairTTLSec: int(pairTicketTTL.Seconds()),
+	}); err != nil {
+		s.dropPairTicket(ticket)
+		return perms, req, err
+	}
+	logInfof("🔗 [PAIR] %s nhận vé ceremony cho role [%s], ticket=%s…", clientIP, req.Role, strutil.Short(ticket))
+	return perms, req, errPairTicketIssued
+}
+
+// loginWithPairTicket spends the proof a browser produced. The role comes
+// from the ticket, never from the packet, so a client cannot ask for a
+// different role than the one its ceremony proved.
+func (s *ChatServer) loginWithPairTicket(clientIP string, req AuthPacket) (Permission, AuthPacket, error) {
+	perms := GetDefaultPermission()
+	ticket, err := s.takeVerifiedPairTicket(req.PairTicket, clientIP)
+	if err != nil {
+		if errors.Is(err, ErrPairExpired) {
+			logWarnf("⚠️ [AUTH FAIL] %s: link ceremony đã hết hạn.", clientIP)
+			return perms, req, fmt.Errorf("%w", ErrPairExpired)
+		}
+		logWarnf("⚠️ [AUTH FAIL] %s: vé pairing không hợp lệ, đã dùng, hoặc chưa xác thực.", clientIP)
+		return perms, req, fmt.Errorf("%w", ErrPairUnknown)
+	}
+	s.RoleRegistryMu.RLock()
+	roleDef, exists := s.RoleRegistry[ticket.Role]
+	s.RoleRegistryMu.RUnlock()
+	if !exists {
+		// The role was checked when the ticket was minted, so reaching here
+		// means roles.json changed mid-ceremony.
+		logWarnf("⚠️ [AUTH FAIL] %s: role [%s] của vé không còn tồn tại.", clientIP, ticket.Role)
+		return perms, req, fmt.Errorf("%w", ErrInvalidRole)
+	}
+	logInfof("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey thật qua browser, role: [%s]", clientIP, ticket.Role)
+	req.Role = ticket.Role
+	req.AuthType = "passkey"
+	return roleDef.Permission, req, nil
 }
 
 // consumeNonce spends a handshake nonce. It is the single gate every
@@ -486,7 +597,17 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expectedHost string, onion bool) (*ClientSession, error) {
 	perms, authPacket, err := s.HandleAuth(conn, clientIP, expectedHost, onion)
 	if err != nil {
-		s.observeAuthErr(clientIP, err)
+		// A pairing ticket is not a failure: the exchange has moved off this
+		// socket, so it closes without an auth_failed frame and without the
+		// penalties a rejected handshake would earn.
+		if errors.Is(err, errPairTicketIssued) {
+			return nil, err
+		}
+		// The behaviour ring records the same errors as the ban, e.g. a bad
+		// signature, but a client that simply went away is not an anomaly.
+		if authErrIsProbe(err) {
+			s.observeAuthErr(clientIP, err)
+		}
 		if penalizeAuthFailure(authPacket, err) {
 			s.handleAuthPenalty(clientIP)
 		}

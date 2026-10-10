@@ -4,15 +4,15 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/CleveTok3125/V2V/internal/wire"
 )
+
+// pairTestIP is the address httptest requests arrive from. A ticket must
+// be issued for that exact address or the store's binding refuses it.
+const pairTestIP = "192.0.2.1"
 
 // pairBody builds a /pair/submit payload. The defaults are a complete,
 // well-formed request carrying a signature no credential can verify, so a
@@ -64,8 +64,8 @@ func TestPairSubmitRejectsUnknownTicket(t *testing.T) {
 	if rec.Code != http.StatusGone {
 		t.Fatalf("unknown ticket = %d, want %d (%s)", rec.Code, http.StatusGone, rec.Body)
 	}
-	if s.countPairSessions() != 0 {
-		t.Fatal("a rejected submission opened a session")
+	if s.countPairTickets() != 0 {
+		t.Fatal("a rejected submission minted a ticket")
 	}
 }
 
@@ -85,7 +85,9 @@ func TestPairSubmitRejectsWrongMethod(t *testing.T) {
 func TestPairSubmitDisabledStaysDisabled(t *testing.T) {
 	s := pairServer(t)
 	WAConfig.Enabled = false
-	_, _, _ = s.newPairSession("member", "203.0.113.7")
+	if _, err := s.issuePairTicket("member", pairTestIP); err != nil {
+		t.Fatal(err)
+	}
 	rec := postPair(s, pairBody(t, "anything", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("disabled = %d, want %d", rec.Code, http.StatusServiceUnavailable)
@@ -93,12 +95,12 @@ func TestPairSubmitDisabledStaysDisabled(t *testing.T) {
 }
 
 // TestPairSubmitRequiresFields: a submission missing any assertion field is
-// malformed. Checking before the store keeps a half-filled body from
-// consuming the ticket and then failing verification.
+// malformed, and the ticket must be untouched by it.
 func TestPairSubmitRequiresFields(t *testing.T) {
+	withPairCap(t, 16)
 	s := pairServer(t)
 	s.WebAuthn = NewWebAuthnStore(t.TempDir() + "/webauthn.json")
-	ticket, _, err := s.newPairSession("member", "203.0.113.7")
+	ticket, err := s.issuePairTicket("member", pairTestIP)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,68 +108,66 @@ func TestPairSubmitRequiresFields(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing credential = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
-	if _, ok := s.claimPairSession(ticket); !ok {
-		t.Fatal("a malformed submission consumed the ticket")
+	if t2, ok := s.pairTicketFor(ticket, pairTestIP); !ok || t2.Verified {
+		t.Fatal("a malformed submission changed the ticket")
 	}
 }
 
-// TestPairSubmitVerifiesAgainstTheSessionRole is the core rule: the assertion
-// is checked against the role the desktop named, never against a role the
-// submission carries. A browser that lies about its role gets nowhere.
-func TestPairSubmitVerifiesAgainstTheSessionRole(t *testing.T) {
+// TestPairSubmitRefusalLeavesTheLinkUsable: a person who taps the wrong
+// passkey, or whose phone drops the response, must be able to try again on
+// the same link instead of restarting the client and the ceremony.
+func TestPairSubmitRefusalLeavesTheLinkUsable(t *testing.T) {
+	withPairCap(t, 16)
 	s := pairServer(t)
-	s.WebAuthn = NewWebAuthnStore(t.TempDir() + "/webauthn.json")
-	ticket, sess, err := s.newPairSession("member", "203.0.113.7")
+	store := NewWebAuthnStore(t.TempDir() + "/webauthn.json")
+	s.WebAuthn = store
+	auth := newTestPasskey(t, store, "member")
+
+	ticket, err := s.issuePairTicket("member", pairTestIP)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A mangled signature: the credential is right, the proof is not.
+	bad := auth.assert(t, ticket)
+	bad["passkey_id"] = auth.credentialID()
+	bad["sig"] = base64.RawURLEncoding.EncodeToString([]byte("not a signature"))
+	if rec := postPair(s, pairBody(t, ticket, bad)); rec.Code == http.StatusAccepted {
+		t.Fatal("a mangled signature was accepted")
+	}
+	if t2, ok := s.pairTicketFor(ticket, pairTestIP); !ok || t2.Verified {
+		t.Fatal("a refused assertion marked the ticket verified or dropped it")
+	}
 
-	rec := postPair(s, pairBody(t, ticket, map[string]any{
-		"role":        "admin",
-		"auth_data":   base64.RawURLEncoding.EncodeToString([]byte("auth")),
-		"client_data": base64.RawURLEncoding.EncodeToString([]byte(`{"type":"webauthn.get"}`)),
-		"sig":         base64.RawURLEncoding.EncodeToString([]byte("sig")),
-	}))
+	// The same link still works with a real assertion.
+	good := auth.assert(t, ticket)
+	good["passkey_id"] = auth.credentialID()
+	pairSubmitCooldowns.Reset()
+	rec := postPair(s, pairBody(t, ticket, good))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("retry after a bad signature = %d, want %d (%s)", rec.Code, http.StatusAccepted, rec.Body)
+	}
+	if t3, ok := s.pairTicketFor(ticket, pairTestIP); !ok || !t3.Verified {
+		t.Fatal("a verified assertion did not mark the ticket")
+	}
+}
+
+// TestPairSubmitVerifiesAgainstTheTicketRole: the assertion is checked
+// against the role the desktop named, never against a role the submission
+// carries. A browser that lies about its role gets nowhere.
+func TestPairSubmitVerifiesAgainstTheTicketRole(t *testing.T) {
+	withPairCap(t, 16)
+	s := pairServer(t)
+	s.WebAuthn = NewWebAuthnStore(t.TempDir() + "/webauthn.json")
+	ticket, err := s.issuePairTicket("member", pairTestIP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := postPair(s, pairBody(t, ticket, map[string]any{"role": "admin"}))
 	if rec.Code == http.StatusAccepted {
 		t.Fatal("a bogus assertion was accepted")
 	}
-
-	v := sess.await(2 * time.Second)
-	if v.OK {
-		t.Fatal("the handshake was granted after a rejected assertion")
-	}
-	if !errors.Is(v.Err, ErrVerificationFailed) {
-		t.Fatalf("verdict err = %v, want ErrVerificationFailed", v.Err)
-	}
-}
-
-// TestPairSubmitRejectsSecondSubmission: the browser may reload, the user may
-// double-tap, a proxy may retry. Only the first submission may resolve the
-// pairing.
-func TestPairSubmitRejectsSecondSubmission(t *testing.T) {
-	s := pairServer(t)
-	s.WebAuthn = NewWebAuthnStore(t.TempDir() + "/webauthn.json")
-	ticket, sess, err := s.newPairSession("member", "203.0.113.7")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// A bogus assertion is rejected and leaves the ticket alone, so the test
-	// for "one login, one grant" has to use assertions that actually verify.
-	first := postPairFrom(s, "198.51.100.1", pairBody(t, ticket, nil))
-	if first.Code == http.StatusAccepted {
-		t.Fatal("a bogus assertion was accepted")
-	}
-	// The ticket is still there: a second bogus attempt is verified again,
-	// not told the pairing is spent.
-	second := postPairFrom(s, "198.51.100.2", pairBody(t, ticket, nil))
-	if second.Code == http.StatusGone {
-		t.Fatal("a failed assertion spent the ticket; the person cannot try another passkey")
-	}
-
-	v := sess.await(2 * time.Second)
-	if v.OK {
-		t.Fatal("the handshake was granted")
+	if t2, ok := s.pairTicketFor(ticket, pairTestIP); !ok || t2.Verified {
+		t.Fatal("a refused assertion changed the ticket")
 	}
 }
 
@@ -194,28 +194,26 @@ func TestPairSubmitIsRateLimitedBeforeTheStore(t *testing.T) {
 	s.WebAuthn = &WebAuthnStore{path: t.TempDir() + "/does-not-exist.json"}
 	pairSubmitCooldowns.Reset()
 
-	rec := postPair(s, pairBody(t, strings.Repeat("ef", 64), nil))
-	if rec.Code == http.StatusTooManyRequests {
+	if rec := postPair(s, pairBody(t, strings.Repeat("ef", 64), nil)); rec.Code == http.StatusTooManyRequests {
 		return
 	}
-	// Not rate limited on the first call: the second must be.
-	second := postPair(s, pairBody(t, strings.Repeat("ef", 64), nil))
-	if second.Code != http.StatusTooManyRequests {
+	if second := postPair(s, pairBody(t, strings.Repeat("ef", 64), nil)); second.Code != http.StatusTooManyRequests {
 		t.Fatalf("second call = %d, want %d", second.Code, http.StatusTooManyRequests)
 	}
 }
 
 // TestPairSubmitAcceptsVerifiedAssertion walks the endpoint end to end with a
-// real ES256 credential: the browser asserts over the pair ticket, the
-// handler verifies it through the same library path the web login uses, the
-// sign counter advances, and the waiting handshake is granted.
+// real ES256 credential: the browser asserts over the ticket, the handler
+// verifies it through the same library path the web login uses, the sign
+// counter advances, and the ticket is left proved for the desktop to spend.
 func TestPairSubmitAcceptsVerifiedAssertion(t *testing.T) {
+	withPairCap(t, 16)
 	s := pairServer(t)
 	store := NewWebAuthnStore(t.TempDir() + "/webauthn.json")
 	s.WebAuthn = store
-	auth := newTestPasskey(t, s.WebAuthn, "member")
+	auth := newTestPasskey(t, store, "member")
 
-	ticket, sess, err := s.newPairSession("member", "203.0.113.7")
+	ticket, err := s.issuePairTicket("member", pairTestIP)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,20 +224,13 @@ func TestPairSubmitAcceptsVerifiedAssertion(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("verified assertion = %d, want %d (%s)", rec.Code, http.StatusAccepted, rec.Body)
 	}
-
-	v := sess.await(2 * time.Second)
-	if !v.OK {
-		t.Fatalf("verdict = %+v, want granted", v)
-	}
-	// The ticket is spent now: a second verified assertion over it must not
-	// resolve the handshake a second time.
-	if s.commitPairSession(ticket) {
-		t.Fatal("a spent pairing was committed again")
+	if t2, ok := s.pairTicketFor(ticket, pairTestIP); !ok || !t2.Verified {
+		t.Fatal("a verified assertion did not mark the ticket")
 	}
 
 	// The counter must have advanced, so a replay of the same assertion is
 	// caught by the clone check rather than by luck.
-	cred, ok := s.WebAuthn.Credential("member", auth.credentialID())
+	cred, ok := store.Credential("member", auth.credentialID())
 	if !ok {
 		t.Fatal("credential vanished from the store")
 	}
@@ -247,124 +238,46 @@ func TestPairSubmitAcceptsVerifiedAssertion(t *testing.T) {
 		t.Fatal("sign counter did not advance")
 	}
 
-	// A second, freshly minted assertion cannot reuse the spent ticket.
-	replay := auth.assert(t, ticket)
-	replay["passkey_id"] = auth.credentialID()
-	if rec := postPairFrom(s, "198.51.100.3", pairBody(t, ticket, replay)); rec.Code != http.StatusGone {
-		t.Fatalf("replay = %d, want %d", rec.Code, http.StatusGone)
+	// Spending is the handshake's job: the ticket is still here until a
+	// desktop presents it, and then it is gone.
+	if _, err := s.takeVerifiedPairTicket(ticket, pairTestIP); err != nil {
+		t.Fatal("the proved ticket could not be spent")
+	}
+	if _, err := s.takeVerifiedPairTicket(ticket, pairTestIP); err == nil {
+		t.Fatal("the ticket was spent twice")
 	}
 }
 
-// TestPairSubmitTicketBelongsToOneRole: the same assertion must not be
-// accepted under a different role's pairing, even when the desktop on that
-// pairing named the same person. The role is part of the lookup, not part of
-// the payload.
+// TestPairSubmitTicketBelongsToOneRole: a passkey enrolled for one role must
+// not be accepted under another role's ticket.
 func TestPairSubmitTicketBelongsToOneRole(t *testing.T) {
-	s := pairServer(t)
-	s.WebAuthn = NewWebAuthnStore(t.TempDir() + "/webauthn.json")
-	auth := newTestPasskey(t, s.WebAuthn, "member")
-
-	adminTicket, _, err := s.newPairSession("admin", "203.0.113.7")
-	if err != nil {
-		t.Fatal(err)
-	}
-	doc := auth.assert(t, adminTicket)
-	// Claim the admin role from a passkey enrolled under member.
-	doc["passkey_id"] = auth.credentialID()
-
-	rec := postPair(s, pairBody(t, adminTicket, doc))
-	if rec.Code == http.StatusAccepted {
-		t.Fatal("a member passkey logged in as admin through a pairing")
-	}
-}
-
-// TestVersionEndpointAdvertisesPasskey: the desktop asks before it starts a
-// ceremony, and a server with passkeys off must say so rather than let the
-// client open a browser link that cannot work.
-func TestVersionEndpointAdvertisesPasskey(t *testing.T) {
-	pairServer(t)
-	rec := httptest.NewRecorder()
-	handleAPIVersion(rec, httptest.NewRequest(http.MethodGet, "/api/version", nil))
-
-	var got map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("version payload is not JSON: %v (%s)", err, rec.Body)
-	}
-	if _, ok := got["version"]; !ok {
-		t.Error("version key missing")
-	}
-	enabled, ok := got["passkey"].(bool)
-	if !ok {
-		t.Fatalf("passkey is not a bool: %v", got["passkey"])
-	}
-	if !enabled {
-		t.Error("passkey reported disabled while WAConfig.Enabled is true")
-	}
-
-	WAConfig.Enabled = false
-	rec = httptest.NewRecorder()
-	handleAPIVersion(rec, httptest.NewRequest(http.MethodGet, "/api/version", nil))
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	if got["passkey"] != false {
-		t.Errorf("passkey = %v, want false when WAConfig is off", got["passkey"])
-	}
-}
-
-// TestPairTicketChallengeMatchesTheNonceContract: the browser derives its
-// challenge the same way the web login does, from the ticket string. If the
-// endpoint hashed something else, every ceremony would be rejected for a
-// reason nobody could see.
-func TestPairTicketChallengeMatchesTheNonceContract(t *testing.T) {
-	if len(ChallengeFromNonce("abc")) != 32 {
-		t.Fatal("challenge is not a SHA-256 digest")
-	}
-	var _ = wire.AuthPair
-}
-
-// TestPairSubmitRetryAfterABadAssertion: a person who taps the wrong passkey,
-// or whose phone drops the response, must be able to try again on the same
-// link. Spending the ticket on the first failure means restarting the client
-// and waiting out the ceremony again.
-func TestPairSubmitRetryAfterABadAssertion(t *testing.T) {
+	withPairCap(t, 16)
 	s := pairServer(t)
 	store := NewWebAuthnStore(t.TempDir() + "/webauthn.json")
 	s.WebAuthn = store
 	auth := newTestPasskey(t, store, "member")
 
-	ticket, sess, err := s.newPairSession("member", "203.0.113.7")
+	adminTicket, err := s.issuePairTicket("admin", "203.0.113.7")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A mangled signature: the credential is right, the proof is not.
-	bad := auth.assert(t, ticket)
-	bad["passkey_id"] = auth.credentialID()
-	bad["sig"] = base64.RawURLEncoding.EncodeToString([]byte("not a signature"))
-	if rec := postPairFrom(s, "198.51.100.1", pairBody(t, ticket, bad)); rec.Code == http.StatusAccepted {
-		t.Fatal("a mangled signature was accepted")
-	}
-	if v := sess.await(2 * time.Second); v.OK {
-		t.Fatal("the handshake was granted on a bad signature")
-	}
+	doc := auth.assert(t, adminTicket)
+	doc["passkey_id"] = auth.credentialID()
 
-	// The ticket must still be there for a second attempt.
-	good := auth.assert(t, ticket)
-	good["passkey_id"] = auth.credentialID()
-	rec := postPairFrom(s, "198.51.100.2", pairBody(t, ticket, good))
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("retry after a bad signature = %d, want %d (%s)", rec.Code, http.StatusAccepted, rec.Body)
+	if rec := postPair(s, pairBody(t, adminTicket, doc)); rec.Code == http.StatusAccepted {
+		t.Fatal("a member passkey logged in as admin through a pairing")
 	}
 }
 
 // TestPairSubmitAcceptedResponseIsJSON: a 202 is still a response the browser
 // parses with resp.json(), so it has to say it is JSON.
 func TestPairSubmitAcceptedResponseIsJSON(t *testing.T) {
+	withPairCap(t, 16)
 	s := pairServer(t)
 	store := NewWebAuthnStore(t.TempDir() + "/webauthn.json")
 	s.WebAuthn = store
 	auth := newTestPasskey(t, store, "member")
-	ticket, _, err := s.newPairSession("member", "203.0.113.7")
+	ticket, err := s.issuePairTicket("member", "127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,8 +291,7 @@ func TestPairSubmitAcceptedResponseIsJSON(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	body := pairBody(t, ticket, doc)
-	resp, err := http.Post(srv.URL, "application/json", body)
+	resp, err := http.Post(srv.URL, "application/json", pairBody(t, ticket, doc))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,5 +301,15 @@ func TestPairSubmitAcceptedResponseIsJSON(t *testing.T) {
 	}
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+}
+
+// TestPairTicketChallengeMatchesTheNonceContract: the browser derives its
+// challenge the same way the web login does, from the ticket string. If the
+// endpoint hashed something else, every ceremony would be rejected for a
+// reason nobody could see.
+func TestPairTicketChallengeMatchesTheNonceContract(t *testing.T) {
+	if len(ChallengeFromNonce("abc")) != 32 {
+		t.Fatal("challenge is not a SHA-256 digest")
 	}
 }

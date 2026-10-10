@@ -48,6 +48,7 @@
         "WEBAUTHN_RPID",
         "WEBAUTHN_ORIGIN",
         "WEBAUTHN_STORE",
+        "PAIR_MAX_PENDING",
         "MAX_TOTAL_CONNECTIONS",
         "REQUIRE_IPV4",
         "BLOCKLIST_FILE",
