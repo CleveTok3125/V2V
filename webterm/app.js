@@ -459,8 +459,11 @@ import { gateFetch } from "./pow_bridge.js";
         return u;
     };
     var rnd = function (n) { var u = new Uint8Array(n); crypto.getRandomValues(u); return u; };
-    var sha256b64url = function (text) {
-        return crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)).then(b64url);
+    // WebAuthn takes the challenge as bytes. Passing the base64url text of the
+    // digest instead makes the browser sign whatever it coerces that string
+    // into, and every ceremony then fails with "Error validating challenge".
+    var sha256bytes = function (text) {
+        return crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
     };
     // --- Passkey login bridge -----------------------------------------------
     // The Go client calls v2vRequestAssertion(nonce, role) during the WebSocket
@@ -476,7 +479,7 @@ import { gateFetch } from "./pow_bridge.js";
                 console.log("Go already exited, ignoring late response", e);
             }
         };
-        crypto.subtle.digest("SHA-256", new TextEncoder().encode(nonceHex))
+        sha256bytes(nonceHex)
             .then(function (challenge) {
             return navigator.credentials.get({
                 publicKey: {
@@ -506,7 +509,7 @@ import { gateFetch } from "./pow_bridge.js";
         panel.style.display = "none";
         wrap.style.display = "block";
         setStatus("Đang chờ passkey cho desktop…");
-        sha256b64url(ticket)
+        sha256bytes(ticket)
             .then(function (challenge) {
             return navigator.credentials.get({
                 publicKey: {
