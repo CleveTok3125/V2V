@@ -9,8 +9,12 @@
 </head>
 <body>
   <div id="connect-panel">
-    <h1>V2V Web Chat</h1>
-    <p class="hint">Giao diện web cho máy chủ chat ẩn danh. Kết nối với quyền khách.</p>
+    <h1 id="connect-title">V2V Web Chat</h1>
+    <p class="hint" id="connect-hint">Giao diện web cho máy chủ chat ẩn danh. Kết nối với quyền khách.</p>
+    <!-- Shown instead of the connect heading while a desktop login is
+         waiting on this tab: the guest hint describes something the person
+         is not doing here. -->
+    <h1 id="pair-title" hidden>Xác thực passkey cho desktop</h1>
 
     <form id="connect-form" autocomplete="off">
       <label for="server-url">Server WebSocket</label>

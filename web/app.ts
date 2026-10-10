@@ -496,6 +496,29 @@ import { gateFetch } from "./pow_bridge.js";
     return seconds;
   }
 
+  // WebAuthn failures reach the page as English spec text with a link to the
+  // W3C document, which is nothing a person can act on. The browser raises
+  // one error for a dismissed dialog and for a timeout, so that message has to
+  // cover both; anything unrecognised keeps the original wording in brackets
+  // so a report still carries the detail.
+  function pairErrorText(e) {
+    var raw = (e && e.message) || e;
+    switch (e && e.name) {
+      case "NotAllowedError":
+        return "Bạn đã huỷ, hoặc hết thời gian xác thực. Bấm Thử lại nếu muốn làm lại.";
+      case "NotSupportedError":
+        return "Trình duyệt hoặc thiết bị này không hỗ trợ passkey.";
+      case "SecurityError":
+        return "Trình duyệt chặn passkey ở địa chỉ này (sai tên miền, hoặc không phải HTTPS).";
+      case "InvalidStateError":
+        return "Không có passkey nào dùng được cho máy chủ này.";
+      case "AbortError":
+        return "Xác thực đã bị dừng giữa chừng.";
+      default:
+        return "Không xác thực được (" + raw + ").";
+    }
+  }
+
   // --- Desktop pair mode (#pair=<ticket>) ---------------------------------
   // The desktop printed this link and is waiting with its socket open. The
   // ticket is the challenge: the page signs it and posts the assertion back
@@ -508,9 +531,13 @@ import { gateFetch } from "./pow_bridge.js";
   function runPairMode(ticket) {
     panel.style.display = "block";
     wrap.style.display = "none";
-    [form, el("config-btn"), el("config-panel")].forEach(function (node) {
+    // The connect form would start a guest session in the very tab that is
+    // waiting on the desktop, and the guest wording above it describes
+    // something the person is not doing. Both give way to the pairing title.
+    [form, el("connect-title"), el("connect-hint"), el("config-btn"), el("config-panel")].forEach(function (node) {
       if (node) node.classList.add("hidden");
     });
+    if (el("pair-title")) el("pair-title").hidden = false;
 
     var retryBtn = el("pair-retry");
     var retryTimer = null;
@@ -599,7 +626,7 @@ import { gateFetch } from "./pow_bridge.js";
           // dialog, the authenticator refused, or the reply never arrived.
           // Without a reply there is no header to read, so this is the one
           // case that falls back to the server's configured window.
-          setStatus("❌ Lỗi pair: " + ((e && e.message) || e), true);
+          setStatus("❌ " + pairErrorText(e), true);
           armRetry(submitted ? PAIR_RETRY_FALLBACK_SECONDS : 0);
         });
     }
