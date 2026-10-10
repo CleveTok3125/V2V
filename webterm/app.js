@@ -500,6 +500,16 @@ import { gateFetch } from "./pow_bridge.js";
         })
             .catch(function () { respond({}); });
     };
+    // The server sends Retry-After in whole seconds. Anything else — absent, an
+    // HTTP date, junk — falls back to its configured submission window, so the
+    // button is never enabled straight into the same refusal.
+    var PAIR_RETRY_FALLBACK_SECONDS = 10;
+    function retryAfterSeconds(raw) {
+        var seconds = parseInt(raw || "", 10);
+        if (isNaN(seconds) || seconds < 1)
+            return PAIR_RETRY_FALLBACK_SECONDS;
+        return seconds;
+    }
     // --- Desktop pair mode (#pair=<ticket>) ---------------------------------
     // The desktop printed this link and is waiting with its socket open. The
     // ticket is the challenge: the page signs it and posts the assertion back
@@ -593,7 +603,7 @@ import { gateFetch } from "./pow_bridge.js";
                 if (!resp.ok) {
                     return resp.text().then(function (body) {
                         setStatus("❌ Chưa xác thực được: " + (body || resp.status), true);
-                        armRetry(10);
+                        armRetry(retryAfterSeconds(resp.headers.get("Retry-After")));
                     });
                 }
                 setStatus("✅ Đã xác thực xong. Bạn có thể đóng tab này và quay lại V2V.");
@@ -601,8 +611,10 @@ import { gateFetch } from "./pow_bridge.js";
                 .catch(function (e) {
                 // Reached when no verdict came back: the person dismissed the
                 // dialog, the authenticator refused, or the reply never arrived.
+                // Without a reply there is no header to read, so this is the one
+                // case that falls back to the server's configured window.
                 setStatus("❌ Lỗi pair: " + ((e && e.message) || e), true);
-                armRetry(submitted ? 10 : 0);
+                armRetry(submitted ? PAIR_RETRY_FALLBACK_SECONDS : 0);
             });
         }
         if (retryBtn) {

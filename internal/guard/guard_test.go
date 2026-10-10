@@ -182,3 +182,32 @@ func TestCooldownMapEvictsStale(t *testing.T) {
 func ipForIndex(i int) string {
 	return "10.9.0." + strconv.Itoa(i)
 }
+
+// TestCooldownRetryAfter: a handler that refuses has to be able to say for
+// how long, so the caller is not left guessing at a wait it could have been
+// told. Nothing held reads as zero, and the reported remainder only shrinks.
+func TestCooldownRetryAfter(t *testing.T) {
+	c := NewCooldownMap()
+	const window = 200 * time.Millisecond
+
+	if got := c.RetryAfter("198.51.100.4", window); got != 0 {
+		t.Fatalf("nothing held yet, got %v", got)
+	}
+	if !c.Allow("198.51.100.4", window) {
+		t.Fatal("first call refused")
+	}
+	first := c.RetryAfter("198.51.100.4", window)
+	if first <= 0 || first > window {
+		t.Fatalf("remaining = %v, want within (0, %v]", first, window)
+	}
+	time.Sleep(60 * time.Millisecond)
+	second := c.RetryAfter("198.51.100.4", window)
+	if second >= first {
+		t.Fatalf("remaining grew: %v then %v", first, second)
+	}
+	// Elapsed: the window is over and nothing is held.
+	time.Sleep(window)
+	if got := c.RetryAfter("198.51.100.4", window); got != 0 {
+		t.Fatalf("after the window, remaining = %v, want 0", got)
+	}
+}

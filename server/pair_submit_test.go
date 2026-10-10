@@ -313,3 +313,25 @@ func TestPairTicketChallengeMatchesTheNonceContract(t *testing.T) {
 		t.Fatal("challenge is not a SHA-256 digest")
 	}
 }
+
+// TestPairSubmitRateLimitSaysHowLong: the page offers a retry button, so a
+// refusal has to carry the wait. Without it the button's first press lands
+// inside the same meter and reads as an unexplained failure — the shape of
+// confusion the cooldown header work exists to remove.
+func TestPairSubmitRateLimitSaysHowLong(t *testing.T) {
+	s := pairServer(t)
+	s.WebAuthn = NewWebAuthnStore(t.TempDir() + "/webauthn.json")
+	pairSubmitCooldowns.Reset()
+
+	if rec := postPair(s, pairBody(t, strings.Repeat("ab", 64), nil)); rec.Code == http.StatusTooManyRequests {
+		t.Fatal("the first submission was metered")
+	}
+	rec := postPair(s, pairBody(t, strings.Repeat("cd", 64), nil))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second submission = %d, want %d", rec.Code, http.StatusTooManyRequests)
+	}
+	got := retryAfterSeconds(t, rec)
+	if got > int(pairSubmitCooldown.Seconds()) {
+		t.Fatalf("Retry-After = %d, want at most the %v cooldown", got, pairSubmitCooldown)
+	}
+}

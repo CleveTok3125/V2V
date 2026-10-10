@@ -38,3 +38,20 @@ func (c *CooldownMap) Allow(ip string, d time.Duration) bool {
 	}
 	return true
 }
+
+// RetryAfter reports how much of a refusal is left for one address, so a
+// handler can tell the caller how long to wait instead of leaving it to
+// guess. Zero means nothing is held. Callers read it after Allow refused:
+// the recorded time is what Allow stores.
+func (c *CooldownMap) RetryAfter(ip string, d time.Duration) time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	t, ok := c.last[ip]
+	if !ok {
+		return 0
+	}
+	if left := d - time.Since(t); left > 0 {
+		return left
+	}
+	return 0
+}
