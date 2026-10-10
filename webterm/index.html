@@ -25,12 +25,17 @@
       <label for="passkey-role" id="passkey-role-label" style="display:none">Role</label>
       <input id="passkey-role" type="text" placeholder="member" style="display:none" />
 
-      <p id="status-line"></p>
       <div style="display:flex;gap:8px">
         <button type="submit" id="connect-btn">Kết nối</button>
         <button type="button" id="passkey-btn">🔑 Passkey</button>
       </div>
     </form>
+
+    <!-- Outside the form so a mode that hides the form (desktop pairing) can
+         still show its status: textContent is what makes it visible, so an
+         empty line stays hidden on the connect page. -->
+    <p id="status-line"></p>
+    <button type="button" id="pair-retry" hidden>Thử lại passkey</button>
 
     <!-- The settings panel sits outside the form on purpose: Enter inside a
          form input submits it, and committing a PoW tier by pressing Enter

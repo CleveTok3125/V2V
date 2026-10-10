@@ -82,7 +82,8 @@ html, body {
 }
 
 /* Secondary action sharing the connect button's geometry. */
-#passkey-btn {
+#passkey-btn,
+#pair-retry {
   width: 100%;
   margin-top: 20px;
   padding: 10px;
@@ -94,8 +95,14 @@ html, body {
   cursor: pointer;
 }
 
-#passkey-btn:hover {
+#passkey-btn:hover,
+#pair-retry:hover {
   background: rgba(79, 125, 255, 0.12);
+}
+
+#pair-retry:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 /* Settings panel: plain switches on the desktop client config. */

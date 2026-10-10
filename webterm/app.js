@@ -505,48 +505,110 @@ import { gateFetch } from "./pow_bridge.js";
     // ticket is the challenge: the page signs it and posts the assertion back
     // to the server, which hands it to the handshake that asked for it. The
     // page never names a role — the server already decided one.
+    //
+    // Only the pairing controls are reachable here. The connect form would
+    // start a guest session in the very tab that is waiting on the desktop,
+    // and the settings would have nothing to configure.
     function runPairMode(ticket) {
-        panel.style.display = "none";
-        wrap.style.display = "block";
-        setStatus("Đang chờ passkey cho desktop…");
-        sha256bytes(ticket)
-            .then(function (challenge) {
-            return navigator.credentials.get({
-                publicKey: {
-                    challenge: challenge,
-                    rpId: location.hostname,
-                    userVerification: "required",
-                    timeout: 120000
-                }
-            });
-        })
-            .then(function (cred) {
-            return gateFetch("/pair/submit", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    ticket: ticket,
-                    passkey_id: b64url(cred.rawId),
-                    auth_data: b64url(cred.response.authenticatorData),
-                    client_data: b64url(cred.response.clientDataJSON),
-                    sig: b64url(cred.response.signature)
-                })
-            }, setStatus);
-        })
-            .then(function (resp) {
-            if (!resp.ok) {
-                return resp.text().then(function (t) {
-                    throw new Error(t || resp.status);
-                });
-            }
-            return resp.json();
-        })
-            .then(function () {
-            setStatus("✅ Đã xác thực — quay lại cửa sổ V2V trên máy của bạn.");
-        })
-            .catch(function (e) {
-            setStatus("Lỗi pair: " + e.message, true);
+        panel.style.display = "block";
+        wrap.style.display = "none";
+        [form, el("config-btn"), el("config-panel")].forEach(function (node) {
+            if (node)
+                node.classList.add("hidden");
         });
+        var retryBtn = el("pair-retry");
+        var retryTimer = null;
+        // A cancelled dialog never reached the server, so the submission meter is
+        // untouched and there is nothing to wait for. Only a request the server
+        // actually saw leaves a cooldown behind.
+        function armRetry(waitSeconds) {
+            if (!retryBtn)
+                return;
+            retryBtn.hidden = false;
+            if (retryTimer) {
+                clearInterval(retryTimer);
+                retryTimer = null;
+            }
+            if (waitSeconds <= 0) {
+                retryBtn.disabled = false;
+                retryBtn.textContent = "Thử lại passkey";
+                return;
+            }
+            var left = waitSeconds;
+            retryBtn.disabled = true;
+            retryBtn.textContent = "Thử lại sau " + left + "s";
+            retryTimer = setInterval(function () {
+                left -= 1;
+                if (left > 0) {
+                    retryBtn.textContent = "Thử lại sau " + left + "s";
+                    return;
+                }
+                clearInterval(retryTimer);
+                retryTimer = null;
+                retryBtn.disabled = false;
+                retryBtn.textContent = "Thử lại passkey";
+            }, 1000);
+        }
+        function ask() {
+            if (retryBtn)
+                retryBtn.hidden = true;
+            setStatus("Đang chờ passkey cho desktop…");
+            // Set once the assertion is on its way, because only then has the
+            // server's submission meter been touched and a wait become necessary.
+            var submitted = false;
+            sha256bytes(ticket)
+                .then(function (challenge) {
+                return navigator.credentials.get({
+                    publicKey: {
+                        challenge: challenge,
+                        rpId: location.hostname,
+                        userVerification: "required",
+                        timeout: 120000
+                    }
+                });
+            })
+                .then(function (cred) {
+                submitted = true;
+                return gateFetch("/pair/submit", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        ticket: ticket,
+                        passkey_id: b64url(cred.rawId),
+                        auth_data: b64url(cred.response.authenticatorData),
+                        client_data: b64url(cred.response.clientDataJSON),
+                        sig: b64url(cred.response.signature)
+                    })
+                }, setStatus);
+            })
+                .then(function (resp) {
+                // 410 means the link is spent or expired, and no ceremony can revive
+                // it: the ticket is bound to one address and one role. Offering a
+                // retry there would only spend another passkey prompt on a link that
+                // cannot complete, so the message sends them back to the desktop.
+                if (resp.status === 410) {
+                    setStatus("❌ Link đã hết hạn hoặc đã dùng. Chạy lại lệnh trên desktop để lấy link mới.", true);
+                    return;
+                }
+                if (!resp.ok) {
+                    return resp.text().then(function (body) {
+                        setStatus("❌ Chưa xác thực được: " + (body || resp.status), true);
+                        armRetry(10);
+                    });
+                }
+                setStatus("✅ Đã xác thực xong. Bạn có thể đóng tab này và quay lại V2V.");
+            })
+                .catch(function (e) {
+                // Reached when no verdict came back: the person dismissed the
+                // dialog, the authenticator refused, or the reply never arrived.
+                setStatus("❌ Lỗi pair: " + ((e && e.message) || e), true);
+                armRetry(submitted ? 10 : 0);
+            });
+        }
+        if (retryBtn) {
+            retryBtn.addEventListener("click", ask);
+        }
+        ask();
     }
     // --- Desktop-issued enrollment (#enroll=<code>) -------------------------
     // Admin issues a one-time ticket (server -enroll); the member opens the
