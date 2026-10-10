@@ -44,9 +44,7 @@ want="$(uid_of "$APP_USER"):$(gid_of "$APP_GROUP")" || {
 }
 mkdir -p "$DATA_DIR"
 cur="$(stat -c %u:%g "$DATA_DIR")"
-if [ "$cur" = "$want" ]; then
-	echo "entrypoint: $DATA_DIR ownership OK ($cur), skipping scan"
-else
+if [ "$cur" != "$want" ]; then
 	echo "entrypoint: fixing $DATA_DIR ownership ($cur -> $want)"
 	# A failed chown must say why, not die silent inside set -e and
 	# spam restarts: usually a missing CAP_CHOWN (check cap_add),
@@ -56,6 +54,33 @@ else
 		-exec chown "$APP_USER:$APP_GROUP" {} +; then
 		echo "FATAL: cannot chown $DATA_DIR (need CAP_CHOWN: check cap_add in compose; rootless docker maps uids differently). Host-side fix: chown -R $want <instance>/data"
 		exit 1
+	fi
+else
+	# A correct directory does not mean the files in it are correct. An
+	# operator running v2vctl as root leaves the identity stores
+	# root-owned, and the server then cannot read its own store while this
+	# top-dir check keeps reporting that everything is fine. The recursive
+	# scan stays off the fast path, so the two files that fail silently are
+	# named instead: everything else in data/ is history and logs.
+	fixed=""
+	for name in webauthn.json server_identity.json; do
+		path="$DATA_DIR/$name"
+		if [ ! -e "$path" ]; then
+			continue
+		fi
+		if [ "$(stat -c %u:%g "$path")" = "$want" ]; then
+			continue
+		fi
+		if ! chown "$APP_USER:$APP_GROUP" "$path"; then
+			echo "FATAL: cannot chown $path (need CAP_CHOWN: check cap_add in compose; rootless docker maps uids differently). Host-side fix: chown $want <instance>/data/$name"
+			exit 1
+		fi
+		fixed="$fixed $name"
+	done
+	if [ -n "$fixed" ]; then
+		echo "entrypoint: $DATA_DIR OK ($cur), fixed inside:$fixed"
+	else
+		echo "entrypoint: $DATA_DIR ownership OK ($cur), skipping scan"
 	fi
 fi
 

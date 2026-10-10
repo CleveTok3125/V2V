@@ -102,9 +102,9 @@ out=$RUN_OUT
 echo "$out" | grep -q "fixing" && ok "mismatch: logged" || bad "mismatch: log branch"
 rm -rf "$ROOT"
 
-# T-blindspot: top dir OK + inner wrong owner takes the fast path by
-# design (pinned trade-off): skips scan, leaves the file, still execs.
-# The server fails closed loudly on its first write to it instead.
+# T-blindspot: a correct top dir still skips the recursive scan, so
+# unrelated wrong-owned files stay untouched — the pinned trade-off.
+# The two identity stores are the exception and have their own test.
 sandbox; ROOT=$SANDBOX_ROOT
 readable_mounts
 chown -R nobody:"$NOBODY_GROUP" "$APP_ROOT/data"
@@ -114,6 +114,26 @@ out=$RUN_OUT
 echo "$out" | grep -q "skipping scan" && ok "blindspot: fast path logged" || bad "blindspot: branch"
 [ "$(stat -c %u "$APP_ROOT/data/inner.log")" = "0" ] && ok "blindspot: left as-is" || bad "blindspot: inner changed"
 grep -q "SERVER_INVOKED" "$CALL_LOG" && ok "blindspot: still execs" || bad "blindspot: exec"
+rm -rf "$ROOT"
+
+# T-fastpath-identities: the fast path must still fix the two stores whose
+# wrong ownership the server cannot report usefully. A correct data dir
+# with a root-owned webauthn.json is exactly how a desktop passkey login
+# ends up failing with no explanation.
+sandbox; ROOT=$SANDBOX_ROOT
+readable_mounts
+chown -R nobody:"$NOBODY_GROUP" "$APP_ROOT/data"
+echo root > "$APP_ROOT/data/webauthn.json"
+echo root > "$APP_ROOT/data/server_identity.json"
+echo keep > "$APP_ROOT/data/history.jsonl"
+chown nobody:"$NOBODY_GROUP" "$APP_ROOT/data/history.jsonl"
+run_entry || bad "fastpath-ids: entrypoint failed"
+out=$RUN_OUT
+[ "$(stat -c %u:%g "$APP_ROOT/data/webauthn.json")" = "$NOBODY_IDS" ] && ok "fastpath-ids: webauthn fixed" || bad "fastpath-ids: webauthn owner $(stat -c %u:%g "$APP_ROOT/data/webauthn.json")"
+[ "$(stat -c %u:%g "$APP_ROOT/data/server_identity.json")" = "$NOBODY_IDS" ] && ok "fastpath-ids: identity fixed" || bad "fastpath-ids: identity owner $(stat -c %u:%g "$APP_ROOT/data/server_identity.json")"
+[ "$(stat -c %u "$APP_ROOT/data/history.jsonl")" = "$(id -u nobody)" ] && ok "fastpath-ids: history untouched" || bad "fastpath-ids: history changed"
+echo "$out" | grep -q "fixed inside: webauthn.json server_identity.json" && ok "fastpath-ids: logged" || bad "fastpath-ids: log"
+grep -q "SERVER_INVOKED" "$CALL_LOG" && ok "fastpath-ids: execs" || bad "fastpath-ids: exec"
 rm -rf "$ROOT"
 
 # T-missing-env: absent .env names the bootstrap, not chmod.

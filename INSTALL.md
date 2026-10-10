@@ -81,6 +81,10 @@ ed25519 key logins still work. Using passkey here means serving the page
 from the exact `WEBAUTHN_ORIGIN` hostname over HTTPS, which cannot also
 serve a different production origin at the same time.
 
+`v2vctl enroll` builds its link from `WEBAUTHN_ORIGIN` (the environment, or
+the instance `.env` if unset) and refuses to issue a ticket without one: a
+ticket whose link has no origin cannot be opened.
+
 ## Docker (recommended)
 
 Prerequisites: Docker Engine with the Compose plugin, and the `v2vctl`
@@ -119,6 +123,15 @@ binary from the bundle.
    build from source. The container runs read-only, drops all
    capabilities except the three the entrypoint needs, and binds to
    loopback by default (`BIND_ADDR`).
+
+   The entrypoint owns `data/` to the container user. When that directory
+   is already correct it skips the recursive scan, but it still re-owns
+   `data/webauthn.json` and `data/server_identity.json`: those two are
+   created whenever a passkey or the server identity is set up, so running
+   `v2vctl` in the instance as root leaves them root-owned and the server
+   then cannot read its own store. Other files created as root inside
+   `data/` are not touched — fix them on the host with
+   `chown -R <user> instances/prod/data`.
 
 5. Check health and logs:
 
