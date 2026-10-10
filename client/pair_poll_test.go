@@ -43,16 +43,12 @@ func statusServer(t *testing.T, state func(call int32) (int, string)) *httptest.
 }
 
 // TestPollPairStatusStopsWhenProved: the desktop must come back the moment
-// the server says a browser proved the ticket.
+// the server says a browser proved the ticket. Announcing it is the caller's
+// job, because the caller is what wipes the link first.
 func TestPollPairStatusStopsWhenProved(t *testing.T) {
 	srv := statusServer(t, func(int32) (int, string) { return http.StatusOK, `{"state":"verified"}` })
-	out := captureStdout(t, func() {
-		if !pollPairStatus(srv.URL, "ticket", 300) {
-			t.Error("a proved ticket was not reported")
-		}
-	})
-	if !strings.Contains(out, "đã xác thực") {
-		t.Errorf("the success was not explained:\n%s", out)
+	if !pollPairStatus(srv.URL, "ticket", 300) {
+		t.Fatal("a proved ticket was not reported")
 	}
 }
 

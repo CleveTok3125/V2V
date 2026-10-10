@@ -42,8 +42,9 @@ func termHeight() int {
 const pairPollInterval = 2 * time.Second
 
 // pollPairStatus asks whether a browser has proved the ticket yet. It
-// returns false once the link is gone or the budget runs out, and every
-// outcome is explained here so the caller has nothing to add.
+// returns false once the link is gone or the budget runs out. Failures are
+// explained here; success is left to the caller, which has to wipe the link
+// before it can say so.
 func pollPairStatus(httpBase, ticket string, ttlSec int) bool {
 	budget := time.Duration(ttlSec) * time.Second
 	if budget <= 0 {
@@ -77,7 +78,6 @@ func pollPairStatus(httpBase, ticket string, ttlSec int) bool {
 			_ = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&body)
 			resp.Body.Close()
 			if body.State == "verified" {
-				fmt.Println("✅ Trình duyệt đã xác thực — đang hoàn tất đăng nhập...")
 				return true
 			}
 		case http.StatusGone:
@@ -217,6 +217,20 @@ func hasGraphicalSession(goos, display, wayland string) bool {
 		return true
 	}
 	return display != "" || wayland != ""
+}
+
+// pairBlockMarks brackets the pairing block so what it printed can be wiped
+// once a browser has proved the ticket: the link is long, the code is tall,
+// and neither is worth reading again once the login is done.
+//
+// The cursor is saved and restored rather than counted over, so a link that
+// wraps costs nothing to get right. A terminal that ignores the restore
+// leaves the erase where the block ended, which is blank space below it.
+func pairBlockMarks(hasTerminal bool) (begin, end string) {
+	if !hasTerminal {
+		return "", ""
+	}
+	return "\x1b7", "\x1b8\x1b[J"
 }
 
 // printPairURL shows the link and, when there is a terminal to open it from,

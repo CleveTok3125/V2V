@@ -331,3 +331,34 @@ func qrLineModules(t *testing.T, line string) [][2]bool {
 	}
 	return out
 }
+
+// TestPairBlockMarksOnlyWithATerminal pins the escapes that let the pairing
+// link and its code be wiped once a browser has proved the ticket. Without a
+// terminal the marks must be empty: the sequence would otherwise land in
+// whatever the output is piped or redirected to.
+func TestPairBlockMarksOnlyWithATerminal(t *testing.T) {
+	begin, end := pairBlockMarks(false)
+	if begin != "" || end != "" {
+		t.Fatalf("no terminal: begin=%q end=%q, want both empty", begin, end)
+	}
+
+	begin, end = pairBlockMarks(true)
+	if begin == "" || end == "" {
+		t.Fatal("a terminal must get both marks")
+	}
+	// Save the position before the block and restore it before erasing:
+	// counting lines instead would be wrong as soon as the link wraps.
+	if !strings.HasPrefix(begin, "\x1b7") {
+		t.Errorf("begin = %q, want the cursor saved first", begin)
+	}
+	if !strings.HasPrefix(end, "\x1b8") {
+		t.Errorf("end = %q, want the cursor restored first", end)
+	}
+	if !strings.Contains(end, "\x1b[J") {
+		t.Errorf("end = %q, want an erase from the restored position", end)
+	}
+	// The restore must come before the erase, or the wrong region goes.
+	if strings.Index(end, "\x1b8") > strings.Index(end, "\x1b[J") {
+		t.Errorf("end = %q erases before restoring", end)
+	}
+}

@@ -107,13 +107,19 @@ func acquirePairTicket(wsURL, role string) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	begin, end := pairBlockMarks(termHeight() > 0)
+	fmt.Print(begin)
 	printPairURL(offer.URL)
 	fmt.Print(pairWaitPrompt(role, offer.TTLSec))
 
 	// The ticket is in hand, so nothing is held while the ceremony runs.
 	if !pollPairStatus(base, offer.Ticket, offer.TTLSec) {
+		// The link stays on screen: an expired or abandoned ceremony can be
+		// started again with it, and the code is how it gets to a phone.
 		return "", false
 	}
+	fmt.Print(end)
+	fmt.Println("✅ Trình duyệt đã xác thực — đang hoàn tất đăng nhập...")
 	return offer.Ticket, true
 }
 

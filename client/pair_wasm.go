@@ -22,3 +22,11 @@ func pollPairStatus(string, string, int) bool { return false }
 func pairWaitPrompt(role string, _ int) string {
 	return fmt.Sprintf("⏳ Đang chờ xác thực passkey cho role [%s]...\n", role)
 }
+
+// pairBlockMarks has nothing to bracket on wasm: the client never prints a
+// link of its own there, so there is no block to wipe.
+func pairBlockMarks(bool) (string, string) { return "", "" }
+
+// termHeight is 0 on wasm: there is no terminal to measure, which is also
+// what keeps the pairing block marks empty above.
+func termHeight() int { return 0 }
