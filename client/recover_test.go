@@ -473,9 +473,7 @@ func TestGreetingAfterCatchup(t *testing.T) {
 
 	go sess.runPump()
 	waitHoldReleased(t, sess, 3*time.Second)
-	close(conn.frames)
-	close(sess.Quitting)
-	<-sess.PumpDone
+	stopPump(t, sess, func() { close(conn.frames) })
 	sess.flushOutputNow()
 
 	text := out.String()
@@ -534,9 +532,7 @@ func TestLoadPagesUntilMaxSeq(t *testing.T) {
 
 	go sess.runPump()
 	waitHoldReleased(t, sess, 3*time.Second)
-	close(conn.frames)
-	close(sess.Quitting)
-	<-sess.PumpDone
+	stopPump(t, sess, func() { close(conn.frames) })
 
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
@@ -587,9 +583,7 @@ func TestLoadAnnouncesSync(t *testing.T) {
 
 	go sess.runPump()
 	waitHoldReleased(t, sess, 3*time.Second)
-	close(conn.frames)
-	close(sess.Quitting)
-	<-sess.PumpDone
+	stopPump(t, sess, func() { close(conn.frames) })
 	sess.flushOutputNow()
 
 	text := out.String()

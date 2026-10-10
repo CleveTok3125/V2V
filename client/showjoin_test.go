@@ -29,15 +29,9 @@ func runFrames(t *testing.T, sess *Session, conn *captureConn, frames ...[]byte)
 	for _, f := range frames {
 		conn.frames <- f
 	}
-	// Give the pump time to drain before the channel closes.
+	// Give the pump time to drain before closing the source.
 	time.Sleep(50 * time.Millisecond)
-	close(conn.frames)
-	close(sess.Quitting)
-	select {
-	case <-sess.PumpDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("pump did not finish")
-	}
+	stopPump(t, sess, func() { close(conn.frames) })
 	sess.flushOutputNow()
 	return strings.Join(sess.Display.TabSys.lines, "")
 }
@@ -137,9 +131,7 @@ func TestReplayMarkerArmsWindowState(t *testing.T) {
 	sess.Display.DisplayMu.Lock()
 	armed := sess.Chain.InSync
 	sess.Display.DisplayMu.Unlock()
-	close(conn.frames)
-	close(sess.Quitting)
-	<-sess.PumpDone
+	stopPump(t, sess, func() { close(conn.frames) })
 
 	if !armed {
 		t.Fatal("a tagged marker must arm the replay window")
@@ -162,9 +154,7 @@ func TestPlainMarkerNoLongerArmsWindowState(t *testing.T) {
 	sess.Display.DisplayMu.Lock()
 	armed := sess.Chain.InSync
 	sess.Display.DisplayMu.Unlock()
-	close(conn.frames)
-	close(sess.Quitting)
-	<-sess.PumpDone
+	stopPump(t, sess, func() { close(conn.frames) })
 
 	if armed {
 		t.Fatal("a plain marker string must not arm the replay window")

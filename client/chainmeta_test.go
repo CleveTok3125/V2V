@@ -714,6 +714,22 @@ func TestDuplicateWireSkipped(t *testing.T) {
 	}
 }
 
+// stopPump ends the pump the way a deliberate quit does: the quit signal
+// goes first, then the read source. The pump reads a closed source as a lost
+// connection and calls os.Exit(1) unless the quit signal is already closed,
+// so closing the source first kills the whole test binary instead of failing
+// one test.
+func stopPump(t *testing.T, sess *Session, closeSource func()) {
+	t.Helper()
+	close(sess.Quitting)
+	closeSource()
+	select {
+	case <-sess.PumpDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pump did not finish")
+	}
+}
+
 // chainTestSession builds a minimal session anchored at tip #100.
 func chainTestSession(t *testing.T, tip byte) *Session {
 	t.Helper()

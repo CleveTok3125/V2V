@@ -75,9 +75,7 @@ func TestRunPumpParsesBatchedFrame(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	close(conn.frames)
-	close(sess.Quitting)
-	<-sess.PumpDone
+	stopPump(t, sess, func() { close(conn.frames) })
 }
 
 // slowWriter simulates a sluggish terminal: every Write parks, so any
@@ -158,9 +156,7 @@ func TestRunPumpKeepsReadingWithSlowOutput(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	close(sess.Quitting)
-	close(conn.release)
-	<-sess.PumpDone
+	stopPump(t, sess, func() { close(conn.release) })
 	// Queued output flushes on demand: all ingested lines must land
 	// exactly once, regardless of terminal speed.
 	sess.flushOutputNow()
