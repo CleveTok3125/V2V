@@ -229,7 +229,7 @@ func checkServerInfo(input string) {
 		}
 	}
 
-	client, err := versionHTTPClient()
+	client, err := serverHTTPClient()
 	if err != nil {
 		fmt.Println("❌ Lỗi khi lấy thông tin:", err)
 		return

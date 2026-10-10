@@ -150,7 +150,15 @@ func httpPostJSON(url string, body any, timeout time.Duration) ([]byte, int, err
 	if err != nil {
 		return nil, 0, err
 	}
-	client := &http.Client{Timeout: timeout}
+	// The join gate is reached before the session dial, so this is one of
+	// the few server calls that does not go through the chat socket. It
+	// still has to ride the session proxy, or a proxied client leaks its
+	// real address on exactly the requests that carry its proof of work.
+	tr, err := serverHTTPTransport()
+	if err != nil {
+		return nil, 0, err
+	}
+	client := &http.Client{Transport: tr, Timeout: timeout}
 	resp, err := client.Post(url, "application/json", bytes.NewReader(raw))
 	if err != nil {
 		return nil, 0, err

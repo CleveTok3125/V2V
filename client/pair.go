@@ -44,7 +44,7 @@ func readAuthResult(s *Session) (AuthPacket, error) {
 // carry on: the handshake is what actually decides, and refusing here would
 // lock out servers that are merely older than this client.
 func serverPasskeyEnabled(httpBase string) (enabled, known bool) {
-	client, err := versionHTTPClient()
+	client, err := serverHTTPClient()
 	if err != nil {
 		return false, false
 	}
@@ -127,7 +127,7 @@ func requestPairTicket(base, role string) (pairOffer, bool) {
 		fmt.Println("❌ Lỗi tạo yêu cầu ghép cặp:", err)
 		return offer, false
 	}
-	client, err := versionHTTPClient()
+	client, err := serverHTTPClient()
 	if err != nil {
 		fmt.Println("❌ Không tạo được kết nối tới server:", err)
 		return offer, false

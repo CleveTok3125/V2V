@@ -134,7 +134,7 @@ func checkServerVersion(wsURL string) bool {
 	base, err := httpBaseFromWS(wsURL)
 	server := ""
 	if err == nil {
-		client, verr := versionHTTPClient()
+		client, verr := serverHTTPClient()
 		if verr != nil {
 			fmt.Printf("❌ Proxy: %v\n", verr)
 			return false
