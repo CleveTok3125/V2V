@@ -64,7 +64,17 @@ func saveStore(path string, f *waStoreFile) error {
 	if err != nil {
 		return err
 	}
-	return identity.AtomicWriteFile(path, out, 0o600)
+	if err := identity.AtomicWriteFile(path, out, 0o600); err != nil {
+		return err
+	}
+	// The replacement now carries the writer's owner, which is root when the
+	// operator runs this tool with sudo on the host. The server reads the
+	// store as its own user, so hand it back to the data directory's owner.
+	// Failing here is better than leaving a store the server cannot open.
+	if err := adoptDirOwner(path); err != nil {
+		return fmt.Errorf("không đặt được chủ cho %s: %w (trên host chạy: chown -R <data owner> <instance>/data)", path, err)
+	}
+	return nil
 }
 
 func (l *ListCmd) Run() error {
