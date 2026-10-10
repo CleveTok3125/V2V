@@ -18,8 +18,7 @@ func sessionForDispatch(t *testing.T) *Session {
 }
 
 func seedChatHeight(sess *Session, height uint64) {
-	sess.Display.TabChat.append("| Alice: hi")
-	sess.Display.TabChat.append(metaLineFor(height, "abcd0000", ""))
+	sess.Display.TabChat.append(chatBlockForTest(height, "abcd0000", "15:04", "Alice", "hi"))
 }
 
 func TestDispatchInlineReplyPassesBody(t *testing.T) {

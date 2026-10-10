@@ -45,12 +45,16 @@ type pendingMsg struct {
 	replyTo    uint64
 }
 
-// metaLineFor builds the trailing metadata line of a message block:
-// "  └─  #height:hash4", with " | ✍️ badge" appended for trip messages.
+// metaLineFor builds the metadata that rides the header row next to the
+// author: "#height:hash4", with " | ✍️ badge" appended for trip messages.
 // badgePart is the already-colored badge (with hyperlink when available).
+//
+// It carries no corner glyph: the header is the top of the block, and the
+// "└─" this used to open with is a bottom-left corner, which would point
+// away from the text it introduces.
 func metaLineFor(height uint64, hashHex, badgePart string) string {
 	var sb strings.Builder
-	sb.WriteString("  └─  #")
+	sb.WriteString("#")
 	sb.WriteString(strconv.FormatUint(height, 10))
 	sb.WriteString(":")
 	// A server-supplied hash is only shown when it really is hex: a
@@ -232,9 +236,12 @@ func (c *renderCache) put(key string, b renderedBlock) {
 	}
 }
 
-// findMetaRe matches rendered meta lines ("└─  #1234:abcd"); the hash
-// part may be empty when scanning, and is compared separately.
-var findMetaRe = regexp.MustCompile(`└─\s+#(\d+):([0-9a-fA-F]*)`)
+// headerMetaRe matches the chain position inside a message header row
+// ("| 14:19 Name#83e4 | #1234:abcd"). It anchors on the "| HH:MM " the
+// header opens with, so neither a body row that happens to contain "#12:"
+// nor the author's own "name#hash" (no colon follows it) can be mistaken
+// for it. The hash part may be empty while scanning and is compared apart.
+var headerMetaRe = regexp.MustCompile(`\| \d\d:\d\d [^\n]*?#(\d+):([0-9a-fA-F]*)`)
 
 // mentionRe matches @-mentions of message heights ("@#1234", "@#1234:abcd").
 // The @ prefix keeps them distinct from server-stamped "name#hash"
@@ -390,14 +397,14 @@ func parseFindArg(arg string) (uint64, string, error) {
 	return height, strings.ToLower(suffix), nil
 }
 
-// findMetaMatches scans rendered buffer entries for meta lines of the
+// findMetaMatches scans rendered buffer entries for a header naming the
 // given height (with optional hash-prefix checksum). It returns the entry
-// indices of matches; callers print each with its preceding head entry.
+// indices; the header and its body live in the same entry.
 func findMetaMatches(lines []string, height uint64, suffix string) []int {
 	want := strconv.FormatUint(height, 10)
 	var out []int
 	for i, line := range lines {
-		m := findMetaRe.FindStringSubmatch(stripANSIForFind(line))
+		m := headerMetaRe.FindStringSubmatch(stripANSIForFind(line))
 		if m == nil || m[1] != want {
 			continue
 		}
@@ -1006,16 +1013,19 @@ func (s *Session) checkRecoverWire(msg WireMessage) {
 	p.Received++
 }
 
-// metaHeightIndex returns the index just after the last meta line
-// naming height h in lines, or -1 when none matches (meta hidden or the
-// predecessor was dropped). Meta lines carry the "└─  #h:hash" shape.
+// metaHeightIndex returns the index just after the block whose header
+// names height h, or -1 when none matches (meta hidden or the predecessor
+// was dropped). A header and its body share one buffer entry, so the row
+// after that entry is the row after the whole block.
 func metaHeightIndex(lines []string, h uint64) int {
-	needle := fmt.Sprintf("#%d:", h)
+	want := strconv.FormatUint(h, 10)
 	idx := -1
 	for i, l := range lines {
-		if strings.Contains(l, "└─") && strings.Contains(l, needle) {
-			idx = i + 1
+		m := headerMetaRe.FindStringSubmatch(stripANSIForFind(l))
+		if m == nil || m[1] != want {
+			continue
 		}
+		idx = i + 1
 	}
 	return idx
 }

@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -28,13 +29,24 @@ func chainedTripWire(tm *TripMeta, text string) WireMessage {
 	}
 }
 
+// chatBlockForTest draws the block the client emits for one chat line: an
+// author header carrying the chain position, then the body under the shared
+// indent. Fixtures use this rather than pasting the shape, so a layout
+// change touches one place.
+func chatBlockForTest(height uint64, hashHex, clock, name, body string) string {
+	return fmt.Sprintf("| %s %s | %s\n%s\n",
+		clock, name, metaLineFor(height, hashHex, ""), chatBodyIndent(body))
+}
+
 func TestMetaLineFor(t *testing.T) {
+	// No corner glyph: this rides the header row beside the author, and the
+	// "└─" it used to open with is a bottom-left corner.
 	got := metaLineFor(1234, "abcdef0123456789", "")
-	if got != "  └─  #1234:abcd" {
+	if got != "#1234:abcd" {
 		t.Fatalf("got %q", got)
 	}
 	got = metaLineFor(7, "ABCDEF", "◆ ab12")
-	if got != "  └─  #7:abcd | ✍️ ◆ ab12" {
+	if got != "#7:abcd | ✍️ ◆ ab12" {
 		t.Fatalf("badge must append after separator, got %q", got)
 	}
 }
@@ -195,21 +207,20 @@ func TestParseFindArg(t *testing.T) {
 
 func TestFindMetaMatches(t *testing.T) {
 	lines := []string{
-		"| 15:04 Alice: hello\n",
-		"|   └─  #1234:abcd\n",
-		"| 15:05 Bob: quoted \"└─  #1234:abcd\" text\n",
-		"|   └─  #1235:abce | ✍️ \x1b[38;2;1;2;3m◆ x9y8\x1b[0m\n",
+		"| 15:04 Alice | #1234:abcd\n|   hello\n",
+		"| 15:05 Bob | #1235:abce | ✍️ \x1b[38;2;1;2;3m◆ x9y8\x1b[0m\n|   quoted \"#1234:abcd\" text\n",
 		"| [Local]: something\n",
 	}
-	// Height-only matches the real meta (and the quoted content line,
-	// which is indistinguishable post-render and listed too).
+	// Only the header names a height. The body above quotes the same
+	// shape, and must not be taken for one: the anchor needs the "| HH:MM "
+	// the header opens with.
 	got := findMetaMatches(lines, 1234, "")
-	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
-		t.Fatalf("got %v", got)
+	if len(got) != 1 || got[0] != 0 {
+		t.Fatalf("a body row was read as a header: %v", got)
 	}
-	// Suffix checksum narrows to the true meta.
+	// Suffix checksum narrows to the true header.
 	got = findMetaMatches(lines, 1235, "abce")
-	if len(got) != 1 || got[0] != 3 {
+	if len(got) != 1 || got[0] != 1 {
 		t.Fatalf("got %v", got)
 	}
 	// Wrong suffix kills the match (typo guard).
@@ -519,8 +530,8 @@ func TestFormatQuoteRich(t *testing.T) {
 	if got := formatQuoteRich(multi, false, 80); strings.Contains(got, "\n") {
 		t.Fatalf("quote must stay single-line: %q", got)
 	}
-	if m := findMetaRe.FindString(formatQuoteRich(wire, false, 80)); m != "" {
-		t.Fatalf("quote must not match the meta regex: %q", m)
+	if m := headerMetaRe.FindString(formatQuoteRich(wire, false, 80)); m != "" {
+		t.Fatalf("quote must not match the header regex: %q", m)
 	}
 }
 

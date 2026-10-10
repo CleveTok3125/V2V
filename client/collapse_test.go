@@ -33,6 +33,8 @@ func TestEstimateRows(t *testing.T) {
 }
 
 func TestCollapseHead(t *testing.T) {
+	const header = "| 15:04 Alice | #42:abcd"
+	// mk builds n body rows; a block is that body under one author header.
 	mk := func(n int) string {
 		var b strings.Builder
 		for i := 1; i <= n; i++ {
@@ -41,59 +43,64 @@ func TestCollapseHead(t *testing.T) {
 		}
 		return b.String()
 	}
-	// Fits: untouched, no trailer.
-	if out, folded := collapseHead(mk(10), 42, 10, 5, 80); folded || out != mk(10) {
-		t.Fatal("10 rows at threshold must not fold")
+	blk := func(body string) string { return header + "\n" + body }
+
+	// Body fits: untouched, no trailer.
+	if out, folded := collapseHead(blk(mk(10)), 42, 10, 5, 80); folded || out != blk(mk(10)) {
+		t.Fatal("10 body rows at threshold must not fold")
 	}
-	// 11 rows fold to 5 preview lines with the trailer on the last one.
-	out, folded := collapseHead(mk(11), 42, 10, 5, 80)
+	// 11 body rows fold to 5 preview rows with the trailer on the last one,
+	// and the header stays: folding it away would leave the body unattached.
+	out, folded := collapseHead(blk(mk(11)), 42, 10, 5, 80)
 	if !folded {
-		t.Fatal("11 rows must fold")
+		t.Fatal("11 body rows must fold")
 	}
 	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("folded block = %d lines, want 5 with inline trailer", len(lines))
+	if len(lines) != 6 {
+		t.Fatalf("folded block = %d lines, want 5 preview rows plus the header", len(lines))
 	}
-	if !strings.Contains(lines[4], "/expand #42") {
-		t.Fatalf("trailer must address height on the last line, got %q", lines[4])
+	if lines[0] != header {
+		t.Fatalf("the header must survive folding, got %q", lines[0])
+	}
+	if !strings.Contains(lines[5], "/expand #42") {
+		t.Fatalf("trailer must address height on the last line, got %q", lines[5])
 	}
 	// Height-less wires never fold (no /expand address exists).
-	if _, folded := collapseHead(mk(30), 0, 10, 5, 80); folded {
+	if _, folded := collapseHead(blk(mk(30)), 0, 10, 5, 80); folded {
 		t.Fatal("height 0 must never fold")
+	}
+	// A header with no body has nothing to fold.
+	if _, folded := collapseHead(header+"\n", 42, 10, 5, 80); folded {
+		t.Fatal("a lone header must not fold")
 	}
 	// Wrapped long single line folds by screen rows AND cuts content:
 	// 900 cells at width 80 must not survive verbatim.
-	wrapped := strings.Repeat("y", 900) + "\n"
-	out, folded = collapseHead(wrapped, 7, 10, 5, 80)
+	out, folded = collapseHead(blk(strings.Repeat("y", 900)+"\n"), 7, 10, 5, 80)
 	if !folded {
 		t.Fatal("900 cells at width 80 (12 rows) must fold")
 	}
 	if strings.Contains(out, strings.Repeat("y", 900)) {
 		t.Fatal("single wall survived unfolded")
 	}
-	if got := estimateRows(out, 80); got > 5+1 {
-		t.Fatalf("folded wall = %d rows, want ≤ preview + trailer row", got)
+	if got := estimateRows(out, 80); got > 5+2 {
+		t.Fatalf("folded wall = %d rows, want ≤ header + preview + trailer row", got)
 	}
 	if !strings.Contains(out, "/expand #7]") {
 		t.Fatalf("folded wall must carry trailer, got %q", out[len(out)-60:])
 	}
 	// Mid-line cut never splits a wide rune: 500 あ (1000 cells = 13
 	// rows at width 80) with preview 5 → 400 cells kept, all complete.
-	wideWall := strings.Repeat("あ", 500) + "\n"
-	out, folded = collapseHead(wideWall, 8, 10, 5, 80)
+	out, folded = collapseHead(blk(strings.Repeat("あ", 500)+"\n"), 8, 10, 5, 80)
 	if !folded {
 		t.Fatal("wide wall must fold")
-	}
-	for _, r := range strings.TrimSuffix(out, "\n") {
-		_ = r
 	}
 	if got := strings.Count(out, "あ"); got != 200 {
 		t.Fatalf("mid-line cut kept %d wide runes, want 200", got)
 	}
 	// Cut happens on line boundaries: preview rows respected.
-	out, _ = collapseHead(mk(30), 9, 10, 5, 80)
-	if got := len(strings.Split(strings.TrimSuffix(out, "\n"), "\n")); got != 5 {
-		t.Fatalf("preview cut = %d lines, want 5", got)
+	out, _ = collapseHead(blk(mk(30)), 9, 10, 5, 80)
+	if got := len(strings.Split(strings.TrimSuffix(out, "\n"), "\n")); got != 6 {
+		t.Fatalf("preview cut = %d lines, want 5 preview rows plus the header", got)
 	}
 }
 
@@ -156,7 +163,8 @@ func TestExpandTrailer(t *testing.T) {
 	}
 }
 
-func TestCollapseAccessors(t *testing.T) {	c := config.DefaultClientConfig()
+func TestCollapseAccessors(t *testing.T) {
+	c := config.DefaultClientConfig()
 	if !c.CollapseEnabled() {
 		t.Fatal("default must enable collapse")
 	}

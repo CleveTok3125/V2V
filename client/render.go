@@ -411,13 +411,24 @@ func (s *Session) quoteLinesFor(replyTo uint64, pending bool) []string {
 	}
 	for _, buf := range []*tabBuffer{s.Display.TabChat, s.Display.TabSys} {
 		for _, idx := range findMetaMatches(buf.lines, replyTo, "") {
-			if idx == 0 {
-				continue
+			// A header and its body share one buffer entry, so the preview
+			// is what follows the header row inside it, not the entry
+			// before it.
+			if body := blockBody(buf.lines[idx]); body != "" {
+				return []string{formatQuote(replyTo, body, pending, ClientCfg.QuoteMaxRunes())}
 			}
-			return []string{formatQuote(replyTo, buf.lines[idx-1], pending, ClientCfg.QuoteMaxRunes())}
 		}
 	}
 	return nil
+}
+
+// blockBody returns the text rows of a rendered block entry: everything
+// after the author header row.
+func blockBody(entry string) string {
+	if i := strings.Index(entry, "\n"); i >= 0 {
+		return entry[i+1:]
+	}
+	return ""
 }
 
 // buildChatBlock renders one wire into head + trailing meta strings
@@ -426,26 +437,46 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (quote []st
 	tab = TabChat
 	if msg.Type == "system" {
 		head = fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(msg.Text))
-		return quote, head, "", tabForWire(msg), wantsMeta(msg, withMeta)
+		return quote, head, "", tabForWire(msg), false
+	}
+	// Author and chain position share one header row; the text hangs below
+	// it under a shared indent. One shape for every chat line keeps the
+	// author column stable and stops a wrapped body from reading as a row
+	// of separate messages.
+	header := fmt.Sprintf("| %s %s",
+		filter.SanitizeSingleLine(msg.Time), filter.SanitizeSingleLine(msg.DisplayName))
+	if wantsMeta(msg, withMeta) {
+		badge := ""
+		if msg.Trip != nil {
+			colored, urlStr := s.badgeForWire(msg, av)
+			badge = colored
+			if urlStr != "" {
+				badge = fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", urlStr, colored)
+			}
+		}
+		header += " | " + metaLineFor(msg.ChainHeight, msg.ChainHash, badge)
 	}
 	mentionOpen, mentionClose := mentionSGR(ClientCfg.MentionColor())
-	head = fmt.Sprintf("| %s %s: %s\n", filter.SanitizeSingleLine(msg.Time), filter.SanitizeSingleLine(msg.DisplayName), renderMentions(renderChatText(msg.Text), s.resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose))
+	body := renderMentions(renderChatText(msg.Text), s.resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose)
 	if msg.ReplyTo > 0 {
 		quote = s.quoteLinesFor(msg.ReplyTo, false)
 	}
-	if !wantsMeta(msg, withMeta) {
-		return quote, head, "", tab, false
+	return quote, header + "\n" + chatBodyIndent(body) + "\n", "", tab, false
+}
+
+// chatBodyPrefix is the indent every text row of a message shares. It sits
+// one cell right of the author row's gutter, so the body is inset from the
+// header without competing with it for the left edge.
+const chatBodyPrefix = "|   "
+
+// chatBodyIndent puts that prefix on every line of a rendered body. A blank
+// body line keeps the prefix too, so the block never looks ragged.
+func chatBodyIndent(body string) string {
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		lines[i] = chatBodyPrefix + line
 	}
-	meta = metaLineFor(msg.ChainHeight, msg.ChainHash, "")
-	if msg.Trip != nil {
-		colored, urlStr := s.badgeForWire(msg, av)
-		badge := colored
-		if urlStr != "" {
-			badge = fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", urlStr, colored)
-		}
-		meta = metaLineFor(msg.ChainHeight, msg.ChainHash, badge)
-	}
-	return quote, head, fmt.Sprintf("| %s\n", meta), tab, true
+	return strings.Join(lines, "\n")
 }
 
 func (s *Session) renderChatBlock(msg WireMessage) {

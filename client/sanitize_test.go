@@ -30,8 +30,8 @@ func TestMetaLineForRejectsNonHexHash(t *testing.T) {
 	if strings.Contains(got, "\x1b") {
 		t.Fatalf("escape leaked: %q", got)
 	}
-	if got != "  └─  #7:" {
-		t.Fatalf("got %q, want %q", got, "  └─  #7:")
+	if got != "#7:" {
+		t.Fatalf("got %q, want %q", got, "#7:")
 	}
 }
 

@@ -78,8 +78,8 @@ func (s *Session) checkSendGuards(text string) bool {
 
 // renderPlaceholder wipes the input line and prints the grey pending block.
 // It returns both the number of buffer entries it wrote (sequence: quote
-// rows, then one row per rendered line, then the badge and meta placeholders)
-// and the number of terminal rows those entries occupy. The buffer splice
+// rows, then the author header, then one row per rendered line) and the
+// number of terminal rows those entries occupy. The buffer splice
 // counts entries; the screen erase counts rows, and a line long enough to
 // wrap makes the two differ.
 func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows int, phScreenRows int, phShown bool, phBufEnd int) {
@@ -111,7 +111,7 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 	// cancel the grey placeholder wrapper mid-line, and line counts
 	// match the highlighted echo anyway.
 	lines := strings.Split(markup.SpanPlain(text), "\n")
-	phRows = len(lines)
+	phRows = 0
 	// Quoted target previews first (same helper as the echo path, so
 	// both blocks share the shape; pending quotes carry ⏳ so the
 	// erase region check keeps passing).
@@ -122,42 +122,40 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 			phScreenRows += countRows(q + "\n")
 		}
 	}
-	for i, line := range lines {
-		line = markup.Linkify(line)
-		entry := fmt.Sprintf("\x1b[90m|      %s\x1b[0m\n", line)
-		if i == 0 {
-			entry = fmt.Sprintf("\x1b[90m| Bạn: %s ⏳\x1b[0m\n", line)
-		}
-		s.emitTab(TabChat, entry)
-		phScreenRows += countRows(entry)
-	}
-	// Trip placeholder (grey ◆ …) — real badge will come from server echo
+	// The header carries everything the real one will: the author, the
+	// chain placeholder, then the trip placeholder. The chain position and
+	// the real badge only exist once the server echoes, so both stand in as
+	// placeholders here and the echo replaces the whole block in place.
+	s.Display.ShowMetaMu.RLock()
+	pmMeta := s.Display.ShowMeta
+	s.Display.ShowMetaMu.RUnlock()
+	badgePlaceholder := ""
 	if s.TripPriv != nil || CLI.Tripcode != "" {
-		badgePlaceholder := s.TripBadge
+		badgePlaceholder = s.TripBadge
 		if badgePlaceholder == "" && CLI.Tripcode != "" {
 			h := sha256.Sum256([]byte(CLI.Tripcode))
 			badgePlaceholder = hex.EncodeToString(h[:])[:8]
 		}
-		if badgePlaceholder != "" {
-			entry := fmt.Sprintf("\x1b[90m|  └─ ✍ ◆ %s ⏳\x1b[0m\n", badgePlaceholder)
-			s.emitTab(TabChat, entry)
-			phRows++
-			phScreenRows += countRows(entry)
-		}
 	}
-	// Trailing meta line: every block ends with exactly one meta row so
-	// the echo (carrying the real #height:hash) replaces it in place.
-	// The chain position is unknown until the server echo arrives.
-	// Hidden with /meta off; the echo follows the same session flag,
-	// so row counts stay consistent.
-	s.Display.ShowMetaMu.RLock()
-	pmMeta := s.Display.ShowMeta
-	s.Display.ShowMetaMu.RUnlock()
+	header := "\x1b[90m| Bạn"
 	if pmMeta {
-		const metaPlaceholder = "\x1b[90m|   └─  ··· ⏳\x1b[0m\n"
-		s.emitTab(TabChat, metaPlaceholder)
+		header += " | ···"
+	}
+	if badgePlaceholder != "" {
+		header += " | ✍️ ◆ " + badgePlaceholder
+	}
+	header += " ⏳\x1b[0m\n"
+	s.emitTab(TabChat, header)
+	phRows++
+	phScreenRows += countRows(header)
+
+	// The text hangs under the header, one indented row per rendered line,
+	// matching the layout the echo uses.
+	for _, line := range lines {
+		entry := fmt.Sprintf("\x1b[90m%s%s\x1b[0m\n", chatBodyPrefix, markup.Linkify(line))
+		s.emitTab(TabChat, entry)
 		phRows++
-		phScreenRows += countRows(metaPlaceholder)
+		phScreenRows += countRows(entry)
 	}
 	phBufEnd = len(s.Display.TabChat.lines)
 	s.Display.Term.Refresh()

@@ -102,18 +102,29 @@ func foldLines(lines []string, budget, width int) []string {
 	return kept
 }
 
-// collapseHead folds head to previewRows head rows with the expand
-// trailer on the last preview line. False means head fits untouched.
+// collapseHead folds the text rows of a block to previewRows rows with the
+// expand trailer on the last kept row. The first row is kept whole: it is
+// the author header, and folding it away would leave a body with nobody
+// attached to it. False means the block fits untouched.
 func collapseHead(head string, height uint64, rows, preview, width int) (string, bool) {
-	if height == 0 || estimateRows(head, width) <= rows {
+	if height == 0 {
 		return head, false
 	}
-	kept := foldLines(strings.Split(strings.TrimSuffix(head, "\n"), "\n"), preview, width)
+	lines := strings.Split(strings.TrimSuffix(head, "\n"), "\n")
+	// A block is a header row plus its body; a lone row has no body to fold.
+	if len(lines) < 2 {
+		return head, false
+	}
+	header, body := lines[0], lines[1:]
+	if estimateRows(strings.Join(body, "\n"), width) <= rows {
+		return head, false
+	}
+	kept := foldLines(body, preview, width)
 	if len(kept) == 0 {
 		return head, false // unreachable: budget fits ≥1 row
 	}
 	kept[len(kept)-1] += expandTrailer(height)
-	return strings.Join(kept, "\n") + "\n", true
+	return header + "\n" + strings.Join(kept, "\n") + "\n", true
 }
 
 // maybeCollapse folds head when it exceeds the configured row budget.
