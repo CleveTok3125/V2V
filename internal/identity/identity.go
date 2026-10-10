@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/google/renameio/v2/maybe"
 )
 
 const Version = 3
@@ -106,12 +104,7 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 			return err
 		}
 	}
-	// Temp-file + fsync + rename via renameio/maybe: atomic on Unix,
-	// plain os.WriteFile fallback on Windows where atomic replace is
-	// not reliably available. Requested perm passes through the umask
-	// on v2 (v1 ignored it); an existing file keeps its own permissions.
-	// MkdirAll keeps the existing dir setup.
-	return maybe.WriteFile(path, data, perm)
+	return writeFileAtomic(path, data, perm)
 }
 
 // Save writes the container with owner-only permissions using atomic write.
