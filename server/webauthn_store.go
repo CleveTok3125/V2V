@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,12 @@ var (
 	errTicketUnknown = errors.New("ticket không tồn tại hoặc đã hết hạn")
 	errTicketUsed    = errors.New("ticket đã được sử dụng")
 	errTicketBound   = errors.New("ticket đã bind challenge — ceremony thất bại thì lấy ticket mới")
+
+	// errCredentialExists is a caller-visible rejection: the credential is
+	// already registered, and saying so is useful. It is a sentinel rather
+	// than an inline error so the HTTP layer can tell it apart from an
+	// internal fault without matching on its text.
+	errCredentialExists = errors.New("credential đã tồn tại")
 )
 
 type WAStoredCred struct {
@@ -112,6 +119,32 @@ func (s *WebAuthnStore) saveFile(f *webauthnFile) error {
 		return err
 	}
 	return identity.AtomicWriteFile(s.path, out, 0o600)
+}
+
+// verifyUsable reports whether this process can actually use the store.
+// Reading catches an ownership mistake; the write probe catches a directory
+// this process cannot create the file in, which a read-only mount or a
+// different owner causes and which otherwise only surfaces at the first
+// enrollment. A missing file is not a fault — the first enrollment makes it.
+func (s *WebAuthnStore) verifyUsable() error {
+	if s == nil {
+		return errors.New("webauthn store not initialized")
+	}
+	if _, err := s.loadFile(); err != nil {
+		return fmt.Errorf("webauthn store không đọc được: %w", err)
+	}
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("webauthn store không tạo được thư mục %s: %w", dir, err)
+	}
+	probe, err := os.CreateTemp(dir, ".webauthn-probe-")
+	if err != nil {
+		return fmt.Errorf("webauthn store không ghi được trong %s (kiểm tra chủ sở hữu: server và v2vctl phải chạy cùng user): %w", dir, err)
+	}
+	name := probe.Name()
+	_ = probe.Close()
+	_ = os.Remove(name)
+	return nil
 }
 
 func (s *WebAuthnStore) mutate(fn func(f *webauthnFile) error) error {
@@ -224,7 +257,7 @@ func (s *WebAuthnStore) CompleteEnrollment(code string, cred *WAStoredCred) erro
 		list := f.Credentials[pending.Role]
 		for _, ex := range list {
 			if ex.CredentialID == cred.CredentialID {
-				return errors.New("credential đã tồn tại")
+				return errCredentialExists
 			}
 		}
 		f.Credentials[pending.Role] = append(list, cred)
@@ -266,6 +299,10 @@ func (s *WebAuthnStore) Credential(role, credentialID string) (*WAStoredCred, bo
 		return nil
 	})
 	if err != nil {
+		// The caller only sees a failed login, which is the right answer to
+		// give a client. Without this line the operator cannot tell an
+		// unreachable store from a credential that does not exist.
+		logErrorf("🚨 [PASSKEY] không đọc được webauthn store khi tra credential cho role [%s]: %v", role, err)
 		return nil, false
 	}
 	if out == nil {

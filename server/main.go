@@ -460,6 +460,15 @@ func main() {
 	}))
 
 	LoadWebauthnEnv()
+	// The store is read on every passkey login and written on every
+	// enrollment. A wrong owner or a read-only mount let the server boot
+	// normally and then fail members one ceremony at a time, so the check
+	// belongs here, while the operator is still watching.
+	if WAConfig.Enabled {
+		if err := chatApp.WebAuthn.verifyUsable(); err != nil {
+			log.Fatalf("❌ CRITICAL ERROR: %v", err)
+		}
+	}
 	mux.HandleFunc("/webauthn/enroll/begin", chatApp.instrumentHTTP("webauthn_begin", func(w http.ResponseWriter, r *http.Request) {
 		if !passkeyAllowed(r) {
 			logWarnf("⛔ [ONION] Chặn enroll từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))

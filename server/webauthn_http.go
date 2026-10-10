@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 
 	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/strutil"
@@ -106,7 +107,7 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 	role, err := s.WebAuthn.BindChallenge(code, challenge)
 	if err != nil {
 		logErrorf("❌ [ENROLL BEGIN] ticket=%s… bind failed: %v", strutil.Short(code), err)
-		http.Error(w, err.Error(), http.StatusForbidden)
+		enrollFailure(w, err)
 		return
 	}
 	logInfof("✅ [ENROLL BEGIN] ticket=%s… role=%s challenge=%s…", strutil.Short(code), role, strutil.Short(challenge))
@@ -180,14 +181,14 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 	_, boundChallenge, err := s.WebAuthn.PendingInfo(req.Ticket)
 	if err != nil {
 		logErrorf("❌ [ENROLL FINISH] ticket=%s… pending lookup failed: %v", strutil.Short(req.Ticket), err)
-		http.Error(w, err.Error(), http.StatusForbidden)
+		enrollFailure(w, err)
 		return
 	}
 	logInfof("🔍 [ENROLL FINISH] ticket=%s… boundChallenge=%s…", strutil.Short(req.Ticket), strutil.Short(boundChallenge))
 	created, err := parseCreationLib(req.ClientDataJSON, req.AttestationObject, boundChallenge, req.ID)
 	if err != nil {
 		logErrorf("❌ [ENROLL FINISH] ticket=%s… parse failed: %v", strutil.Short(req.Ticket), err)
-		http.Error(w, err.Error(), http.StatusForbidden)
+		enrollFailure(w, err)
 		return
 	}
 	logInfof("✅ [ENROLL FINISH] parsed credential_id=%s… counter=%d fmt=%s", strutil.Short(created.CredentialID), created.Counter, created.AttFormat)
@@ -202,7 +203,7 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 	})
 	if err != nil {
 		logErrorf("❌ [ENROLL FINISH] ticket=%s… store failed: %v", strutil.Short(req.Ticket), err)
-		http.Error(w, err.Error(), http.StatusForbidden)
+		enrollFailure(w, err)
 		return
 	}
 	logInfof("✅ [ENROLL FINISH] ticket=%s… stored credential_id=%s…", strutil.Short(req.Ticket), strutil.Short(created.CredentialID))
@@ -212,4 +213,22 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// enrollFailure answers a failed enrollment step. Only reasons the caller can
+// act on are echoed; anything else is an internal fault, and its detail stays
+// in the log because a raw os error carries the server's filesystem layout
+// into the browser. The status says whose fault it is: 403 for a rejected
+// ceremony, 500 for a store the server cannot touch.
+func enrollFailure(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errTicketUnknown),
+		errors.Is(err, errTicketUsed),
+		errors.Is(err, errTicketBound),
+		errors.Is(err, errCredentialExists),
+		errors.Is(err, errPasskey):
+		http.Error(w, err.Error(), http.StatusForbidden)
+	default:
+		http.Error(w, "enrollment failed", http.StatusInternalServerError)
+	}
 }
