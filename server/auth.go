@@ -21,7 +21,6 @@ import (
 
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
-	"github.com/CleveTok3125/V2V/internal/strutil"
 	"github.com/CleveTok3125/V2V/internal/wire"
 
 	"github.com/gorilla/websocket"
@@ -97,20 +96,11 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		return perms, resp, err
 	}
 
-	// Desktop passkey pairing, part one: the client cannot run the ceremony
-	// itself, so it asks for a ticket and gets a link to open. The answer is
-	// the end of this socket — the wait happens over poll requests, where
-	// nothing is held and an idle path cannot cut the ceremony short.
-	//
-	// A packet that also carries assertion material is a login attempt, not a
-	// pairing request, and is handled as one below.
-	if resp.Type == wire.AuthPairRequest && resp.PasskeyID == "" && resp.PasskeySig == "" {
-		return s.issuePairTicketReply(conn, clientIP, resp, onion)
-	}
-
-	// Part two: the desktop comes back with the ticket a browser ceremony
-	// proved. The nonce above already bound this connection to a live
-	// handshake and an address; the ticket supplies the role.
+	// Desktop passkey pairing: the desktop already asked for the ticket over
+	// HTTP (see pair_request.go) and this is the one dial it makes, carrying
+	// the ticket a browser ceremony proved. The nonce above bound this
+	// connection to a live handshake and an address; the ticket supplies the
+	// role.
 	if resp.PairTicket != "" {
 		return s.loginWithPairTicket(clientIP, resp)
 	}
@@ -264,9 +254,6 @@ func authErrIsProbe(err error) bool {
 		return false
 	}
 	switch {
-	case errors.Is(err, errPairTicketIssued):
-		// Not a failure at all: the pairing moved off this socket.
-		return false
 	case errors.Is(err, ErrPairExpired):
 		// Ran out of time. The slot came back by itself.
 		return false
@@ -289,52 +276,6 @@ func penalizeAuthFailure(resp AuthPacket, err error) bool {
 		return false
 	}
 	return authErrIsProbe(err)
-}
-
-// issuePairTicketReply mints a ticket, sends it with the page URL, and ends
-// the socket. The wait is not this connection's job: a ceremony takes
-// minutes, and a socket held that long costs a connection slot and can be
-// cut by anything idle on the path.
-func (s *ChatServer) issuePairTicketReply(conn *websocket.Conn, clientIP string, req AuthPacket, onion bool) (Permission, AuthPacket, error) {
-	perms := GetDefaultPermission()
-	if !WAConfig.Enabled {
-		logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt (thiếu WEBAUTHN_RPID/ORIGIN).", clientIP)
-		return perms, req, fmt.Errorf("%w", ErrPasskeyDisabled)
-	}
-	if passkeyDisabledForOnion(onion) {
-		logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt trên onion (ONION_ALLOW_PASSKEY=false).", clientIP)
-		return perms, req, fmt.Errorf("%w", ErrPasskeyDisabled)
-	}
-	// The role is named by the desktop and confirmed here, so the browser
-	// page never gets to decide which role the ceremony is for.
-	if req.Role == "" {
-		return perms, req, fmt.Errorf("%w", ErrInvalidRole)
-	}
-	s.RoleRegistryMu.RLock()
-	_, exists := s.RoleRegistry[req.Role]
-	s.RoleRegistryMu.RUnlock()
-	if !exists {
-		logWarnf("⚠️ [AUTH FAIL] %s: Yêu cầu Role không tồn tại [%s]", clientIP, req.Role)
-		return perms, req, fmt.Errorf("%w", ErrInvalidRole)
-	}
-
-	ticket, err := s.issuePairTicket(req.Role, clientIP)
-	if err != nil {
-		return perms, req, err
-	}
-	// The ticket rides in the URL fragment, which browsers never put in a
-	// request line, so it stays out of server and proxy logs.
-	if err := conn.WriteJSON(AuthPacket{
-		Type:       wire.AuthPair,
-		PairTicket: ticket,
-		PairURL:    WAConfig.Origin + "/web/#pair=" + ticket,
-		PairTTLSec: int(pairTicketTTL.Seconds()),
-	}); err != nil {
-		s.dropPairTicket(ticket)
-		return perms, req, err
-	}
-	logInfof("🔗 [PAIR] %s nhận vé ceremony cho role [%s], ticket=%s…", clientIP, req.Role, strutil.Short(ticket))
-	return perms, req, errPairTicketIssued
 }
 
 // loginWithPairTicket spends the proof a browser produced. The role comes
@@ -597,12 +538,6 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expectedHost string, onion bool) (*ClientSession, error) {
 	perms, authPacket, err := s.HandleAuth(conn, clientIP, expectedHost, onion)
 	if err != nil {
-		// A pairing ticket is not a failure: the exchange has moved off this
-		// socket, so it closes without an auth_failed frame and without the
-		// penalties a rejected handshake would earn.
-		if errors.Is(err, errPairTicketIssued) {
-			return nil, err
-		}
 		// The behaviour ring records the same errors as the ban, e.g. a bad
 		// signature, but a client that simply went away is not an anomaly.
 		if authErrIsProbe(err) {

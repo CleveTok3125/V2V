@@ -505,6 +505,17 @@ func main() {
 		chatApp.handlePairSubmit(w, r)
 	}))
 
+	// The desktop asks for its ticket here. It is HTTP rather than a
+	// websocket dial so the login that spends the ticket is the only dial
+	// the desktop makes: a second dial would trip CONNECTION_COOLDOWN.
+	mux.HandleFunc("/pair/request", chatApp.instrumentHTTP("pair_request", func(w http.ResponseWriter, r *http.Request) {
+		if !passkeyAllowed(r) {
+			http.NotFound(w, r)
+			return
+		}
+		chatApp.handlePairRequest(w, r)
+	}))
+
 	// The desktop polls here while a browser runs the ceremony. No IP gate:
 	// the request holds nothing and returns at once, and it is metered
 	// inside. Unlike /pair/submit it must come from the address that asked

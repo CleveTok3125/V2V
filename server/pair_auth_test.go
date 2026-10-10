@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/wire"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 )
@@ -47,144 +46,12 @@ func pairServer(t *testing.T) *ChatServer {
 		"member": {Permission: GetDefaultPermission()},
 		"admin":  {Permission: Permission{CanMessageUnlimited: true, CustomPrefix: "*"}},
 	}
-	// The poll and submission meters are package-level and keyed by client
-	// IP, and httptest requests all arrive from the same one.
+	// The poll, submission and ask meters are package-level and keyed by
+	// client IP, and httptest requests all arrive from the same one.
 	pairSubmitCooldowns.Reset()
 	pairStatusCooldowns.Reset()
+	pairRequestCooldowns.Reset()
 	return s
-}
-
-// TestPairRequestIssuesAndCloses is the shape of the whole feature: the
-// desktop asks, gets a ticket and a link, and this socket ends. Nothing is
-// left waiting here, because the wait belongs to poll requests.
-func TestPairRequestIssuesAndCloses(t *testing.T) {
-	s := pairServer(t)
-	client, server := dialAuthPair(t, s)
-	done := make(chan error, 1)
-	go func() {
-		_, _, err := s.HandleAuth(server, "127.0.0.1", "localhost", false)
-		done <- err
-	}()
-
-	ch := readChallenge(t, client)
-	if err := client.WriteJSON(AuthPacket{
-		Type: "auth_pair_request", Username: "Alice", Nonce: ch.Nonce, Role: "admin",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	client.SetReadDeadline(time.Now().Add(10 * time.Second))
-	var reply AuthPacket
-	if err := client.ReadJSON(&reply); err != nil {
-		t.Fatalf("no pairing reply: %v", err)
-	}
-	if reply.Type != "auth_pair" {
-		t.Fatalf("reply type = %q, want auth_pair", reply.Type)
-	}
-	if want := WAConfig.Origin + "/web/#pair=" + reply.PairTicket; reply.PairURL != want {
-		t.Fatalf("PairURL = %q, want %q", reply.PairURL, want)
-	}
-	if reply.PairTTLSec != int(pairTicketTTL.Seconds()) {
-		t.Fatalf("PairTTLSec = %d, want %d", reply.PairTTLSec, int(pairTicketTTL.Seconds()))
-	}
-
-	select {
-	case err := <-done:
-		if !errors.Is(err, errPairTicketIssued) {
-			t.Fatalf("err = %v, want errPairTicketIssued", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("HandleAuth kept waiting instead of ending the socket")
-	}
-
-	ticket, ok := s.pairTicketFor(reply.PairTicket, "127.0.0.1")
-	if !ok {
-		t.Fatal("the issued ticket does not resolve")
-	}
-	if ticket.Role != "admin" {
-		t.Fatalf("ticket role = %q, want the requested admin", ticket.Role)
-	}
-}
-
-// TestPairRequestRefusals covers the ways a pairing must not start: no
-// passkey support, onion ingress, an unknown role, a missing role and a
-// stolen handshake nonce. None of them may mint a ticket.
-func TestPairRequestRefusals(t *testing.T) {
-	cases := []struct {
-		name    string
-		mutate  func(*ChatServer)
-		onion   bool
-		nonce   string
-		role    string
-		wantErr error
-	}{
-		{name: "passkey disabled", mutate: func(*ChatServer) { WAConfig.Enabled = false }, wantErr: ErrPasskeyDisabled},
-		{name: "onion without the opt-in", onion: true, wantErr: ErrPasskeyDisabled},
-		{name: "unknown role", role: "nobody", wantErr: ErrInvalidRole},
-		{name: "no role", wantErr: ErrInvalidRole},
-		{name: "stolen nonce", nonce: strings.Repeat("ab", 64), role: "member", wantErr: ErrInvalidNonce},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			s := pairServer(t)
-			if c.mutate != nil {
-				c.mutate(s)
-			}
-			client, server := dialAuthPair(t, s)
-			done := make(chan error, 1)
-			go func() {
-				_, _, err := s.HandleAuth(server, "127.0.0.1", "localhost", c.onion)
-				done <- err
-			}()
-			ch := readChallenge(t, client)
-			nonce := c.nonce
-			if nonce == "" {
-				nonce = ch.Nonce
-			}
-			if err := client.WriteJSON(AuthPacket{
-				Type: "auth_pair_request", Nonce: nonce, Role: c.role,
-			}); err != nil {
-				t.Fatal(err)
-			}
-			select {
-			case err := <-done:
-				if !errors.Is(err, c.wantErr) {
-					t.Fatalf("err = %v, want %v", err, c.wantErr)
-				}
-			case <-time.After(5 * time.Second):
-				t.Fatal("HandleAuth did not return")
-			}
-			if s.countPairTickets() != 0 {
-				t.Fatal("a refused request minted a ticket")
-			}
-		})
-	}
-}
-
-// TestPairRequestWithAssertionIsALoginAttempt: a packet carrying assertion
-// material meant to authenticate here, so it must be verified here rather
-// than used to open a ceremony.
-func TestPairRequestWithAssertionIsALoginAttempt(t *testing.T) {
-	s := pairServer(t)
-	client, server := dialAuthPair(t, s)
-	done := make(chan error, 1)
-	go func() {
-		_, _, err := s.HandleAuth(server, "127.0.0.1", "localhost", false)
-		done <- err
-	}()
-	ch := readChallenge(t, client)
-	if err := client.WriteJSON(AuthPacket{
-		Type: "auth_pair_request", Nonce: ch.Nonce, Role: "member",
-		PasskeyID: "cred", PasskeySig: "sig",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; !errors.Is(err, ErrVerificationFailed) {
-		t.Fatalf("err = %v, want the assertion path to reject it", err)
-	}
-	if s.countPairTickets() != 0 {
-		t.Fatal("a rejected assertion minted a ticket")
-	}
 }
 
 // TestTicketLoginGrantsTheTicketRole: the role comes from the ticket, not
@@ -299,7 +166,6 @@ func TestAuthErrIsProbe(t *testing.T) {
 		want bool
 	}{
 		{"nothing happened", nil, false},
-		{"pairing moved off the socket", errPairTicketIssued, false},
 		{"ran out of time", ErrPairExpired, false},
 		{"server out of entropy", ErrEntropyExhaustion, false},
 		{"server turned passkeys off", ErrPasskeyDisabled, false},
@@ -383,7 +249,7 @@ func TestTicketLoginBecomesAWorkingSession(t *testing.T) {
 			t.Fatalf("read failed before the session opened: %v", err)
 		}
 		var packet AuthPacket
-		if json.Unmarshal(msg, &packet) == nil && packet.Type == wire.AuthSuccess {
+		if json.Unmarshal(msg, &packet) == nil && packet.Type == "auth_success" {
 			sawSuccess = true
 			if packet.AuthType != "passkey" || packet.Role != "admin" {
 				t.Fatalf("auth_success = %+v, want a passkey admin session", packet)

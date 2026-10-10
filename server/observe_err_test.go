@@ -8,6 +8,7 @@ package main
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -110,27 +111,16 @@ func TestExpiredCeremonyStaysOutOfTheRing(t *testing.T) {
 }
 
 // TestIssuedTicketStaysOutOfTheRing: asking for a ceremony is the feature
-// working. The handshake returns a private sentinel for it, and the guard is
-// bypassed for that path, so this pins that nothing leaks into the ring.
+// working, and it is now an HTTP ask that never reaches the auth path, so
+// nothing about it may be filed as an auth anomaly.
 func TestIssuedTicketStaysOutOfTheRing(t *testing.T) {
 	s, store := authScoreServer(t)
-	client, server := dialAuthPair(t, s)
-	done := make(chan error, 1)
-	go func() {
-		_, err := s.authenticateClient(server, "127.0.0.1", "localhost", false)
-		done <- err
-	}()
-	ch := readChallenge(t, client)
-	if err := client.WriteJSON(AuthPacket{
-		Type: "auth_pair_request", Nonce: ch.Nonce, Role: "member", Username: "Alice",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; !errors.Is(err, errPairTicketIssued) {
-		t.Fatalf("handshake err = %v, want errPairTicketIssued", err)
+	rec := postPairRequest(s, pairRequestBody(t, "member"))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("ask = %d, want %d (%s)", rec.Code, http.StatusCreated, rec.Body)
 	}
 
-	if codes := recordedCodes(store, "127.0.0.1"); len(codes) != 0 {
+	if codes := recordedCodes(store, "192.0.2.1"); len(codes) != 0 {
 		t.Fatalf("a requested ceremony was filed as an anomaly: %v", codes)
 	}
 }

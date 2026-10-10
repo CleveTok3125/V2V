@@ -148,18 +148,16 @@ func TestReadAuthResultReportsAClosedSocket(t *testing.T) {
 	}
 }
 
-// TestPairRequestCarriesNoKeyMaterial: the pairing request asks for a
-// ceremony and nothing else, so there is no assertion material for a
-// confused server to mistake for a login attempt.
-func TestPairRequestCarriesNoKeyMaterial(t *testing.T) {
-	raw, err := json.Marshal(AuthPacket{Type: "auth_pair_request", Role: "member", Username: "A"})
+// TestPairRequestCarriesOnlyTheRole: the ask is a role name and nothing
+// else. It goes over HTTP now, so the assertion is on the body the desktop
+// actually posts.
+func TestPairRequestCarriesOnlyTheRole(t *testing.T) {
+	raw, err := json.Marshal(pairRequest{Role: "member"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"passkey_id", "passkey_sig", "passkey_auth_data", "signature", "hmac"} {
-		if strings.Contains(string(raw), `"`+k+`"`) {
-			t.Errorf("a pairing request carried %q: %s", k, raw)
-		}
+	if string(raw) != `{"role":"member"}` {
+		t.Fatalf("pair request body = %s, want only the role", raw)
 	}
 }
 

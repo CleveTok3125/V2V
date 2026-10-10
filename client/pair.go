@@ -9,13 +9,11 @@ package main
 // See docs/TECHNICAL.md, "Desktop pairing".
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
-
-	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
 // validateAuthFlags refuses a login that names two credentials. -P owns the
@@ -71,9 +69,27 @@ func serverPasskeyEnabled(httpBase string) (enabled, known bool) {
 	return *v.Passkey, true
 }
 
+// pairRequest is what the desktop posts to ask for a ceremony. The role
+// names which credentials the ceremony may prove; the server confirms it
+// exists and never lets the page choose it.
+type pairRequest struct {
+	Role string `json:"role"`
+}
+
+// pairOffer is the server's answer: the ticket, and the link that proves it.
+type pairOffer struct {
+	Ticket string `json:"ticket"`
+	URL    string `json:"url"`
+	TTLSec int    `json:"ttl_sec"`
+}
+
 // acquirePairTicket fetches a ticket, shows the link, and waits for a
 // browser to prove it. ok=false means the caller must give up: every
 // failure here has already been explained to the user.
+//
+// The ask is an HTTP request, not a throwaway dial, so the connection this
+// login eventually makes is the only one the server sees. A second dial
+// would be refused as churn by CONNECTION_COOLDOWN.
 func acquirePairTicket(wsURL, role string) (string, bool) {
 	base, err := httpBaseFromWS(wsURL)
 	if err != nil {
@@ -87,46 +103,53 @@ func acquirePairTicket(wsURL, role string) (string, bool) {
 		return "", false
 	}
 
-	conn, _, err := dialManaged(wsURL)
-	if err != nil {
+	offer, ok := requestPairTicket(base, role)
+	if !ok {
 		return "", false
 	}
-	defer conn.Close()
+	printPairURL(offer.URL)
+	fmt.Print(pairWaitPrompt(role, offer.TTLSec))
 
-	challenge, err := readChallenge(conn)
-	if err != nil {
+	// The ticket is in hand, so nothing is held while the ceremony runs.
+	if !pollPairStatus(base, offer.Ticket, offer.TTLSec) {
 		return "", false
 	}
-	if err := conn.WriteJSON(AuthPacket{
-		Type:     wire.AuthPairRequest,
-		Nonce:    challenge.Nonce,
-		Role:     role,
-		Username: strings.TrimSpace(CLI.Username),
-		Platform: clientPlatform(),
-	}); err != nil {
-		fmt.Println("❌ Lỗi gửi yêu cầu ghép cặp:", err)
-		return "", false
-	}
+	return offer.Ticket, true
+}
 
-	var reply AuthPacket
-	if err := conn.ReadJSON(&reply); err != nil {
-		fmt.Println("❌ Không nhận được vé ghép cặp:", err)
-		return "", false
+// requestPairTicket posts the ask and decodes the offer. The server's own
+// reasons are shown as they arrive; anything unreadable is reported as a
+// failure rather than guessed at.
+func requestPairTicket(base, role string) (pairOffer, bool) {
+	var offer pairOffer
+	body, err := json.Marshal(pairRequest{Role: role})
+	if err != nil {
+		fmt.Println("❌ Lỗi tạo yêu cầu ghép cặp:", err)
+		return offer, false
 	}
-	if reply.Type != wire.AuthPair || reply.PairTicket == "" || reply.PairURL == "" {
+	client, err := versionHTTPClient()
+	if err != nil {
+		fmt.Println("❌ Không tạo được kết nối tới server:", err)
+		return offer, false
+	}
+	resp, err := client.Post(base+"/pair/request", "application/json", bytes.NewReader(body))
+	if err != nil {
+		fmt.Println("❌ Không gửi được yêu cầu ghép cặp:", err)
+		return offer, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		fmt.Printf("❌ Server từ chối yêu cầu ghép cặp (HTTP %d): %s\n",
+			resp.StatusCode, dialBodyText(resp))
+		return offer, false
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&offer); err != nil {
+		fmt.Println("❌ Phản hồi ghép cặp không đọc được:", err)
+		return offer, false
+	}
+	if offer.Ticket == "" || offer.URL == "" {
 		fmt.Println("❌ Phản hồi ghép cặp không hợp lệ.")
-		return "", false
+		return offer, false
 	}
-
-	printPairURL(reply.PairURL)
-	fmt.Print(pairWaitPrompt(role, reply.PairTTLSec))
-	// The ticket is in hand, so this socket has done its job. Holding it
-	// would cost a connection slot for the whole ceremony and an idle path
-	// could cut it before the browser ever speaks.
-	conn.Close()
-
-	if !pollPairStatus(base, reply.PairTicket, reply.PairTTLSec) {
-		return "", false
-	}
-	return reply.PairTicket, true
+	return offer, true
 }

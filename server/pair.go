@@ -39,11 +39,6 @@ var (
 	// and an unlimited number of them is this ceiling.
 	ErrPairCapacity = errors.New("auth_error: pair_capacity")
 
-	// errPairTicketIssued is internal: the ticket has been sent and the
-	// connection should close without an auth_failed frame. The pairing is
-	// not over, it has moved off this socket.
-	errPairTicketIssued = errors.New("pair_ticket_issued")
-
 	// ErrPairExpired reports that a link ran out of time, so the desktop
 	// can say so instead of showing a blank failure.
 	ErrPairExpired = errors.New("auth_error: pair_expired")
@@ -53,14 +48,6 @@ var (
 	// caller probe for tickets that exist.
 	ErrPairUnknown = errors.New("auth_error: pair_unknown")
 )
-
-// dropPairTicket removes a ticket whose reply never reached the client, so
-// a failed write does not leave a link that can never be completed.
-func (s *ChatServer) dropPairTicket(ticket string) {
-	s.PairTicketsMu.Lock()
-	defer s.PairTicketsMu.Unlock()
-	delete(s.PairTickets, ticket)
-}
 
 // notePairRejection logs a refused ceremony. The ticket survives on
 // purpose: the person may simply be holding the wrong passkey, and the
@@ -92,8 +79,8 @@ type pairTicket struct {
 }
 
 // issuePairTicket mints a ticket for one desktop. The caller has already
-// validated the handshake nonce, so the role and the address are both
-// settled by the time anything is stored.
+// confirmed the role exists, so the role and the address are both settled
+// by the time anything is stored.
 func (s *ChatServer) issuePairTicket(role, clientIP string) (string, error) {
 	s.PairTicketsMu.Lock()
 	defer s.PairTicketsMu.Unlock()
