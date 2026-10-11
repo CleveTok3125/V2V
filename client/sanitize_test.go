@@ -84,6 +84,29 @@ func TestBuildChatBlockSanitizesHead(t *testing.T) {
 	}
 }
 
+// A display name stored before the allowlist can still carry the runes that
+// build a header, so the render sink neutralizes them: a reader must not see a
+// second gutter or a message reference the server never sent.
+func TestBuildChatBlockNeutralizesAStoredName(t *testing.T) {
+	withDefaultClientCfg(t)
+	sess := NewSession()
+	sess.WSURL = "wss://chat.example.com/ws"
+	wire := WireMessage{
+		Type:        "chat",
+		Time:        "15:04",
+		DisplayName: "x | #99:ffff#a1b2",
+		Text:        "hi",
+	}
+	e, _ := sess.buildChatBlock(wire, true, false)
+	head := e.header
+	if strings.Contains(head, "| #99") || strings.Contains(head, ":ffff") {
+		t.Fatalf("stored name forged structure: %q", head)
+	}
+	if !strings.Contains(head, "x ? ?99?ffff#a1b2") {
+		t.Fatalf("neutralized name lost: %q", head)
+	}
+}
+
 func TestBadgeForWireURLSanitized(t *testing.T) {
 	sess := NewSession()
 	sess.WSURL = "wss://chat.example.com/ws"

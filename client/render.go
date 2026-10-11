@@ -53,6 +53,11 @@ func serverText(s string) string { return filter.SanitizeForDisplay(s) }
 // serverField is serverText for one-line fields (host, role, error).
 func serverField(s string) string { return filter.SanitizeSingleLine(s) }
 
+// authorField is a display name for a header or a quote row. It neutralizes
+// the runes that would otherwise read as header structure: a name minted
+// before the allowlist can still carry them, and history is not rewritten.
+func authorField(s string) string { return filter.NeutralizeDisplayName(filter.SanitizeSingleLine(s)) }
+
 // tabForWire routes a wire to its tab. A replay marker delimits the chat
 // history stream, so it belongs to TabChat next to the messages it frames;
 // every other system line goes to TabSystem. The type and the tags decide,
@@ -358,7 +363,7 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (e entry, t
 	// author column stable and stops a wrapped body from reading as a row
 	// of separate messages.
 	header := fmt.Sprintf("| %s %s",
-		filter.SanitizeSingleLine(msg.Time), filter.SanitizeSingleLine(msg.DisplayName))
+		filter.SanitizeSingleLine(msg.Time), authorField(msg.DisplayName))
 	if wantsMeta(msg, withMeta) {
 		badge := ""
 		if msg.Trip != nil {

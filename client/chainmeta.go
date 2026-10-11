@@ -440,7 +440,7 @@ func formatQuoteRich(msg WireMessage, pending bool, maxRunes int) string {
 		mark = " \x1b[91m✗\x1b[39m"
 	}
 	line := fmt.Sprintf("|   ┌─  ↩ #%d • %s %s: %s%s",
-		msg.ChainHeight, filter.SanitizeSingleLine(msg.Time), filter.SanitizeSingleLine(msg.DisplayName),
+		msg.ChainHeight, filter.SanitizeSingleLine(msg.Time), authorField(msg.DisplayName),
 		quoteFirstLine(msg.Text, maxRunes), mark)
 	if pending {
 		// Grey marks it as part of a block still on its way; the "⏳" belongs
@@ -557,7 +557,7 @@ func formatInfoBlock(msg WireMessage) []string {
 		sentAt = "(không)"
 	}
 	out = append(out, row("sent_at:", sentAt))
-	out = append(out, row("from:", filter.SanitizeSingleLine(msg.DisplayName)))
+	out = append(out, row("from:", authorField(msg.DisplayName)))
 	if msg.Trip != nil {
 		tm := msg.Trip
 		verdict := "✗"
