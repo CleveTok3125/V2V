@@ -272,7 +272,7 @@ func (s *Session) refreshCoalesced() {
 	if time.Since(s.Display.LastRefresh) >= 100*time.Millisecond {
 		s.Display.LastRefresh = time.Now()
 		s.Display.RefreshMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return
 	}
 	if !s.Display.RefreshPending {
@@ -282,7 +282,7 @@ func (s *Session) refreshCoalesced() {
 			s.Display.RefreshPending = false
 			s.Display.LastRefresh = time.Now()
 			s.Display.RefreshMu.Unlock()
-			s.Display.Term.Refresh()
+			s.refreshTerminal()
 		})
 	}
 	s.Display.RefreshMu.Unlock()
@@ -576,5 +576,5 @@ func (s *Session) switchTab(n int) {
 		sb.WriteString(l)
 	}
 	s.enqueueOutputKeep(sb.String(), true)
-	s.Display.Term.Refresh()
+	s.refreshTerminal()
 }

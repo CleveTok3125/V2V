@@ -62,7 +62,7 @@ func (s *Session) dispatch(text string) (string, cmdAction) {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Lệnh không tồn tại: %s. Gõ /help để xem danh sách.\n", text))
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		// Rejected input never sends: drop the one-shot reply target
 		// so the next plain message does not inherit the quote.
 		s.Pending.PendingReplyTo = 0
@@ -88,14 +88,14 @@ func (s *Session) handleReadErr(err error) cmdAction {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback("| [Local]: Đã hủy reply nháp.\n")
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return cmdDone
 	}
 	s.Display.Term.SetPrompt("| > ")
 	s.Display.DisplayMu.Lock()
 	s.emitLocalFeedback("| [Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.\n")
 	s.Display.DisplayMu.Unlock()
-	s.Display.Term.Refresh()
+	s.refreshTerminal()
 	return cmdDone
 }
 
@@ -360,7 +360,7 @@ func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback("| [Local]: Reply đã tắt trong config (ui.reply.enabled).\n")
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return text, cmdDone, true
 	}
 	rest := strings.TrimSpace(strings.TrimPrefix(text, "/reply"))
@@ -375,7 +375,7 @@ func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback("| [Local]: Dùng /reply <height>[:hash] [tin nhắn] (vd /reply 1234 đồng ý; /reply 1234 để soạn nháp).\n")
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return text, cmdDone, true
 	}
 	s.Display.DisplayMu.Lock()
@@ -386,7 +386,7 @@ func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ, không reply được.\n", height))
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return text, cmdDone, true
 	}
 	if body == "" {
@@ -401,7 +401,7 @@ func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 		}
 		s.emitLocalFeedback("| [Local]: Gõ nội dung reply (Enter gửi, ^C ở dòng trống hủy, lệnh / khác hủy draft).\n")
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return text, cmdDone, true
 	}
 	// Quote validated: the body flows through the remaining dispatch
@@ -434,7 +434,7 @@ func (s *Session) cmdMeta(text string) bool {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback("| [Local]: Dùng /meta, /meta on hoặc /meta off.\n")
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return true
 	}
 	state := "HIỆN"
@@ -445,7 +445,7 @@ func (s *Session) cmdMeta(text string) bool {
 	s.Display.DisplayMu.Lock()
 	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Dòng meta (#height:hash) %s (chain vẫn verify ngầm).\n", state))
 	s.Display.DisplayMu.Unlock()
-	s.Display.Term.Refresh()
+	s.refreshTerminal()
 	return true
 }
 
@@ -464,7 +464,7 @@ func (s *Session) cmdFind(text string) bool {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: %v.\n", err))
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return true
 	}
 	s.Display.DisplayMu.Lock()
@@ -501,7 +501,7 @@ func (s *Session) cmdFind(text string) bool {
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m\n", height))
 	}
 	s.Display.DisplayMu.Unlock()
-	s.Display.Term.Refresh()
+	s.refreshTerminal()
 	return true
 }
 
@@ -515,7 +515,7 @@ func (s *Session) cmdExpand(text string) bool {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback("| [Local]: Dùng /expand #height (vd /expand 1234).\n")
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return true
 	}
 	s.Display.DisplayMu.Lock()
@@ -523,13 +523,13 @@ func (s *Session) cmdExpand(text string) bool {
 	if !ok {
 		s.emitLocalFeedback("| [Local]: Tin đã trôi khỏi bộ nhớ hoặc chưa sync.\n")
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return true
 	}
 	if findCollapsed(s.Display.TabChat.lines, height) < 0 {
 		s.emitLocalFeedback("| [Local]: Tin này không thu gọn.\n")
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return true
 	}
 	// Re-render full and replay it inside a dim heredoc frame
@@ -548,7 +548,7 @@ func (s *Session) cmdExpand(text string) bool {
 	}
 	s.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m\n", height))
 	s.Display.DisplayMu.Unlock()
-	s.Display.Term.Refresh()
+	s.refreshTerminal()
 	return true
 }
 
@@ -562,7 +562,7 @@ func (s *Session) cmdInfo(text string) bool {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback("| [Local]: Dùng /info <height>[:hash] (vd /info 1234).\n")
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return true
 	}
 	s.Display.DisplayMu.Lock()
@@ -570,20 +570,20 @@ func (s *Session) cmdInfo(text string) bool {
 	if !ok {
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height))
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return true
 	}
 	if suffix != "" && !strings.HasPrefix(strings.ToLower(wire.ChainHash), suffix) {
 		s.emitLocalFeedback("| [Local]: Height đúng nhưng hash khác — kiểm tra lại số.\n")
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return true
 	}
 	for _, line := range formatInfoBlock(wire) {
 		s.emitLocalFeedback(line)
 	}
 	s.Display.DisplayMu.Unlock()
-	s.Display.Term.Refresh()
+	s.refreshTerminal()
 	return true
 }
 
@@ -597,7 +597,7 @@ func (s *Session) cmdCopy(text string) bool {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback("| [Local]: Dùng /copy <height>[:hash] (vd /copy 1234).\n")
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return true
 	}
 	s.Display.DisplayMu.Lock()
@@ -605,7 +605,7 @@ func (s *Session) cmdCopy(text string) bool {
 	if !ok {
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height))
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return true
 	}
 	if err := copyToClipboard(wire.Text); err != nil {
@@ -615,7 +615,7 @@ func (s *Session) cmdCopy(text string) bool {
 		scheduleClipboardClear(wire.Text, ClientCfg.ClipboardClearAfterSec())
 	}
 	s.Display.DisplayMu.Unlock()
-	s.Display.Term.Refresh()
+	s.refreshTerminal()
 	return true
 }
 
@@ -645,7 +645,7 @@ func (s *Session) cmdOlder(text string) bool {
 			s.Display.DisplayMu.Lock()
 			s.emitLocalFeedback("| [Local]: Dùng /older [số dòng] (vd /older 50).\n")
 			s.Display.DisplayMu.Unlock()
-			s.Display.Term.Refresh()
+			s.refreshTerminal()
 			return true
 		}
 		limit = n
@@ -657,14 +657,14 @@ func (s *Session) cmdOlder(text string) bool {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback("| [Local]: Chưa có tin nào trong bộ nhớ — không có gì để lùi.\n")
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return true
 	}
 	if err := s.sendJSON(HistoryRequest{Type: "history_request", Before: before, Limit: limit}); err != nil {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Không gửi được yêu cầu lịch sử cũ: %v.\n", err))
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 	}
 	return true
 }

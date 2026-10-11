@@ -117,6 +117,18 @@ func (s *Session) flushOutputNow() {
 	}
 }
 
+// refreshTerminal redraws the prompt after draining queued output. The two
+// writers must not interleave: a block reaches the terminal as bytes appended
+// to OutBuf and written by a drainer goroutine, while Refresh writes the
+// prompt directly from the caller. Refreshing with a block still queued puts
+// the prompt inside that block's byte sequence, which is how a notice or a
+// prompt ends up wedged between a message's lines. Draining first makes the
+// block whole on screen before anything else is drawn.
+func (s *Session) refreshTerminal() {
+	s.flushOutputNow()
+	s.Display.Term.Refresh()
+}
+
 // holdOrEnqueue routes one rendered line to the terminal, or to the
 // catch-up hold buffer while a join replay is being merged. Caller
 // must hold DisplayMu.

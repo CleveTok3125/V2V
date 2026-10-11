@@ -46,7 +46,7 @@ func (s *Session) checkSendGuards(text string) bool {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin nhắn chứa ký tự không hợp lệ và đã bị chặn (client-side): %v\n", err))
 		s.Display.DisplayMu.Unlock()
-		s.Display.Term.Refresh()
+		s.refreshTerminal()
 		return false
 	}
 
@@ -61,14 +61,14 @@ func (s *Session) checkSendGuards(text string) bool {
 				s.Display.DisplayMu.Lock()
 				s.emitLocalFeedback(fmt.Sprintf("| [Local]: Bạn đang chat quá nhanh! Vui lòng đợi %v.\n", ClientCfg.Limits.MessageCooldown))
 				s.Display.DisplayMu.Unlock()
-				s.Display.Term.Refresh()
+				s.refreshTerminal()
 				return false
 			}
 			if err == guard.ErrTooLong {
 				s.Display.DisplayMu.Lock()
 				s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin nhắn quá dài (tối đa %d ký tự).\n", ClientCfg.Limits.MaxMessageLength))
 				s.Display.DisplayMu.Unlock()
-				s.Display.Term.Refresh()
+				s.refreshTerminal()
 				return false
 			}
 		}
@@ -164,7 +164,7 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 	phRows = 1
 	phScreenRows = countRows(entry)
 	phBufEnd = len(s.Display.TabChat.lines)
-	s.Display.Term.Refresh()
+	s.refreshTerminal()
 	s.Display.DisplayMu.Unlock()
 	return phRows, phScreenRows, phShown, phBufEnd
 }
