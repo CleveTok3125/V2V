@@ -525,9 +525,19 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 	}
 
 	// Always include hash, even for privileged roles (no exception)
+	// The prefix is admin config, not user input: an invalid one is dropped
+	// with a warning rather than turning an otherwise valid name into
+	// "Anonymous", so a roles.json typo cannot cost a user their name.
+	prefix := perms.CustomPrefix
+	if prefix != "" {
+		if err := filter.ValidateDisplayPrefix(prefix); err != nil {
+			logWarnf("⚠️ [FILTER] custom prefix invalid from %s: %v -> dropped", clientIP, err)
+			prefix = ""
+		}
+	}
 	var baseDisplay string
-	if perms.CustomPrefix != "" {
-		baseDisplay = perms.CustomPrefix + name + "#" + hashStr
+	if prefix != "" {
+		baseDisplay = prefix + name + "#" + hashStr
 	} else {
 		baseDisplay = name + "#" + hashStr
 	}

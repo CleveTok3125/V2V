@@ -32,6 +32,28 @@ func TestDisplayName_AlwaysHash(t *testing.T) {
 	}
 }
 
+// A prefix that carries header structure is dropped, and the user keeps the
+// name they asked for instead of losing it to "Anonymous".
+func TestDisplayName_SpoofingPrefixDropped(t *testing.T) {
+	s := NewChatServer()
+	s.DisplaySalt = []byte("test-salt-32-bytes-long-for-test!!")
+	cases := []struct{ prefix, forbidden string }{
+		{"| ", "|"},
+		{"#99:ffff ", ":"},
+		{"✍ ", "✍"},
+	}
+	for _, tc := range cases {
+		perms := Permission{CustomPrefix: tc.prefix, CanMessageUnlimited: true}
+		got := s.generateDisplayName("Alice", "1.2.3.4", perms)
+		if strings.Contains(got, tc.forbidden) {
+			t.Fatalf("prefix %q leaked %q into %q", tc.prefix, tc.forbidden, got)
+		}
+		if !strings.HasPrefix(got, "Alice#") {
+			t.Fatalf("name lost for prefix %q: %q", tc.prefix, got)
+		}
+	}
+}
+
 func TestDisplayName_Serial(t *testing.T) {
 	s := NewChatServer()
 	s.DisplaySalt = []byte("fixed-salt-for-serial-test-32bytes!")
