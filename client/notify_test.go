@@ -151,7 +151,7 @@ func TestEmitLocalFeedbackTagsMutesLiveButBuffers(t *testing.T) {
 	if out.String() != "" {
 		t.Fatalf("muted notice must not print live, got %q", out.String())
 	}
-	if !strings.Contains(strings.Join(sess.Display.TabSys.lines, ""), "muted") {
+	if !strings.Contains(entriesText(sess.Display.TabSys.lines), "muted") {
 		t.Fatal("muted notice must still be buffered in Tab 2")
 	}
 
@@ -230,7 +230,7 @@ func TestRenderChatBlockMutedSystemBuffersTabSys(t *testing.T) {
 	if strings.Contains(out.String(), "rate limit") {
 		t.Fatalf("muted system wire must not print live, got %q", out.String())
 	}
-	if !strings.Contains(strings.Join(sess.Display.TabSys.lines, ""), "rate limit") {
+	if !strings.Contains(entriesText(sess.Display.TabSys.lines), "rate limit") {
 		t.Fatal("muted system wire must still be buffered in Tab 2")
 	}
 
@@ -259,7 +259,7 @@ func TestPowNoticeMutedStillBuffers(t *testing.T) {
 	if out.String() != "" {
 		t.Fatalf("muted pow notice must not print live, got %q", out.String())
 	}
-	if !strings.Contains(strings.Join(sess.Display.TabSys.lines, ""), "Đang giải PoW") {
+	if !strings.Contains(entriesText(sess.Display.TabSys.lines), "Đang giải PoW") {
 		t.Fatal("muted pow notice must still be buffered in Tab 2")
 	}
 }
@@ -283,7 +283,7 @@ func TestRawFrameIsNotClassifiedByWording(t *testing.T) {
 	if !strings.Contains(out.String(), "quá nhanh") {
 		t.Fatalf("a raw frame must still print, got %q", out.String())
 	}
-	if strings.Contains(strings.Join(sess.Display.TabSys.lines, ""), "quá nhanh") {
+	if strings.Contains(entriesText(sess.Display.TabSys.lines), "quá nhanh") {
 		t.Fatal("a raw frame must not be routed to the system tab by its wording")
 	}
 }

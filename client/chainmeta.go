@@ -37,12 +37,15 @@ type pendingMsg struct {
 	shown      bool
 	gen        uint64
 	bufEnd     int
-	seq        uint32
-	pub        string
-	hasTrip    bool
-	sentAt     time.Time
-	tmpID      uint64
-	replyTo    uint64
+	// entry is the exact slot content written, so the erase can confirm the
+	// slot is still ours by equality instead of searching for a marker.
+	entry   entry
+	seq     uint32
+	pub     string
+	hasTrip bool
+	sentAt  time.Time
+	tmpID   uint64
+	replyTo uint64
 }
 
 // metaLineFor builds the metadata that rides the header row next to the
@@ -57,15 +60,7 @@ func metaLineFor(height uint64, hashHex, badgePart string) string {
 	sb.WriteString("#")
 	sb.WriteString(strconv.FormatUint(height, 10))
 	sb.WriteString(":")
-	// A server-supplied hash is only shown when it really is hex: a
-	// crafted value must not smuggle escapes into the meta line.
-	if isHexString(hashHex) {
-		if len(hashHex) >= 4 {
-			sb.WriteString(strings.ToLower(hashHex[:4]))
-		} else {
-			sb.WriteString(strings.ToLower(hashHex))
-		}
-	}
+	sb.WriteString(shortHashHex(hashHex))
 	if badgePart != "" {
 		// No separator before the badge: "•" marks where the author ends
 		// and the meta strip begins, and there is only one such boundary.
@@ -73,6 +68,20 @@ func metaLineFor(height uint64, hashHex, badgePart string) string {
 		sb.WriteString(badgePart)
 	}
 	return sb.String()
+}
+
+// shortHashHex is the hash prefix a header prints, and the value an entry
+// keeps so a lookup never reads it back out of the rendered row. A
+// server-supplied hash is only shown when it really is hex: a crafted value
+// must not smuggle escapes into the header.
+func shortHashHex(hashHex string) string {
+	if !isHexString(hashHex) {
+		return ""
+	}
+	if len(hashHex) >= 4 {
+		return strings.ToLower(hashHex[:4])
+	}
+	return strings.ToLower(hashHex)
 }
 
 // isHexString reports whether s is a non-empty run of hex digits.
@@ -200,10 +209,8 @@ func reapStaleEchoes(stash []pendingEcho, maxAge time.Duration) (kept []pendingE
 // renderedBlock is one cached message block: content head plus the
 // trailing meta line, with the tab it belongs to.
 type renderedBlock struct {
-	tab     int
-	head    string
-	meta    string
-	hasMeta bool
+	tab   int
+	entry entry
 }
 
 // renderCache is a bounded FIFO cache of rendered blocks keyed by chain
@@ -247,7 +254,9 @@ func (c *renderCache) put(key string, b renderedBlock) {
 // (names allow "#" and ":"), and the renderer's reference is the last one
 // on the row, so matching the last keeps a name from standing in for it.
 // The hash part may be empty while scanning and is compared apart.
-var headerMetaRe = regexp.MustCompile(`\| \d\d:\d\d .*#(\d+):([0-9a-fA-F]*)`)
+// headerMetaRe used to recover the message number by scanning a rendered
+// header. Entries carry height and hashHex instead, so nothing parses a row
+// back into structure.
 
 // mentionRe matches @-mentions of message heights ("@#1234", "@#1234:abcd").
 // The @ prefix keeps them distinct from server-stamped "name#hash"
@@ -401,25 +410,6 @@ func parseFindArg(arg string) (uint64, string, error) {
 		}
 	}
 	return height, strings.ToLower(suffix), nil
-}
-
-// findMetaMatches scans rendered buffer entries for a header naming the
-// given height (with optional hash-prefix checksum). It returns the entry
-// indices; the header and its body live in the same entry.
-func findMetaMatches(lines []string, height uint64, suffix string) []int {
-	want := strconv.FormatUint(height, 10)
-	var out []int
-	for i, line := range lines {
-		m := headerMetaRe.FindStringSubmatch(stripANSIForFind(line))
-		if m == nil || m[1] != want {
-			continue
-		}
-		if suffix != "" && !strings.HasPrefix(strings.ToLower(m[2]), suffix) {
-			continue
-		}
-		out = append(out, i)
-	}
-	return out
 }
 
 // formatQuote renders one quote preview line from a resolved head entry:
@@ -1027,35 +1017,57 @@ func (s *Session) checkRecoverWire(msg WireMessage) {
 // names height h, or -1 when none matches (meta hidden or the predecessor
 // was dropped). A header and its body share one buffer entry, so the row
 // after that entry is the row after the whole block.
-func metaHeightIndex(lines []string, h uint64) int {
-	want := strconv.FormatUint(h, 10)
+func metaHeightIndex(lines []entry, h uint64) int {
+	idx := entryIndexByHeight(lines, h, "")
+	if idx < 0 {
+		return -1
+	}
+	// One entry holds a whole message, so the position after it is the next
+	// slot.
+	return idx + 1
+}
+
+// chunkHeightIndex is metaHeightIndex over the held output, which mixes
+// message chunks with control sequences.
+func chunkHeightIndex(chunks []heldChunk, h uint64) int {
 	idx := -1
-	for i, l := range lines {
-		m := headerMetaRe.FindStringSubmatch(stripANSIForFind(l))
-		if m == nil || m[1] != want {
-			continue
+	for i, c := range chunks {
+		if c.height == h {
+			idx = i + 1
 		}
-		idx = i + 1
 	}
 	return idx
 }
 
-// insertStrings splices block into lines at idx.
-func insertStrings(lines []string, idx int, block []string) []string {
+// insertChunks splices block into chunks at idx.
+func insertChunks(chunks []heldChunk, idx int, block []heldChunk) []heldChunk {
 	if len(block) == 0 {
-		return lines
+		return chunks
 	}
 	if idx < 0 {
 		idx = 0
 	}
-	if idx > len(lines) {
-		idx = len(lines)
+	if idx > len(chunks) {
+		idx = len(chunks)
 	}
 	n := len(block)
-	lines = append(lines, make([]string, n)...)
-	copy(lines[idx+n:], lines[idx:])
-	copy(lines[idx:], block)
-	return lines
+	chunks = append(chunks, make([]heldChunk, n)...)
+	copy(chunks[idx+n:], chunks[idx:])
+	copy(chunks[idx:], block)
+	return chunks
+}
+
+// entryIndexByHeight returns the slot reporting h, or -1. A hash prefix
+// narrows the match, which is what tells two entries at the same height
+// apart. The lookup reads fields, so a body that happens to contain
+// "#123:abc" can never answer for a real entry.
+func entryIndexByHeight(lines []entry, h uint64, hashPrefix string) int {
+	for i, e := range lines {
+		if e.matchesHeight(h, hashPrefix) {
+			return i
+		}
+	}
+	return -1
 }
 
 // renderRecoveredInPlace renders one recovered wire and splices its
@@ -1067,16 +1079,16 @@ func (s *Session) renderRecoveredInPlace(msg WireMessage) {
 	beforeHold := len(s.Display.HoldLines)
 	beforeChat := len(s.Display.TabChat.lines)
 	s.renderChatBlock(msg)
-	blockHold := append([]string{}, s.Display.HoldLines[beforeHold:]...)
-	blockChat := append([]string{}, s.Display.TabChat.lines[beforeChat:]...)
+	blockHold := append([]heldChunk{}, s.Display.HoldLines[beforeHold:]...)
+	blockChat := append([]entry{}, s.Display.TabChat.lines[beforeChat:]...)
 	s.Display.HoldLines = s.Display.HoldLines[:beforeHold]
 	s.Display.TabChat.spliceOut(beforeChat, beforeChat+len(blockChat))
 
-	holdIdx := metaHeightIndex(s.Display.HoldLines, msg.ChainHeight-1)
+	holdIdx := chunkHeightIndex(s.Display.HoldLines, msg.ChainHeight-1)
 	if holdIdx < 0 {
 		holdIdx = len(s.Display.HoldLines)
 	}
-	s.Display.HoldLines = insertStrings(s.Display.HoldLines, holdIdx, blockHold)
+	s.Display.HoldLines = insertChunks(s.Display.HoldLines, holdIdx, blockHold)
 
 	chatIdx := metaHeightIndex(s.Display.TabChat.lines, msg.ChainHeight-1)
 	if chatIdx < 0 {
@@ -1158,17 +1170,13 @@ func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
 	// above the author row, and the quote is a preview of another message,
 	// so it carries no mark of its own. Requiring a mark on every row is
 	// what once left a multi-line placeholder on screen forever.
-	ours := false
-	for _, l := range s.Display.TabChat.lines[start:pm.bufEnd] {
-		if strings.Contains(l, "⏳") {
-			ours = true
-			break
-		}
-	}
-	if !ours {
+	// Identity is the entry itself, not a marker inside the rendered rows: a
+	// body that happens to contain "⏳" must not be mistaken for our
+	// placeholder.
+	if s.Display.TabChat.lines[start] != pm.entry {
 		return
 	}
-	intervening := append([]string{}, s.Display.TabChat.lines[pm.bufEnd:]...)
+	intervening := append([]entry{}, s.Display.TabChat.lines[pm.bufEnd:]...)
 	s.Display.TabChat.spliceOut(start, pm.bufEnd)
 	// Rows on screen: placeholder block plus intervening lines printed after it.
 	// The count must be in terminal rows, not buffer entries: a message block
@@ -1177,14 +1185,14 @@ func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
 	// Enqueued (not written) so a slow terminal never stalls the caller;
 	// the order against previously queued lines keeps the erase math valid.
 	interveningRows := 0
-	for _, l := range intervening {
-		interveningRows += estimateRows(l, termWidth())
+	for _, e := range intervening {
+		interveningRows += e.rows(termWidth())
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "\x1b[%dA", screenRows+interveningRows)
 	sb.WriteString("\x1b[J")
-	for _, l := range intervening {
-		sb.WriteString(l)
+	for _, e := range intervening {
+		sb.WriteString(e.text())
 	}
 	s.holdOrEnqueue(sb.String())
 	s.Display.PrintGen++

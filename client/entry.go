@@ -1,0 +1,61 @@
+package main
+
+import "strings"
+
+// entry is one buffer unit: a message and every display part that belongs to
+// it. The parts are fields rather than rows to be parsed back apart, so
+// nothing has to search rendered text to find a body, a chain position, or the
+// unit it wrote.
+type entry struct {
+	quote  string // rendered quote rows, no trailing newline; "" when none
+	header string // first row: author and chain, or the whole line for a notice
+	body   string // rendered body rows, no trailing newline; "" when none
+
+	// Identity, so a lookup never scans text.
+	height    uint64 // chain height this entry reports; 0 when it has none
+	hashHex   string // short hash as printed, "" when none
+	collapsed bool   // body was folded, so /expand targets this entry
+}
+
+// text is the exact bytes this entry contributes to the screen and to a tab
+// repaint: the parts that exist, one row each.
+func (e entry) text() string {
+	var sb strings.Builder
+	for _, part := range [...]string{e.quote, e.header, e.body} {
+		if part == "" {
+			continue
+		}
+		sb.WriteString(part)
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// rows is how many terminal rows the entry occupies at the given width.
+func (e entry) rows(width int) int {
+	return estimateRows(e.text(), width)
+}
+
+// matchesHeight reports whether this entry is the one that reports h, with an
+// optional hash prefix to tell two entries at the same height apart.
+func (e entry) matchesHeight(h uint64, hashPrefix string) bool {
+	// Zero means the entry reports no chain position at all, so it can never
+	// answer for a height.
+	if e.height == 0 || e.height != h {
+		return false
+	}
+	if hashPrefix == "" {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(e.hashHex), strings.ToLower(hashPrefix))
+}
+
+// heldChunk is one piece of deferred terminal output. Message chunks carry the
+// height they report so a recovered block can be spliced in at its chain
+// position; control sequences and other text leave it zero. The held stream is
+// not a buffer of entries — it mixes both — so it needs its own small record
+// rather than a search over the rendered text.
+type heldChunk struct {
+	text   string
+	height uint64
+}

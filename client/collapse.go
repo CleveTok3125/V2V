@@ -69,13 +69,12 @@ func expandTrailer(height uint64) string {
 	return tail
 }
 
-// findCollapsed locates the buffer entry holding the expand trailer for
-// height, or -1. The trailing "]" pins exact heights (#4 never matches
-// #42's trailer).
-func findCollapsed(lines []string, height uint64) int {
-	marker := fmt.Sprintf("/expand #%d]", height)
-	for i, line := range lines {
-		if strings.Contains(line, marker) {
+// collapsedIndex locates the folded entry for height, or -1. The entry
+// records that it was folded, so nothing reads the expand trailer back out of
+// the rendered rows.
+func collapsedIndex(lines []entry, height uint64) int {
+	for i, e := range lines {
+		if e.collapsed && e.height == height {
 			return i
 		}
 	}
@@ -102,38 +101,37 @@ func foldLines(lines []string, budget, width int) []string {
 	return kept
 }
 
-// collapseHead folds the text rows of a block to previewRows rows with the
-// expand trailer on the last kept row. The first row is kept whole: it is
-// the author header, and folding it away would leave a body with nobody
-// attached to it. False means the block fits untouched.
-func collapseHead(head string, height uint64, rows, preview, width int) (string, bool) {
-	if height == 0 {
-		return head, false
+// collapseBody folds a body to preview rows with the expand trailer on the
+// last kept row. The header is not touched: folding it away would leave a body
+// with nobody attached to it. False means the body fits untouched.
+func collapseBody(body string, height uint64, rows, preview, width int) (string, bool) {
+	if height == 0 || body == "" {
+		return body, false
 	}
-	lines := strings.Split(strings.TrimSuffix(head, "\n"), "\n")
-	// A block is a header row plus its body; a lone row has no body to fold.
-	if len(lines) < 2 {
-		return head, false
+	lines := strings.Split(body, "\n")
+	if estimateRows(body, width) <= rows {
+		return body, false
 	}
-	header, body := lines[0], lines[1:]
-	if estimateRows(strings.Join(body, "\n"), width) <= rows {
-		return head, false
-	}
-	kept := foldLines(body, preview, width)
+	kept := foldLines(lines, preview, width)
 	if len(kept) == 0 {
-		return head, false // unreachable: budget fits ≥1 row
+		return body, false // unreachable: budget fits ≥1 row
 	}
 	kept[len(kept)-1] += expandTrailer(height)
-	return header + "\n" + strings.Join(kept, "\n") + "\n", true
+	return strings.Join(kept, "\n"), true
 }
 
 // maybeCollapse folds head when it exceeds the configured row budget.
 // System-tab content and height-less wires render untouched; everything
 // else collapses. Pure except the live width probe.
-func maybeCollapse(head string, wire WireMessage, tab int) string {
+func maybeCollapse(e entry, wire WireMessage, tab int) entry {
 	if tab == TabSystem || ClientCfg == nil || !ClientCfg.CollapseEnabled() {
-		return head
+		return e
 	}
-	folded, _ := collapseHead(head, wire.ChainHeight, ClientCfg.CollapseRows(), ClientCfg.CollapsePreviewRows(), termWidth())
-	return folded
+	folded, ok := collapseBody(e.body, wire.ChainHeight, ClientCfg.CollapseRows(), ClientCfg.CollapsePreviewRows(), termWidth())
+	if !ok {
+		return e
+	}
+	e.body = folded
+	e.collapsed = true
+	return e
 }

@@ -396,7 +396,7 @@ func (s *Session) badgeForWire(msg WireMessage, av bool) (colored, urlStr string
 // message (suffix checksum when given). Unresolved mentions render
 // plain so evicted targets never mislead. Caller must hold s.Display.DisplayMu.
 func (s *Session) resolveMentionLocked(height uint64, suffix string) bool {
-	return len(findMetaMatches(s.Display.TabChat.lines, height, suffix)) > 0
+	return entryIndexByHeight(s.Display.TabChat.lines, height, suffix) >= 0
 }
 
 // quoteLinesFor resolves a reply target to quote preview lines from
@@ -411,11 +411,10 @@ func (s *Session) quoteLinesFor(replyTo uint64, pending bool) []string {
 		return []string{formatQuoteRich(wire, pending, ClientCfg.QuoteMaxRunes())}
 	}
 	for _, buf := range []*tabBuffer{s.Display.TabChat, s.Display.TabSys} {
-		for _, idx := range findMetaMatches(buf.lines, replyTo, "") {
-			// A header and its body share one buffer entry, so the preview
-			// is what follows the header row inside it, not the entry
-			// before it.
-			if body := blockBody(buf.lines[idx]); body != "" {
+		if idx := entryIndexByHeight(buf.lines, replyTo, ""); idx >= 0 {
+			// The body is a field, so the preview is read rather than parsed
+			// back out of the rendered rows.
+			if body := buf.lines[idx].body; body != "" {
 				return []string{formatQuote(replyTo, body, pending, ClientCfg.QuoteMaxRunes())}
 			}
 		}
@@ -423,34 +422,14 @@ func (s *Session) quoteLinesFor(replyTo uint64, pending bool) []string {
 	return nil
 }
 
-// blockBody returns the text rows of a rendered block entry: everything
-// after the author header row.
-// quoteLinePrefix opens a rendered quote row. A quote rides inside the entry
-// of the message it answers, so a block entry may open with these rows.
-const quoteLinePrefix = "|   ┌─"
-
-// blockBody returns the body of a rendered block entry: everything after the
-// header row. Quote rows are part of the same entry, so the scan skips them
-// instead of assuming the header comes first.
-func blockBody(entry string) string {
-	for {
-		i := strings.Index(entry, "\n")
-		if i < 0 {
-			return ""
-		}
-		if !strings.HasPrefix(entry, quoteLinePrefix) {
-			return entry[i+1:]
-		}
-		entry = entry[i+1:]
-	}
-}
-
-// buildChatBlock renders one wire into head + trailing meta strings
-// without emitting. Pure given (wire, av, withMeta); cached by renderChatBlock.
-func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (head, meta string, tab int, hasMeta bool) {
+// buildChatBlock renders one wire into a buffer entry without emitting. Pure
+// given (wire, av, withMeta); cached by renderChatBlock. A part is never
+// patched in place: a change means rendering the whole entry again.
+func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (e entry, tab int) {
 	tab = TabChat
 	if msg.Type == "system" {
-		return fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(msg.Text)), "", tabForWire(msg), false
+		e.header = fmt.Sprintf("| %s", filter.SanitizeForDisplay(msg.Text))
+		return e, tabForWire(msg)
 	}
 	// Author and chain position share one header row; the text hangs below
 	// it under a shared indent. One shape for every chat line keeps the
@@ -478,11 +457,20 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (head, meta
 	var quote strings.Builder
 	if msg.ReplyTo > 0 {
 		for _, q := range s.quoteLinesFor(msg.ReplyTo, false) {
+			if quote.Len() > 0 {
+				quote.WriteString("\n")
+			}
 			quote.WriteString(q)
-			quote.WriteString("\n")
 		}
 	}
-	return quote.String() + header + "\n" + chatBodyIndent(body) + "\n", "", tab, false
+	e.quote = quote.String()
+	e.header = header
+	e.body = chatBodyIndent(body)
+	if wantsMeta(msg, withMeta) {
+		e.height = msg.ChainHeight
+		e.hashHex = shortHashHex(msg.ChainHash)
+	}
+	return e, tab
 }
 
 // chatBodyPrefix is the indent every text row of a message shares. It sits
@@ -511,7 +499,7 @@ func (s *Session) renderChatBlock(msg WireMessage) {
 	// Notify gates live printing of informational system notices; the
 	// lines still land in their tab buffer when muted.
 	live := s.notifyWireAllowed(msg)
-	emit := func(tab int, line string) { s.emitTabLive(live, tab, line) }
+	emit := func(tab int, e entry) { s.emitTabLive(live, tab, e) }
 	// Replay and tab switches re-render the same immutable wires;
 	// the chain hash covers the content, so it is a safe cache key
 	// (verify mode and meta visibility are folded in). Messages with
@@ -522,27 +510,18 @@ func (s *Session) renderChatBlock(msg WireMessage) {
 			"\x00" + map[bool]string{true: "v", false: "p"}[av] +
 			"\x00" + map[bool]string{true: "m", false: "n"}[withMeta]
 		if hit, ok := s.Chain.RenderCache.get(key); ok {
-			emit(hit.tab, hit.head)
-			if hit.hasMeta {
-				emit(hit.tab, hit.meta)
-			}
+			emit(hit.tab, hit.entry)
 			return
 		}
-		head, meta, tab, hasMeta := s.buildChatBlock(msg, av, withMeta)
-		head = maybeCollapse(head, msg, tab)
-		s.Chain.RenderCache.put(key, renderedBlock{tab: tab, head: head, meta: meta, hasMeta: hasMeta})
-		emit(tab, head)
-		if hasMeta {
-			emit(tab, meta)
-		}
+		e, tab := s.buildChatBlock(msg, av, withMeta)
+		e = maybeCollapse(e, msg, tab)
+		s.Chain.RenderCache.put(key, renderedBlock{tab: tab, entry: e})
+		emit(tab, e)
 		return
 	}
-	head, meta, tab, hasMeta := s.buildChatBlock(msg, av, withMeta)
-	head = maybeCollapse(head, msg, tab)
-	emit(tab, head)
-	if hasMeta {
-		emit(tab, meta)
-	}
+	e, tab := s.buildChatBlock(msg, av, withMeta)
+	e = maybeCollapse(e, msg, tab)
+	emit(tab, e)
 }
 
 // switchTab replays the target buffer under a single lock.
@@ -572,8 +551,8 @@ func (s *Session) switchTab(n int) {
 		buf = s.Display.TabSys
 	}
 	var sb strings.Builder
-	for _, l := range buf.lines {
-		sb.WriteString(l)
+	for _, e := range buf.lines {
+		sb.WriteString(e.text())
 	}
 	s.enqueueOutputKeep(sb.String(), true)
 	s.refreshTerminal()

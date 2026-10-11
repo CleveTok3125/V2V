@@ -95,8 +95,8 @@ func recoverTestSession(t *testing.T, tip byte, conn *captureConn) *Session {
 
 func tabSysText(sess *Session) string {
 	var sb strings.Builder
-	for _, l := range sess.Display.TabSys.lines {
-		sb.WriteString(l)
+	for _, e := range sess.Display.TabSys.lines {
+		sb.WriteString(e.text())
 	}
 	return sb.String()
 }
@@ -331,7 +331,7 @@ func TestRecoveryRendersOnlyMissing(t *testing.T) {
 
 	got := 0
 	for _, l := range sess.Display.TabChat.lines {
-		if strings.Contains(l, "msg") {
+		if strings.Contains(l.text(), "msg") {
 			got++
 		}
 	}

@@ -32,9 +32,9 @@ func TestEstimateRows(t *testing.T) {
 	}
 }
 
-func TestCollapseHead(t *testing.T) {
-	const header = "| 15:04 Alice • #42:abcd"
-	// mk builds n body rows; a block is that body under one author header.
+func TestCollapseBody(t *testing.T) {
+	// mk builds n body rows; the header is never folded, so these tests work
+	// on the body alone.
 	mk := func(n int) string {
 		var b strings.Builder
 		for i := 1; i <= n; i++ {
@@ -43,56 +43,50 @@ func TestCollapseHead(t *testing.T) {
 		}
 		return b.String()
 	}
-	blk := func(body string) string { return header + "\n" + body }
 
 	// Body fits: untouched, no trailer.
-	if out, folded := collapseHead(blk(mk(10)), 42, 10, 5, 80); folded || out != blk(mk(10)) {
+	if out, folded := collapseBody(mk(10), 42, 10, 5, 80); folded || out != mk(10) {
 		t.Fatal("10 body rows at threshold must not fold")
 	}
-	// 11 body rows fold to 5 preview rows with the trailer on the last one,
-	// and the header stays: folding it away would leave the body unattached.
-	out, folded := collapseHead(blk(mk(11)), 42, 10, 5, 80)
+	// 11 body rows fold to 5 preview rows with the trailer on the last one.
+	out, folded := collapseBody(mk(11), 42, 10, 5, 80)
 	if !folded {
 		t.Fatal("11 body rows must fold")
 	}
-	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-	if len(lines) != 6 {
-		t.Fatalf("folded block = %d lines, want header + 5 preview", len(lines))
+	lines := strings.Split(out, "\n")
+	if len(lines) != 5 {
+		t.Fatalf("folded body = %d lines, want 5 preview", len(lines))
 	}
-	if lines[0] != header {
-		t.Fatalf("the header must survive folding, got %q", lines[0])
-	}
-	if !strings.Contains(lines[5], "/expand #42") {
-		t.Fatalf("trailer must address height on the last preview row, got %q", lines[5])
+	if !strings.Contains(lines[4], "/expand #42") {
+		t.Fatalf("trailer must address height on the last preview row, got %q", lines[4])
 	}
 	// Height-less wires never fold (no /expand address exists).
-	if _, folded := collapseHead(blk(mk(30)), 0, 10, 5, 80); folded {
+	if _, folded := collapseBody(mk(30), 0, 10, 5, 80); folded {
 		t.Fatal("height 0 must never fold")
 	}
-	// A header with no body has nothing to fold.
-	if _, folded := collapseHead(header+"\n", 42, 10, 5, 80); folded {
-		t.Fatal("a lone header must not fold")
+	// An empty body has nothing to fold.
+	if _, folded := collapseBody("", 42, 10, 5, 80); folded {
+		t.Fatal("an empty body must not fold")
 	}
 	// Wrapped long single line folds by screen rows AND cuts content:
 	// 900 cells at width 80 must not survive verbatim.
-	out, folded = collapseHead(blk(strings.Repeat("y", 900)+"\n"), 7, 10, 5, 80)
+	out, folded = collapseBody(strings.Repeat("y", 900), 7, 10, 5, 80)
 	if !folded {
 		t.Fatal("900 cells at width 80 (12 rows) must fold")
 	}
 	if strings.Contains(out, strings.Repeat("y", 900)) {
 		t.Fatal("single wall survived unfolded")
 	}
-	// header + the cut wall's 5 preview rows + the trailer wrapping onto a
-	// 6th.
-	if got := estimateRows(out, 80); got > 7 {
-		t.Fatalf("folded wall = %d rows, want ≤ header + preview + wrapped trailer", got)
+	// The cut wall's 5 preview rows plus the trailer wrapping onto a 6th.
+	if got := estimateRows(out, 80); got > 6 {
+		t.Fatalf("folded wall = %d rows, want ≤ preview + wrapped trailer", got)
 	}
 	if !strings.Contains(out, "/expand #7]") {
 		t.Fatalf("folded wall must carry trailer, got %q", out[len(out)-60:])
 	}
 	// Mid-line cut never splits a wide rune: 500 あ (1000 cells = 13
 	// rows at width 80) with preview 5 → 400 cells kept, all complete.
-	out, folded = collapseHead(blk(strings.Repeat("あ", 500)+"\n"), 8, 10, 5, 80)
+	out, folded = collapseBody(strings.Repeat("あ", 500), 8, 10, 5, 80)
 	if !folded {
 		t.Fatal("wide wall must fold")
 	}
@@ -100,9 +94,9 @@ func TestCollapseHead(t *testing.T) {
 		t.Fatalf("mid-line cut kept %d wide runes, want 200", got)
 	}
 	// Cut happens on line boundaries: preview rows respected.
-	out, _ = collapseHead(blk(mk(30)), 9, 10, 5, 80)
-	if got := len(strings.Split(strings.TrimSuffix(out, "\n"), "\n")); got != 6 {
-		t.Fatalf("preview cut = %d lines, want header + 5 preview", got)
+	out, _ = collapseBody(mk(30), 9, 10, 5, 80)
+	if got := len(strings.Split(out, "\n")); got != 5 {
+		t.Fatalf("preview cut = %d lines, want 5 preview", got)
 	}
 }
 
@@ -121,40 +115,46 @@ func TestMaybeCollapse(t *testing.T) {
 	wire := WireMessage{ChainHeight: 99}
 
 	// System tab never folds.
-	if out := maybeCollapse(mk(30), wire, TabSystem); strings.Contains(out, "/expand") {
+	if out := maybeCollapse(entry{body: mk(30)}, wire, TabSystem); strings.Contains(out.body, "/expand") {
 		t.Fatal("system tab must not fold")
 	}
 	// Short heads pass through.
-	if out := maybeCollapse(mk(3), wire, TabChat); strings.Contains(out, "/expand") {
+	if out := maybeCollapse(entry{body: mk(3)}, wire, TabChat); strings.Contains(out.body, "/expand") {
 		t.Fatal("short head must not fold")
 	}
-	// Long chat head folds with height address.
-	if out := maybeCollapse(mk(30), wire, TabChat); !strings.Contains(out, "/expand #99") {
-		t.Fatalf("long head must fold with address, got %q", out[len(out)-40:])
+	// Long chat head folds with height address, and folding never touches the
+	// header: the body is the only part that shrinks.
+	hdr := "| 15:04 Alice • #99:abcd"
+	out := maybeCollapse(entry{header: hdr, body: mk(30)}, wire, TabChat)
+	if !strings.Contains(out.body, "/expand #99") {
+		t.Fatalf("long head must fold with address, got %q", out.body[len(out.body)-40:])
+	}
+	if out.header != hdr {
+		t.Fatalf("folding must not touch the header, got %q", out.header)
 	}
 	// Disabled config passes through.
 	ClientCfg.UI.Collapse.Enabled = &[]bool{false}[0]
-	if out := maybeCollapse(mk(30), wire, TabChat); strings.Contains(out, "/expand") {
+	if out := maybeCollapse(entry{body: mk(30)}, wire, TabChat); strings.Contains(out.body, "/expand") {
 		t.Fatal("disabled collapse must pass through")
 	}
 }
 
-func TestFindCollapsed(t *testing.T) {
-	lines := []string{
-		"| 12:00 Alice: hello\n",
-		"| line one\n| line two\x1b[90m...\x1b[0m [Xem thêm: /expand #42]\n",
-		"| 12:01 Bob: short\n",
+func TestCollapsedIndex(t *testing.T) {
+	lines := []entry{
+		{header: "| 12:00 Alice: hello"},
+		{body: "| line one\n| line two" + expandTrailer(42), height: 42, collapsed: true},
+		{header: "| 12:01 Bob: short"},
 	}
-	if got := findCollapsed(lines, 42); got != 1 {
+	if got := collapsedIndex(lines, 42); got != 1 {
 		t.Fatalf("find = %d, want 1", got)
 	}
-	if got := findCollapsed(lines, 4); got != -1 {
+	if got := collapsedIndex(lines, 4); got != -1 {
 		t.Fatalf("#4 must not match #42's trailer, got %d", got)
 	}
-	if got := findCollapsed(lines, 43); got != -1 {
+	if got := collapsedIndex(lines, 43); got != -1 {
 		t.Fatalf("missing height = %d, want -1", got)
 	}
-	if got := findCollapsed(nil, 42); got != -1 {
+	if got := collapsedIndex(nil, 42); got != -1 {
 		t.Fatal("nil buffer must return -1")
 	}
 }

@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/CleveTok3125/V2V/internal/filter"
 	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/markup"
@@ -82,19 +80,11 @@ func (s *Session) checkSendGuards(text string) bool {
 // number of terminal rows those entries occupy. The buffer splice
 // counts entries; the screen erase counts rows, and a line long enough to
 // wrap makes the two differ.
-func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows int, phScreenRows int, phShown bool, phBufEnd int) {
+func (s *Session) renderPlaceholder(text string, typedLinesCount int) (e entry, phShown bool, phBufEnd int) {
 	// Placeholder: keep original text grey with pending indicator until server echo
 	// Single s.Display.DisplayMu lock for entire wipe + placeholder + trip sign + send to avoid burst drift
-	phRows = 0
-	phScreenRows = 0
 	phShown = s.Display.ActiveTab == TabChat
 	phBufEnd = 0
-	// Rows a queued entry occupies on screen. The grey wrapper's escapes are
-	// stripped first: cell counting would otherwise charge for every byte of
-	// [90m and read a one-row line as several.
-	countRows := func(entry string) int {
-		return estimateRows(ansi.Strip(entry), termWidth())
-	}
 	s.Display.DisplayMu.Lock()
 	// Wipe the input line as one ordered chunk: queued like every other
 	// screen write so a slow terminal never stalls the sender.
@@ -115,15 +105,17 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 	// message is one entry whatever it carries. Splitting it into a row per
 	// part would make the splice range and the erase math disagree with the
 	// block that replaces it.
-	var block strings.Builder
 	// Quoted target previews come first, inside the same entry (same helper
-	// as the echo path, so both shapes match; pending quotes carry ⏳ so the
-	// erase region check keeps passing).
+	// as the echo path, so both shapes match).
 	if s.Pending.PendingReplyTo > 0 {
+		var quote strings.Builder
 		for _, q := range s.quoteLinesFor(s.Pending.PendingReplyTo, true) {
-			block.WriteString(q)
-			block.WriteString("\n")
+			if quote.Len() > 0 {
+				quote.WriteString("\n")
+			}
+			quote.WriteString(q)
 		}
+		e.quote = quote.String()
 	}
 	// The header carries everything the real one will: the author, the
 	// chain placeholder, then the trip placeholder. The chain position and
@@ -151,26 +143,29 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 			header += " ✍️ ◆ " + badgePlaceholder
 		}
 	}
-	header += " ⏳\x1b[0m\n"
-	block.WriteString(header)
+	header += " ⏳\x1b[0m"
+	e.header = header
 
 	// The text hangs under the header, one indented row per rendered line,
 	// matching the layout the echo uses.
-	for _, line := range lines {
-		fmt.Fprintf(&block, "\x1b[90m%s%s\x1b[0m\n", chatBodyPrefix, markup.Linkify(line))
+	var body strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			body.WriteString("\n")
+		}
+		fmt.Fprintf(&body, "\x1b[90m%s%s\x1b[0m", chatBodyPrefix, markup.Linkify(line))
 	}
-	entry := block.String()
-	s.emitTab(TabChat, entry)
-	phRows = 1
-	phScreenRows = countRows(entry)
+	e.body = body.String()
+
+	s.emitTab(TabChat, e)
 	phBufEnd = len(s.Display.TabChat.lines)
 	s.refreshTerminal()
 	s.Display.DisplayMu.Unlock()
-	return phRows, phScreenRows, phShown, phBufEnd
+	return e, phShown, phBufEnd
 }
 
 // sendMessage signs (trip) or envelopes (plain) one message, tracks its
-func (s *Session) sendMessage(text string, phRows, phScreenRows int, phShown bool, phBufEnd int) error {
+func (s *Session) sendMessage(text string, placeholder entry, phShown bool, phBufEnd int) error {
 	s.Pending.TmpSeq++
 	var err error
 	if s.TripPriv != nil {
@@ -217,7 +212,7 @@ func (s *Session) sendMessage(text string, phRows, phScreenRows int, phShown boo
 		// Queue guard nested per Display -> Chain -> Pending; the
 		// erasePlaceholderLocked call in this function stays on DisplayMu.
 		s.Pending.Mu.Lock()
-		pm := pendingMsg{text: text, rows: phRows, screenRows: phScreenRows, shown: phShown, gen: s.Display.PrintGen, bufEnd: phBufEnd, sentAt: time.Now(), tmpID: s.Pending.TmpSeq, replyTo: s.Pending.PendingReplyTo}
+		pm := pendingMsg{text: text, rows: 1, screenRows: placeholder.rows(termWidth()), shown: phShown, gen: s.Display.PrintGen, bufEnd: phBufEnd, entry: placeholder, sentAt: time.Now(), tmpID: s.Pending.TmpSeq, replyTo: s.Pending.PendingReplyTo}
 		if s.TripPriv != nil {
 			pm.hasTrip = true
 			pm.seq = s.TripSeq

@@ -39,11 +39,11 @@ func tabBarLine(active int) string {
 	return sb.String()
 }
 
-// tabBuffer is a FIFO ring holding raw lines for one tab with dual-limit
-// eviction (lines + bytes), mirroring server ChatHistory. Caps come from
+// tabBuffer is a FIFO ring holding entries for one tab with dual-limit
+// eviction (entries + bytes), mirroring server ChatHistory. Caps come from
 // ClientCfg, never hardcoded. Callers must hold displayMu.
 type tabBuffer struct {
-	lines    []string
+	lines    []entry
 	size     int
 	maxLines int
 	maxBytes int
@@ -59,26 +59,26 @@ func newTabBuffer(maxLines, maxBytes int) *tabBuffer {
 	return &tabBuffer{maxLines: maxLines, maxBytes: maxBytes}
 }
 
-func (b *tabBuffer) append(line string) {
-	b.lines = append(b.lines, line)
-	b.size += len(line)
+func (b *tabBuffer) append(e entry) {
+	b.lines = append(b.lines, e)
+	b.size += len(e.text())
 	b.evict()
 }
 
 func (b *tabBuffer) evict() {
 	for (len(b.lines) > b.maxLines || b.size > b.maxBytes) && len(b.lines) > 0 {
-		b.size -= len(b.lines[0])
-		b.lines[0] = ""
+		b.size -= len(b.lines[0].text())
+		b.lines[0] = entry{}
 		b.lines = b.lines[1:]
 	}
 	if cap(b.lines) > 4*len(b.lines) && cap(b.lines) > 1024 {
-		n := make([]string, len(b.lines), len(b.lines))
+		n := make([]entry, len(b.lines), len(b.lines))
 		copy(n, b.lines)
 		b.lines = n
 	}
 }
 
-// spliceOut removes lines [start:end) and fixes the byte accounting. It is
+// spliceOut removes entries [start:end) and fixes the byte accounting. It is
 // used to drop a resolved placeholder block from the buffer.
 func (b *tabBuffer) spliceOut(start, end int) {
 	if start < 0 {
@@ -90,12 +90,12 @@ func (b *tabBuffer) spliceOut(start, end int) {
 	if start >= end {
 		return
 	}
-	for _, l := range b.lines[start:end] {
-		b.size -= len(l)
+	for _, e := range b.lines[start:end] {
+		b.size -= len(e.text())
 	}
 	copy(b.lines[start:], b.lines[end:])
 	for i := len(b.lines) - (end - start); i < len(b.lines); i++ {
-		b.lines[i] = ""
+		b.lines[i] = entry{}
 	}
 	b.lines = b.lines[:len(b.lines)-(end-start)]
 }
@@ -103,7 +103,7 @@ func (b *tabBuffer) spliceOut(start, end int) {
 // insertAt splices block into the buffer at idx, keeping byte accounting
 // and caps. Used to place a recovered message at its chain position
 // during a held catch-up instead of appending it at the end.
-func (b *tabBuffer) insertAt(idx int, block []string) {
+func (b *tabBuffer) insertAt(idx int, block []entry) {
 	if len(block) == 0 {
 		return
 	}
@@ -114,11 +114,11 @@ func (b *tabBuffer) insertAt(idx int, block []string) {
 		idx = len(b.lines)
 	}
 	n := len(block)
-	b.lines = append(b.lines, make([]string, n)...)
+	b.lines = append(b.lines, make([]entry, n)...)
 	copy(b.lines[idx+n:], b.lines[idx:])
 	copy(b.lines[idx:], block)
-	for _, l := range block {
-		b.size += len(l)
+	for _, e := range block {
+		b.size += len(e.text())
 	}
 	b.evict()
 }

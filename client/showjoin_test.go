@@ -33,7 +33,7 @@ func runFrames(t *testing.T, sess *Session, conn *captureConn, frames ...[]byte)
 	time.Sleep(50 * time.Millisecond)
 	stopPump(t, sess, func() { close(conn.frames) })
 	sess.flushOutputNow()
-	return strings.Join(sess.Display.TabSys.lines, "")
+	return entriesText(sess.Display.TabSys.lines)
 }
 
 // TestJoinNoticeHiddenWithoutShowJoin: without -j, a join/leave notice

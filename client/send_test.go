@@ -63,7 +63,7 @@ func TestSendMessagePlainLoopback(t *testing.T) {
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabChat = newTabBuffer(100, 100000)
 	sess.Pending.PendingReplyTo = 7
-	if err := sess.sendMessage("hello", 1, 1, true, 0); err != nil {
+	if err := sess.sendMessage("hello", entry{}, true, 0); err != nil {
 		t.Fatalf("sendMessage: %v", err)
 	}
 	select {
@@ -121,7 +121,7 @@ func TestSendMessageTripWriteJSONError(t *testing.T) {
 	sess.Pending.TmpSeq = 10
 	prev := append([]byte(nil), sess.TripPrev...)
 	sess.Pending.PendingReplyTo = 7
-	err := sess.sendMessage("hello", 1, 1, true, 0)
+	err := sess.sendMessage("hello", entry{}, true, 0)
 	if err == nil {
 		t.Fatal("WriteJSON fail must return err")
 	}
@@ -145,7 +145,7 @@ func TestSendMessageTripWriteJSONError(t *testing.T) {
 func TestSendMessageTripWriteJSONOK(t *testing.T) {
 	conn := &stubConn{}
 	sess := tripSessionForSend(t, conn)
-	if err := sess.sendMessage("hello", 1, 1, true, 0); err != nil {
+	if err := sess.sendMessage("hello", entry{}, true, 0); err != nil {
 		t.Fatalf("sendMessage: %v", err)
 	}
 	tm, ok := conn.wrote.(TripMessage)
@@ -176,20 +176,22 @@ func assertSwapEraseCoversDrawnRows(t *testing.T, body string, replyTo uint64) {
 		sess.Pending.PendingReplyTo = replyTo
 	}
 
-	phRows, phScreenRows, shown, bufEnd := sess.renderPlaceholder(body, 1)
-	if !shown || phRows == 0 {
-		t.Fatalf("placeholder did not render: rows=%d shown=%v", phRows, shown)
+	phEntry, shown, bufEnd := sess.renderPlaceholder(body, 1)
+	if !shown {
+		t.Fatalf("placeholder did not render: shown=%v", shown)
 	}
 	// A message is one entry whatever it carries, and the placeholder stands
 	// in for exactly that: quote, header and body in a single unit, so the
 	// splice range and the erase math agree with the block that replaces it.
-	if phRows != 1 {
-		t.Fatalf("a placeholder must be one entry, got %d", phRows)
+	// renderPlaceholder writes exactly one entry, so phRows is 1.
+	phRows := 1
+	if bufEnd != phRows {
+		t.Fatalf("a placeholder must be one entry, got %d", bufEnd)
 	}
-	phEntries := append([]string{}, sess.Display.TabChat.lines[bufEnd-phRows:bufEnd]...)
+	phEntries := append([]entry{}, sess.Display.TabChat.lines[bufEnd-phRows:bufEnd]...)
 	sess.Pending.PendingPlaceholders = append(sess.Pending.PendingPlaceholders, pendingMsg{
-		text: body, rows: phRows, screenRows: phScreenRows, shown: shown, bufEnd: bufEnd,
-		tmpID: sess.Pending.TmpSeq, replyTo: replyTo,
+		text: body, rows: phRows, screenRows: phEntry.rows(termWidth()), shown: shown, bufEnd: bufEnd,
+		entry: phEntry, tmpID: sess.Pending.TmpSeq, replyTo: replyTo,
 	})
 	// Everything queued so far must be on the wire before the measurement,
 	// or the input-line wipe would be counted as part of the echo.
@@ -203,7 +205,7 @@ func assertSwapEraseCoversDrawnRows(t *testing.T, body string, replyTo uint64) {
 	}
 	sess.Display.DisplayMu.Lock()
 	sess.renderChatBlock(echo)
-	echoEntries := append([]string{}, sess.Display.TabChat.lines[bufEnd:]...)
+	echoEntries := append([]entry{}, sess.Display.TabChat.lines[bufEnd:]...)
 	sess.consumeEchoLocked(echo, false)
 	sess.Display.DisplayMu.Unlock()
 	sess.flushOutputNow()
@@ -217,12 +219,12 @@ func assertSwapEraseCoversDrawnRows(t *testing.T, body string, replyTo uint64) {
 		t.Fatal(err)
 	}
 	want := 0
-	for _, entry := range append(append([]string{}, phEntries...), echoEntries...) {
-		want += estimateRows(ansi.Strip(entry), termWidth())
+	for _, e := range append(append([]entry{}, phEntries...), echoEntries...) {
+		want += estimateRows(ansi.Strip(e.text()), termWidth())
 	}
 	if moved != want {
 		t.Fatalf("erase moved up %d rows, want %d (placeholder %d entries / %d rows, echo %d entries)\nbody=%q",
-			moved, want, phRows, phScreenRows, len(echoEntries), body)
+			moved, want, phRows, phEntry.rows(termWidth()), len(echoEntries), body)
 	}
 }
 

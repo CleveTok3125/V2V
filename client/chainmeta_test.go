@@ -29,13 +29,27 @@ func chainedTripWire(tm *TripMeta, text string) WireMessage {
 	}
 }
 
-// chatBlockForTest draws the block the client emits for one chat line: an
+// chatBlockForTest builds the entry the client emits for one chat line: an
 // author header carrying the chain position, then the body under the shared
-// indent. Fixtures use this rather than pasting the shape, so a layout
-// change touches one place.
-func chatBlockForTest(height uint64, hashHex, clock, name, body string) string {
-	return fmt.Sprintf("| %s %s • %s\n%s\n",
-		clock, name, metaLineFor(height, hashHex, ""), chatBodyIndent(body))
+// indent, plus the identity fields a lookup reads. Fixtures use this rather
+// than pasting the shape, so a layout change touches one place.
+func chatBlockForTest(height uint64, hashHex, clock, name, body string) entry {
+	return entry{
+		header:  fmt.Sprintf("| %s %s • %s", clock, name, metaLineFor(height, hashHex, "")),
+		body:    chatBodyIndent(body),
+		height:  height,
+		hashHex: shortHashHex(hashHex),
+	}
+}
+
+// entriesText concatenates the rendered bytes of a tab buffer's entries, the
+// same bytes a tab repaint writes.
+func entriesText(lines []entry) string {
+	var sb strings.Builder
+	for _, e := range lines {
+		sb.WriteString(e.text())
+	}
+	return sb.String()
 }
 
 func TestMetaLineFor(t *testing.T) {
@@ -51,14 +65,22 @@ func TestMetaLineFor(t *testing.T) {
 	}
 }
 
-// TestHeaderMetaIgnoresANameThatLooksLikeOne: display names are free text,
-// and a name sits between the header's "| HH:MM " and its number. A name
-// carrying "#1:ffff" must not stand in for the number the renderer wrote
-// after it, or quoting and /find would address the wrong message.
-func TestHeaderMetaIgnoresANameThatLooksLikeOne(t *testing.T) {
-	m := headerMetaRe.FindStringSubmatch("| 15:04 #1:ffff • #42:abcd")
-	if m == nil || m[1] != "42" {
-		t.Fatalf("a display name stood in for the message number: %v", m)
+// TestEntryIdentityIgnoresANameThatLooksLikeOne: display names are free text,
+// and a name may itself carry "#1:ffff". Entry identity lives in the height
+// and hashHex fields, so a name that looks like a meta line can never stand in
+// for the message number the renderer wrote, or quoting and /find would
+// address the wrong message.
+func TestEntryIdentityIgnoresANameThatLooksLikeOne(t *testing.T) {
+	e := entry{
+		header:  "| 15:04 #1:ffff • #42:abcd",
+		height:  42,
+		hashHex: "abcd",
+	}
+	if !e.matchesHeight(42, "") || e.matchesHeight(1, "") {
+		t.Fatalf("a display name stood in for the message number: %+v", e)
+	}
+	if !e.matchesHeight(42, "abcd") || e.matchesHeight(42, "ffff") {
+		t.Fatalf("hash lookup read the rendered row instead of the field: %+v", e)
 	}
 }
 
@@ -216,36 +238,35 @@ func TestParseFindArg(t *testing.T) {
 	}
 }
 
-func TestFindMetaMatches(t *testing.T) {
-	lines := []string{
-		"| 15:04 Alice • #1234:abcd\n|   hello\n",
-		"| 15:05 Bob • #1235:abce ✍️ \x1b[38;2;1;2;3m◆ x9y8\x1b[0m\n|   quoted \"#1234:abcd\" text\n",
-		"| [Local]: something\n",
+func TestEntryIndexByHeight(t *testing.T) {
+	lines := []entry{
+		{header: "| 15:04 Alice • #1234:abcd", height: 1234, hashHex: "abcd"},
+		{header: "| 15:05 Bob • #1235:abce ✍️ ◆ x9y8", height: 1235, hashHex: "abce"},
+		{header: "| [Local]: quoted", body: "|   quoted \"#1234:abcd\" text"},
 	}
-	// Only the header names a height. The body above quotes the same
-	// shape, and must not be taken for one: the anchor needs the "| HH:MM "
-	// the header opens with.
-	got := findMetaMatches(lines, 1234, "")
-	if len(got) != 1 || got[0] != 0 {
-		t.Fatalf("a body row was read as a header: %v", got)
+	// Only an entry whose identity fields name a height answers. The notice
+	// above quotes the same shape in its body, and must not be taken for one:
+	// the lookup reads the fields, never the rendered rows.
+	got := entryIndexByHeight(lines, 1234, "")
+	if got != 0 {
+		t.Fatalf("a body row was read as a header: %d", got)
 	}
 	// Suffix checksum narrows to the true header.
-	got = findMetaMatches(lines, 1235, "abce")
-	if len(got) != 1 || got[0] != 1 {
-		t.Fatalf("got %v", got)
+	if got := entryIndexByHeight(lines, 1235, "abce"); got != 1 {
+		t.Fatalf("got %d", got)
 	}
 	// Wrong suffix kills the match (typo guard).
-	if got := findMetaMatches(lines, 1235, "ffff"); len(got) != 0 {
-		t.Fatalf("got %v", got)
+	if got := entryIndexByHeight(lines, 1235, "ffff"); got != -1 {
+		t.Fatalf("got %d", got)
 	}
-	if got := findMetaMatches(lines, 9999, ""); len(got) != 0 {
-		t.Fatalf("got %v", got)
+	if got := entryIndexByHeight(lines, 9999, ""); got != -1 {
+		t.Fatalf("got %d", got)
 	}
 }
 
 func TestRenderCacheBounded(t *testing.T) {
 	c := newRenderCache(3)
-	mk := func(tab int) renderedBlock { return renderedBlock{tab: tab, head: "h", meta: "m", hasMeta: true} }
+	mk := func(tab int) renderedBlock { return renderedBlock{tab: tab, entry: entry{header: "h"}} }
 	c.put("a", mk(1))
 	c.put("b", mk(1))
 	c.put("c", mk(1))
@@ -543,14 +564,16 @@ func TestFormatQuoteRich(t *testing.T) {
 	if got := formatQuoteRich(bad, false, 80); !strings.Contains(got, "\x1b[91m✗\x1b[39m") {
 		t.Fatalf("tampered target must mark red ✗: %q", got)
 	}
-	// Single line always, and never shaped like a meta line.
+	// Single line always, and never shaped like a meta line. The quote preview
+	// names a height, but identity lives in the entry fields: an entry holding
+	// it as its quote must not answer for a height.
 	multi := wire
 	multi.Text = "line one\nline two"
 	if got := formatQuoteRich(multi, false, 80); strings.Contains(got, "\n") {
 		t.Fatalf("quote must stay single-line: %q", got)
 	}
-	if m := headerMetaRe.FindString(formatQuoteRich(wire, false, 80)); m != "" {
-		t.Fatalf("quote must not match the header regex: %q", m)
+	if q := (entry{quote: formatQuoteRich(wire, false, 80)}); q.matchesHeight(wire.ChainHeight, "") {
+		t.Fatalf("a quote preview must not answer for a height: %q", q.text())
 	}
 }
 
@@ -695,8 +718,8 @@ func TestVerifyReplayWireSkipsSegment(t *testing.T) {
 		t.Fatal("segment wire must still render and index")
 	}
 	for _, l := range sess.Display.TabSys.lines {
-		if strings.Contains(l, "đứt") {
-			t.Fatalf("segment wire warned in tab: %q", l)
+		if strings.Contains(l.text(), "đứt") {
+			t.Fatalf("segment wire warned in tab: %q", l.text())
 		}
 	}
 }
@@ -808,11 +831,11 @@ func TestCheckChainLinkGapIsNotFork(t *testing.T) {
 	}
 	gaps := 0
 	for _, l := range sess.Display.TabSys.lines {
-		if strings.Contains(l, "Bỏ lỡ") {
+		if strings.Contains(l.text(), "Bỏ lỡ") {
 			gaps++
 		}
-		if strings.Contains(l, "đứt") {
-			t.Fatalf("gap must not emit the tamper warning: %q", l)
+		if strings.Contains(l.text(), "đứt") {
+			t.Fatalf("gap must not emit the tamper warning: %q", l.text())
 		}
 	}
 	if gaps != 1 {
@@ -828,7 +851,7 @@ func TestCheckChainLinkGapIsNotFork(t *testing.T) {
 	}
 	gaps = 0
 	for _, l := range sess.Display.TabSys.lines {
-		if strings.Contains(l, "Bỏ lỡ") {
+		if strings.Contains(l.text(), "Bỏ lỡ") {
 			gaps++
 		}
 	}
@@ -855,7 +878,7 @@ func TestCheckChainLinkAdjacentMismatchWarns(t *testing.T) {
 	}
 	warned := false
 	for _, l := range sess.Display.TabSys.lines {
-		if strings.Contains(l, "đứt") {
+		if strings.Contains(l.text(), "đứt") {
 			warned = true
 		}
 	}
@@ -905,12 +928,12 @@ func TestTrackReplayWindowFooterFlushesBanner(t *testing.T) {
 		t.Fatal("footer must clear the stashed banner")
 	}
 	for _, l := range append(sess.Display.TabChat.lines, sess.Display.TabSys.lines...) {
-		if strings.Contains(l, "day marker") {
+		if strings.Contains(l.text(), "day marker") {
 			return
 		}
 	}
 	t.Fatalf("footer must flush the stashed banner, chat=%q sys=%q",
-		sess.Display.TabChat.lines, sess.Display.TabSys.lines)
+		entriesText(sess.Display.TabChat.lines), entriesText(sess.Display.TabSys.lines))
 }
 
 // TestSentAtIsNotCoveredByChainHash: sent_at is a display-only stamp, so
@@ -973,17 +996,17 @@ func TestRecoveredBlockGoesAfterItsPredecessor(t *testing.T) {
 
 	sess.Display.DisplayMu.Lock()
 	sess.renderChatBlock(chainWireWithText(100, "first-message", 0x21))
-	sess.emitTab(TabChat, "| [Local]: notice-after-block\n")
+	sess.emitTab(TabChat, noticeEntry("| [Local]: notice-after-block\n"))
 	sess.Display.DisplayMu.Unlock()
 
 	sess.Display.DisplayMu.Lock()
 	sess.renderRecoveredInPlace(chainWireWithText(101, "recovered-message", 0x31))
-	lines := append([]string{}, sess.Display.TabChat.lines...)
+	lines := append([]entry{}, sess.Display.TabChat.lines...)
 	sess.Display.DisplayMu.Unlock()
 
 	idx := func(needle string) int {
 		for i, l := range lines {
-			if strings.Contains(l, needle) {
+			if strings.Contains(l.text(), needle) {
 				return i
 			}
 		}
@@ -991,13 +1014,13 @@ func TestRecoveredBlockGoesAfterItsPredecessor(t *testing.T) {
 	}
 	first, recovered, notice := idx("first-message"), idx("recovered-message"), idx("notice-after-block")
 	if first < 0 {
-		t.Fatalf("predecessor never rendered:\n%s", strings.Join(lines, "\n"))
+		t.Fatalf("predecessor never rendered:\n%s", entriesText(lines))
 	}
 	if recovered < 0 {
-		t.Fatalf("recovered block never rendered:\n%s", strings.Join(lines, "\n"))
+		t.Fatalf("recovered block never rendered:\n%s", entriesText(lines))
 	}
 	if !(first < recovered && recovered < notice) {
 		t.Fatalf("recovered block not spliced after its predecessor\n  first=%d recovered=%d notice=%d\n%s",
-			first, recovered, notice, strings.Join(lines, "\n"))
+			first, recovered, notice, entriesText(lines))
 	}
 }

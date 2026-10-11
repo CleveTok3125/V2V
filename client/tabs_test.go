@@ -7,19 +7,18 @@ import (
 
 func TestTabBufferDualLimit(t *testing.T) {
 	b := newTabBuffer(3, 1000000)
-	b.append("a")
-	b.append("b")
-	b.append("c")
-	b.append("d")
-	if len(b.lines) != 3 || strings.Join(b.lines, "") != "bcd" {
-		t.Fatalf("line eviction failed: %q", b.lines)
+	for _, l := range []string{"a", "b", "c", "d"} {
+		b.append(noticeEntry(l))
+	}
+	if len(b.lines) != 3 || entriesText(b.lines) != "b\nc\nd\n" {
+		t.Fatalf("line eviction failed: %q", entriesText(b.lines))
 	}
 	b2 := newTabBuffer(1000000, 4)
-	b2.append("aa")
-	b2.append("bb")
-	b2.append("cc")
-	if len(b2.lines) != 2 || strings.Join(b2.lines, "") != "bbcc" {
-		t.Fatalf("byte eviction failed: %q", b2.lines)
+	for _, l := range []string{"a", "b", "c"} {
+		b2.append(noticeEntry(l))
+	}
+	if len(b2.lines) != 2 || entriesText(b2.lines) != "b\nc\n" {
+		t.Fatalf("byte eviction failed: %q", entriesText(b2.lines))
 	}
 }
 
@@ -33,18 +32,18 @@ func TestTabCapsFromConfig(t *testing.T) {
 func TestTabBufferSpliceOut(t *testing.T) {
 	b := newTabBuffer(100, 1000000)
 	for _, l := range []string{"a\n", "b ⏳\n", "c ⏳\n", "d\n"} {
-		b.append(l)
+		b.append(noticeEntry(l))
 	}
 	b.spliceOut(1, 3)
-	if len(b.lines) != 2 || b.lines[0] != "a\n" || b.lines[1] != "d\n" {
-		t.Fatalf("splice failed: %q", b.lines)
+	if len(b.lines) != 2 || b.lines[0].text() != "a\n" || b.lines[1].text() != "d\n" {
+		t.Fatalf("splice failed: %q", entriesText(b.lines))
 	}
 	if b.size != len("a\n")+len("d\n") {
 		t.Fatalf("size not fixed: %d", b.size)
 	}
 	b.spliceOut(-5, 99)
 	if len(b.lines) != 0 || b.size != 0 {
-		t.Fatalf("clamp splice failed: %q %d", b.lines, b.size)
+		t.Fatalf("clamp splice failed: %q %d", entriesText(b.lines), b.size)
 	}
 }
 

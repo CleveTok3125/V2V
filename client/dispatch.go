@@ -379,8 +379,8 @@ func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 		return text, cmdDone, true
 	}
 	s.Display.DisplayMu.Lock()
-	found := len(findMetaMatches(s.Display.TabChat.lines, height, suffix)) > 0 ||
-		len(findMetaMatches(s.Display.TabSys.lines, height, suffix)) > 0
+	found := entryIndexByHeight(s.Display.TabChat.lines, height, suffix) >= 0 ||
+		entryIndexByHeight(s.Display.TabSys.lines, height, suffix) >= 0
 	s.Display.DisplayMu.Unlock()
 	if !found {
 		s.Display.DisplayMu.Lock()
@@ -478,14 +478,12 @@ func (s *Session) cmdFind(text string) bool {
 	// sess.Display.TabSys, whose eviction could shift indices mid-scan.
 	var hits []string
 	for _, buf := range []*tabBuffer{s.Display.TabChat, s.Display.TabSys} {
-		matches := findMetaMatches(buf.lines, height, suffix)
-		for _, idx := range matches {
-			if idx > 0 {
-				hits = append(hits, buf.lines[idx-1])
-			}
-			hits = append(hits, buf.lines[idx])
+		if idx := entryIndexByHeight(buf.lines, height, suffix); idx >= 0 {
+			// One entry holds the whole message, so there is no second row
+			// to pair it with.
+			hits = append(hits, buf.lines[idx].text())
+			shown++
 		}
-		shown += len(matches)
 	}
 	// Replay inside the same dim heredoc frame as /expand so replayed
 	// lines never read as live chat. No buffer surgery: markers only.
@@ -526,7 +524,7 @@ func (s *Session) cmdExpand(text string) bool {
 		s.refreshTerminal()
 		return true
 	}
-	if findCollapsed(s.Display.TabChat.lines, height) < 0 {
+	if collapsedIndex(s.Display.TabChat.lines, height) < 0 {
 		s.emitLocalFeedback("| [Local]: Tin này không thu gọn.\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
@@ -541,9 +539,9 @@ func (s *Session) cmdExpand(text string) bool {
 	s.Display.ShowMetaMu.RLock()
 	withMeta := s.Display.ShowMeta
 	s.Display.ShowMetaMu.RUnlock()
-	full, _, _, _ := s.buildChatBlock(wire, av, withMeta)
+	full, _ := s.buildChatBlock(wire, av, withMeta)
 	s.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m\n", height))
-	for _, line := range strings.Split(strings.TrimSuffix(full, "\n"), "\n") {
+	for _, line := range strings.Split(strings.TrimSuffix(full.text(), "\n"), "\n") {
 		s.emitLocalFeedback(line + "\n")
 	}
 	s.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m\n", height))

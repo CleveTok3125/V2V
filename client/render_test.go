@@ -270,9 +270,9 @@ func TestHandleReplayMarkerIgnoresWording(t *testing.T) {
 	}
 }
 
-func containsLine(lines []string, needle string) bool {
+func containsLine(lines []entry, needle string) bool {
 	for _, line := range lines {
-		if strings.Contains(line, needle) {
+		if strings.Contains(line.text(), needle) {
 			return true
 		}
 	}
@@ -325,7 +325,8 @@ func TestChatBlockShape(t *testing.T) {
 	sess := chainTestSession(t, 0)
 
 	chat := WireMessage{Type: "chat", Time: "14:19", DisplayName: "Alice#a11c", Text: "hi"}
-	head, _, _, _ := sess.buildChatBlock(chat, false, false)
+	e, _ := sess.buildChatBlock(chat, false, false)
+	head := e.text()
 	if !strings.HasSuffix(head, "\n") || strings.HasSuffix(head, "\n\n") {
 		t.Fatalf("a chat line must end in one newline, got %q", head)
 	}
@@ -337,8 +338,8 @@ func TestChatBlockShape(t *testing.T) {
 	}
 
 	sys := WireMessage{Type: "system", Time: "14:19", Tags: []string{"system", wire.TagJoin}, Text: "ai đó đã tham gia"}
-	head, _, _, _ = sess.buildChatBlock(sys, false, false)
-	if head != "| ai đó đã tham gia\n" {
+	e, _ = sess.buildChatBlock(sys, false, false)
+	if head := e.text(); head != "| ai đó đã tham gia\n" {
 		t.Fatalf("a notice is one row, got %q", head)
 	}
 }
@@ -368,21 +369,21 @@ func TestOneMessageIsOneEntry(t *testing.T) {
 	sess.flushOutputNow()
 
 	if got := len(sess.Display.TabChat.lines); got != 2 {
-		t.Fatalf("two messages must be two entries, got %d: %q", got, sess.Display.TabChat.lines)
+		t.Fatalf("two messages must be two entries, got %d: %q", got, entriesText(sess.Display.TabChat.lines))
 	}
 	// Literal, not the constant: a test that follows the code cannot catch a
 	// change to the marker it is pinning.
-	entry := sess.Display.TabChat.lines[1]
-	if !strings.HasPrefix(entry, "|   ┌─") {
-		t.Fatalf("the quote must ride inside its message entry, got %q", entry)
+	e := sess.Display.TabChat.lines[1]
+	if !strings.HasPrefix(e.quote, "|   ┌─") {
+		t.Fatalf("the quote must ride inside its message entry, got %q", e.quote)
 	}
-	if !strings.Contains(entry, "\n| 12:00 A\n") {
-		t.Fatalf("the header must follow the quote in the same entry, got %q", entry)
+	if e.header != "| 12:00 A" {
+		t.Fatalf("the header must follow the quote in the same entry, got %q", e.header)
 	}
-	// The quote lookup reads the body out of that entry, skipping the quote
-	// row and the header.
-	if body := blockBody(entry); body != "|   trả lời đây\n" {
-		t.Fatalf("blockBody = %q, want the body alone", body)
+	// The quote lookup reads the body field out of that entry, skipping the
+	// quote row and the header.
+	if e.body != "|   trả lời đây" {
+		t.Fatalf("entry body = %q, want the body alone", e.body)
 	}
 	// And the queue carries the same two units, in order.
 	if got := strings.Count(out.String(), "|   ┌─"); got != 1 {

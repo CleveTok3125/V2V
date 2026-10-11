@@ -17,10 +17,10 @@ func dateBanner(day, text string) WireMessage {
 }
 
 // countLines counts rendered lines containing needle.
-func countLines(lines []string, needle string) int {
+func countLines(lines []entry, needle string) int {
 	n := 0
 	for _, line := range lines {
-		if strings.Contains(line, needle) {
+		if strings.Contains(line.text(), needle) {
 			n++
 		}
 	}
@@ -154,7 +154,7 @@ func TestDateBannerGatedByDateSwitch(t *testing.T) {
 	if out.String() != "" {
 		t.Fatalf("muted date banner must not print live, got %q", out.String())
 	}
-	if !strings.Contains(strings.Join(sess.Display.TabSys.lines, ""), "Ngày") {
+	if !strings.Contains(entriesText(sess.Display.TabSys.lines), "Ngày") {
 		t.Fatal("muted date banner must still be buffered in Tab 2")
 	}
 }

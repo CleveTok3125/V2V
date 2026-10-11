@@ -30,7 +30,7 @@ func TestOutputQueuePreservesOrder(t *testing.T) {
 
 	sess.Display.DisplayMu.Lock()
 	for i := 0; i < 50; i++ {
-		sess.emitTab(TabChat, fmt.Sprintf("chat %02d\n", i))
+		sess.emitTab(TabChat, noticeEntry(fmt.Sprintf("chat %02d\n", i)))
 		sess.emitLocalFeedback(fmt.Sprintf("sys %02d\n", i))
 	}
 	sess.Display.DisplayMu.Unlock()
@@ -73,7 +73,7 @@ func TestOutputQueueDropsOldestAtCap(t *testing.T) {
 	sess.Display.Out = gw
 
 	// Park the drainer on its first write, then enqueue with it idle.
-	sess.emitTab(TabChat, "warmup\n")
+	sess.emitTab(TabChat, noticeEntry("warmup\n"))
 	<-gw.entered
 
 	total := 0
@@ -81,7 +81,7 @@ func TestOutputQueueDropsOldestAtCap(t *testing.T) {
 	for i := 0; i < 600; i++ {
 		line := fmt.Sprintf("line-%04d %s\n", i, strings.Repeat("y", 1000))
 		total += len(line)
-		sess.emitTab(TabChat, line)
+		sess.emitTab(TabChat, noticeEntry(line))
 	}
 	sess.Display.DisplayMu.Unlock()
 
@@ -106,7 +106,7 @@ func TestOutputQueueCapsNewlineFreeChunks(t *testing.T) {
 	gw := &gateWriter{hold: hold, entered: make(chan struct{}), dst: out}
 	sess.Display.Out = gw
 
-	sess.emitTab(TabChat, "warmup\n")
+	sess.emitTab(TabChat, noticeEntry("warmup\n"))
 	<-gw.entered
 
 	chunk := "\033[1A\033[2K\r" + strings.Repeat("x", 4096)

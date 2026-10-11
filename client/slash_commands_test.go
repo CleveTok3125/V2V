@@ -286,7 +286,7 @@ func TestCmdInfoShowsMetadata(t *testing.T) {
 func TestCmdExpandReplaysFull(t *testing.T) {
 	sess, out := behaviorSession(t)
 	seedIndexedWire(sess, 42)
-	sess.Display.TabChat.append("| Alice: hello wo\x1b[90m...\x1b[0m [Xem thêm: /expand #42]\n")
+	sess.Display.TabChat.append(entry{body: "| Alice: hello wo" + expandTrailer(42), height: 42, collapsed: true})
 	if !sess.cmdExpand("/expand 42") {
 		t.Fatal("/expand must match")
 	}

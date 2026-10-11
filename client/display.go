@@ -133,11 +133,18 @@ func (s *Session) refreshTerminal() {
 // catch-up hold buffer while a join replay is being merged. Caller
 // must hold DisplayMu.
 func (s *Session) holdOrEnqueue(line string) {
+	s.holdOrEnqueueChunk(heldChunk{text: line})
+}
+
+// holdOrEnqueueChunk is holdOrEnqueue for a piece that knows the chain height
+// it reports, so a recovered block can be spliced into the held stream at its
+// position instead of being appended.
+func (s *Session) holdOrEnqueueChunk(chunk heldChunk) {
 	if s.Display.CatchupHold {
-		s.Display.HoldLines = append(s.Display.HoldLines, line)
+		s.Display.HoldLines = append(s.Display.HoldLines, chunk)
 		return
 	}
-	s.enqueueOutput(line)
+	s.enqueueOutput(chunk.text)
 }
 
 // releaseCatchupLocked prints everything accumulated during a held
@@ -154,7 +161,11 @@ func (s *Session) releaseCatchupLocked() {
 		s.Display.HoldTimer = nil
 	}
 	if len(s.Display.HoldLines) > 0 {
-		s.enqueueOutput(strings.Join(s.Display.HoldLines, ""))
+		var sb strings.Builder
+		for _, c := range s.Display.HoldLines {
+			sb.WriteString(c.text)
+		}
+		s.enqueueOutput(sb.String())
 		s.Display.HoldLines = nil
 	}
 	// The welcome line lands after the history it was waiting behind.
@@ -172,19 +183,19 @@ func (s *Session) flushPendingGreetingLocked() {
 	s.Display.PendingGreeting = ""
 }
 
-func (s *Session) emitTab(tab int, line string) {
-	s.emitTabLive(true, tab, line)
+func (s *Session) emitTab(tab int, e entry) {
+	s.emitTabLive(true, tab, e)
 }
 
 // emitTabLive appends a line to its tab buffer and prints it live only
 // when live is true. A muted line still lands in the buffer, so it
 // stays reviewable in the system tab and on tab switches. Caller must
 // hold DisplayMu.
-func (s *Session) emitTabLive(live bool, tab int, line string) {
+func (s *Session) emitTabLive(live bool, tab int, e entry) {
 	if tab == TabChat {
-		s.Display.TabChat.append(line)
+		s.Display.TabChat.append(e)
 	} else {
-		s.Display.TabSys.append(line)
+		s.Display.TabSys.append(e)
 	}
 	if !live {
 		return
@@ -192,7 +203,7 @@ func (s *Session) emitTabLive(live bool, tab int, line string) {
 	// Tab 1 shows the full legacy stream, so it is unaffected by tabs.
 	// Tab 2 is purely additive and shows only its own lines.
 	if tab == s.Display.ActiveTab || s.Display.ActiveTab == TabChat {
-		s.holdOrEnqueue(line)
+		s.holdOrEnqueueChunk(heldChunk{text: e.text(), height: e.height})
 		s.Display.PrintGen++
 	}
 }
@@ -204,9 +215,15 @@ func (s *Session) emitTabLive(live bool, tab int, line string) {
 // go through here — printing to out directly bypasses Tab 2 and
 // leaves it incomplete. Caller must hold DisplayMu.
 func (s *Session) emitLocalFeedback(line string) {
-	s.Display.TabSys.append(line)
+	s.Display.TabSys.append(noticeEntry(line))
 	s.holdOrEnqueue(line)
 	s.Display.PrintGen++
+}
+
+// noticeEntry is a locally generated line as a buffer entry: one header row,
+// no chain position and no body.
+func noticeEntry(line string) entry {
+	return entry{header: strings.TrimSuffix(line, "\n")}
 }
 
 // emitLocalFeedbackTags is emitLocalFeedback for informational notices
@@ -221,7 +238,7 @@ func (s *Session) emitLocalFeedbackTags(tags []string, line string) {
 // live only when live is true; a muted line remains reviewable in Tab 2.
 // Caller must hold DisplayMu.
 func (s *Session) emitLocalFeedbackLive(live bool, line string) {
-	s.Display.TabSys.append(line)
+	s.Display.TabSys.append(noticeEntry(line))
 	if !live {
 		return
 	}

@@ -108,13 +108,13 @@ type DisplayState struct {
 	// data stays in the tab buffers, so switching tabs replays them.
 	OutSkipped int
 	// CatchupHold defers terminal output during the join replay and any
-	// refill of its dropped lines: lines accumulate in HoldLines in
+	// refill of its dropped lines: chunks accumulate in HoldLines in
 	// emission order, recovered wires are spliced in at their chain
 	// position, and the whole stream is printed once at release. This
 	// keeps a gapped replay from reaching scrollback, where it could
 	// not be merged afterwards. Under DisplayMu.
 	CatchupHold bool
-	HoldLines   []string
+	HoldLines   []heldChunk
 	// HoldGen invalidates the release timer of a superseded hold.
 	HoldGen uint64
 	// HoldTimer is the release timer for the current hold; stopped when
