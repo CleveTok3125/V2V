@@ -38,7 +38,8 @@ func TestOutputQueuePreservesOrder(t *testing.T) {
 
 	var want strings.Builder
 	for i := 0; i < 50; i++ {
-		fmt.Fprintf(&want, "chat %02d\nsys %02d\n", i, i)
+		// Every entry ends with the blank row that separates it.
+		fmt.Fprintf(&want, "chat %02d\n\nsys %02d\n\n", i, i)
 	}
 	if out.String() != want.String() {
 		t.Fatalf("queue reordered output: got %q", out.String())

@@ -417,7 +417,7 @@ func TestRejectedLineKeepsItsEchoEntry(t *testing.T) {
 	if len(lines) != 1 || slot.index != 0 {
 		t.Fatalf("the echo entry must own its slot: %q", entriesText(lines))
 	}
-	if got := lines[0].text(); got != inputEchoPrefix+"quá nhanh\n" {
+	if got := lines[0].text(); got != inputEchoPrefix+"quá nhanh\n\n" {
 		t.Fatalf("echo entry = %q", got)
 	}
 }

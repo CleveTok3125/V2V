@@ -17,8 +17,15 @@ type entry struct {
 	collapsed bool   // body was folded, so /expand targets this entry
 }
 
+// entryGapRow is the blank row that separates one entry from the next. It
+// rides inside the entry, so a repaint, a slot replacement and the erase math
+// all carry it without anything having to remember what was drawn last.
+const entryGapRow = "\n"
+
 // text is the exact bytes this entry contributes to the screen and to a tab
-// repaint: the parts that exist, one row each.
+// repaint: the parts that exist, one row each, plus the blank row that sets
+// this entry apart from the next. An empty entry contributes nothing at all,
+// so it never leaves a stray blank behind.
 func (e entry) text() string {
 	var sb strings.Builder
 	for _, part := range [...]string{e.quote, e.header, e.body} {
@@ -27,6 +34,9 @@ func (e entry) text() string {
 		}
 		sb.WriteString(part)
 		sb.WriteString("\n")
+	}
+	if sb.Len() > 0 {
+		sb.WriteString(entryGapRow)
 	}
 	return sb.String()
 }

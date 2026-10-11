@@ -319,16 +319,17 @@ func TestHandleReplayMarkerRespectsNotifyGates(t *testing.T) {
 
 // TestChatBlockShape pins what a rendered block looks like: the author and
 // chain position share one header row, the body hangs below it under a
-// shared indent, and a notice is a single row. No blank rows are added here;
-// spacing between groups is not this function's business.
+// shared indent, and a notice is a single row. Every entry ends with the
+// blank row that separates it from the next, so the spacing travels with the
+// entry through a repaint, a slot replacement and the erase math alike.
 func TestChatBlockShape(t *testing.T) {
 	sess := chainTestSession(t, 0)
 
 	chat := WireMessage{Type: "chat", Time: "14:19", DisplayName: "Alice#a11c", Text: "hi"}
 	e, _ := sess.buildChatBlock(chat, false, false)
 	head := e.text()
-	if !strings.HasSuffix(head, "\n") || strings.HasSuffix(head, "\n\n") {
-		t.Fatalf("a chat line must end in one newline, got %q", head)
+	if !strings.HasSuffix(head, "\n\n") || strings.HasSuffix(head, "\n\n\n") {
+		t.Fatalf("a chat line must end in exactly one blank row, got %q", head)
 	}
 	if !strings.Contains(head, "\n"+chatBodyPrefix) {
 		t.Fatalf("a chat body must be indented, got %q", head)
@@ -339,8 +340,8 @@ func TestChatBlockShape(t *testing.T) {
 
 	sys := WireMessage{Type: "system", Time: "14:19", Tags: []string{"system", wire.TagJoin}, Text: "ai đó đã tham gia"}
 	e, _ = sess.buildChatBlock(sys, false, false)
-	if head := e.text(); head != "| ai đó đã tham gia\n" {
-		t.Fatalf("a notice is one row, got %q", head)
+	if head := e.text(); head != "| ai đó đã tham gia\n\n" {
+		t.Fatalf("a notice is one row plus the gap, got %q", head)
 	}
 }
 

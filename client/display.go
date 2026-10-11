@@ -216,9 +216,7 @@ func (s *Session) emitTabLive(live bool, tab int, e entry) {
 // go through here — printing to out directly bypasses Tab 2 and
 // leaves it incomplete. Caller must hold DisplayMu.
 func (s *Session) emitLocalFeedback(line string) {
-	s.Display.TabSys.append(noticeEntry(line))
-	s.holdOrEnqueue(line)
-	s.Display.PrintGen++
+	s.emitLocalFeedbackLive(true, line)
 }
 
 // clearInputRow erases the row readline was editing and leaves the cursor at
@@ -309,10 +307,11 @@ func (s *Session) emitLocalFeedbackTags(tags []string, line string) {
 // live only when live is true; a muted line remains reviewable in Tab 2.
 // Caller must hold DisplayMu.
 func (s *Session) emitLocalFeedbackLive(live bool, line string) {
-	s.Display.TabSys.append(noticeEntry(line))
+	e := noticeEntry(line)
+	s.Display.TabSys.append(e)
 	if !live {
 		return
 	}
-	s.holdOrEnqueue(line)
+	s.holdOrEnqueueChunk(heldChunk{text: e.text(), height: e.height})
 	s.Display.PrintGen++
 }
