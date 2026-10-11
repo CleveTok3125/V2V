@@ -331,11 +331,9 @@ func (s *Session) cmdTab(text string) bool {
 			n = TabSystem
 		}
 	}
+	// switchTab paints the bar itself, inside the same ordered chunk as the
+	// dump, so nothing is queued behind the prompt it would race.
 	s.switchTab(n)
-	s.Display.DisplayMu.Lock()
-	s.emitLocalFeedback(tabBarLine(s.Display.ActiveTab))
-	s.Display.PrintGen++
-	s.Display.DisplayMu.Unlock()
 	return true
 }
 

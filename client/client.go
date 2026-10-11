@@ -191,6 +191,10 @@ func main() {
 	go sess.runPump()
 
 	for {
+		// Everything queued by the last command must be on screen before
+		// readline draws its prompt, or the tail of it lands after the
+		// prompt and reads as part of the input line.
+		sess.flushOutputNow()
 		text, err := sess.Display.Term.ReadLine()
 		if err != nil {
 			if sess.handleReadErr(err) == cmdQuit {

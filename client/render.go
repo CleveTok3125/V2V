@@ -473,6 +473,10 @@ func (s *Session) switchTab(n int) {
 	for _, e := range buf.lines {
 		sb.WriteString(e.text())
 	}
+	// The bar rides in the same ordered chunk as the dump. Emitting it
+	// separately put it on the queue while readline was already drawing the
+	// prompt, which is how it ended up glued to the input line.
+	sb.WriteString(tabBarLine(n))
 	s.enqueueOutputKeep(sb.String(), true)
 	s.refreshTerminal()
 }

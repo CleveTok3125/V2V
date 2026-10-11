@@ -390,3 +390,49 @@ func TestOneMessageIsOneEntry(t *testing.T) {
 		t.Fatalf("the quote must be printed once, got %d in %q", got, out.String())
 	}
 }
+
+// TestSwitchTabPaintsEverythingBeforeThePrompt: a switch must leave nothing
+// queued. The bar used to be emitted on its own, so it sat on the queue while
+// readline was already drawing the prompt and landed on the input line; the
+// clear, the dump and the bar are now one ordered chunk.
+func TestSwitchTabPaintsEverythingBeforeThePrompt(t *testing.T) {
+	sess := chainTestSession(t, 0)
+	sess.Chain.WireIdx = newWireIndex(1000)
+	sess.Chain.RenderCache = newRenderCache(200)
+	// Start on the system tab so the switch has a chat buffer to dump.
+	sess.Display.ActiveTab = TabSystem
+	var out strings.Builder
+	sess.Display.Out = &out
+	sess.Display.Term = &fakeTerm{}
+
+	sess.Display.DisplayMu.Lock()
+	sess.renderChatBlock(chainWireWithText(1, "hello there", 1))
+	sess.Display.DisplayMu.Unlock()
+	sess.flushOutputNow()
+
+	// switchTab takes DisplayMu itself.
+	sess.switchTab(TabChat)
+
+	sess.Display.OutMu.Lock()
+	pending := len(sess.Display.OutBuf)
+	sess.Display.OutMu.Unlock()
+	if pending != 0 {
+		t.Fatalf("%d bytes left queued behind the prompt: %q", pending, sess.Display.OutBuf)
+	}
+
+	got := out.String()
+	clear := strings.Index(got, "\033[H\033[2J")
+	if clear < 0 {
+		t.Fatalf("switch did not clear the screen: %q", got)
+	}
+	// Look only past the clear: the same body was printed before it.
+	after := got[clear:]
+	dump := strings.Index(after, "hello there")
+	bar := strings.Index(after, "[1:chat]")
+	if dump < 0 || bar < 0 {
+		t.Fatalf("switch is missing a part: dump=%d bar=%d in %q", dump, bar, after)
+	}
+	if dump > bar {
+		t.Fatalf("switch order must be dump then bar: dump=%d bar=%d", dump, bar)
+	}
+}
