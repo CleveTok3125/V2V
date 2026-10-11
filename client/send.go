@@ -111,15 +111,18 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 	// cancel the grey placeholder wrapper mid-line, and line counts
 	// match the highlighted echo anyway.
 	lines := strings.Split(markup.SpanPlain(text), "\n")
-	phRows = 0
-	// Quoted target previews first (same helper as the echo path, so
-	// both blocks share the shape; pending quotes carry ⏳ so the
+	// The whole placeholder is one entry, like the echo it stands in for: a
+	// message is one entry whatever it carries. Splitting it into a row per
+	// part would make the splice range and the erase math disagree with the
+	// block that replaces it.
+	var block strings.Builder
+	// Quoted target previews come first, inside the same entry (same helper
+	// as the echo path, so both shapes match; pending quotes carry ⏳ so the
 	// erase region check keeps passing).
 	if s.Pending.PendingReplyTo > 0 {
 		for _, q := range s.quoteLinesFor(s.Pending.PendingReplyTo, true) {
-			s.emitTab(TabChat, q+"\n")
-			phRows++
-			phScreenRows += countRows(q + "\n")
+			block.WriteString(q)
+			block.WriteString("\n")
 		}
 	}
 	// The header carries everything the real one will: the author, the
@@ -149,18 +152,17 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (phRows in
 		}
 	}
 	header += " ⏳\x1b[0m\n"
-	s.emitTab(TabChat, header)
-	phRows++
-	phScreenRows += countRows(header)
+	block.WriteString(header)
 
 	// The text hangs under the header, one indented row per rendered line,
 	// matching the layout the echo uses.
 	for _, line := range lines {
-		entry := fmt.Sprintf("\x1b[90m%s%s\x1b[0m\n", chatBodyPrefix, markup.Linkify(line))
-		s.emitTab(TabChat, entry)
-		phRows++
-		phScreenRows += countRows(entry)
+		fmt.Fprintf(&block, "\x1b[90m%s%s\x1b[0m\n", chatBodyPrefix, markup.Linkify(line))
 	}
+	entry := block.String()
+	s.emitTab(TabChat, entry)
+	phRows = 1
+	phScreenRows = countRows(entry)
 	phBufEnd = len(s.Display.TabChat.lines)
 	s.Display.Term.Refresh()
 	s.Display.DisplayMu.Unlock()

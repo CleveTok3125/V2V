@@ -74,7 +74,7 @@ func TestBuildChatBlockSanitizesHead(t *testing.T) {
 		DisplayName: "Alice\x1b]52;c;AAAA\x1b\\",
 		Text:        "hi",
 	}
-	_, head, _, _, _ := sess.buildChatBlock(wire, true, false)
+	head, _, _, _ := sess.buildChatBlock(wire, true, false)
 	if strings.Contains(head, "\x1b[2J") || strings.Contains(head, "52;c") {
 		t.Fatalf("escape leaked: %q", head)
 	}

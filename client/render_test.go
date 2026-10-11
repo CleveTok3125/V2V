@@ -325,7 +325,7 @@ func TestChatBlockShape(t *testing.T) {
 	sess := chainTestSession(t, 0)
 
 	chat := WireMessage{Type: "chat", Time: "14:19", DisplayName: "Alice#a11c", Text: "hi"}
-	_, head, _, _, _ := sess.buildChatBlock(chat, false, false)
+	head, _, _, _ := sess.buildChatBlock(chat, false, false)
 	if !strings.HasSuffix(head, "\n") || strings.HasSuffix(head, "\n\n") {
 		t.Fatalf("a chat line must end in one newline, got %q", head)
 	}
@@ -337,8 +337,55 @@ func TestChatBlockShape(t *testing.T) {
 	}
 
 	sys := WireMessage{Type: "system", Time: "14:19", Tags: []string{"system", wire.TagJoin}, Text: "ai đó đã tham gia"}
-	_, head, _, _, _ = sess.buildChatBlock(sys, false, false)
+	head, _, _, _ = sess.buildChatBlock(sys, false, false)
 	if head != "| ai đó đã tham gia\n" {
 		t.Fatalf("a notice is one row, got %q", head)
+	}
+}
+
+// TestOneMessageIsOneEntry pins the shape the rest of the display rests on: a
+// message is a single buffer entry whatever it carries, quote included. That
+// is what keeps the erase math, the catch-up anchor and the quote lookup
+// agreeing on one unit, and it is why nothing can land between a message's
+// parts.
+func TestOneMessageIsOneEntry(t *testing.T) {
+	sess := chainTestSession(t, 0)
+	sess.Chain.WireIdx = newWireIndex(1000)
+	sess.Chain.RenderCache = newRenderCache(200)
+	sess.Display.ActiveTab = TabChat
+	var out strings.Builder
+	sess.Display.Out = &out
+	sess.Display.Term = &fakeTerm{}
+
+	first := chainWireWithText(1, "nội dung gốc", 1)
+	reply := chainWireWithText(2, "trả lời đây", 2)
+	reply.ReplyTo = 1
+
+	sess.Display.DisplayMu.Lock()
+	sess.renderChatBlock(first)
+	sess.renderChatBlock(reply)
+	sess.Display.DisplayMu.Unlock()
+	sess.flushOutputNow()
+
+	if got := len(sess.Display.TabChat.lines); got != 2 {
+		t.Fatalf("two messages must be two entries, got %d: %q", got, sess.Display.TabChat.lines)
+	}
+	// Literal, not the constant: a test that follows the code cannot catch a
+	// change to the marker it is pinning.
+	entry := sess.Display.TabChat.lines[1]
+	if !strings.HasPrefix(entry, "|   ┌─") {
+		t.Fatalf("the quote must ride inside its message entry, got %q", entry)
+	}
+	if !strings.Contains(entry, "\n| 12:00 A\n") {
+		t.Fatalf("the header must follow the quote in the same entry, got %q", entry)
+	}
+	// The quote lookup reads the body out of that entry, skipping the quote
+	// row and the header.
+	if body := blockBody(entry); body != "|   trả lời đây\n" {
+		t.Fatalf("blockBody = %q, want the body alone", body)
+	}
+	// And the queue carries the same two units, in order.
+	if got := strings.Count(out.String(), "|   ┌─"); got != 1 {
+		t.Fatalf("the quote must be printed once, got %d in %q", got, out.String())
 	}
 }

@@ -541,7 +541,7 @@ func (s *Session) cmdExpand(text string) bool {
 	s.Display.ShowMetaMu.RLock()
 	withMeta := s.Display.ShowMeta
 	s.Display.ShowMetaMu.RUnlock()
-	_, full, _, _, _ := s.buildChatBlock(wire, av, withMeta)
+	full, _, _, _ := s.buildChatBlock(wire, av, withMeta)
 	s.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m\n", height))
 	for _, line := range strings.Split(strings.TrimSuffix(full, "\n"), "\n") {
 		s.emitLocalFeedback(line + "\n")

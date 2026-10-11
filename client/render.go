@@ -425,20 +425,32 @@ func (s *Session) quoteLinesFor(replyTo uint64, pending bool) []string {
 
 // blockBody returns the text rows of a rendered block entry: everything
 // after the author header row.
+// quoteLinePrefix opens a rendered quote row. A quote rides inside the entry
+// of the message it answers, so a block entry may open with these rows.
+const quoteLinePrefix = "|   ┌─"
+
+// blockBody returns the body of a rendered block entry: everything after the
+// header row. Quote rows are part of the same entry, so the scan skips them
+// instead of assuming the header comes first.
 func blockBody(entry string) string {
-	if i := strings.Index(entry, "\n"); i >= 0 {
-		return entry[i+1:]
+	for {
+		i := strings.Index(entry, "\n")
+		if i < 0 {
+			return ""
+		}
+		if !strings.HasPrefix(entry, quoteLinePrefix) {
+			return entry[i+1:]
+		}
+		entry = entry[i+1:]
 	}
-	return ""
 }
 
 // buildChatBlock renders one wire into head + trailing meta strings
 // without emitting. Pure given (wire, av, withMeta); cached by renderChatBlock.
-func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (quote []string, head, meta string, tab int, hasMeta bool) {
+func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (head, meta string, tab int, hasMeta bool) {
 	tab = TabChat
 	if msg.Type == "system" {
-		head = fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(msg.Text))
-		return quote, head, "", tabForWire(msg), false
+		return fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(msg.Text)), "", tabForWire(msg), false
 	}
 	// Author and chain position share one header row; the text hangs below
 	// it under a shared indent. One shape for every chat line keeps the
@@ -459,10 +471,18 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (quote []st
 	}
 	mentionOpen, mentionClose := mentionSGR(ClientCfg.MentionColor())
 	body := renderMentions(renderChatText(msg.Text), s.resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose)
+	// A quote rides in the same entry as the message it answers: a message is
+	// one entry whatever it carries, so nothing can land between its parts and
+	// every consumer — the erase math, the catch-up merge, the quote lookup —
+	// sees a single unit.
+	var quote strings.Builder
 	if msg.ReplyTo > 0 {
-		quote = s.quoteLinesFor(msg.ReplyTo, false)
+		for _, q := range s.quoteLinesFor(msg.ReplyTo, false) {
+			quote.WriteString(q)
+			quote.WriteString("\n")
+		}
 	}
-	return quote, header + "\n" + chatBodyIndent(body) + "\n", "", tab, false
+	return quote.String() + header + "\n" + chatBodyIndent(body) + "\n", "", tab, false
 }
 
 // chatBodyPrefix is the indent every text row of a message shares. It sits
@@ -508,7 +528,7 @@ func (s *Session) renderChatBlock(msg WireMessage) {
 			}
 			return
 		}
-		_, head, meta, tab, hasMeta := s.buildChatBlock(msg, av, withMeta)
+		head, meta, tab, hasMeta := s.buildChatBlock(msg, av, withMeta)
 		head = maybeCollapse(head, msg, tab)
 		s.Chain.RenderCache.put(key, renderedBlock{tab: tab, head: head, meta: meta, hasMeta: hasMeta})
 		emit(tab, head)
@@ -517,11 +537,8 @@ func (s *Session) renderChatBlock(msg WireMessage) {
 		}
 		return
 	}
-	quote, head, meta, tab, hasMeta := s.buildChatBlock(msg, av, withMeta)
+	head, meta, tab, hasMeta := s.buildChatBlock(msg, av, withMeta)
 	head = maybeCollapse(head, msg, tab)
-	for _, q := range quote {
-		emit(tab, q+"\n")
-	}
 	emit(tab, head)
 	if hasMeta {
 		emit(tab, meta)

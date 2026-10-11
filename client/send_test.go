@@ -180,6 +180,12 @@ func assertSwapEraseCoversDrawnRows(t *testing.T, body string, replyTo uint64) {
 	if !shown || phRows == 0 {
 		t.Fatalf("placeholder did not render: rows=%d shown=%v", phRows, shown)
 	}
+	// A message is one entry whatever it carries, and the placeholder stands
+	// in for exactly that: quote, header and body in a single unit, so the
+	// splice range and the erase math agree with the block that replaces it.
+	if phRows != 1 {
+		t.Fatalf("a placeholder must be one entry, got %d", phRows)
+	}
 	phEntries := append([]string{}, sess.Display.TabChat.lines[bufEnd-phRows:bufEnd]...)
 	sess.Pending.PendingPlaceholders = append(sess.Pending.PendingPlaceholders, pendingMsg{
 		text: body, rows: phRows, screenRows: phScreenRows, shown: shown, bufEnd: bufEnd,
