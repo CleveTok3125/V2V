@@ -1,8 +1,10 @@
 package filter
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 func TestValidateMessage(t *testing.T) {
@@ -21,11 +23,156 @@ func TestValidateMessage(t *testing.T) {
 }
 
 func TestValidateDisplayName(t *testing.T) {
-	if err := ValidateDisplayName("Alice"); err != nil {
-		t.Error(err)
+	allowed := []struct {
+		label string
+		name  string
+	}{
+		{"latin", "Alice"},
+		{"latin with space", "John Smith"},
+		{"latin separators", "a_b-c.d'e"},
+		{"latin with digits", "user1234"},
+		{"vietnamese nfc", "Nguyễn Văn A"},
+		{"cyrillic", "Иван"},
+		{"greek", "Δημήτρης"},
+		{"cjk", "张三"},
+		{"cjk numerals as letters", "一二三"},
+		{"hangul", "김철수"},
+		{"arabic", "محمد"},
+		{"hebrew", "דוד"},
+		{"thai", "สมชาย"},
+		{"devanagari spacing marks", "राम"},
+		{"non-ascii decimal digits", "user١٢٣"},
 	}
-	if err := ValidateDisplayName("a\nb"); err == nil {
-		t.Error("should reject newline")
+	for _, tc := range allowed {
+		if err := ValidateDisplayName(tc.name); err != nil {
+			t.Errorf("%s: %q should be allowed, got %v", tc.label, tc.name, err)
+		}
+	}
+
+	blocked := []struct {
+		label string
+		name  string
+	}{
+		{"empty", ""},
+		{"spaces only", "   "},
+		{"underscores only", "___"},
+		{"dots only", "..."},
+		{"lone combining mark", "\u0301"},
+		{"latin with combining mark", "a\u0301"},
+		{"vietnamese nfd", "Nguye\u0302\u0303n Va\u0306n A"},
+		{"thai tone mark", "สม\u0e48ชาย"},
+		{"newline", "a\nb"},
+		{"tab", "a\tb"},
+		{"esc", "a\x1bb"},
+		{"replacement char", "a\ufffdb"},
+		{"rtl override", "a\u202eb"},
+		{"zero width joiner", "a\u200db"},
+		{"gutter", "a|b"},
+		{"bullet separator", "a\u2022b"},
+		{"fake message number", "x | #99:ffff"},
+		{"hash", "a#1"},
+		{"colon", "a:b"},
+		{"at", "a@b"},
+		{"asterisk", "a*b"},
+		{"backtick", "a`b"},
+		{"brackets", "a[b]"},
+		{"angle brackets", "a<b>"},
+		{"slash", "a/b"},
+		{"backslash", "a\\b"},
+		{"pencil", "a\u270db"},
+		{"diamond", "a\u25c6b"},
+		{"reply arrow", "a\u21a9b"},
+		{"box drawing", "a\u250cb"},
+		{"middot", "a\u00b7b"},
+		{"emoji", "a\U0001F600b"},
+		{"fullwidth hash", "a\uff03b"},
+		{"vulgar fraction", "a\u00bdb"},
+	}
+	for _, tc := range blocked {
+		if err := ValidateDisplayName(tc.name); err == nil {
+			t.Errorf("%s: %q should be rejected", tc.label, tc.name)
+		}
+	}
+}
+
+// TestDisplayNameRuleIsSubsetOfLegacy is the guarantee that the allowlist only
+// tightens: over every code point, a rune the new rule accepts is a rune
+// displayLegacyAllowed accepted too. A rune accepted here but refused there
+// would mean the change widened the policy instead of narrowing it.
+func TestDisplayNameRuleIsSubsetOfLegacy(t *testing.T) {
+	widened := 0
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if r >= 0xD800 && r <= 0xDFFF {
+			continue // lone surrogates are not encodable text
+		}
+		if ValidateDisplayName("a"+string(r)+"a") != nil {
+			continue
+		}
+		if !displayLegacyAllowed(r) {
+			if widened < 5 {
+				t.Errorf("U+%04X %q is accepted now but the legacy rule refused it", r, r)
+			}
+			widened++
+		}
+	}
+	if widened > 5 {
+		t.Errorf("%d code points widened in total", widened)
+	}
+	if displayLegacyAllowed('|') && ValidateDisplayName("a|a") == nil {
+		t.Error("the rule is not a strict tightening: a|a is still accepted")
+	}
+}
+
+// An admin prefix keeps the permissive legacy rule so an existing roles.json
+// keeps working; only the runes that build a header are refused.
+func TestValidateDisplayPrefix(t *testing.T) {
+	allowed := []string{"", "[Admin] ", "*", "@", "«Admin»", "★Admin★", "Moderator "}
+	for _, prefix := range allowed {
+		if err := ValidateDisplayPrefix(prefix); err != nil {
+			t.Errorf("%q should be allowed, got %v", prefix, err)
+		}
+	}
+	blocked := []string{"| ", "• ", "#99:ffff", "a:b", "✍ ", "◆ ", "↩ ", "┌─ ", "a·b", "a\nb", "a\x1bb"}
+	for _, prefix := range blocked {
+		if err := ValidateDisplayPrefix(prefix); err == nil {
+			t.Errorf("%q should be rejected", prefix)
+		}
+	}
+	if err := ValidateDisplayPrefix("a|b"); !errors.Is(err, ErrInvalidDisplayPrefix) {
+		t.Fatalf("want ErrInvalidDisplayPrefix, got %v", err)
+	}
+}
+
+func TestNeutralizeDisplayName(t *testing.T) {
+	cases := []struct {
+		label string
+		in    string
+		want  string
+	}{
+		{"clean name", "Alice", "Alice"},
+		{"keeps the hash tail", "Alice#a1b2", "Alice#a1b2"},
+		{"keeps a serial", "Alice#a1b2-2", "Alice#a1b2-2"},
+		{"keeps an admin prefix", "[Admin] Alice#a1b2", "[Admin] Alice#a1b2"},
+		{"forges a gutter", "x | y#a1b2", "x ? y#a1b2"},
+		{"forges a reference", "x | #99:ffff#a1b2", "x ? ?99?ffff#a1b2"},
+		{"forges a badge", "x ✍ ◆ deadbeef#a1b2", "x ? ? deadbeef#a1b2"},
+		{"forges a quote", "┌─ ↩ #12#a1b2", "?? ? ?12#a1b2"},
+		{"hash that is not a tail", "a#b#a1b2", "a?b#a1b2"},
+		{"no hash at all", "a|b", "a?b"},
+	}
+	for _, tc := range cases {
+		if got := NeutralizeDisplayName(tc.in); got != tc.want {
+			t.Errorf("%s: %q -> %q, want %q", tc.label, tc.in, got, tc.want)
+		}
+	}
+}
+
+// Every rejection carries the sentinel, so a caller can classify without
+// matching the message text.
+func TestValidateDisplayNameErrorIsSentinel(t *testing.T) {
+	err := ValidateDisplayName("a|b")
+	if !errors.Is(err, ErrInvalidDisplayName) {
+		t.Fatalf("want ErrInvalidDisplayName, got %v", err)
 	}
 }
 
