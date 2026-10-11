@@ -121,7 +121,6 @@ func (s *Session) handleDraftGate(text string) {
 func (s *Session) gracefulQuit() {
 	s.Quitting <- true
 	s.flushChainTip()
-	s.Verify.VerifyCloseOnce.Do(func() { close(s.Verify.VerifyCh) })
 	s.SendMu.Lock()
 	s.Conn.WriteMessage(wsCloseMessage, []byte{})
 	s.SendMu.Unlock()

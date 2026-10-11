@@ -1371,23 +1371,3 @@ func (s *Session) checkChainLink(msg WireMessage) {
 	}
 	s.noteChainTip(newTip, msg.ChainHeight)
 }
-
-func (s *Session) enqueueVerify(job verifyJob) {
-	s.Verify.VerifyMu.Lock()
-	defer s.Verify.VerifyMu.Unlock()
-	select {
-	case s.Verify.VerifyCh <- job:
-	default:
-		// Drop oldest (FIFO) — dropped is considered verify fail (red ✗)
-		select {
-		case <-s.Verify.VerifyCh:
-		default:
-		}
-		// Now space is guaranteed (or channel was emptied)
-		select {
-		case s.Verify.VerifyCh <- job:
-		default:
-			// Extremely unlikely: channel filled again between drop and send
-		}
-	}
-}

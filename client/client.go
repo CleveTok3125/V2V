@@ -120,23 +120,6 @@ type inputTerminal interface {
 // historyFile is set in parseFlags from CacheDir (UserCacheDir/V2V/history.tmp by default).
 var historyFile string
 
-type verifyJob struct {
-	rawLine     string
-	badge       string
-	urlStr      string
-	pub         string
-	seqStr      string
-	prev        string
-	sig         string
-	msgHash     string
-	serverPub   string
-	displayName string
-	textParam   string
-	seq         uint32
-	tmpID       uint64
-	tmpReplyTo  uint64
-}
-
 // emitWhoami prints the /whoami identity lines under the session DisplayMu. The mutex
 // is released on every path via defer: guests (empty role) take no early
 // return that could skip the unlock and freeze the terminal.
@@ -180,7 +163,6 @@ func main() {
 	}
 	defer sess.Display.Term.Close()
 	defer ClearLoadedPassphrase()
-	go sess.runVerify()
 
 	// The welcome line is held, not printed yet: it is released after
 	// the join replay so it lands at the bottom of the loaded history

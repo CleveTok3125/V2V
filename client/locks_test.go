@@ -126,30 +126,6 @@ func TestCheckChainLinkSuccessPath(t *testing.T) {
 	}
 }
 
-// TestEnqueueVerifyDropOldest pins the bounded-queue contract: beyond
-// capacity the oldest job drops FIFO, survivors keep arrival order.
-func TestEnqueueVerifyDropOldest(t *testing.T) {
-	sess := &Session{Verify: VerifyState{VerifyCh: make(chan verifyJob, 2)}}
-	for _, badge := range []string{"one", "two", "three"} {
-		sess.enqueueVerify(verifyJob{badge: badge})
-	}
-	for _, want := range []string{"two", "three"} {
-		select {
-		case job := <-sess.Verify.VerifyCh:
-			if job.badge != want {
-				t.Fatalf("dequeued = %q, want %q", job.badge, want)
-			}
-		default:
-			t.Fatalf("queue must hold %q", want)
-		}
-	}
-	select {
-	case job := <-sess.Verify.VerifyCh:
-		t.Fatalf("queue must be empty, got %q", job.badge)
-	default:
-	}
-}
-
 // TestConsumeEchoMatchPath drives the hit branch the stray test
 // never reaches: a matching echo splices its placeholder without
 // touching the screen (shown=false), exercising the queue splice

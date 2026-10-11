@@ -145,7 +145,6 @@ func TestGracefulQuitNilPumpDone(t *testing.T) {
 		Conn:     &stubConn{},
 		Quitting: make(chan bool, 1),
 		Display:  DisplayState{Out: io.Discard, Term: &fakeTerm{}},
-		Verify:   VerifyState{VerifyCh: make(chan verifyJob, 1)},
 	}
 	start := time.Now()
 	sess.gracefulQuit()

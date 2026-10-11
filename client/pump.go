@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/filter"
-	"github.com/CleveTok3125/V2V/internal/trip"
 	"github.com/CleveTok3125/V2V/internal/wire"
 )
 
@@ -408,51 +407,6 @@ func (s *Session) runPump() {
 			s.emitRawLineLocked(line)
 			s.Display.DisplayMu.Unlock()
 		}
-		s.refreshCoalesced()
-	}
-}
-
-// runVerify resolves trip badges asynchronously; dropped-queue
-// entries stay red. Started once from main.
-func (s *Session) runVerify() {
-
-	for job := range s.Verify.VerifyCh {
-		// Use shared trip verification (same as server) — serverPub is enforced to server's own key
-		serverPub := strings.ToLower(job.serverPub)
-		if serverPub == "" {
-			serverPub = strings.ToLower(s.Challenge.ServerPubKey)
-		}
-		textForVerify := job.textParam
-		// Links without text= verify the signature over msgHash alone;
-		// nothing is displayed from the link, so no text binding exists.
-		_, err := trip.Verify(trip.VerifyParams{
-			Text:          textForVerify,
-			DisplayName:   job.displayName,
-			ServerPub:     serverPub,
-			PubHex:        job.pub,
-			Seq:           job.seq,
-			PrevHex:       job.prev,
-			SigHex:        job.sig,
-			MsgHashHex:    job.msgHash,
-			TmpID:         job.tmpID,
-			ReplyTo:       job.tmpReplyTo,
-			SkipTextCheck: textForVerify == "",
-		})
-		valid := err == nil
-		// Fallback: if textParam was empty but msgHash check failed, try empty text path
-		if !valid && textForVerify != "" {
-			// Already handled; keep invalid
-		}
-		var colored string
-		if valid {
-			colored = badgeColor(job.badge) + job.badge + "\x1b[0m"
-		} else {
-			colored = "\x1b[91m" + job.badge + " ✗\x1b[0m"
-		}
-		line := fmt.Sprintf("  └─ ✍️ \x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", s.absoluteVerifyURL(job.urlStr), colored)
-		s.Display.DisplayMu.Lock()
-		s.emitTab(TabChat, noticeEntry(fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line))))
-		s.Display.DisplayMu.Unlock()
 		s.refreshCoalesced()
 	}
 }

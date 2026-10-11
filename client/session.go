@@ -207,14 +207,11 @@ type ChainState struct {
 	RenderCache  *renderCache
 }
 
-// VerifyState is the async badge-verify worker: channel, guard,
-// close-once and the autoverify toggle.
+// VerifyState carries the autoverify toggle: whether a received badge is
+// checked against the trip signature as it is rendered.
 type VerifyState struct {
-	VerifyCh        chan verifyJob
-	VerifyMu        sync.Mutex
-	VerifyCloseOnce sync.Once
-	AutoVerify      bool
-	AutoVerifyMu    sync.RWMutex
+	AutoVerify   bool
+	AutoVerifyMu sync.RWMutex
 }
 
 // PendingState is the outgoing message state: sequence counters,
@@ -249,9 +246,6 @@ func NewSession() *Session {
 		Quitting: make(chan bool, 1),
 		PumpDone: make(chan struct{}),
 		TripPrev: make([]byte, 32),
-		Verify: VerifyState{
-			VerifyCh: make(chan verifyJob, 128),
-		},
 		Pending: PendingState{
 			PendingPlaceholders: []pendingMsg{},
 		},

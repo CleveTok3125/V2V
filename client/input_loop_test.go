@@ -22,7 +22,6 @@ func smokeSession() *Session {
 	sess.Chain.WireIdx = newWireIndex(16)
 	sess.Conn = &stubConn{}
 	sess.Quitting = make(chan bool, 1)
-	sess.Verify.VerifyCh = make(chan verifyJob, 4)
 	sess.Display.TabChat.append(chatBlockForTest(1234, "abcd0000", "15:04", "Alice", "hi"))
 	return sess
 }
