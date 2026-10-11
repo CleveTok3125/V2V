@@ -37,6 +37,10 @@ type pendingMsg struct {
 	shown      bool
 	gen        uint64
 	bufEnd     int
+	// epoch is the layout generation the block was drawn in. A different one
+	// means a tab switch or the input prompt has moved the cursor since, so
+	// the rows above it are no longer this block's to erase.
+	epoch uint64
 	// entry is the exact slot content written, so the erase can confirm the
 	// slot is still ours by equality instead of searching for a marker.
 	entry   entry
@@ -1151,33 +1155,39 @@ func (s *Session) abandonRecoveryLocked(p *recoverWindow) {
 }
 
 func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
-	if !pm.shown || s.Display.ActiveTab != TabChat || pm.rows <= 0 {
-		return
-	}
 	// Entries for the buffer splice, terminal rows for the cursor move.
 	screenRows := pm.screenRows
 	if screenRows <= 0 {
 		screenRows = pm.rows
 	}
 	start := pm.bufEnd - pm.rows
-	if start < 0 || pm.bufEnd > len(s.Display.TabChat.lines) {
+	if start < 0 || start >= len(s.Display.TabChat.lines) || pm.bufEnd > len(s.Display.TabChat.lines) {
 		return
 	}
-	// Verify the region still holds our placeholder (eviction or concurrent
-	// appends may have shifted it); otherwise leave the screen alone and
-	// render the echo normally. The mark is looked for anywhere in the
-	// region, not only on its first row: a pending reply prints its quote
-	// above the author row, and the quote is a preview of another message,
-	// so it carries no mark of its own. Requiring a mark on every row is
-	// what once left a multi-line placeholder on screen forever.
-	// Identity is the entry itself, not a marker inside the rendered rows: a
-	// body that happens to contain "⏳" must not be mistaken for our
-	// placeholder.
+	// Verify the slot still holds our placeholder: eviction or concurrent
+	// appends may have shifted it. Identity is the entry itself, not a
+	// marker inside the rendered rows, so a body that happens to contain
+	// "⏳" cannot be mistaken for our placeholder.
 	if s.Display.TabChat.lines[start] != pm.entry {
 		return
 	}
+	// The slot is ours, so it leaves the buffer in every case. The screen
+	// erase is the part that depends on where the block was drawn: a send
+	// while tab 2 was open, or a tab switch between send and echo, used to
+	// return before the splice and leave the placeholder in the buffer,
+	// which showed the message twice as soon as the echo rendered.
+	//
+	// Moving up is only safe while the chat tab is the one on screen and
+	// nothing has repainted since the block was drawn: a tab switch leaves
+	// the cursor at the end of the whole buffer, so the rows above belong to
+	// something else.
+	onScreen := pm.shown && s.Display.ActiveTab == TabChat && pm.rows > 0 &&
+		pm.epoch == s.Display.LayoutEpoch
 	intervening := append([]entry{}, s.Display.TabChat.lines[pm.bufEnd:]...)
 	s.Display.TabChat.spliceOut(start, pm.bufEnd)
+	if !onScreen {
+		return
+	}
 	// Rows on screen: placeholder block plus intervening lines printed after it.
 	// The count must be in terminal rows, not buffer entries: a message block
 	// is one entry however many lines it has, so counting entries moves the

@@ -458,6 +458,9 @@ func (s *Session) switchTab(n int) {
 	s.releaseCatchupLocked()
 	s.Display.ActiveTab = n
 	s.Display.PrintGen++
+	// The repaint leaves the cursor at the end of the whole buffer, so
+	// nothing drawn earlier can still be erased by moving up.
+	s.Display.LayoutEpoch++
 	// Queued like every other screen write: a full tab dump is large,
 	// and a synchronous write would stall the pump behind a slow
 	// terminal. The dump is one ordered chunk (never dropped by the

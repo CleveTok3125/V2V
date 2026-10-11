@@ -88,6 +88,14 @@ type DisplayState struct {
 	TabSys    *tabBuffer
 	PrintGen  uint64
 
+	// LayoutEpoch counts the writes that move the cursor away from where the
+	// last buffer entry ended. Only a tab switch does: it repaints the whole
+	// screen, so the rows above the cursor stop belonging to the block that
+	// was drawn last. The input prompt does not count — it is drawn below the
+	// last entry, and every entry ends with a newline, so the cursor is still
+	// one row past the block and moving up over it lands on its first row.
+	LayoutEpoch uint64
+
 	// Terminal and output funnel.
 	Term inputTerminal
 	Out  io.Writer

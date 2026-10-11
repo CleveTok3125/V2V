@@ -250,3 +250,101 @@ func TestPlaceholderEraseCoversWhatWasDrawn(t *testing.T) {
 		assertSwapEraseCoversDrawnRows(t, "trả lời", 5)
 	})
 }
+
+// TestPlaceholderLeavesTheBufferOffScreen pins the half of the swap that has
+// nothing to do with the terminal: the slot must leave the buffer whatever is
+// on screen. Both cases used to return before the splice — a send while tab 2
+// was open, and a tab switch between send and echo — so the placeholder
+// stayed in the history and the message read twice as soon as the echo
+// rendered. The screen erase is a separate question: moving up is only safe
+// while nothing has repainted, so a stale layout must skip it.
+func TestPlaceholderLeavesTheBufferOffScreen(t *testing.T) {
+	cases := []struct {
+		name       string
+		beforeSend func(*Session)
+		afterSend  func(*Session)
+		wantErase  bool
+	}{
+		{
+			name:       "sent while tab 2 is open",
+			beforeSend: func(s *Session) { s.Display.ActiveTab = TabSystem },
+			wantErase:  false,
+		},
+		{
+			name:      "switched away before the echo",
+			afterSend: func(s *Session) { s.switchTab(TabSystem) },
+			wantErase: false,
+		},
+		{
+			// Back on the chat tab, so the tab check alone would allow the
+			// erase — but the repaint left the cursor at the end of the whole
+			// buffer, so the rows above belong to the dump, not the block.
+			name: "switched away and back before the echo",
+			afterSend: func(s *Session) {
+				s.switchTab(TabSystem)
+				s.switchTab(TabChat)
+			},
+			wantErase: false,
+		},
+		{
+			name:      "left alone",
+			wantErase: true,
+		},
+		{
+			// The input loop drains the queue before every read, and
+			// readline then draws its prompt below the block. Neither
+			// moves the block, so the erase still lands on its first row:
+			// a prompt is not a layout change. Counting it as one left
+			// every placeholder on screen, since the echo almost always
+			// arrives after the next prompt is drawn.
+			name:      "after the next prompt",
+			afterSend: func(s *Session) { s.flushOutputNow() },
+			wantErase: true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sess, out := queueTestSession(t)
+			sess.Username = "A#1"
+			sess.Chain.WireIdx = newWireIndex(1000)
+			sess.Chain.RenderCache = newRenderCache(200)
+			sess.Pending.TmpSeq = 7
+
+			if c.beforeSend != nil {
+				c.beforeSend(sess)
+			}
+			phEntry, shown, bufEnd := sess.renderPlaceholder("xin chào", 1)
+			sess.Pending.PendingPlaceholders = append(sess.Pending.PendingPlaceholders, pendingMsg{
+				text: "xin chào", rows: 1, screenRows: phEntry.rows(termWidth()), shown: shown,
+				epoch: sess.Display.LayoutEpoch, bufEnd: bufEnd, entry: phEntry, tmpID: sess.Pending.TmpSeq,
+			})
+			if c.afterSend != nil {
+				c.afterSend(sess)
+			}
+			sess.flushOutputNow()
+			beforeEcho := out.Len()
+
+			echo := WireMessage{
+				Type: "chat", Time: "12:00", DisplayName: "A#1", Text: "xin chào",
+				TmpID: sess.Pending.TmpSeq, ChainHeight: 1, ChainHash: "ab", ChainVer: 2,
+			}
+			sess.Display.DisplayMu.Lock()
+			sess.renderChatBlock(echo)
+			sess.consumeEchoLocked(echo, false)
+			sess.Display.DisplayMu.Unlock()
+			sess.flushOutputNow()
+
+			lines := sess.Display.TabChat.lines
+			if len(lines) != 1 {
+				t.Fatalf("buffer holds %d entries after the echo, want 1 (the echo)", len(lines))
+			}
+			if strings.Contains(lines[0].text(), "⏳") {
+				t.Fatalf("the placeholder survived the echo: %q", lines[0].text())
+			}
+			drawn := out.String()[beforeEcho:]
+			if got := strings.Contains(drawn, "\x1b[J"); got != c.wantErase {
+				t.Fatalf("erase emitted = %v, want %v, in %q", got, c.wantErase, drawn)
+			}
+		})
+	}
+}

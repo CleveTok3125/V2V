@@ -212,7 +212,7 @@ func (s *Session) sendMessage(text string, placeholder entry, phShown bool, phBu
 		// Queue guard nested per Display -> Chain -> Pending; the
 		// erasePlaceholderLocked call in this function stays on DisplayMu.
 		s.Pending.Mu.Lock()
-		pm := pendingMsg{text: text, rows: 1, screenRows: placeholder.rows(termWidth()), shown: phShown, gen: s.Display.PrintGen, bufEnd: phBufEnd, entry: placeholder, sentAt: time.Now(), tmpID: s.Pending.TmpSeq, replyTo: s.Pending.PendingReplyTo}
+		pm := pendingMsg{text: text, rows: 1, screenRows: placeholder.rows(termWidth()), shown: phShown, gen: s.Display.PrintGen, epoch: s.Display.LayoutEpoch, bufEnd: phBufEnd, entry: placeholder, sentAt: time.Now(), tmpID: s.Pending.TmpSeq, replyTo: s.Pending.PendingReplyTo}
 		if s.TripPriv != nil {
 			pm.hasTrip = true
 			pm.seq = s.TripSeq
