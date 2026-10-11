@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/CleveTok3125/V2V/internal/filter"
 )
 
 // validateAuthFlags refuses a login that names two credentials. -P owns the
@@ -22,6 +24,22 @@ import (
 func validateAuthFlags() error {
 	if CLI.Passkey != "" && CLI.KeyFile != "" {
 		return fmt.Errorf("--passkey và --key-file không dùng cùng nhau")
+	}
+	return nil
+}
+
+// validateDisplayName refuses a display name the server would silently
+// replace. The client sends what the user typed, and the server turns an
+// invalid name into "Anonymous" without saying so, so the same rule runs here
+// where the reason can reach the user. An empty name is not refused: the
+// server reads it as "Anonymous", which is what the panel placeholder already
+// promises.
+func validateDisplayName(name string) error {
+	if name == "" {
+		return nil
+	}
+	if err := filter.ValidateDisplayName(name); err != nil {
+		return fmt.Errorf("Tên hiển thị không hợp lệ (%v)", err)
 	}
 	return nil
 }

@@ -286,6 +286,20 @@ func (s *Session) connect() bool {
 	}
 	s.WSURL = normalizeURL(CLI.Server)
 	s.Username = strings.TrimSpace(CLI.Username)
+	// The name is the cheapest thing to check and the one the server would
+	// otherwise replace without a word, so it goes before the passkey wait
+	// and the version probe.
+	if err := validateDisplayName(s.Username); err != nil {
+		msg := "❌ " + err.Error()
+		fmt.Println(msg)
+		if showWasmStatus(msg, true) {
+			// The panel is back on screen with the reason; keep the runtime
+			// alive so the next submit reuses it.
+			parkForever()
+		}
+		notifyQuit()
+		return false
+	}
 
 	// A passkey login needs a browser ceremony first, and that wait does
 	// not belong on the chat socket: it takes minutes, and a socket held
