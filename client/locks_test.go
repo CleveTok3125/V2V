@@ -75,7 +75,7 @@ func TestPendingTrackConcurrent(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 30; i++ {
-			if err := sess.sendMessage("hi", entry{}, false, 0); err != nil {
+			if err := sess.sendMessage("hi", entry{}, slotRef{}, false); err != nil {
 				t.Errorf("sendMessage: %v", err)
 				return
 			}

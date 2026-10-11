@@ -78,6 +78,12 @@ func (s *Session) handleReadErr(err error) cmdAction {
 		s.gracefulQuit()
 		return cmdQuit
 	}
+	// UniqueEditLine makes readline erase the draft when a line is submitted,
+	// but the interrupt path only moves to the end of the line and resets:
+	// the half-typed row is still on screen with the cursor at its end, so
+	// the notice below would join it. The input row is never a buffer entry,
+	// so nothing else can account for it.
+	s.clearInputRow()
 	// Reply targets attach to the next send only; reset first so a
 	// rejected message never leaks its quote into a later one. The
 	// draft/inline /reply handlers below re-arm it when due.

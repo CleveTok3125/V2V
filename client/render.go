@@ -83,7 +83,7 @@ func parseHistoryBoundary(tags []string) (boundary bool, start bool) {
 // It returns the joined text, or canceled=true when the user aborted with
 // Ctrl+C or the stream ended — in which case the caller must discard
 // everything and send nothing.
-func collectCodeblock(term inputTerminal, firstLine string) (string, bool) {
+func collectCodeblock(term inputTerminal, firstLine string, onLine func([]string)) (string, bool) {
 	rawLines := []string{firstLine}
 
 	term.SetPrompt("| ... ")
@@ -97,6 +97,9 @@ func collectCodeblock(term inputTerminal, firstLine string) (string, bool) {
 			return "", true
 		}
 		rawLines = append(rawLines, nextLine)
+		// The term now erases the draft instead of committing it, so the
+		// block only stays visible if the echo entry is rewritten here.
+		onLine(rawLines)
 
 		if strings.HasSuffix(strings.TrimSpace(nextLine), "```") {
 			break
@@ -418,7 +421,26 @@ func (s *Session) renderChatBlock(msg WireMessage) {
 	// Notify gates live printing of informational system notices; the
 	// lines still land in their tab buffer when muted.
 	live := s.notifyWireAllowed(msg)
-	emit := func(tab int, e entry) { s.emitTabLive(live, tab, e) }
+	// A consumed echo owns the slot its pending block was drawn in, so the
+	// message lands there instead of beside it. The slot is claimed by the
+	// first entry this render emits, which is the message itself: the quote
+	// now rides inside it, so one render is one entry.
+	emit := func(tab int, e entry) {
+		if tab == TabChat {
+			s.Pending.Mu.Lock()
+			pm := s.Pending.EchoSlot
+			s.Pending.EchoSlot = nil
+			s.Pending.Mu.Unlock()
+			if pm != nil {
+				repaint := pm.shown && s.Display.ActiveTab == TabChat &&
+					pm.epoch == s.Display.LayoutEpoch
+				if s.replaceSlot(pm.slot, e, repaint) {
+					return
+				}
+			}
+		}
+		s.emitTabLive(live, tab, e)
+	}
 	// Replay and tab switches re-render the same immutable wires;
 	// the chain hash covers the content, so it is a safe cache key
 	// (verify mode and meta visibility are folded in). Messages with

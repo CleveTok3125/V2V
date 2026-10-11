@@ -105,7 +105,7 @@ func TestInputLoopCodeblockCancelClearsTarget(t *testing.T) {
 	sess := smokeSession()
 	sess.Pending.PendingReplyTo = 1234
 	sess.Display.Term = &fakeTerm{errs: map[int]error{1: ErrInputCancel}}
-	if _, _, ok := sess.collectBody("```"); ok {
+	if _, _, ok := sess.collectBody("```", slotRef{}); ok {
 		t.Fatal("canceled codeblock must return ok=false")
 	}
 	sess.Pending.PendingReplyTo = 0
@@ -117,7 +117,7 @@ func TestInputLoopCodeblockCancelClearsTarget(t *testing.T) {
 func TestInputLoopSendConsumesTarget(t *testing.T) {
 	sess := smokeSession()
 	sess.Pending.PendingReplyTo = 9
-	if err := sess.sendMessage("hi", entry{}, false, 0); err != nil {
+	if err := sess.sendMessage("hi", entry{}, slotRef{}, false); err != nil {
 		t.Fatalf("sendMessage: %v", err)
 	}
 	if sess.Pending.PendingReplyTo != 0 {
@@ -130,7 +130,7 @@ func TestInputLoopSendConsumesTarget(t *testing.T) {
 	sess = smokeSession()
 	sess.Conn = &stubConn{writeErr: errors.New("connection unavailable")}
 	sess.Pending.PendingReplyTo = 9
-	if err := sess.sendMessage("hi", entry{}, false, 0); err == nil {
+	if err := sess.sendMessage("hi", entry{}, slotRef{}, false); err == nil {
 		t.Fatal("failed send must return an error")
 	}
 	if sess.Pending.PendingReplyTo != 0 {

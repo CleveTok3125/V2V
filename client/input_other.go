@@ -18,8 +18,13 @@ type readlineTerm struct {
 
 func newInputTerminal() (inputTerminal, error) {
 	rl, err := readline.NewEx(&readline.Config{
-		Prompt:          "| > ",
-		HistoryFile:     historyFile,
+		Prompt:      "| > ",
+		HistoryFile: historyFile,
+		// The session owns the submitted line: readline erases the draft
+		// instead of committing it, so the echo is a buffer entry that the
+		// pending block and then the server echo replace in place. Committing
+		// here would put a second, uncontrollable copy on the screen.
+		UniqueEditLine:  true,
 		InterruptPrompt: "^C",
 		EOFPrompt:       "/quit",
 	})

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 )
 
@@ -218,6 +219,76 @@ func (s *Session) emitLocalFeedback(line string) {
 	s.Display.TabSys.append(noticeEntry(line))
 	s.holdOrEnqueue(line)
 	s.Display.PrintGen++
+}
+
+// clearInputRow erases the row readline was editing and leaves the cursor at
+// its start. That row is never a buffer entry, so no repaint accounts for it.
+// Caller must not hold DisplayMu.
+func (s *Session) clearInputRow() {
+	s.Display.DisplayMu.Lock()
+	defer s.Display.DisplayMu.Unlock()
+	s.holdOrEnqueue("\r\x1b[2K")
+}
+
+// slotRef is a buffer entry a later write replaces in place: where it sits,
+// and the entry itself so the replace can confirm the slot still holds what
+// the caller wrote.
+type slotRef struct {
+	index int
+	entry entry
+}
+
+// appendEntrySlot appends one entry and prints it, returning the slot it
+// occupies. A caller keeps the slot to replace the entry later, which is how
+// one message moves from the input echo to its pending block to its server
+// echo without ever leaving a second row behind. Caller must hold DisplayMu.
+func (s *Session) appendEntrySlot(live bool, tab int, e entry) slotRef {
+	s.emitTabLive(live, tab, e)
+	buf := s.Display.TabChat
+	if tab != TabChat {
+		buf = s.Display.TabSys
+	}
+	return slotRef{index: len(buf.lines) - 1, entry: e}
+}
+
+// entriesRows is the terminal rows a run of entries occupies.
+func entriesRows(entries []entry, width int) int {
+	total := 0
+	for _, e := range entries {
+		total += e.rows(width)
+	}
+	return total
+}
+
+// replaceSlot rewrites one buffer entry and, when repaint is true, repaints
+// from that entry down: erasing to the end of the screen takes the entries
+// after it with it, so they are printed again. repaint is false when the
+// cursor is no longer under the block — a tab switch moved it — and the
+// buffer then updates alone, the screen catching up on the next repaint.
+// Reports false when the slot no longer holds what the caller wrote, leaving
+// the buffer untouched so the caller can fall back to appending. Caller must
+// hold DisplayMu.
+func (s *Session) replaceSlot(slot slotRef, next entry, repaint bool) bool {
+	lines := s.Display.TabChat.lines
+	if slot.index < 0 || slot.index >= len(lines) || lines[slot.index] != slot.entry {
+		return false
+	}
+	tail := append([]entry{}, lines[slot.index+1:]...)
+	lines[slot.index] = next
+	if !repaint {
+		return true
+	}
+	width := termWidth()
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "\x1b[%dA", slot.entry.rows(width)+entriesRows(tail, width))
+	sb.WriteString("\x1b[J")
+	sb.WriteString(next.text())
+	for _, e := range tail {
+		sb.WriteString(e.text())
+	}
+	s.holdOrEnqueue(sb.String())
+	s.Display.PrintGen++
+	return true
 }
 
 // noticeEntry is a locally generated line as a buffer entry: one header row,

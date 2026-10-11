@@ -245,6 +245,12 @@ type PendingState struct {
 	// window whose chat lines are not drawn yet, so it prints just before
 	// the block that follows it rather than in the wrong place.
 	PendingDateBannerWire *WireMessage
+
+	// EchoSlot is the block a just-consumed echo belongs to. The render that
+	// follows writes into that slot instead of appending, so a message
+	// replaces its own pending block in place rather than leaving it for a
+	// separate erase. Cleared by whoever consumes it.
+	EchoSlot *pendingMsg
 }
 
 // NewSession returns a Session with the channels, maps and buffers that

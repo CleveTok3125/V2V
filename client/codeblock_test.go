@@ -33,7 +33,7 @@ func (f *fakeTerm) Writer() io.Writer  { return io.Discard }
 
 func TestCollectCodeblockNormal(t *testing.T) {
 	ft := &fakeTerm{lines: []string{"abc", "```"}}
-	text, canceled := collectCodeblock(ft, "```")
+	text, canceled := collectCodeblock(ft, "```", func([]string) {})
 	if canceled {
 		t.Fatal("unexpected cancel")
 	}
@@ -44,7 +44,7 @@ func TestCollectCodeblockNormal(t *testing.T) {
 
 func TestCollectCodeblockCancel(t *testing.T) {
 	ft := &fakeTerm{lines: []string{"abc"}, errs: map[int]error{1: ErrInputCancel}}
-	text, canceled := collectCodeblock(ft, "```")
+	text, canceled := collectCodeblock(ft, "```", func([]string) {})
 	if !canceled {
 		t.Fatal("expected cancel")
 	}
@@ -55,7 +55,7 @@ func TestCollectCodeblockCancel(t *testing.T) {
 
 func TestCollectCodeblockEOF(t *testing.T) {
 	ft := &fakeTerm{lines: []string{"abc"}, errs: map[int]error{1: io.EOF}}
-	_, canceled := collectCodeblock(ft, "```")
+	_, canceled := collectCodeblock(ft, "```", func([]string) {})
 	if !canceled {
 		t.Fatal("expected cancel on EOF")
 	}
@@ -63,7 +63,7 @@ func TestCollectCodeblockEOF(t *testing.T) {
 
 func TestCollectCodeblockCancelRestoresPrompt(t *testing.T) {
 	ft := &fakeTerm{errs: map[int]error{0: errors.New("boom")}}
-	collectCodeblock(ft, "```")
+	collectCodeblock(ft, "```", func([]string) {})
 	if len(ft.prompts) != 2 || ft.prompts[0] != "| ... " || ft.prompts[1] != "| > " {
 		t.Fatalf("prompt not restored: %q", ft.prompts)
 	}

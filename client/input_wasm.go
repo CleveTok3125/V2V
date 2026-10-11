@@ -231,12 +231,12 @@ func (t *wasmTerm) lineLoop() {
 				t.mu.Lock()
 				up := t.wipeOffsetLocked()
 				line := string(t.line)
-				// Repaint the submitted line in one pass so the cursor
-				// ends up just below the block, then move to a new line.
+				// Erase the draft only. The session draws the submitted
+				// line as a buffer entry and every later write for that
+				// message replaces it in place, so the echo must not also be
+				// written here: a second copy would sit outside the buffer
+				// where no replace could reach it.
 				t.wipeLocked(up)
-				t.out.Write([]byte(t.prompt))
-				t.out.Write([]byte(line))
-				t.out.Write([]byte("\r\n"))
 				t.line = t.line[:0]
 				t.cur = 0
 				t.active = false

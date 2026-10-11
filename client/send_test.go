@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/gorilla/websocket"
 )
 
@@ -63,7 +62,7 @@ func TestSendMessagePlainLoopback(t *testing.T) {
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabChat = newTabBuffer(100, 100000)
 	sess.Pending.PendingReplyTo = 7
-	if err := sess.sendMessage("hello", entry{}, true, 0); err != nil {
+	if err := sess.sendMessage("hello", entry{}, slotRef{}, true); err != nil {
 		t.Fatalf("sendMessage: %v", err)
 	}
 	select {
@@ -87,9 +86,9 @@ func TestSendMessagePlainLoopback(t *testing.T) {
 // guard happy path without a terminal.
 func TestCollectBodyPassthrough(t *testing.T) {
 	sess := NewSession()
-	body, lines, ok := sess.collectBody("hi")
-	if !ok || body != "hi" || lines != 1 {
-		t.Fatalf("got %q,%d,%v", body, lines, ok)
+	body, _, ok := sess.collectBody("hi", slotRef{})
+	if !ok || body != "hi" {
+		t.Fatalf("got %q,%v", body, ok)
 	}
 	if !sess.checkSendGuards("hi") {
 		t.Fatal("simple greeting blocked")
@@ -121,7 +120,7 @@ func TestSendMessageTripWriteJSONError(t *testing.T) {
 	sess.Pending.TmpSeq = 10
 	prev := append([]byte(nil), sess.TripPrev...)
 	sess.Pending.PendingReplyTo = 7
-	err := sess.sendMessage("hello", entry{}, true, 0)
+	err := sess.sendMessage("hello", entry{}, slotRef{}, true)
 	if err == nil {
 		t.Fatal("WriteJSON fail must return err")
 	}
@@ -145,7 +144,7 @@ func TestSendMessageTripWriteJSONError(t *testing.T) {
 func TestSendMessageTripWriteJSONOK(t *testing.T) {
 	conn := &stubConn{}
 	sess := tripSessionForSend(t, conn)
-	if err := sess.sendMessage("hello", entry{}, true, 0); err != nil {
+	if err := sess.sendMessage("hello", entry{}, slotRef{}, true); err != nil {
 		t.Fatalf("sendMessage: %v", err)
 	}
 	tm, ok := conn.wrote.(TripMessage)
@@ -170,31 +169,25 @@ func assertSwapEraseCoversDrawnRows(t *testing.T, body string, replyTo uint64) {
 	sess.Chain.RenderCache = newRenderCache(200)
 	sess.Pending.TmpSeq = 7
 	if replyTo > 0 {
-		// A pending reply prints its quote above the author row, so the
-		// region's first row is a preview of another message.
+		// A pending reply prints its quote inside the block, so the region
+		// carries a preview of another message as well as the author row.
 		sess.Chain.WireIdx.put(chainWireWithText(replyTo, "tin được trả lời", 0x05))
 		sess.Pending.PendingReplyTo = replyTo
 	}
 
-	phEntry, shown, bufEnd := sess.renderPlaceholder(body, 1)
+	// The submitted line becomes an entry, and the block takes its slot.
+	slot := sess.echoInputLine(body)
+	phEntry, slot, shown := sess.renderPlaceholder(body, slot)
 	if !shown {
 		t.Fatalf("placeholder did not render: shown=%v", shown)
 	}
-	// A message is one entry whatever it carries, and the placeholder stands
-	// in for exactly that: quote, header and body in a single unit, so the
-	// splice range and the erase math agree with the block that replaces it.
-	// renderPlaceholder writes exactly one entry, so phRows is 1.
-	phRows := 1
-	if bufEnd != phRows {
-		t.Fatalf("a placeholder must be one entry, got %d", bufEnd)
+	pm := pendingMsg{
+		text: body, slot: slot, shown: shown, epoch: sess.Display.LayoutEpoch,
+		tmpID: sess.Pending.TmpSeq, replyTo: replyTo,
 	}
-	phEntries := append([]entry{}, sess.Display.TabChat.lines[bufEnd-phRows:bufEnd]...)
-	sess.Pending.PendingPlaceholders = append(sess.Pending.PendingPlaceholders, pendingMsg{
-		text: body, rows: phRows, screenRows: phEntry.rows(termWidth()), shown: shown, bufEnd: bufEnd,
-		entry: phEntry, tmpID: sess.Pending.TmpSeq, replyTo: replyTo,
-	})
-	// Everything queued so far must be on the wire before the measurement,
-	// or the input-line wipe would be counted as part of the echo.
+	if got := sess.Display.TabChat.lines[slot.index]; got != phEntry {
+		t.Fatalf("the block did not take the input echo's slot")
+	}
 	sess.flushOutputNow()
 	beforeEcho := out.Len()
 
@@ -204,27 +197,33 @@ func assertSwapEraseCoversDrawnRows(t *testing.T, body string, replyTo uint64) {
 		ReplyTo: replyTo,
 	}
 	sess.Display.DisplayMu.Lock()
+	// The echo is consumed first, arming the slot the render then writes into.
+	sess.Pending.Mu.Lock()
+	sess.Pending.EchoSlot = &pm
+	sess.Pending.Mu.Unlock()
 	sess.renderChatBlock(echo)
-	echoEntries := append([]entry{}, sess.Display.TabChat.lines[bufEnd:]...)
-	sess.consumeEchoLocked(echo, false)
 	sess.Display.DisplayMu.Unlock()
 	sess.flushOutputNow()
 
 	drawn := out.String()[beforeEcho:]
 	if !strings.Contains(drawn, "\x1b[") {
-		t.Fatalf("no erase sequence was emitted, so the placeholder is still on screen:\n%q", drawn)
+		t.Fatalf("no erase sequence was emitted, so the block is still on screen:\n%q", drawn)
 	}
 	moved, err := strconv.Atoi(regexp.MustCompile(`\x1b\[(\d+)A`).FindStringSubmatch(drawn)[1])
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := 0
-	for _, e := range append(append([]entry{}, phEntries...), echoEntries...) {
-		want += estimateRows(ansi.Strip(e.text()), termWidth())
-	}
+	// Nothing was drawn after the block, so the erase covers the block alone.
+	want := phEntry.rows(termWidth())
 	if moved != want {
-		t.Fatalf("erase moved up %d rows, want %d (placeholder %d entries / %d rows, echo %d entries)\nbody=%q",
-			moved, want, phRows, phEntry.rows(termWidth()), len(echoEntries), body)
+		t.Fatalf("erase moved up %d rows, want %d (block %d rows)\nbody=%q",
+			moved, want, want, body)
+	}
+	if lines := sess.Display.TabChat.lines; len(lines) != 1 {
+		t.Fatalf("buffer holds %d entries after the echo, want 1 (the echo)", len(lines))
+	}
+	if !strings.Contains(drawn, inputEchoPrefix) && !strings.Contains(sess.Display.TabChat.lines[0].text(), "12:00") {
+		t.Fatalf("the echo never replaced the block:\n%q", drawn)
 	}
 }
 
@@ -313,11 +312,12 @@ func TestPlaceholderLeavesTheBufferOffScreen(t *testing.T) {
 			if c.beforeSend != nil {
 				c.beforeSend(sess)
 			}
-			phEntry, shown, bufEnd := sess.renderPlaceholder("xin chào", 1)
-			sess.Pending.PendingPlaceholders = append(sess.Pending.PendingPlaceholders, pendingMsg{
-				text: "xin chào", rows: 1, screenRows: phEntry.rows(termWidth()), shown: shown,
-				epoch: sess.Display.LayoutEpoch, bufEnd: bufEnd, entry: phEntry, tmpID: sess.Pending.TmpSeq,
-			})
+			slot := sess.echoInputLine("xin chào")
+			_, slot, shown := sess.renderPlaceholder("xin chào", slot)
+			pm := pendingMsg{
+				text: "xin chào", slot: slot, shown: shown,
+				epoch: sess.Display.LayoutEpoch, tmpID: sess.Pending.TmpSeq,
+			}
 			if c.afterSend != nil {
 				c.afterSend(sess)
 			}
@@ -329,8 +329,10 @@ func TestPlaceholderLeavesTheBufferOffScreen(t *testing.T) {
 				TmpID: sess.Pending.TmpSeq, ChainHeight: 1, ChainHash: "ab", ChainVer: 2,
 			}
 			sess.Display.DisplayMu.Lock()
+			sess.Pending.Mu.Lock()
+			sess.Pending.EchoSlot = &pm
+			sess.Pending.Mu.Unlock()
 			sess.renderChatBlock(echo)
-			sess.consumeEchoLocked(echo, false)
 			sess.Display.DisplayMu.Unlock()
 			sess.flushOutputNow()
 
@@ -346,5 +348,76 @@ func TestPlaceholderLeavesTheBufferOffScreen(t *testing.T) {
 				t.Fatalf("erase emitted = %v, want %v, in %q", got, c.wantErase, drawn)
 			}
 		})
+	}
+}
+
+// TestOneMessageIsOneSlotFromInputToEcho pins the rule the input echo exists
+// for: the submitted line, the pending block and the server echo are the same
+// buffer entry, and the terminal sees each replace the last rather than land
+// beside it. Anything else leaves the message on screen twice, which is what
+// a tab switch between send and echo used to produce.
+func TestOneMessageIsOneSlotFromInputToEcho(t *testing.T) {
+	sess, out := queueTestSession(t)
+	sess.Username = "A#1"
+	sess.Chain.WireIdx = newWireIndex(1000)
+	sess.Chain.RenderCache = newRenderCache(200)
+	sess.Pending.TmpSeq = 7
+
+	slot := sess.echoInputLine("xin chào")
+	if lines := sess.Display.TabChat.lines; len(lines) != 1 ||
+		!strings.HasPrefix(lines[0].text(), inputEchoPrefix) {
+		t.Fatalf("the input echo must be one entry: %q", entriesText(lines))
+	}
+
+	_, slot, shown := sess.renderPlaceholder("xin chào", slot)
+	if lines := sess.Display.TabChat.lines; len(lines) != 1 ||
+		!strings.Contains(lines[0].text(), "⏳") {
+		t.Fatalf("the block must take the echo's slot: %q", entriesText(lines))
+	}
+
+	sess.flushOutputNow()
+	beforeEcho := out.Len()
+	echo := WireMessage{
+		Type: "chat", Time: "12:00", DisplayName: "A#1", Text: "xin chào",
+		TmpID: 7, ChainHeight: 1, ChainHash: "ab", ChainVer: 2,
+	}
+	sess.Display.DisplayMu.Lock()
+	sess.Pending.Mu.Lock()
+	sess.Pending.EchoSlot = &pendingMsg{
+		text: "xin chào", slot: slot, shown: shown,
+		epoch: sess.Display.LayoutEpoch, tmpID: 7,
+	}
+	sess.Pending.Mu.Unlock()
+	sess.renderChatBlock(echo)
+	sess.Display.DisplayMu.Unlock()
+	sess.flushOutputNow()
+
+	lines := sess.Display.TabChat.lines
+	if len(lines) != 1 {
+		t.Fatalf("buffer holds %d entries after the echo, want 1: %q", len(lines), entriesText(lines))
+	}
+	if strings.Contains(lines[0].text(), "⏳") {
+		t.Fatalf("the block survived the echo: %q", lines[0].text())
+	}
+	drawn := out.String()[beforeEcho:]
+	if !strings.Contains(drawn, "\x1b[J") {
+		t.Fatalf("the echo must replace the block, not land beside it: %q", drawn)
+	}
+	if got := strings.Count(drawn, "xin chào"); got != 1 {
+		t.Fatalf("the body was drawn %d times in one replace: %q", got, drawn)
+	}
+}
+
+// TestRejectedLineKeepsItsEchoEntry: a message the guards stop never gets a
+// block, so its echo entry stays as the record of what was typed.
+func TestRejectedLineKeepsItsEchoEntry(t *testing.T) {
+	sess, _ := queueTestSession(t)
+	slot := sess.echoInputLine("quá nhanh")
+	lines := sess.Display.TabChat.lines
+	if len(lines) != 1 || slot.index != 0 {
+		t.Fatalf("the echo entry must own its slot: %q", entriesText(lines))
+	}
+	if got := lines[0].text(); got != inputEchoPrefix+"quá nhanh\n" {
+		t.Fatalf("echo entry = %q", got)
 	}
 }

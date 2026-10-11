@@ -189,6 +189,10 @@ func main() {
 		if text == "" {
 			continue
 		}
+		// The submitted line becomes a buffer entry the session owns: the
+		// pending block and then the server echo replace it in place, so the
+		// message never occupies two rows.
+		slot := sess.echoInputLine(text)
 		sess.handleDraftGate(text)
 		text, act := sess.dispatch(text)
 		if act == cmdQuit {
@@ -198,7 +202,7 @@ func main() {
 			continue
 		}
 
-		body, lines, ok := sess.collectBody(text)
+		body, slot, ok := sess.collectBody(text, slot)
 		if !ok {
 			// Codeblock canceled: no send happens, so drop the
 			// one-shot reply target (inline /reply or draft).
@@ -206,13 +210,14 @@ func main() {
 			continue
 		}
 		if !sess.checkSendGuards(body) {
-			// Guard rejected the message: same one-shot cleanup;
-			// only sendMessage may consume PendingReplyTo.
+			// Guard rejected the message: same one-shot cleanup; only
+			// sendMessage may consume PendingReplyTo. The echo entry stays,
+			// so the rejected line is still on the record.
 			sess.Pending.PendingReplyTo = 0
 			continue
 		}
-		placeholder, phShown, phBufEnd := sess.renderPlaceholder(body, lines)
-		if serr := sess.sendMessage(body, placeholder, phShown, phBufEnd); serr != nil {
+		placeholder, slot, phShown := sess.renderPlaceholder(body, slot)
+		if serr := sess.sendMessage(body, placeholder, slot, phShown); serr != nil {
 			break
 		}
 

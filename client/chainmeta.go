@@ -30,20 +30,17 @@ import (
 // pendingMsg tracks a grey placeholder awaiting server echo.
 type pendingMsg struct {
 	text string
-	rows int
-	// screenRows is how many terminal rows rows above occupies: the buffer
-	// splice counts entries, the screen erase counts rows.
-	screenRows int
-	shown      bool
-	gen        uint64
-	bufEnd     int
-	// epoch is the layout generation the block was drawn in. A different one
-	// means a tab switch or the input prompt has moved the cursor since, so
-	// the rows above it are no longer this block's to erase.
-	epoch uint64
-	// entry is the exact slot content written, so the erase can confirm the
-	// slot is still ours by equality instead of searching for a marker.
-	entry   entry
+	// slot is the buffer entry this message owns: the input echo, then the
+	// pending block, then the server echo all live there. Identity is the
+	// entry itself, so the replace confirms the slot is still ours by
+	// equality instead of searching for a marker inside the rendered rows.
+	slot slotRef
+	// shown is whether the block was drawn on the chat tab, and epoch the
+	// layout generation it was drawn in. A different epoch means a tab switch
+	// has repainted since, so the rows above it are no longer this block's to
+	// erase.
+	shown   bool
+	epoch   uint64
 	seq     uint32
 	pub     string
 	hasTrip bool
@@ -1155,20 +1152,8 @@ func (s *Session) abandonRecoveryLocked(p *recoverWindow) {
 }
 
 func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
-	// Entries for the buffer splice, terminal rows for the cursor move.
-	screenRows := pm.screenRows
-	if screenRows <= 0 {
-		screenRows = pm.rows
-	}
-	start := pm.bufEnd - pm.rows
-	if start < 0 || start >= len(s.Display.TabChat.lines) || pm.bufEnd > len(s.Display.TabChat.lines) {
-		return
-	}
-	// Verify the slot still holds our placeholder: eviction or concurrent
-	// appends may have shifted it. Identity is the entry itself, not a
-	// marker inside the rendered rows, so a body that happens to contain
-	// "⏳" cannot be mistaken for our placeholder.
-	if s.Display.TabChat.lines[start] != pm.entry {
+	lines := s.Display.TabChat.lines
+	if pm.slot.index < 0 || pm.slot.index >= len(lines) || lines[pm.slot.index] != pm.slot.entry {
 		return
 	}
 	// The slot is ours, so it leaves the buffer in every case. The screen
@@ -1181,27 +1166,24 @@ func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
 	// nothing has repainted since the block was drawn: a tab switch leaves
 	// the cursor at the end of the whole buffer, so the rows above belong to
 	// something else.
-	onScreen := pm.shown && s.Display.ActiveTab == TabChat && pm.rows > 0 &&
+	onScreen := pm.shown && s.Display.ActiveTab == TabChat &&
 		pm.epoch == s.Display.LayoutEpoch
-	intervening := append([]entry{}, s.Display.TabChat.lines[pm.bufEnd:]...)
-	s.Display.TabChat.spliceOut(start, pm.bufEnd)
+	tail := append([]entry{}, lines[pm.slot.index+1:]...)
+	s.Display.TabChat.spliceOut(pm.slot.index, pm.slot.index+1)
 	if !onScreen {
 		return
 	}
-	// Rows on screen: placeholder block plus intervening lines printed after it.
-	// The count must be in terminal rows, not buffer entries: a message block
-	// is one entry however many lines it has, so counting entries moves the
-	// cursor up short and leaves the tail of the placeholder on screen.
+	// Rows on screen: the block plus the entries printed after it. The count
+	// must be in terminal rows, not buffer entries: a message block is one
+	// entry however many lines it has, so counting entries moves the cursor
+	// up short and leaves the tail of the placeholder on screen.
 	// Enqueued (not written) so a slow terminal never stalls the caller;
 	// the order against previously queued lines keeps the erase math valid.
-	interveningRows := 0
-	for _, e := range intervening {
-		interveningRows += e.rows(termWidth())
-	}
+	width := termWidth()
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "\x1b[%dA", screenRows+interveningRows)
+	fmt.Fprintf(&sb, "\x1b[%dA", pm.slot.entry.rows(width)+entriesRows(tail, width))
 	sb.WriteString("\x1b[J")
-	for _, e := range intervening {
+	for _, e := range tail {
 		sb.WriteString(e.text())
 	}
 	s.holdOrEnqueue(sb.String())
@@ -1258,7 +1240,12 @@ func (s *Session) consumeEchoLocked(msg WireMessage, allowStash bool) {
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Echo không khớp tin đang chờ (tmp_id=%d) — ID có thể đã bị sửa.\n", w.TmpID))
 	}
 	if act.matched {
-		s.erasePlaceholderLocked(act.pm)
+		// Arm the slot instead of erasing: the render that follows this call
+		// writes the echo into the block's own slot, so the message replaces
+		// its pending block in place. Erasing here would leave a hole the
+		// echo then fills as a separate entry, which is what a tab switch
+		// between send and echo turned into a duplicated message.
+		s.Pending.EchoSlot = &act.pm
 	}
 }
 

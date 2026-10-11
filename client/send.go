@@ -18,24 +18,64 @@ import (
 
 const maxPendingPlaceholders = 128
 
-// collectBody gathers a multi-line codeblock when fenced.
-func (s *Session) collectBody(text string) (string, int, bool) {
-	typedLinesCount := 1
+// inputEchoPrefix marks the row the person submitted, which the session now
+// draws itself: readline erases the draft instead of committing it, so the
+// line becomes a buffer entry like any other output and every later write for
+// this message replaces that entry in place.
+const (
+	inputEchoPrefix         = "| > "
+	inputContinuationPrefix = "| ... "
+)
 
-	if strings.HasPrefix(text, "```") {
-		if !markup.NeedsContinuation(text) {
-			// Single-line fence (```code```): complete already.
-			typedLinesCount = 1
-		} else {
-			var canceled bool
-			text, canceled = collectCodeblock(s.Display.Term, text)
-			if canceled {
-				return text, 0, false
-			}
-			typedLinesCount = strings.Count(text, "\n") + 1
+// inputEchoEntry renders submitted lines as one entry. A fenced block is one
+// entry too, however many lines it grows to, because the message it becomes is
+// one entry. Continuation rows reuse the prompt readline showed for them, so
+// the echo reads as the same block the person typed.
+func inputEchoEntry(lines []string) entry {
+	rows := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if i == 0 {
+			rows = append(rows, inputEchoPrefix+line)
+			continue
 		}
+		rows = append(rows, inputContinuationPrefix+line)
 	}
-	return text, typedLinesCount, true
+	return entry{header: strings.Join(rows, "\n")}
+}
+
+// echoInputLine records the submitted line as a buffer entry and prints it.
+func (s *Session) echoInputLine(text string) slotRef {
+	s.Display.DisplayMu.Lock()
+	defer s.Display.DisplayMu.Unlock()
+	return s.appendEntrySlot(true, TabChat, inputEchoEntry([]string{text}))
+}
+
+// extendInputEcho rewrites the input echo as more lines arrive, so a fenced
+// block reads as one growing entry rather than a row that stops changing.
+func (s *Session) extendInputEcho(slot slotRef, lines []string) slotRef {
+	next := inputEchoEntry(lines)
+	s.Display.DisplayMu.Lock()
+	defer s.Display.DisplayMu.Unlock()
+	if !s.replaceSlot(slot, next, true) {
+		return slot
+	}
+	return slotRef{index: slot.index, entry: next}
+}
+
+// collectBody gathers a multi-line codeblock when fenced, extending the input
+// echo's entry as it goes.
+func (s *Session) collectBody(text string, slot slotRef) (string, slotRef, bool) {
+	if !strings.HasPrefix(text, "```") || !markup.NeedsContinuation(text) {
+		// Single-line fence (```code```) or plain text: complete already.
+		return text, slot, true
+	}
+	text, canceled := collectCodeblock(s.Display.Term, text, func(lines []string) {
+		slot = s.extendInputEcho(slot, lines)
+	})
+	if canceled {
+		return text, slot, false
+	}
+	return text, slot, true
 }
 
 // checkSendGuards runs the client-side content and cooldown gates.
@@ -80,19 +120,12 @@ func (s *Session) checkSendGuards(text string) bool {
 // number of terminal rows those entries occupy. The buffer splice
 // counts entries; the screen erase counts rows, and a line long enough to
 // wrap makes the two differ.
-func (s *Session) renderPlaceholder(text string, typedLinesCount int) (e entry, phShown bool, phBufEnd int) {
-	// Placeholder: keep original text grey with pending indicator until server echo
-	// Single s.Display.DisplayMu lock for entire wipe + placeholder + trip sign + send to avoid burst drift
+func (s *Session) renderPlaceholder(text string, slot slotRef) (e entry, out slotRef, phShown bool) {
+	// Placeholder: keep original text grey with pending indicator until the
+	// server echo replaces this very entry.
 	phShown = s.Display.ActiveTab == TabChat
-	phBufEnd = 0
 	s.Display.DisplayMu.Lock()
-	// Wipe the input line as one ordered chunk: queued like every other
-	// screen write so a slow terminal never stalls the sender.
-	var wipe strings.Builder
-	for range typedLinesCount {
-		wipe.WriteString("\033[1A\033[2K\r")
-	}
-	s.holdOrEnqueue(wipe.String())
+	defer s.Display.DisplayMu.Unlock()
 
 	// Render markup on the whole text first so fenced blocks
 	// keep their state across lines; phRows then counts rendered
@@ -157,15 +190,24 @@ func (s *Session) renderPlaceholder(text string, typedLinesCount int) (e entry, 
 	}
 	e.body = body.String()
 
-	s.emitTab(TabChat, e)
-	phBufEnd = len(s.Display.TabChat.lines)
+	// The block takes over the input echo's slot, so the row the person
+	// submitted becomes the row that says the message is on its way. A slot
+	// that no longer holds the echo (evicted, or shifted by a repaint we
+	// cannot see) falls back to appending, which keeps the block visible.
+	// The returned slot names the placeholder, which is what the echo will
+	// replace: reporting the echo's entry here would make every later
+	// replace fail its identity check.
+	next := slotRef{index: slot.index, entry: e}
+	if !s.replaceSlot(slot, e, phShown) {
+		s.emitTab(TabChat, e)
+		next = slotRef{index: len(s.Display.TabChat.lines) - 1, entry: e}
+	}
 	s.refreshTerminal()
-	s.Display.DisplayMu.Unlock()
-	return e, phShown, phBufEnd
+	return e, next, phShown
 }
 
 // sendMessage signs (trip) or envelopes (plain) one message, tracks its
-func (s *Session) sendMessage(text string, placeholder entry, phShown bool, phBufEnd int) error {
+func (s *Session) sendMessage(text string, placeholder entry, slot slotRef, phShown bool) error {
 	s.Pending.TmpSeq++
 	var err error
 	if s.TripPriv != nil {
@@ -212,7 +254,7 @@ func (s *Session) sendMessage(text string, placeholder entry, phShown bool, phBu
 		// Queue guard nested per Display -> Chain -> Pending; the
 		// erasePlaceholderLocked call in this function stays on DisplayMu.
 		s.Pending.Mu.Lock()
-		pm := pendingMsg{text: text, rows: 1, screenRows: placeholder.rows(termWidth()), shown: phShown, gen: s.Display.PrintGen, epoch: s.Display.LayoutEpoch, bufEnd: phBufEnd, entry: placeholder, sentAt: time.Now(), tmpID: s.Pending.TmpSeq, replyTo: s.Pending.PendingReplyTo}
+		pm := pendingMsg{text: text, slot: slot, shown: phShown, epoch: s.Display.LayoutEpoch, sentAt: time.Now(), tmpID: s.Pending.TmpSeq, replyTo: s.Pending.PendingReplyTo}
 		if s.TripPriv != nil {
 			pm.hasTrip = true
 			pm.seq = s.TripSeq
