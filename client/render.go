@@ -20,7 +20,6 @@ import (
 	"github.com/CleveTok3125/V2V/internal/markup"
 	"github.com/CleveTok3125/V2V/internal/trip"
 	"github.com/CleveTok3125/V2V/internal/wire"
-	"github.com/charmbracelet/x/ansi"
 )
 
 func renderChatText(text string) string {
@@ -53,86 +52,6 @@ func serverText(s string) string { return filter.SanitizeForDisplay(s) }
 
 // serverField is serverText for one-line fields (host, role, error).
 func serverField(s string) string { return filter.SanitizeSingleLine(s) }
-
-func parseTripBadgeLine(line string) (verifyJob, bool) {
-	// Look for OSC8 trip link (only https)
-	idx := strings.Index(line, "/api/trip/verify?")
-	if idx == -1 {
-		return verifyJob{}, false
-	}
-	// Find OSC8 start before idx
-	start := strings.LastIndex(line[:idx], "\x1b]8;;")
-	if start == -1 {
-		return verifyJob{}, false
-	}
-	// Find URL end (ESC \ terminator)
-	endRel := strings.Index(line[idx:], "\x1b\\")
-	if endRel == -1 {
-		return verifyJob{}, false
-	}
-	urlStr := line[idx : idx+endRel]
-	// Badge is between first terminator and second OSC8
-	firstTermEnd := idx + endRel + 2 // after \x1b\\
-	secondOsc := strings.Index(line[firstTermEnd:], "\x1b]8;;")
-	var badge string
-	if secondOsc != -1 {
-		badge = strings.TrimSpace(line[firstTermEnd : firstTermEnd+secondOsc])
-		// Badge is like "◆ ab12" possibly with color codes: strip all
-		// escapes so only the visible text feeds the hash lookup.
-		if idx2 := strings.Index(badge, "◆"); idx2 != -1 {
-			badge = strings.TrimSpace(ansi.Strip(badge[idx2:]))
-		}
-	} else {
-		// Fallback: find ◆
-		if p := strings.Index(line, "◆"); p != -1 {
-			end := p + len("◆ ") + 8
-			if end > len(line) {
-				end = len(line)
-			}
-			badge = strings.TrimSpace(line[p:end])
-		}
-	}
-	// Parse URL query to get pub/seq etc. Only https is supported now.
-	fullURL := urlStr
-	if !strings.HasPrefix(fullURL, "http") {
-		fullURL = "https://" + fullURL
-	}
-	u, err := url.Parse(fullURL)
-	if err != nil {
-		return verifyJob{}, false
-	}
-	q := u.Query()
-	job := verifyJob{
-		rawLine:     line,
-		badge:       badge,
-		urlStr:      urlStr,
-		pub:         q.Get("pub"),
-		seqStr:      q.Get("seq"),
-		prev:        q.Get("prev"),
-		sig:         q.Get("sig"),
-		msgHash:     q.Get("msg_hash"),
-		serverPub:   q.Get("server_pub"),
-		displayName: q.Get("display_name"),
-		textParam:   q.Get("text"),
-	}
-	if job.pub == "" || job.sig == "" {
-		return verifyJob{}, false
-	}
-	if v, err := strconv.ParseUint(job.seqStr, 10, 32); err == nil {
-		job.seq = uint32(v)
-	}
-	if v, err := strconv.ParseUint(q.Get("tmp_id"), 10, 64); err == nil {
-		job.tmpID = v
-	}
-	if v, err := strconv.ParseUint(q.Get("reply_to"), 10, 64); err == nil {
-		job.tmpReplyTo = v
-	}
-	return job, true
-}
-
-func isTripBadgeLine(line string) bool {
-	return strings.Contains(line, "◆") && strings.Contains(line, "/api/trip/verify")
-}
 
 // tabForWire routes a wire to its tab. A replay marker delimits the chat
 // history stream, so it belongs to TabChat next to the messages it frames;

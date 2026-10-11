@@ -404,20 +404,6 @@ func (s *Session) runPump() {
 				s.flushDateBannerLocked()
 				s.Display.DisplayMu.Unlock()
 			}
-			if isTripBadgeLine(line) {
-				s.Verify.AutoVerifyMu.RLock()
-				av := s.Verify.AutoVerify
-				s.Verify.AutoVerifyMu.RUnlock()
-				if av {
-					if job, ok := parseTripBadgeLine(line); ok {
-						// Drop-oldest on full: dropped is treated as verify fail (deterministic)
-						// Show the line immediately as pending-plain then queue newest for real verify
-						// If queue was full, oldest was dropped and will stay uncolored (fail)
-						s.enqueueVerify(job)
-						continue
-					}
-				}
-			}
 			s.Display.DisplayMu.Lock()
 			s.emitRawLineLocked(line)
 			s.Display.DisplayMu.Unlock()
