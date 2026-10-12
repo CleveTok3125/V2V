@@ -57,7 +57,9 @@ jobs:
         uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
-          args: release --clean
+          # The release body is docs/RELEASE_NOTES.md, used verbatim; without
+          # the flag goreleaser would list the commits since the last tag.
+          args: release --clean --release-notes docs/RELEASE_NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CC_ANDROID: ${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang

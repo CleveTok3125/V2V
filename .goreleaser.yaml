@@ -191,6 +191,8 @@ signs:
       - "${artifact}"
     output: true
 
+# Only used when goreleaser runs without --release-notes; the release workflow
+# passes docs/RELEASE_NOTES.md, which replaces this generated list.
 changelog:
   use: github
   sort: asc
