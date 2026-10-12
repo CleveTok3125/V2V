@@ -15,7 +15,7 @@ PLATFORMS := windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 da
 HOST_GOOS ?= $(shell go env GOOS)
 HOST_GOARCH ?= $(shell go env GOARCH)
 
-.PHONY: all server web web-wasm web-compress web-ts check-web-ts test-web client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test test-sh test-wasm clean help
+.PHONY: all server web web-wasm web-compress web-ts check-web-ts test-web client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test test-race test-sh test-wasm clean help
 
 all: server web client v2vctl
 
@@ -121,6 +121,13 @@ vet:
 test:
 	V2V_NO_TTY=1 GOCACHE=$(GOCACHE) go test ./... -count=1
 
+# test-race runs the same suite under the race detector, which is the only
+# way to see a shared-state violation: the concurrency tests in client/ and
+# lib/clientcore cannot see one without it. Needs cgo, so it is a separate
+# target rather than part of test.
+test-race:
+	V2V_NO_TTY=1 GOCACHE=$(GOCACHE) go test -race ./... -count=1
+
 # test-sh runs the entrypoint shell tests. They need root for chown
 # and self-skip otherwise, so check stays green everywhere; CI runs
 # them with sudo for the full matrix.
@@ -176,6 +183,7 @@ help:
 	@echo "  make v2vctl   - build public/V2Vctl-* (host only, or all with ALL=1)"
 	@echo "  make vet      - go vet"
 	@echo "  make test     - go test"
+	@echo "  make test-race - go test under the race detector (needs cgo)"
 	@echo "  make test-sh  - entrypoint shell tests (skip without root)"
 	@echo "  make test-wasm - js-tagged client tests under node (skip without node)"
 	@echo "  make web-ts   - compile web/ TypeScript sources into webterm/*.js (needs tsc)"
