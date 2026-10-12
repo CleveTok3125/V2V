@@ -48,16 +48,24 @@ func getClientIP(r *http.Request) string {
 	return resolveClientIP(r).ClientIP
 }
 
+// refuseUntrustedProxy answers 403 and reports the rejection. Both entry points
+// that can meet a strict chain — the WebSocket upgrade and the HTTP routes
+// guarded by rejectUntrustedProxy — report it through here, so a refused
+// request reads the same whichever endpoint it arrived on.
+func refuseUntrustedProxy(w http.ResponseWriter, r *http.Request, outcome trustedproxy.Outcome) {
+	logWarnf("⛔ [PROXY] Reject %s (%s): %s", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Reason, proxyHeadersForLog(r))
+	http.Error(w, "Untrusted proxy.", http.StatusForbidden)
+}
+
 // rejectUntrustedProxy answers 403 and reports true when a strict chain
-// refuses the request (no trusted claimant). It mirrors the ServeWS gate
-// for non-WebSocket endpoints that otherwise resolve an empty client IP.
+// refuses the request (no trusted claimant). It is the ServeWS gate for
+// non-WebSocket endpoints that otherwise resolve an empty client IP.
 func rejectUntrustedProxy(w http.ResponseWriter, r *http.Request) bool {
 	outcome := resolveClientIP(r)
 	if !outcome.Reject {
 		return false
 	}
-	logWarnf("⛔ [PROXY] Reject %s (%s): %s", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Reason, proxyHeadersForLog(r))
-	http.Error(w, "Untrusted proxy.", http.StatusForbidden)
+	refuseUntrustedProxy(w, r, outcome)
 	return true
 }
 

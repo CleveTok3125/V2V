@@ -83,8 +83,7 @@ func IsSecuredConnect(w http.ResponseWriter, r *http.Request, outcome trustedpro
 func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 	outcome := resolveClientIP(r)
 	if outcome.Reject {
-		logWarnf("⛔ [PROXY] Reject %s (%s): %s", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Reason, proxyHeadersForLog(r))
-		http.Error(w, "Untrusted proxy.", http.StatusForbidden)
+		refuseUntrustedProxy(w, r, outcome)
 		return
 	}
 	clientIP := outcome.ClientIP
