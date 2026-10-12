@@ -189,7 +189,7 @@ func WarnStaleContentFiles(logPath, historyPath string) []string {
 			continue
 		}
 		if _, err := os.Stat(p); err == nil {
-			out = append(out, fmt.Sprintf("⚠️ NO_CONTENT_LOGS: còn file %s trên đĩa; hãy tự xoá nếu muốn sạch dấu vết", p))
+			out = append(out, fmt.Sprintf("NO_CONTENT_LOGS: còn file %s trên đĩa; hãy tự xoá nếu muốn sạch dấu vết", p))
 		}
 	}
 	return out

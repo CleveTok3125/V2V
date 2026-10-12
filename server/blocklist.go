@@ -18,7 +18,7 @@ func loadBlocklist(path string) ([]*net.IPNet, string, error) {
 	set, err := trustedproxy.LoadTrustFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Sprintf("⚠️ Blocklist: %s missing; IP blocking disabled", path), nil
+			return nil, fmt.Sprintf("Blocklist: %s missing; IP blocking disabled", path), nil
 		}
 		return nil, "", err
 	}

@@ -152,6 +152,39 @@ func TestLogEmojiMatchesLevel(t *testing.T) {
 	}
 }
 
+// TestForwardedWarningsCarryNoEmoji: a line owns the marker its standard puts
+// first, so a warning built elsewhere must not bring one of its own, or the
+// line prints two. v2vctl prints the same strings and prefixes its own marker.
+func TestForwardedWarningsCarryNoEmoji(t *testing.T) {
+	files := []string{
+		filepath.Join("..", "internal", "serverconfig", "load.go"),
+		filepath.Join("..", "internal", "serverconfig", "loader.go"),
+		filepath.Join("..", "internal", "serverconfig", "config.go"),
+		"blocklist.go",
+	}
+	literal := regexp.MustCompile(`"([^"\\]*)"`)
+	checked := 0
+	for _, file := range files {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range literal.FindAllStringSubmatch(string(src), -1) {
+			if m[1] == "" {
+				continue
+			}
+			first, _ := utf8.DecodeRuneInString(m[1])
+			if first > 0x2000 {
+				t.Errorf("%s: the warning %q opens with a marker of its own; the log line owns it", file, m[1])
+			}
+			checked++
+		}
+	}
+	if checked < 20 {
+		t.Fatalf("only %d string literals scanned", checked)
+	}
+}
+
 // TestFatalCallSitesSayFatal: logFatalf exits the process, and the level alone
 // does not say so. The "fatal" tag is what tells a reader the process is about
 // to die, so every fatal call site has to carry it.

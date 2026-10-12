@@ -72,7 +72,7 @@ func LoadStaticConfig(root string) (StaticConfig, []string, error) {
 	}
 	if noContentLogs {
 		if strings.TrimSpace(os.Getenv("LOG_FILE_PATH")) != "" || strings.TrimSpace(os.Getenv("HISTORY_FILE_PATH")) != "" {
-			w.addf("⚠️ NO_CONTENT_LOGS=true: LOG_FILE_PATH/HISTORY_FILE_PATH bị bỏ qua (RAM-only)")
+			w.addf("NO_CONTENT_LOGS=true: LOG_FILE_PATH/HISTORY_FILE_PATH bị bỏ qua (RAM-only)")
 		}
 		w.list = append(w.list, WarnStaleContentFiles(logFilePath, historyFilePath)...)
 	}
@@ -249,7 +249,7 @@ func LoadProxyChain(dir string, names []string) (*ProxyChainInfo, []string, erro
 	}
 	var warns []string
 	if extraWarn != "" {
-		warns = append(warns, fmt.Sprintf("⚠️ Trusted proxy: %s", extraWarn))
+		warns = append(warns, fmt.Sprintf("Trusted proxy: %s", extraWarn))
 	}
 	return &ProxyChainInfo{
 		Chain:        chain,
@@ -267,7 +267,7 @@ func LoadOnionTrust(dir string) ([]*net.IPNet, []string, error) {
 	set, err := trustedproxy.LoadTrustFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, []string{fmt.Sprintf("⚠️ Onion: %s missing; only loopback hops accepted", path)}, nil
+			return nil, []string{fmt.Sprintf("Onion: %s missing; only loopback hops accepted", path)}, nil
 		}
 		return nil, nil, err
 	}

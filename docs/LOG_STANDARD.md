@@ -113,11 +113,11 @@ catalog, never a spelling invented at a call site.
 ## Values a line forwards
 
 A line that forwards a warning built elsewhere carries the marker itself: the
-message a loader returns is plain text, and the emoji and the tags belong to the
-line. `internal/serverconfig` and `server/blocklist.go` still put `⚠️ ` in the
-message because `v2vctl` prints those strings too; `logGeoipWarnings` adds the
-marker at the call site because the log line is the only place its warnings are
-shown.
+text a loader returns is plain, and the emoji and the tags belong to the line. A
+warning string that brought its own marker would print twice, so
+`internal/serverconfig` and `server/blocklist.go` return plain text;
+`v2vctl config validate` prints the same strings and prefixes its own marker,
+and `logGeoipWarnings` adds the marker at the call site.
 
 ## Attacker-controlled values
 

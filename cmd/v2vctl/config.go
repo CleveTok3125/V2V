@@ -1008,14 +1008,14 @@ func (c *ConfigValidateCmd) Run() error {
 	} else if len(problems) == 0 {
 		fmt.Println("ok")
 		for _, w := range warns {
-			fmt.Println(w)
+			fmt.Println("⚠️ " + w)
 		}
 	} else {
 		for _, p := range problems {
 			fmt.Println("problem: " + p)
 		}
 		for _, w := range warns {
-			fmt.Println(w)
+			fmt.Println("⚠️ " + w)
 		}
 	}
 	if len(problems) > 0 {

@@ -117,7 +117,7 @@ func getEnvAsLocationFallback(w *warnings, key string, fallback string) *time.Lo
 	}
 	loc, err := time.LoadLocation(val)
 	if err != nil {
-		w.addf("⚠️ Cảnh báo: Múi giờ '%s' không hợp lệ. Đang dùng mặc định (Local).", val)
+		w.addf("Cảnh báo: Múi giờ '%s' không hợp lệ. Đang dùng mặc định (Local).", val)
 		return time.Local
 	}
 	return loc
@@ -155,7 +155,7 @@ func getEnvAsIntFallback(w *warnings, key string, fallback int) int {
 	}
 	parsed, err := strconv.Atoi(val)
 	if err != nil {
-		w.addf("⚠️ Lỗi định dạng số ở biến %s. Dùng mặc định: %d", key, fallback)
+		w.addf("Lỗi định dạng số ở biến %s. Dùng mặc định: %d", key, fallback)
 		return fallback
 	}
 	return parsed
@@ -195,7 +195,7 @@ func getEnvAsBoolFallback(w *warnings, key string, fallback bool) bool {
 	}
 	parsed, err := strconv.ParseBool(val)
 	if err != nil {
-		w.addf("⚠️ Lỗi định dạng boolean ở biến %s. Dùng mặc định: %v", key, fallback)
+		w.addf("Lỗi định dạng boolean ở biến %s. Dùng mặc định: %v", key, fallback)
 		return fallback
 	}
 	return parsed
