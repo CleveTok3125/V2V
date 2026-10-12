@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/CleveTok3125/V2V/lib/chain"
+	"github.com/CleveTok3125/V2V/lib/clientcore"
 	"github.com/CleveTok3125/V2V/lib/tripcolor"
 	"github.com/CleveTok3125/V2V/lib/wire"
 )
@@ -942,17 +943,17 @@ func TestTrackReplayWindowFooterFlushesBanner(t *testing.T) {
 func TestSentAtIsNotCoveredByChainHash(t *testing.T) {
 	genesis := chain.Genesis("srv")
 	base := chainedTestWire(genesis, 1, 5)
-	if err := verifyWireContent(base); err != nil {
+	if err := clientcore.VerifyWireContent(base); err != nil {
 		t.Fatalf("base wire must verify: %v", err)
 	}
 	stamped := base
 	stamped.SentAt = "2026-09-27T03:27:45+07:00"
-	if err := verifyWireContent(stamped); err != nil {
+	if err := clientcore.VerifyWireContent(stamped); err != nil {
 		t.Fatalf("sent_at must not break verification: %v", err)
 	}
 	other := stamped
 	other.SentAt = "2030-01-02T03:04:05+07:00"
-	if err := verifyWireContent(other); err != nil {
+	if err := clientcore.VerifyWireContent(other); err != nil {
 		t.Fatalf("changing sent_at must not break verification: %v", err)
 	}
 }

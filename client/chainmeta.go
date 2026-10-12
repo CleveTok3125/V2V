@@ -17,9 +17,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/CleveTok3125/V2V/lib/chain"
+	"github.com/CleveTok3125/V2V/lib/clientcore"
 	"github.com/CleveTok3125/V2V/lib/filter"
 	"github.com/CleveTok3125/V2V/lib/trip"
-	"github.com/CleveTok3125/V2V/lib/tripcolor"
 	"github.com/CleveTok3125/V2V/lib/wire"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -442,7 +442,7 @@ func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) st
 // formatQuote when the caller only has text.
 func formatQuoteRich(msg WireMessage, pending bool, maxRunes int) string {
 	mark := ""
-	if err := verifyWireContent(msg); err != nil {
+	if err := clientcore.VerifyWireContent(msg); err != nil {
 		mark = " \x1b[91m✗\x1b[39m"
 	}
 	line := fmt.Sprintf("|   ┌─  ↩ #%d • %s %s: %s%s",
@@ -590,11 +590,11 @@ func formatInfoBlock(msg WireMessage) []string {
 		}
 		out = append(out, row("trip.hash:", hexField(tm.MsgHash)+" "+hashMark))
 		out = append(out, row("trip.srv:", hexField(tm.ServerPub)))
-		out = append(out, row("trip.payload:", fmt.Sprintf("%x", tripPayloadBytes(msg, tm))))
+		out = append(out, row("trip.payload:", fmt.Sprintf("%x", clientcore.TripPayloadBytes(msg, tm))))
 	} else {
 		out = append(out, row("trip:", "(không)"))
 	}
-	if err := verifyWireContent(msg); err == nil {
+	if err := clientcore.VerifyWireContent(msg); err == nil {
 		out = append(out, row("chain:", "khớp ✓"))
 	} else {
 		out = append(out, row("chain:", fmt.Sprintf("lệch ✗ (%s)", filter.SanitizeSingleLine(err.Error()))))
@@ -626,21 +626,6 @@ func rawOneLine(s string) string {
 		return string(r[:500]) + "…"
 	}
 	return b.String()
-}
-
-// tripPayloadBytes rebuilds the exact signed bytes trip.Verify checks
-// (same normalization, same field order), so /info shows everything
-// needed to re-verify by hand with any ed25519 tool. Nil when the stored
-// hex does not decode — the verdict line already reports that case.
-func tripPayloadBytes(msg WireMessage, tm *TripMeta) []byte {
-	lower := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
-	pub, err1 := hex.DecodeString(lower(tm.Pub))
-	prev, err2 := hex.DecodeString(lower(tm.Prev))
-	msgHash, err3 := hex.DecodeString(lower(tm.MsgHash))
-	if err1 != nil || err2 != nil || err3 != nil {
-		return nil
-	}
-	return tripcolor.CanonicalPayload(lower(tm.ServerPub), tm.Seq, prev, msgHash, pub, msg.DisplayName, tm.TmpID, tm.ReplyTo)
 }
 
 // shortBadge derives the visible badge from a pubkey hex, tolerating junk.
@@ -722,49 +707,20 @@ func verifyWireLink(msg WireMessage, prev [32]byte) ([32]byte, error) {
 	var zero [32]byte
 	gotPrev, ok := chain.ParseHex64(msg.ChainPrev)
 	if !ok {
-		return zero, errChainLink("malformed chain_prev")
+		return zero, &clientcore.ChainLinkError{Msg: "malformed chain_prev"}
 	}
 	if gotPrev != prev {
-		return zero, errPrevMismatch
+		return zero, clientcore.ErrPrevMismatch
 	}
 	want, ok := chain.ParseHex64(msg.ChainHash)
 	if !ok {
-		return zero, errChainLink("malformed chain_hash")
+		return zero, &clientcore.ChainLinkError{Msg: "malformed chain_hash"}
 	}
-	if err := verifyWireContent(msg); err != nil {
+	if err := clientcore.VerifyWireContent(msg); err != nil {
 		return zero, err
 	}
 	return want, nil
 }
-
-// verifyWireContent recomputes a wire link from its own fields, without
-// any tip context: it proves the content is intact but says nothing about
-// position in the log (that needs the running tip in checkChainLink).
-func verifyWireContent(msg WireMessage) error {
-	want, ok := chain.ParseHex64(msg.ChainHash)
-	if !ok {
-		return errChainLink("malformed chain_hash")
-	}
-	prev, ok := chain.ParseHex64(msg.ChainPrev)
-	if !ok {
-		return errChainLink("malformed chain_prev")
-	}
-	if !chain.VerifyWire(prev, msg, want) {
-		return errChainLink("hash does not match content")
-	}
-	return nil
-}
-
-type chainLinkError struct{ msg string }
-
-func (e *chainLinkError) Error() string { return "chain link broken: " + e.msg }
-
-func errChainLink(msg string) error { return &chainLinkError{msg} }
-
-// errPrevMismatch marks the running-tip break specifically: a forward
-// height jump with this error is a transit gap (dropped frames), while
-// other link errors stay tamper signals.
-var errPrevMismatch = &chainLinkError{msg: "prev does not continue the local tip"}
 
 // parseHistorySync decodes the machine-readable replay trailer. Anything
 // else (chat, system, legacy text) reports false so the caller falls
@@ -1341,7 +1297,7 @@ func (s *Session) checkChainLink(msg WireMessage) {
 		// Only when the received hash is well-formed: a malformed hash
 		// falls through to the tamper warning below.
 		if parsed, ok := chain.ParseHex64(msg.ChainHash); ok &&
-			s.Chain.ChainHaveTip && err == errPrevMismatch && msg.ChainHeight > s.Chain.ChainHeight+1 {
+			s.Chain.ChainHaveTip && err == clientcore.ErrPrevMismatch && msg.ChainHeight > s.Chain.ChainHeight+1 {
 			oldH, oldTip := s.Chain.ChainHeight, s.Chain.ChainTip
 			if s.Chain.InSync {
 				// Join replay: drops are settled once from its trailer
