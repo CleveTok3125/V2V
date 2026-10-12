@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/CleveTok3125/V2V/lib/clientcore"
 	"github.com/CleveTok3125/V2V/lib/filter"
 )
 
@@ -164,7 +165,7 @@ func requestPairTicket(base, role string) (pairOffer, bool) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		fmt.Printf("❌ Server từ chối yêu cầu ghép cặp (HTTP %d): %s\n",
-			resp.StatusCode, dialBodyText(resp))
+			resp.StatusCode, clientcore.DialBodyText(resp))
 		return offer, false
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&offer); err != nil {

@@ -6,7 +6,6 @@ package main
 // call sites that compose raw fields with client-generated SGR/OSC8.
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -137,26 +136,6 @@ func TestServerHelpersNeutralizeEscapes(t *testing.T) {
 	}
 	if got := serverText("body\x1b]52;c;x\x1b\\tail"); strings.Contains(got, "52;c") {
 		t.Fatalf("serverText leaked: %q", got)
-	}
-}
-
-// dialBodyText bounds the read and neutralizes escapes in a failed
-// dial's response body.
-func TestDialBodyText(t *testing.T) {
-	if got := dialBodyText(nil); got != "" {
-		t.Fatalf("nil response = %q, want empty", got)
-	}
-	resp := &http.Response{Body: io.NopCloser(strings.NewReader(
-		"  nope\x1b]52;c;AAAA\x1b\\  "))}
-	if got := dialBodyText(resp); strings.Contains(got, "52;c") || strings.Contains(got, "\x1b") {
-		t.Fatalf("escape leaked: %q", got)
-	} else if got != "nope" {
-		t.Fatalf("got %q, want %q", got, "nope")
-	}
-	big := &http.Response{Body: io.NopCloser(strings.NewReader(
-		strings.Repeat("x", dialErrorBody+4096)))}
-	if got := dialBodyText(big); len(got) != dialErrorBody {
-		t.Fatalf("body not capped: len=%d want=%d", len(got), dialErrorBody)
 	}
 }
 

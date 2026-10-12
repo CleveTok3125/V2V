@@ -337,14 +337,14 @@ func (s *Session) connect() bool {
 	}
 
 	var err error
-	dialConn, dialURL, err := dialManaged(s.WSURL)
+	dialConn, dialURL, err := newDialer().DialManaged(s.WSURL)
 	if err != nil {
 		return false
 	}
 	s.Conn = dialConn
 	s.WSURL = dialURL
 
-	s.Challenge, err = readChallenge(s.Conn)
+	s.Challenge, err = s.readChallenge()
 	if err != nil {
 		return false
 	}

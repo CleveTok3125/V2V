@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/CleveTok3125/V2V/lib/clientcore"
 	"github.com/CleveTok3125/V2V/lib/wire"
 
 	"github.com/alecthomas/kong"
@@ -70,17 +71,9 @@ const (
 	wsCloseMessage = 8
 )
 
-// wsConn is the minimal socket surface the chat loop needs. The desktop build
-// satisfies it with gorilla/websocket; the wasm build uses a shim over the
-// browser's native WebSocket.
-type wsConn interface {
-	ReadJSON(v any) error
-	WriteJSON(v any) error
-	ReadMessage() (messageType int, p []byte, err error)
-	WriteMessage(messageType int, data []byte) error
-	SetReadLimit(n int64)
-	Close() error
-}
+// wsConn is the core's socket surface. Aliased so the client's dialers,
+// session and tests keep naming it the way they always have.
+type wsConn = clientcore.Conn
 
 // clientReadLimit bounds one inbound WebSocket frame. The server sends
 // replay lines individually, so any legitimate frame is far below this;
