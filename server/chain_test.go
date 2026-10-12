@@ -283,8 +283,41 @@ func TestChainBreakAdoptsTipOnce(t *testing.T) {
 	if height != 6 || tip != goodHash {
 		t.Fatalf("tip/height = %x/%d, want good hash/6", tip, height)
 	}
-	if n := strings.Count(buf.String(), "link break, adopting tip"); n != 1 {
-		t.Fatalf("want exactly 1 TAMPER (the bad link), got %d:\n%s", n, buf.String())
+	if n := strings.Count(buf.String(), "link does not continue the tip"); n != 1 {
+		t.Fatalf("want exactly 1 broken link, got %d:\n%s", n, buf.String())
+	}
+}
+
+// A record whose link lines up but whose own hash does not verify is a
+// different failure from a broken link. The two must not read the same in the
+// log, or a rewritten record cannot be told from one that simply does not
+// follow its predecessor.
+func TestChainBreakDistinguishesRewriteFromBreak(t *testing.T) {
+	defer testChainCfg()()
+	var buf bytes.Buffer
+	oldOut := log.Default().Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(oldOut)
+
+	s := NewChatServer()
+	anchor := "legacy raw line without chain"
+	s.Chain.History = append(s.Chain.History, anchor)
+	// Continues the anchor at the right height, but claims a hash its own
+	// fields do not produce.
+	prev := chain.LegacyAnchor(anchor)
+	rec, _ := json.Marshal(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "rewritten",
+		ChainPrev: hex.EncodeToString(prev[:]), ChainHash: strings.Repeat("2", 64), ChainHeight: 1, ChainVer: 2})
+	s.Chain.History = append(s.Chain.History, string(rec))
+
+	s.Chain.Mu.Lock()
+	s.Chain.initChainLocked("")
+	s.Chain.Mu.Unlock()
+
+	if n := strings.Count(buf.String(), "record fails verification"); n != 1 {
+		t.Fatalf("want the rewrite reported as a verification failure, got %d:\n%s", n, buf.String())
+	}
+	if strings.Contains(buf.String(), "link does not continue the tip") {
+		t.Fatalf("a link that lines up must not read as a broken one:\n%s", buf.String())
 	}
 }
 

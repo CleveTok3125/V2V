@@ -109,13 +109,13 @@ func (c *ChainService) initChainLocked(serverPub string) {
 		}
 		if prev != expectPrev || wire.ChainHeight != height+1 {
 			broken = true
-			logWarnf("⛔ (chain,tamper) height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
+			logWarnf("⛔ (chain,tamper) height %d: link does not continue the tip, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
 			tip, height = want, wire.ChainHeight
 			continue
 		}
 		if !chain.VerifyWire(prev, wire, want) {
 			broken = true
-			logWarnf("⛔ (chain,tamper) height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
+			logWarnf("⛔ (chain,tamper) height %d: record fails verification, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
 		}
 		tip, height = want, wire.ChainHeight
 	}
