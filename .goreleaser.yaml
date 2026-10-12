@@ -28,7 +28,10 @@ before:
 builds:
   - id: client
     main: ./client
-    binary: V2V-{{ .Os }}-{{ .Arch }}
+    # The internal name must differ from the asset name below: a binary
+    # archive whose name equals the build artifact is added twice, and
+    # goreleaser warns that publishing may fail.
+    binary: v2v-{{ .Os }}-{{ .Arch }}
     goos:
       - windows
       - linux
@@ -54,7 +57,7 @@ builds:
   # NDK toolchain is provided by the release workflow (CC_ANDROID).
   - id: client-android
     main: ./client
-    binary: V2V-android-aarch64
+    binary: v2v-android-aarch64
     goos:
       - android
     goarch:
@@ -72,8 +75,7 @@ builds:
 
   - id: v2vctl
     main: ./cmd/v2vctl
-    binary: >-
-      V2Vctl-{{ .Os }}-{{ if and (eq .Os "android") (eq .Arch "arm64") }}aarch64{{ else }}{{ .Arch }}{{ end }}
+    binary: v2vctl-{{ .Os }}-{{ .Arch }}
     goos:
       - windows
       - linux
@@ -134,21 +136,22 @@ archives:
       - client
     formats:
       - binary
-    # Bare binary assets keep the historical `V2V-<os>-<arch>` names
-    # (no version/OS/arch suffix that the binary default would add).
-    name_template: "{{ .Binary }}"
+    # Bare binary assets keep the historical `V2V-<os>-<arch>` names, which
+    # is also why the build binary above is named differently.
+    name_template: "V2V-{{ .Os }}-{{ .Arch }}"
   - id: client-android
     ids:
       - client-android
     formats:
       - binary
-    name_template: "{{ .Binary }}"
+    name_template: "V2V-android-aarch64"
   - id: v2vctl
     ids:
       - v2vctl
     formats:
       - binary
-    name_template: "{{ .Binary }}"
+    name_template: >-
+      V2Vctl-{{ .Os }}-{{ if and (eq .Os "android") (eq .Arch "arm64") }}aarch64{{ else }}{{ .Arch }}{{ end }}
 
   # One self-contained server bundle per platform: binary, wasm web
   # bundle, bootstrap template, compose file and the matching v2vctl.
