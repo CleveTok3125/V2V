@@ -16,6 +16,16 @@ import (
 // behaviorStoreCap bounds live profiles; beyond it the stalest goes.
 const behaviorStoreCap = 50000
 
+// logGeoipWarnings reports the loader's non-fatal warnings. Every other
+// warning a log line forwards carries its own leading emoji; the geoip package
+// does not, so the line supplies it here instead of printing a warn line with
+// no marker at all.
+func logGeoipWarnings(warns []string) {
+	for _, w := range warns {
+		logWarnf("⚠️ %s", w)
+	}
+}
+
 // initBehaviorEngines builds the scoring engine and screener when the
 // behavior feature is on. A corrupt GeoIP database fails the boot;
 // missing files only skip those grouping levels.
@@ -30,9 +40,7 @@ func initBehaviorEngines() (*BehaviorEngine, *PowScreener) {
 		if err != nil {
 			log.Fatalf("❌ CRITICAL ERROR: geoip: %v", err)
 		}
-		for _, w := range warns {
-			logWarnf("%s", w)
-		}
+		logGeoipWarnings(warns)
 		if r != nil {
 			geo = r
 			logInfof("🌍 GeoIP enabled from %s", Cfg.Static.BehaviorGeoIPDir)
