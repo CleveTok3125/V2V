@@ -413,18 +413,24 @@ func parseFindArg(arg string) (uint64, string, error) {
 	return height, strings.ToLower(suffix), nil
 }
 
+// wrapPendingQuote greys a quote row that belongs to a block still on its way.
+// The "⏳" itself belongs on the author row, which is the message; the wrapper
+// here is what marks the placeholder as not yet confirmed and keeps the erase
+// region check passing.
+func wrapPendingQuote(line string, pending bool) string {
+	if !pending {
+		return line
+	}
+	return "\x1b[90m" + line + "\x1b[0m"
+}
+
 // formatQuote renders one quote preview line from a resolved head entry:
 // "| ↩ #height: first line…", truncated to maxRunes for narrow screens.
 // Pending (placeholder) quotes carry the grey wrapper plus ⏳ so the erase
 // region check keeps passing; confirmed quotes render plain.
 func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) string {
 	line := fmt.Sprintf("|   ┌─  ↩ #%d: %s", height, quoteFirstLine(headEntry, maxRunes))
-	if pending {
-		// Grey marks it as part of a block still on its way; the "⏳" belongs
-		// on the author row, which is the message itself.
-		return "\x1b[90m" + line + "\x1b[0m"
-	}
-	return line
+	return wrapPendingQuote(line, pending)
 }
 
 // formatQuoteRich renders a quote from the indexed wire itself instead of
@@ -442,12 +448,7 @@ func formatQuoteRich(msg WireMessage, pending bool, maxRunes int) string {
 	line := fmt.Sprintf("|   ┌─  ↩ #%d • %s %s: %s%s",
 		msg.ChainHeight, filter.SanitizeSingleLine(msg.Time), authorField(msg.DisplayName),
 		quoteFirstLine(msg.Text, maxRunes), mark)
-	if pending {
-		// Grey marks it as part of a block still on its way; the "⏳" belongs
-		// on the author row, which is the message itself.
-		return "\x1b[90m" + line + "\x1b[0m"
-	}
-	return line
+	return wrapPendingQuote(line, pending)
 }
 
 // quoteFirstLine strips a rendered head entry (or raw text) down to one
