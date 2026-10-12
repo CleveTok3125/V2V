@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/CleveTok3125/V2V/lib/chain"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // TestChainTipConcurrent races the pump tip path against the input
@@ -145,5 +146,46 @@ func TestConsumeEchoMatchPath(t *testing.T) {
 	sess.Display.DisplayMu.Unlock()
 	if len(sess.Pending.PendingPlaceholders) != 0 {
 		t.Fatalf("matched placeholder not spliced: %+v", sess.Pending.PendingPlaceholders)
+	}
+}
+
+// TestNotifyGateConcurrent races the render-side notice gate against the
+// /notify switches the way production does: the pump gates a system wire
+// while the input loop flips a tag, replaces the quiet set and moves the
+// tier floor. The gate state holds a map, so a gate read outside NotifyMu
+// races those writes; only -race sees it, while the timeout still turns a
+// deadlock into a failure.
+func TestNotifyGateConcurrent(t *testing.T) {
+	sess := NewSession()
+	sess.Display.Out = io.Discard
+	sess.Display.Term = &fakeTerm{}
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{}, PowMinTier: 1}
+	msg := WireMessage{Type: "system", Tags: wire.WithTags(wire.TagJoin), Text: "x"}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			_ = sess.notifyWireAllowed(msg)
+			_ = sess.notifyPowLive(i % 3)
+			_ = sess.notifyTagsAllowed(wire.WithTags(wire.TagJoin))
+			_ = sess.notifyTagEnabled(wire.TagJoin)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			sess.notifySetTag(wire.TagJoin, i%2 == 0)
+			sess.notifySetAll(i%3 != 0)
+			sess.notifySetPowMinTier(i % 3)
+		}
+	}()
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("notify gate paths deadlocked")
 	}
 }

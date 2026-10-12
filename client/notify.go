@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 
+	"github.com/CleveTok3125/V2V/lib/clientcore"
 	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
@@ -17,10 +18,9 @@ import (
 // from lib/wire.
 
 // NotifyState is the set of muted tag paths, adjustable at runtime.
-type NotifyState struct {
-	Muted      map[string]bool
-	PowMinTier int
-}
+// NotifyState is the core's gate state; the client keeps it inside Display
+// and owns the lock.
+type NotifyState = clientcore.Notices
 
 // configMutedTags turns the loaded config's gates into a muted set, so the
 // subtree rule applies to config exactly as it does at runtime.
@@ -113,32 +113,13 @@ func (s *Session) notifyTagsAllowed(tags []string) bool {
 }
 
 func (s *Session) notifyTagsAllowedLocked(tags []string) bool {
-	return len(wire.BlockedBy(tags, s.Display.Notify.Muted)) == 0
+	return s.Display.Notify.TagsAllowed(tags)
 }
 
-// powTierAllowed reports whether a proof-of-work notice of this tier may
-// print. A tier of zero means the notice carries none — a deadline, a
-// result, a decline — and those are not filtered: the floor says how much
-// work to announce, not which outcome to hide.
-func (s *Session) powTierAllowed(tier int) bool {
-	if tier <= 0 {
-		return true
-	}
-	s.Display.NotifyMu.RLock()
-	defer s.Display.NotifyMu.RUnlock()
-	return tier >= s.Display.Notify.PowMinTier
-}
-
-// notifyPowLive reports whether the "solving PoW" notice for a tier
-// prints live: it is gated both by the pow subtree and the tier floor. The
-// subtree test has to walk ancestors like every other gate — a direct lookup
-// of the system.pow key would let a muted root (or --quiet system) leave
-// this one line printing.
 func (s *Session) notifyPowLive(tier int) bool {
 	s.Display.NotifyMu.RLock()
 	defer s.Display.NotifyMu.RUnlock()
-	return len(wire.BlockedBy(wire.WithTags(wire.TagPow), s.Display.Notify.Muted)) == 0 &&
-		tier >= s.Display.Notify.PowMinTier
+	return s.Display.Notify.PowLive(tier)
 }
 
 // notifyWireAllowed reports whether a system wire may print live: no tag it
@@ -147,25 +128,14 @@ func (s *Session) notifyPowLive(tier int) bool {
 // where the client emits its own solving line, or ui.powMinTier would
 // appear to work while a server-sent challenge below it still printed.
 func (s *Session) notifyWireAllowed(msg WireMessage) bool {
-	tags := notifyTagsForWire(msg)
-	if !s.notifyTagsAllowed(tags) {
-		return false
+	// Untagged content (chat) is never gated, and the gate state is a map:
+	// reading it without the lock races /notify, which writes it.
+	if len(clientcore.TagsForWire(msg)) == 0 {
+		return true
 	}
-	return !wire.HasTag(tags, wire.TagPow) || s.powTierAllowed(msg.SysPowTier)
-}
-
-// notifyTagsForWire returns the tags a wire is gated on, or nil for content
-// that is always live. Only system lines are notices; chat is never muted.
-// An untagged system line falls back to the root, so a notice from a peer
-// that predates tagging is still covered by the system switch.
-func notifyTagsForWire(msg WireMessage) []string {
-	if msg.Type != "system" {
-		return nil
-	}
-	if len(msg.Tags) == 0 {
-		return wire.WithTags(wire.TagRoot)
-	}
-	return msg.Tags
+	s.Display.NotifyMu.RLock()
+	defer s.Display.NotifyMu.RUnlock()
+	return s.Display.Notify.WireAllowed(msg)
 }
 
 // notifyPowMinTier returns the lowest PoW tier announced live.

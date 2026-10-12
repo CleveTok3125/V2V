@@ -8,38 +8,6 @@ import (
 	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
-// TestNotifyTagsForWire: a system line is gated on its tags, chat is never
-// gated, and a notice from a peer that predates tagging still falls under
-// the system switch instead of escaping it.
-func TestNotifyTagsForWire(t *testing.T) {
-	cases := []struct {
-		name string
-		msg  WireMessage
-		want string
-	}{
-		{"chat", WireMessage{Type: "chat", Text: "hi"}, ""},
-		{"join", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagJoin)}, wire.TagJoin},
-		{"leave", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagLeave)}, wire.TagLeave},
-		{"date", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagDate)}, wire.TagDate},
-		{"limit", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagLimit)}, wire.TagLimit},
-		{"screening", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagPowScreen)}, wire.TagPowScreen},
-		// No tag: the root still applies, so the system switch covers it.
-		{"untagged", WireMessage{Type: "system", Text: "x"}, wire.TagRoot},
-	}
-	for _, tc := range cases {
-		got := notifyTagsForWire(tc.msg)
-		if tc.want == "" {
-			if len(got) != 0 {
-				t.Errorf("%s: chat must not be gated, got %v", tc.name, got)
-			}
-			continue
-		}
-		if !wire.HasTag(got, tc.want) {
-			t.Errorf("%s: notifyTagsForWire = %v, want it to carry %q", tc.name, got, tc.want)
-		}
-	}
-}
-
 // TestNotifyTagsAllowedAncestorGating: muting a node hides its whole
 // subtree, which is the reason the tags travel as a chain.
 func TestNotifyTagsAllowedAncestorGating(t *testing.T) {
