@@ -55,7 +55,7 @@ var (
 // purpose: the person may simply be holding the wrong passkey, and the
 // link should let them try another one.
 func (s *ChatServer) notePairRejection(clientIP string) {
-	logWarnf("⚠️ [PAIR SUBMIT] %s: bằng chứng không xác minh được, vé vẫn dùng được.", clientIP)
+	logWarnf("⚠️ (pair,submit) %s: bằng chứng không xác minh được, vé vẫn dùng được.", clientIP)
 }
 
 // pairMaxPending reads the memory ceiling. Tests build a bare server with

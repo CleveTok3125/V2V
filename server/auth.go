@@ -112,13 +112,13 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 	if resp.PasskeyID != "" || resp.PasskeySig != "" {
 		var lastErr error
 		if !WAConfig.Enabled {
-			logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt (thiếu WEBAUTHN_RPID/ORIGIN).", clientIP)
+			logWarnf("⚠️ (auth,fail) %s: passkey bị tắt (thiếu WEBAUTHN_RPID/ORIGIN).", clientIP)
 			return perms, resp, fmt.Errorf("%w", ErrPasskeyDisabled)
 		}
 		// Onion: passkey is off unless explicitly allowed. WebAuthn binds a
 		// single RPID/origin, so it cannot serve clearnet and onion at once.
 		if passkeyDisabledForOnion(onion) {
-			logWarnf("⚠️ [AUTH FAIL] %s: passkey bị tắt trên onion (ONION_ALLOW_PASSKEY=false).", clientIP)
+			logWarnf("⚠️ (auth,fail) %s: passkey bị tắt trên onion (ONION_ALLOW_PASSKEY=false).", clientIP)
 			return perms, resp, fmt.Errorf("%w", ErrPasskeyDisabled)
 		}
 		s.RoleRegistryMu.RLock()
@@ -149,7 +149,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 					}
 				}
 				resp.AuthType = "passkey"
-				logInfof("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey thật, role: [%s]", clientIP, resp.Role)
+				logInfof("✅ (auth,success) %s đăng nhập bằng passkey thật, role: [%s]", clientIP, resp.Role)
 				return roleDef.Permission, resp, nil
 			case verr == nil:
 				lastErr = ErrCounterNotIncreasing
@@ -159,9 +159,9 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		}
 
 		if lastErr != nil {
-			logErrorf("🚨 [PASSKEY FAIL] %s: %v", clientIP, lastErr)
+			logErrorf("🚨 (passkey,fail) %s: %v", clientIP, lastErr)
 		}
-		logErrorf("🚨 [BRUTE-FORCE ALERT] %s: assertion passkey không khớp credential nào của role [%s]!", clientIP, resp.Role)
+		logErrorf("🚨 (auth,brute_force) %s: assertion passkey không khớp credential nào của role [%s]!", clientIP, resp.Role)
 		return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
 	}
 
@@ -174,13 +174,13 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 	s.RoleRegistryMu.RUnlock()
 
 	if !exists {
-		logWarnf("⚠️ [AUTH FAIL] %s: Yêu cầu Role không tồn tại [%s]", clientIP, resp.Role)
+		logWarnf("⚠️ (auth,fail) %s: Yêu cầu Role không tồn tại [%s]", clientIP, resp.Role)
 		return perms, resp, fmt.Errorf("%w", ErrInvalidRole)
 	}
 
 	sig, err := hex.DecodeString(resp.Signature)
 	if err != nil || len(sig) != ed25519.SignatureSize {
-		logErrorf("🚨 [AUTH FAIL] %s: Signature sai định dạng cho role [%s]", clientIP, resp.Role)
+		logErrorf("🚨 (auth,fail) %s: Signature sai định dạng cho role [%s]", clientIP, resp.Role)
 		return perms, resp, fmt.Errorf("%w", ErrInvalidSignature)
 	}
 
@@ -208,7 +208,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 			if len(pinShort) > 12 {
 				pinShort = pinShort[:12]
 			}
-			logErrorf("🚨 [AUTH FAIL] %s: identity pinned to server %q but this server is %q", clientIP, pinShort, srvShort)
+			logErrorf("🚨 (auth,fail) %s: identity pinned to server %q but this server is %q", clientIP, pinShort, srvShort)
 			continue
 		}
 
@@ -222,13 +222,13 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 			if err == nil && hmac.Equal(h.Sum(nil), hmacBytes) {
 				s.Hub.alertConcurrentIdentity(resp.IdentityPub, clientIP)
 				resp.AuthType = "ed25519"
-				logInfof("✅ [AUTH SUCCESS] %s đăng nhập thành công role: [%s]", clientIP, resp.Role)
+				logInfof("✅ (auth,success) %s đăng nhập thành công role: [%s]", clientIP, resp.Role)
 				return roleDef.Permission, resp, nil
 			}
 		}
 	}
 
-	logErrorf("🚨 [BRUTE-FORCE ALERT] %s: Sai Key/HMAC khi cố lấy quyền [%s]!", clientIP, resp.Role)
+	logErrorf("🚨 (auth,brute_force) %s: Sai Key/HMAC khi cố lấy quyền [%s]!", clientIP, resp.Role)
 	return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
 }
 
@@ -287,10 +287,10 @@ func (s *ChatServer) loginWithPairTicket(clientIP string, req AuthPacket) (Permi
 	ticket, err := s.takeVerifiedPairTicket(req.PairTicket, clientIP)
 	if err != nil {
 		if errors.Is(err, ErrPairExpired) {
-			logWarnf("⚠️ [AUTH FAIL] %s: link ceremony đã hết hạn.", clientIP)
+			logWarnf("⚠️ (auth,fail) %s: link ceremony đã hết hạn.", clientIP)
 			return perms, req, fmt.Errorf("%w", ErrPairExpired)
 		}
-		logWarnf("⚠️ [AUTH FAIL] %s: vé pairing không hợp lệ, đã dùng, hoặc chưa xác thực.", clientIP)
+		logWarnf("⚠️ (auth,fail) %s: vé pairing không hợp lệ, đã dùng, hoặc chưa xác thực.", clientIP)
 		return perms, req, fmt.Errorf("%w", ErrPairUnknown)
 	}
 	s.RoleRegistryMu.RLock()
@@ -299,10 +299,10 @@ func (s *ChatServer) loginWithPairTicket(clientIP string, req AuthPacket) (Permi
 	if !exists {
 		// The role was checked when the ticket was minted, so reaching here
 		// means roles.json changed mid-ceremony.
-		logWarnf("⚠️ [AUTH FAIL] %s: role [%s] của vé không còn tồn tại.", clientIP, ticket.Role)
+		logWarnf("⚠️ (auth,fail) %s: role [%s] của vé không còn tồn tại.", clientIP, ticket.Role)
 		return perms, req, fmt.Errorf("%w", ErrInvalidRole)
 	}
-	logInfof("✅ [AUTH SUCCESS] %s đăng nhập bằng passkey thật qua browser, role: [%s]", clientIP, ticket.Role)
+	logInfof("✅ (auth,success) %s đăng nhập bằng passkey thật qua browser, role: [%s]", clientIP, ticket.Role)
 	req.Role = ticket.Role
 	req.AuthType = "passkey"
 	return roleDef.Permission, req, nil
@@ -314,16 +314,16 @@ func (s *ChatServer) loginWithPairTicket(clientIP string, req AuthPacket) (Permi
 func (s *ChatServer) consumeNonce(clientIP, nonceHex string) error {
 	metaRaw, exists := s.ActiveNonces.LoadAndDelete(nonceHex)
 	if !exists {
-		logWarnf("⚠️ [AUTH ALERT] %s: Nonce không tồn tại hoặc đã bị sử dụng (Dấu hiệu Replay Attack).", clientIP)
+		logWarnf("⚠️ (auth,alert) %s: Nonce không tồn tại hoặc đã bị sử dụng (Dấu hiệu Replay Attack).", clientIP)
 		return fmt.Errorf("%w", ErrInvalidNonce)
 	}
 	meta := metaRaw.(NonceMeta)
 	if time.Now().After(meta.ExpiresAt) {
-		logWarnf("⚠️ [AUTH FAIL] %s: Nonce đã hết hạn.", clientIP)
+		logWarnf("⚠️ (auth,fail) %s: Nonce đã hết hạn.", clientIP)
 		return fmt.Errorf("%w", ErrExpiredNonce)
 	}
 	if meta.IP != clientIP {
-		logErrorf("🚨 [SECURITY BREACH] %s đang cố sử dụng Nonce được cấp cho IP %s! (Dấu hiệu cướp Token/MITM).", clientIP, meta.IP)
+		logErrorf("🚨 (security,breach) %s đang cố sử dụng Nonce được cấp cho IP %s! (Dấu hiệu cướp Token/MITM).", clientIP, meta.IP)
 		return fmt.Errorf("%w", ErrIPMismatch)
 	}
 	return nil
@@ -366,7 +366,7 @@ func (h *Hub) alertConcurrentIdentity(identityPubHex, newClientIP string) {
 	case prev.Send <- alert:
 	default:
 	}
-	logWarnf("⚠️ [IDENTITY CONCURRENT] identity đăng nhập song song từ %s (phiên cũ còn sống)", newClientIP)
+	logWarnf("⚠️ (identity,concurrent) identity đăng nhập song song từ %s (phiên cũ còn sống)", newClientIP)
 }
 
 // Trip-chain map bounds. Any client can mint a fresh ed25519 key and send
@@ -424,7 +424,7 @@ func (s *ChatServer) LoadRoles() error {
 			s.RoleRegistry = tempRegistry
 			s.RoleRegistryMu.Unlock()
 
-			logInfof("✅ Đã nạp cấu hình quyền hạn (Roles) từ: %s", p)
+			logInfof("✅ (config) Đã nạp cấu hình quyền hạn (Roles) từ: %s", p)
 			return nil
 		}
 	}
@@ -437,7 +437,7 @@ func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string)
 	now := time.Now()
 	if guard.IsBanned(rec, now) {
 		s.AuthFailsMu.Unlock()
-		logWarnf("⛔ [BAN] Từ chối %s. Vui lòng đợi đến %s.", clientIP, rec.UnlockTime.Format("15:04:05"))
+		logWarnf("⛔ (ban) Từ chối %s. Vui lòng đợi đến %s.", clientIP, rec.UnlockTime.Format("15:04:05"))
 		setRetryAfter(w, rec.UnlockTime.Sub(now))
 		http.Error(w, "IP của bạn đang bị khóa tạm thời do xác thực sai nhiều lần.", http.StatusTooManyRequests)
 		return false
@@ -449,7 +449,7 @@ func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string)
 		cooldown := Cfg.Dynamic.Load().ConnectionCooldown
 		if ok, _ := guard.CheckConnectionRate(now, rec, lastTime, cooldown); !ok {
 			s.LastConnectMu.Unlock()
-			logWarnf("⛔ Từ chối: %s kết nối ra/vào quá nhanh.\n", clientIP)
+			logWarnf("⛔ (limit) Từ chối: %s kết nối ra/vào quá nhanh.\n", clientIP)
 			setRetryAfter(w, cooldown-time.Since(lastTime))
 			http.Error(w, "Bạn thao tác ra/vào quá nhanh! Vui lòng đợi vài giây rồi thử lại.", http.StatusTooManyRequests)
 			return false
@@ -484,7 +484,7 @@ func (s *ChatServer) handleAuthPenalty(clientIP string) {
 
 func (s *ChatServer) generateDisplayName(username string, clientIP string, perms Permission) string {
 	if err := filter.ValidateDisplayName(username); err != nil {
-		logWarnf("⚠️ [FILTER] displayName invalid from %s: %v -> fallback Anonymous", clientIP, err)
+		logWarnf("⚠️ (filter) displayName invalid from %s: %v -> fallback Anonymous", clientIP, err)
 		username = "Anonymous"
 	}
 	name := strings.TrimSpace(username)
@@ -531,7 +531,7 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 	prefix := perms.CustomPrefix
 	if prefix != "" {
 		if err := filter.ValidateDisplayPrefix(prefix); err != nil {
-			logWarnf("⚠️ [FILTER] custom prefix invalid from %s: %v -> dropped", clientIP, err)
+			logWarnf("⚠️ (filter) custom prefix invalid from %s: %v -> dropped", clientIP, err)
 			prefix = ""
 		}
 	}
@@ -588,7 +588,7 @@ func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expected
 			Error: fmt.Sprintf("Mật khẩu Tripcode quá dài (tối đa %d byte). Bị từ chối!", Cfg.Dynamic.Load().MaxTripcodeLength),
 		})
 		conn.Close()
-		logWarnf("⚠️ [AUTH FAIL] %s: Tripcode secret quá dài (%d bytes) - Từ chối để chống trùng lặp.", clientIP, len(authPacket.Tripcode))
+		logWarnf("⚠️ (auth,fail) %s: Tripcode secret quá dài (%d bytes) - Từ chối để chống trùng lặp.", clientIP, len(authPacket.Tripcode))
 		s.observeAuthErr(clientIP, ErrTripcodeTooLong)
 		return nil, fmt.Errorf("%w", ErrTripcodeTooLong)
 	}

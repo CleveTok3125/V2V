@@ -53,7 +53,7 @@ func getClientIP(r *http.Request) string {
 // guarded by rejectUntrustedProxy — report it through here, so a refused
 // request reads the same whichever endpoint it arrived on.
 func refuseUntrustedProxy(w http.ResponseWriter, r *http.Request, outcome trustedproxy.Outcome) {
-	logWarnf("⛔ [PROXY] Reject %s (%s): %s", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Reason, proxyHeadersForLog(r))
+	logWarnf("⛔ (proxy) Reject %s (%s): %s", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Reason, proxyHeadersForLog(r))
 	http.Error(w, "Untrusted proxy.", http.StatusForbidden)
 }
 
@@ -79,11 +79,11 @@ func initOnionTrust(dir string) ([]*net.IPNet, error) {
 	}
 	if len(warns) > 0 {
 		for _, w := range warns {
-			logWarnf("%s", w)
+			logWarnf("⚠️ (proxy) %s", w)
 		}
 		return nets, nil
 	}
-	logInfof("🧅 Onion: %d trusted hops from %s", len(nets), filepath.Join(dir, "onion.txt"))
+	logInfof("🧅 (onion) Onion: %d trusted hops from %s", len(nets), filepath.Join(dir, "onion.txt"))
 	return nets, nil
 }
 
@@ -96,21 +96,21 @@ func initProxyChain(dir string, names []string) (*trustedproxy.Chain, error) {
 	if err != nil {
 		return nil, err
 	}
-	logInfof("🛡️ Trusted proxy: providers=[%s]", strings.Join(info.Names, ","))
+	logInfof("🛡️ (proxy) Trusted proxy: providers=[%s]", strings.Join(info.Names, ","))
 	for _, e := range info.Entries {
 		if e.Missing {
-			logInfof("🛡️ Trusted proxy: %s: no file (%s), empty set", e.Name, e.Path)
+			logInfof("🛡️ (proxy) Trusted proxy: %s: no file (%s), empty set", e.Name, e.Path)
 		} else {
-			logInfof("🛡️ Trusted proxy: %s: %d ranges from %s", e.Name, e.Count, e.Path)
+			logInfof("🛡️ (proxy) Trusted proxy: %s: %d ranges from %s", e.Name, e.Count, e.Path)
 		}
 	}
 	if info.AllowsDirect {
-		logInfof("🛡️ Trusted proxy: direct connections allowed (WARN per connection)")
+		logInfof("🛡️ (proxy) Trusted proxy: direct connections allowed (WARN per connection)")
 	} else {
-		logInfof("🛡️ Trusted proxy: direct connections rejected (403)")
+		logInfof("🛡️ (proxy) Trusted proxy: direct connections rejected (403)")
 	}
 	for _, w := range warns {
-		logWarnf("%s", w)
+		logWarnf("⚠️ (proxy) %s", w)
 	}
 	return info.Chain, nil
 }

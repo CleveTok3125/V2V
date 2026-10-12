@@ -51,7 +51,7 @@ func passkeyDisabledForOnion(onion bool) bool {
 
 func IsSecuredConnect(w http.ResponseWriter, r *http.Request, outcome trustedproxy.Outcome) bool {
 	if !Cfg.Static.RequireTLS {
-		logWarnf("⚠️ Server đang không buộc sử dụng kết nối mã hoá")
+		logWarnf("⚠️ (security) Server đang không buộc sử dụng kết nối mã hoá")
 		return true
 	}
 
@@ -70,12 +70,12 @@ func IsSecuredConnect(w http.ResponseWriter, r *http.Request, outcome trustedpro
 
 	if isTLS || isProxyTLS || isLocalhost || isOnion {
 		if isOnion {
-			logInfof("🧅 Onion ingress accepted for %s (Tor transport encryption)", trustedproxy.Clip(r.Host, 200))
+			logInfof("🧅 (onion) Onion ingress accepted for %s (Tor transport encryption)", trustedproxy.Clip(r.Host, 200))
 		}
 		return true
 	}
 
-	logWarnf("⚠️ Khóa kết nối không an toàn từ %s (Policy: RequireTLS)", clientIP)
+	logWarnf("⚠️ (security) Khóa kết nối không an toàn từ %s (Policy: RequireTLS)", clientIP)
 	http.Error(w, "Server bắt buộc sử dụng kết nối mã hóa (wss://).", http.StatusUpgradeRequired)
 	return false
 }
@@ -88,7 +88,7 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 	}
 	clientIP := outcome.ClientIP
 	if outcome.Provider == "none" || outcome.Provider == "direct" {
-		logWarnf("⚠️ [PROXY] Direct connection from %s via %s (no proxy headers trusted)", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Provider)
+		logWarnf("⚠️ (proxy) Direct connection from %s via %s (no proxy headers trusted)", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Provider)
 	}
 	if s.Attack != nil {
 		s.Attack.noteAttempt(clientIP)
@@ -102,14 +102,14 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 			s.Behavior.SetBlocklisted(clientIP)
 		}
 		s.observeHTTP(clientIP, "join_ws", http.StatusForbidden)
-		logWarnf("⛔ [BLOCKLIST] Reject %s", trustedproxy.Clip(clientIP, 200))
+		logWarnf("⛔ (blocklist) Reject %s", trustedproxy.Clip(clientIP, 200))
 		http.Error(w, "Blocked.", http.StatusForbidden)
 		return
 	}
 
 	if Cfg.Static.RequireIPv4 && !isIPv4(clientIP) {
 		s.observeHTTP(clientIP, "join_ws", http.StatusForbidden)
-		logWarnf("⛔ [IPV6] Reject %s (REQUIRE_IPV4)", trustedproxy.Clip(clientIP, 200))
+		logWarnf("⛔ (network,ipv6) Reject %s (REQUIRE_IPV4)", trustedproxy.Clip(clientIP, 200))
 		http.Error(w, "IPv6 is not accepted here.", http.StatusForbidden)
 		return
 	}
@@ -156,12 +156,12 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 	// accepted join is recorded here rather than at disconnect.
 	s.observeHTTP(clientIP, "join_ws", http.StatusOK)
 
-	logInfof("🔌 New request | Client IP: %s | Proxy IP: %s | Via: %s trusted=%v | Upgrade: %s | %s\n", clientIP, r.RemoteAddr, outcome.Provider, outcome.Trusted, r.Header.Get("Upgrade"), proxyHeadersForLog(r))
+	logInfof("🔌 (request) New request | Client IP: %s | Proxy IP: %s | Via: %s trusted=%v | Upgrade: %s | %s\n", clientIP, r.RemoteAddr, outcome.Provider, outcome.Trusted, r.Header.Get("Upgrade"), proxyHeadersForLog(r))
 
 	conn, err := s.Upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.releaseInflight()
-		logErrorf("❌ Upgrade error: %v", err)
+		logErrorf("❌ (request) Upgrade error: %v", err)
 		return
 	}
 	defer conn.Close()
@@ -252,7 +252,7 @@ func (s *ChatServer) StartCleanupTasks() {
 func loadStaticConfig() (StaticConfig, error) {
 	cfg, warns, err := serverconfig.LoadStaticConfig(ServerRoot)
 	for _, w := range warns {
-		logWarnf("%s", w)
+		logWarnf("⚠️ (config) %s", w)
 	}
 	return cfg, err
 }
@@ -262,7 +262,7 @@ func loadStaticConfig() (StaticConfig, error) {
 func loadDynamicConfig() (DynamicConfig, error) {
 	cfg, warns, err := serverconfig.LoadDynamicConfig()
 	for _, w := range warns {
-		logWarnf("%s", w)
+		logWarnf("⚠️ (config) %s", w)
 	}
 	return cfg, err
 }
@@ -272,7 +272,7 @@ func loadDynamicConfig() (DynamicConfig, error) {
 func loadAbuseConfig() (serverconfig.AbuseConfig, error) {
 	cfg, warns, err := serverconfig.LoadAbuseConfig()
 	for _, w := range warns {
-		logWarnf("%s", w)
+		logWarnf("⚠️ (config) %s", w)
 	}
 	return cfg, err
 }
@@ -287,19 +287,19 @@ func ReloadDynamicConfig() {
 
 	newDynamic, err := loadDynamicConfig()
 	if err != nil {
-		logErrorf("❌ [HOT-RELOAD] Không thể nạp lại dynamic config: %v", err)
+		logErrorf("❌ (config,reload) Không thể nạp lại dynamic config: %v", err)
 		return
 	}
 
 	newAbuse, err := loadAbuseConfig()
 	if err != nil {
-		logErrorf("❌ [HOT-RELOAD] Không thể nạp lại abuse config: %v", err)
+		logErrorf("❌ (config,reload) Không thể nạp lại abuse config: %v", err)
 		return
 	}
 
 	Cfg.Dynamic.Store(&newDynamic)
 	Cfg.Abuse.Store(&newAbuse)
-	logInfo("🔄 [HOT-RELOAD] Đã cập nhật thành công các thông số logic!")
+	logInfo("🔄 (config,reload) Đã cập nhật thành công các thông số logic!")
 }
 
 func (s *ChatServer) WatchEnvFile() {
@@ -319,7 +319,7 @@ func (s *ChatServer) WatchEnvFile() {
 						lastModTime = info.ModTime()
 
 						ReloadDynamicConfig()
-						logWarnf("⚠️ Lưu ý: File %s vừa đổi. Nếu bạn sửa Static Config, vui lòng RESTART server!", p)
+						logWarnf("⚠️ (config) Lưu ý: File %s vừa đổi. Nếu bạn sửa Static Config, vui lòng RESTART server!", p)
 					}
 					break
 				}
@@ -344,12 +344,12 @@ func (s *ChatServer) WatchRolesFile() {
 
 					if info.ModTime().After(lastModTime) {
 						lastModTime = info.ModTime()
-						logInfof("🔄 [HOT-RELOAD] Phát hiện thay đổi trong %s, đang nạp lại roles...", p)
+						logInfof("🔄 (config,reload) Phát hiện thay đổi trong %s, đang nạp lại roles...", p)
 
 						// Runtime failures keep the old registry: only
 						// the boot path below is fatal.
 						if err := s.LoadRoles(); err != nil {
-							logErrorf("❌ [HOT-RELOAD LỖI] %v. Đang giữ nguyên Roles cũ!", err)
+							logErrorf("❌ (config,reload) %v. Đang giữ nguyên Roles cũ!", err)
 						}
 					}
 					break
@@ -366,7 +366,7 @@ func main() {
 
 	for _, p := range EnvFilePaths {
 		if err := godotenv.Load(p); err == nil {
-			logInfof("✅ Đã nạp cấu hình môi trường từ: %s", p)
+			logInfof("✅ (config) Đã nạp cấu hình môi trường từ: %s", p)
 			break
 		}
 	}
@@ -413,9 +413,9 @@ func main() {
 		log.Fatalf("❌ CRITICAL ERROR: blocklist: %v", err)
 	}
 	if blWarn != "" {
-		logWarnf("%s", blWarn)
+		logWarnf("⚠️ (blocklist) %s", blWarn)
 	} else {
-		logInfof("🛡️ Blocklist: %d nets from %s", len(blNets), Cfg.Static.BlocklistFile)
+		logInfof("🛡️ (blocklist) Blocklist: %d nets from %s", len(blNets), Cfg.Static.BlocklistFile)
 	}
 	chatApp.Blocklist = blNets
 
@@ -448,9 +448,9 @@ func main() {
 	mux.HandleFunc("/web/", chatApp.instrumentHTTP("web_static", func(w http.ResponseWriter, r *http.Request) {
 		if !webAllowed(r) {
 			if !Cfg.Static.WebEnabled {
-				logWarnf("⛔ [WEB] Chặn web client từ %s (WEB_ENABLED=false)", trustedproxy.Clip(r.Host, 200))
+				logWarnf("⛔ (web) Chặn web client từ %s (WEB_ENABLED=false)", trustedproxy.Clip(r.Host, 200))
 			} else {
-				logWarnf("⛔ [ONION] Chặn web client từ %s (ONION_ALLOW_WEB=false)", trustedproxy.Clip(r.Host, 200))
+				logWarnf("⛔ (onion) Chặn web client từ %s (ONION_ALLOW_WEB=false)", trustedproxy.Clip(r.Host, 200))
 			}
 			http.NotFound(w, r)
 			return
@@ -470,7 +470,7 @@ func main() {
 	}
 	mux.HandleFunc("/webauthn/enroll/begin", chatApp.instrumentHTTP("webauthn_begin", func(w http.ResponseWriter, r *http.Request) {
 		if !passkeyAllowed(r) {
-			logWarnf("⛔ [ONION] Chặn enroll từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))
+			logWarnf("⛔ (onion) Chặn enroll từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))
 			http.NotFound(w, r)
 			return
 		}
@@ -481,7 +481,7 @@ func main() {
 	}))
 	mux.HandleFunc("/webauthn/enroll/finish", chatApp.instrumentHTTP("webauthn_finish", func(w http.ResponseWriter, r *http.Request) {
 		if !passkeyAllowed(r) {
-			logWarnf("⛔ [ONION] Chặn enroll từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))
+			logWarnf("⛔ (onion) Chặn enroll từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))
 			http.NotFound(w, r)
 			return
 		}
@@ -497,7 +497,7 @@ func main() {
 	// never trusted, and the ticket binds it to one live handshake.
 	mux.HandleFunc("/pair/submit", chatApp.instrumentHTTP("pair_submit", func(w http.ResponseWriter, r *http.Request) {
 		if !passkeyAllowed(r) {
-			logWarnf("⛔ [ONION] Chặn pair từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))
+			logWarnf("⛔ (onion) Chặn pair từ %s (ONION_ALLOW_PASSKEY=false)", trustedproxy.Clip(r.Host, 200))
 			http.NotFound(w, r)
 			return
 		}
@@ -599,13 +599,13 @@ func main() {
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 		<-ch
-		logInfo("🛑 Nhận tín hiệu dừng, đang flush history...")
+		logInfo("🛑 (shutdown) Nhận tín hiệu dừng, đang flush history...")
 		if chatApp.Chain.Store != nil {
 			_ = chatApp.Chain.Store.Close()
 		}
 		if chatApp.Behavior != nil {
 			if err := chatApp.Behavior.Save(); err != nil {
-				logWarnf("⚠️ behavior save: %v", err)
+				logWarnf("⚠️ (behavior) behavior save: %v", err)
 			}
 		}
 		os.Exit(0)
@@ -617,6 +617,6 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	logInfof("🚀 Server đang chạy tại port %v (version %s, instance %s)", Cfg.Static.Port, Version, Cfg.Static.Root)
+	logInfof("🚀 (boot) Server đang chạy tại port %v (version %s, instance %s)", Cfg.Static.Port, Version, Cfg.Static.Root)
 	log.Fatal(server.ListenAndServe())
 }

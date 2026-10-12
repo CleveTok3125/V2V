@@ -73,14 +73,14 @@ func (s *ChatServer) handlePairSubmit(w http.ResponseWriter, r *http.Request) {
 
 	cred, ok := s.WebAuthn.Credential(ticket.Role, sub.PasskeyID)
 	if !ok {
-		logWarnf("⚠️ [PAIR SUBMIT] %s: credential không thuộc role [%s]", clientIP, ticket.Role)
+		logWarnf("⚠️ (pair,submit) %s: credential không thuộc role [%s]", clientIP, ticket.Role)
 		s.notePairRejection(clientIP)
 		http.Error(w, "verification failed", http.StatusForbidden)
 		return
 	}
 	counter, verr := verifyAssertionLib(cred, sub.Ticket, sub.AuthData, sub.ClientData, sub.Sig, ticket.Role)
 	if verr != nil {
-		logErrorf("🚨 [PAIR SUBMIT] %s: %v", clientIP, verr)
+		logErrorf("🚨 (pair,submit) %s: %v", clientIP, verr)
 		s.notePairRejection(clientIP)
 		http.Error(w, "verification failed", http.StatusForbidden)
 		return
@@ -88,21 +88,21 @@ func (s *ChatServer) handlePairSubmit(w http.ResponseWriter, r *http.Request) {
 	// Same clone-detection rule as the web login: a counter that does not
 	// advance means the same authenticator answered twice, or a copy did.
 	if counter != 0 && cred.SignCount != 0 && counter <= cred.SignCount {
-		logErrorf("🚨 [PAIR SUBMIT] %s: counter không tăng (%d <= %d)", clientIP, counter, cred.SignCount)
+		logErrorf("🚨 (pair,submit) %s: counter không tăng (%d <= %d)", clientIP, counter, cred.SignCount)
 		s.notePairRejection(clientIP)
 		http.Error(w, "verification failed", http.StatusForbidden)
 		return
 	}
 	if counter != 0 {
 		if err := s.WebAuthn.UpdateSignCount(ticket.Role, cred.CredentialID, counter); err != nil {
-			logErrorf("🚨 [PAIR SUBMIT] %s: không lưu counter: %v", clientIP, err)
+			logErrorf("🚨 (pair,submit) %s: không lưu counter: %v", clientIP, err)
 			s.notePairRejection(clientIP)
 			http.Error(w, "verification failed", http.StatusForbidden)
 			return
 		}
 	}
 
-	logInfof("✅ [PAIR SUBMIT] %s xác thực được, role=[%s], ticket=%s…", clientIP, ticket.Role, strutil.Short(sub.Ticket))
+	logInfof("✅ (pair,submit) %s xác thực được, role=[%s], ticket=%s…", clientIP, ticket.Role, strutil.Short(sub.Ticket))
 	s.markPairVerified(sub.Ticket)
 	// Content-Type before the status: WriteHeader snapshots the header map,
 	// so setting it afterwards leaves the browser with text/plain.

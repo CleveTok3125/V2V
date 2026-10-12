@@ -450,10 +450,10 @@ func (s *ChatServer) attackSampler() {
 			ScaleW:    a.EffectiveScaleW(),
 		})
 		if st.Under && !wasUnder {
-			logErrorf("🚨 UNDER-ATTACK ENTER (scale=%.2f)", st.Scale)
+			logErrorf("🚨 (under_attack) UNDER-ATTACK ENTER (scale=%.2f)", st.Scale)
 		}
 		if !st.Under && wasUnder {
-			logInfof("✅ UNDER-ATTACK EXIT (quiet %v)", a.UnderAttackTTL)
+			logInfof("✅ (under_attack) UNDER-ATTACK EXIT (quiet %v)", a.UnderAttackTTL)
 		}
 		wasUnder = st.Under
 		if s.Gate != nil {

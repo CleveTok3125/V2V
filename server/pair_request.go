@@ -87,7 +87,7 @@ func (s *ChatServer) handlePairRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot issue a ticket", http.StatusInternalServerError)
 		return
 	}
-	logInfof("🔗 [PAIR] %s nhận vé ceremony cho role [%s], ticket=%s…", clientIP, req.Role, strutil.Short(ticket))
+	logInfof("🔗 (pair) %s nhận vé ceremony cho role [%s], ticket=%s…", clientIP, req.Role, strutil.Short(ticket))
 
 	// The ticket rides in the fragment, which a browser never puts in a
 	// request line, so it stays out of server and proxy logs.

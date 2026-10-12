@@ -211,9 +211,9 @@ func (s *WebAuthnStore) CreatePendingTicket(role, label string, ttl time.Duratio
 		return nil
 	})
 	if err == nil {
-		logInfof("🎫 [TICKET CREATED] code=%s… role=%s label=%q expires=%s", strutil.Short(code), role, label, time.Now().Add(ttl).Format(time.RFC3339))
+		logInfof("🎫 (ticket,created) code=%s… role=%s label=%q expires=%s", strutil.Short(code), role, label, time.Now().Add(ttl).Format(time.RFC3339))
 	} else {
-		logErrorf("❌ [TICKET CREATE FAILED] role=%s: %v", role, err)
+		logErrorf("❌ (ticket,create_failed) role=%s: %v", role, err)
 	}
 	return code, err
 }
@@ -237,9 +237,9 @@ func (s *WebAuthnStore) BindChallenge(code, challengeB64 string) (role string, e
 		return nil
 	})
 	if err != nil {
-		logErrorf("❌ [TICKET BIND] code=%s… failed: %v", strutil.Short(code), err)
+		logErrorf("❌ (ticket,bind) code=%s… failed: %v", strutil.Short(code), err)
 	} else {
-		logInfof("🔗 [TICKET BIND] code=%s… role=%s challenge=%s…", strutil.Short(code), role, strutil.Short(challengeB64))
+		logInfof("🔗 (ticket,bind) code=%s… role=%s challenge=%s…", strutil.Short(code), role, strutil.Short(challengeB64))
 	}
 	return role, err
 }
@@ -265,9 +265,9 @@ func (s *WebAuthnStore) CompleteEnrollment(code string, cred *WAStoredCred) erro
 		return nil
 	})
 	if err != nil {
-		logErrorf("❌ [ENROLL STORE] CompleteEnrollment code=%s… failed: %v", strutil.Short(code), err)
+		logErrorf("❌ (enroll,store) CompleteEnrollment code=%s… failed: %v", strutil.Short(code), err)
 	} else {
-		logInfof("✅ [ENROLL STORE] CompleteEnrollment code=%s… credential_id=%s… stored", strutil.Short(code), strutil.Short(cred.CredentialID))
+		logInfof("✅ (enroll,store) CompleteEnrollment code=%s… credential_id=%s… stored", strutil.Short(code), strutil.Short(cred.CredentialID))
 	}
 	return err
 }
@@ -302,7 +302,7 @@ func (s *WebAuthnStore) Credential(role, credentialID string) (*WAStoredCred, bo
 		// The caller only sees a failed login, which is the right answer to
 		// give a client. Without this line the operator cannot tell an
 		// unreachable store from a credential that does not exist.
-		logErrorf("🚨 [PASSKEY] không đọc được webauthn store khi tra credential cho role [%s]: %v", role, err)
+		logErrorf("🚨 (passkey) không đọc được webauthn store khi tra credential cho role [%s]: %v", role, err)
 		return nil, false
 	}
 	if out == nil {

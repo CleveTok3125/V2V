@@ -151,24 +151,24 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 				ReplyTo:     tripForChain.ReplyTo,
 			})
 			if err != nil {
-				logWarnf("⚠️ [HISTORY TAMPER] %s seq %d: %v", strutil.Short(tripForChain.Pub), tripForChain.Seq, err)
+				logWarnf("⚠️ (history,tamper) %s seq %d: %v", strutil.Short(tripForChain.Pub), tripForChain.Seq, err)
 				continue
 			}
 			// Success: derive newPrev via result. Malformed hex aborts
 			// the record instead of chaining zeros.
 			prevBytes, err := hex.DecodeString(tripForChain.Prev)
 			if err != nil {
-				logWarnf("⚠️ [HISTORY TAMPER] %s: bad prev hex: %v", strutil.Short(tripForChain.Pub), err)
+				logWarnf("⚠️ (history,tamper) %s: bad prev hex: %v", strutil.Short(tripForChain.Pub), err)
 				continue
 			}
 			sigBytes, err := hex.DecodeString(tripForChain.Sig)
 			if err != nil {
-				logWarnf("⚠️ [HISTORY TAMPER] %s: bad sig hex: %v", strutil.Short(tripForChain.Pub), err)
+				logWarnf("⚠️ (history,tamper) %s: bad sig hex: %v", strutil.Short(tripForChain.Pub), err)
 				continue
 			}
 			hashBytes, err := hex.DecodeString(tripForChain.MsgHash)
 			if err != nil {
-				logWarnf("⚠️ [HISTORY TAMPER] %s: bad msg_hash hex: %v", strutil.Short(tripForChain.Pub), err)
+				logWarnf("⚠️ (history,tamper) %s: bad msg_hash hex: %v", strutil.Short(tripForChain.Pub), err)
 				continue
 			}
 			h := sha256.New()
@@ -188,9 +188,9 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 			next, status := applyTripChain(tip, has, tripForChain.Seq, prevBytes, newPrev)
 			switch status {
 			case tripChainGap:
-				logWarnf("⛔ [TRIP CHAIN GAP] %s: seq %d follows %d — missing records, adopting tip", strutil.Short(tripForChain.Pub), tripForChain.Seq, tip.Seq)
+				logWarnf("⛔ (chain,gap) %s: seq %d follows %d — missing records, adopting tip", strutil.Short(tripForChain.Pub), tripForChain.Seq, tip.Seq)
 			case tripChainFork:
-				logWarnf("⛔ [TRIP CHAIN FORK] %s: seq %d prev does not continue seq %d, adopting tip", strutil.Short(tripForChain.Pub), tripForChain.Seq, tip.Seq)
+				logWarnf("⛔ (chain,fork) %s: seq %d prev does not continue seq %d, adopting tip", strutil.Short(tripForChain.Pub), tripForChain.Seq, tip.Seq)
 			}
 			if status != tripChainStale {
 				next.LastSeen = time.Now()
@@ -204,7 +204,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 
 	loggedCount := len(s.Chain.History)
 	if loggedCount > 0 {
-		logInfof("📚 Đã phục hồi %d tin nhắn history từ disk", loggedCount)
+		logInfof("📚 (history) Đã phục hồi %d tin nhắn history từ disk", loggedCount)
 	}
 
 	return nil
@@ -949,6 +949,6 @@ func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, mo
 		dropped++
 	}
 	if dropped > 0 {
-		logWarnf("⚠️ [REPLAY] Dropped %d/%d lines for slow peer (buffer full)", dropped, len(lines)+3)
+		logWarnf("⚠️ (history,replay) Dropped %d/%d lines for slow peer (buffer full)", dropped, len(lines)+3)
 	}
 }

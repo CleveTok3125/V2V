@@ -99,7 +99,7 @@ func (c *ChainService) initChainLocked(serverPub string) {
 			// Drop the anchor: a malformed line between the legacy tail
 			// and this record makes the cached anchor stale.
 			anchored = false
-			logWarnf("⛔ [CHAIN TAMPER] height %d: malformed link fields", wire.ChainHeight)
+			logWarnf("⛔ (chain,tamper) height %d: malformed link fields", wire.ChainHeight)
 			continue
 		}
 		expectPrev := tip
@@ -109,18 +109,18 @@ func (c *ChainService) initChainLocked(serverPub string) {
 		}
 		if prev != expectPrev || wire.ChainHeight != height+1 {
 			broken = true
-			logWarnf("⛔ [CHAIN TAMPER] height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
+			logWarnf("⛔ (chain,tamper) height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
 			tip, height = want, wire.ChainHeight
 			continue
 		}
 		if !chain.VerifyWire(prev, wire, want) {
 			broken = true
-			logWarnf("⛔ [CHAIN TAMPER] height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
+			logWarnf("⛔ (chain,tamper) height %d: link break, adopting tip anyway (chat stays up; clients holding older tips flag the fork)", wire.ChainHeight)
 		}
 		tip, height = want, wire.ChainHeight
 	}
 	if broken {
-		logWarnf("⛔ [CHAIN TAMPER] history failed verification on load; tip adopted, online clients detect forks via persisted tips")
+		logWarnf("⛔ (chain,tamper) history failed verification on load; tip adopted, online clients detect forks via persisted tips")
 	}
 	if anchored && height == 0 {
 		// Legacy-only log: the next message anchors to the last legacy

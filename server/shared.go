@@ -210,7 +210,7 @@ func NewChatServer() *ChatServer {
 	if _, err := rand.Read(salt); err != nil {
 		// The salt protects display-name anonymity; a predictable
 		// fallback must never be silent.
-		logWarnf("⚠️ [SECURITY] crypto/rand thất bại khi sinh DisplaySalt (%v); dùng fallback time-based — hash định danh tên hiển thị trở nên dự đoán được, có thể bị đối chiếu ngược", err)
+		logWarnf("⚠️ (security) crypto/rand thất bại khi sinh DisplaySalt (%v); dùng fallback time-based — hash định danh tên hiển thị trở nên dự đoán được, có thể bị đối chiếu ngược", err)
 		salt = []byte(time.Now().String())
 	}
 	s := &ChatServer{
@@ -244,7 +244,7 @@ func NewChatServer() *ChatServer {
 					}
 				}
 
-				logWarnf("⛔ [SECURITY] Chặn kết nối từ Origin không hợp lệ: %s", origin)
+				logWarnf("⛔ (security) Chặn kết nối từ Origin không hợp lệ: %s", origin)
 				return false
 			},
 		},
