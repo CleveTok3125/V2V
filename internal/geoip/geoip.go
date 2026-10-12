@@ -35,7 +35,7 @@ type Resolver struct {
 // nil resolver with a warning and no error.
 func Open(dir string) (*Resolver, []string, error) {
 	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
-		return nil, []string{fmt.Sprintf("geoip: %s missing; ASN/region grouping disabled", dir)}, nil
+		return nil, []string{fmt.Sprintf("%s missing; ASN/region grouping disabled", dir)}, nil
 	}
 	r := &Resolver{}
 	try := func(name string) (*geoip2.Reader, error) {
@@ -63,7 +63,7 @@ func Open(dir string) (*Resolver, []string, error) {
 		}
 	}
 	if r.asn == nil && r.geo == nil {
-		return nil, []string{fmt.Sprintf("geoip: no database in %s; ASN/region grouping disabled", dir)}, nil
+		return nil, []string{fmt.Sprintf("no database in %s; ASN/region grouping disabled", dir)}, nil
 	}
 	return r, nil, nil
 }

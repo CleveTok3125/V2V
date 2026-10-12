@@ -83,7 +83,7 @@ func initOnionTrust(dir string) ([]*net.IPNet, error) {
 		}
 		return nets, nil
 	}
-	logInfof("🧅 (config,onion) Onion: %d trusted hops from %s", len(nets), filepath.Join(dir, "onion.txt"))
+	logInfof("🧅 (config,onion) %d trusted hops from %s", len(nets), filepath.Join(dir, "onion.txt"))
 	return nets, nil
 }
 
@@ -96,18 +96,18 @@ func initProxyChain(dir string, names []string) (*trustedproxy.Chain, error) {
 	if err != nil {
 		return nil, err
 	}
-	logInfof("🛡️ (config,proxy) Trusted proxy: providers=[%s]", strings.Join(info.Names, ","))
+	logInfof("🛡️ (config,proxy) providers=[%s]", strings.Join(info.Names, ","))
 	for _, e := range info.Entries {
 		if e.Missing {
-			logInfof("🛡️ (config,proxy) Trusted proxy: %s: no file (%s), empty set", e.Name, e.Path)
+			logInfof("🛡️ (config,proxy) %s: no file (%s), empty set", e.Name, e.Path)
 		} else {
-			logInfof("🛡️ (config,proxy) Trusted proxy: %s: %d ranges from %s", e.Name, e.Count, e.Path)
+			logInfof("🛡️ (config,proxy) %s: %d ranges from %s", e.Name, e.Count, e.Path)
 		}
 	}
 	if info.AllowsDirect {
-		logInfof("🛡️ (config,proxy) Trusted proxy: direct connections allowed (WARN per connection)")
+		logInfof("🛡️ (config,proxy) direct connections allowed (WARN per connection)")
 	} else {
-		logInfof("🛡️ (config,proxy) Trusted proxy: direct connections rejected (403)")
+		logInfof("🛡️ (config,proxy) direct connections rejected (403)")
 	}
 	for _, w := range warns {
 		logWarnf("⚠️ (config,proxy) %s", w)

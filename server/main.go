@@ -69,7 +69,7 @@ func IsSecuredConnect(w http.ResponseWriter, r *http.Request, outcome trustedpro
 
 	if isTLS || isProxyTLS || isLocalhost || isOnion {
 		if isOnion {
-			logInfof("🧅 (onion,security) Onion ingress accepted for %s (Tor transport encryption)", trustedproxy.Clip(r.Host, 200))
+			logInfof("🧅 (onion,security) ingress accepted for %s (Tor transport encryption)", trustedproxy.Clip(r.Host, 200))
 		}
 		return true
 	}
@@ -385,7 +385,7 @@ func main() {
 	if Cfg.Static.OnionEnabled() {
 		onionTrust, err := initOnionTrust(Cfg.Static.TrustedProxyDir)
 		if err != nil {
-			logFatalf("❌ (config,fail,fatal,onion) onion trust: %v", err)
+			logFatalf("❌ (config,fail,fatal,onion) trust: %v", err)
 		}
 		Cfg.Static.Onion.Trust = onionTrust
 	}
@@ -409,19 +409,19 @@ func main() {
 	chatApp := NewChatServer()
 	blNets, blWarn, err := loadBlocklist(Cfg.Static.BlocklistFile)
 	if err != nil {
-		logFatalf("❌ (blocklist,config,fail,fatal) blocklist: %v", err)
+		logFatalf("❌ (blocklist,config,fail,fatal) %v", err)
 	}
 	if blWarn != "" {
 		logWarnf("⚠️ (blocklist) %s", blWarn)
 	} else {
-		logInfof("🛡️ (blocklist,config) Blocklist: %d nets from %s", len(blNets), Cfg.Static.BlocklistFile)
+		logInfof("🛡️ (blocklist,config) %d nets from %s", len(blNets), Cfg.Static.BlocklistFile)
 	}
 	chatApp.Blocklist = blNets
 
 	chatApp.Behavior, chatApp.Screener = initBehaviorEngines()
 	sid, err := LoadOrCreateServerIdentity(dataPath("server_identity.json"))
 	if err != nil {
-		logFatalf("❌ (config,fail,fatal,identity) cannot load server identity: %v", err)
+		logFatalf("❌ (config,fail,fatal,identity) cannot load: %v", err)
 	}
 	chatApp.ServerID = sid
 	if err := chatApp.InitHistoryStore(Cfg.Static.HistoryFilePath, Cfg.Static.MaxHistoryFileSizeMB); err != nil {
@@ -604,7 +604,7 @@ func main() {
 		}
 		if chatApp.Behavior != nil {
 			if err := chatApp.Behavior.Save(); err != nil {
-				logWarnf("⚠️ (behavior,fail) behavior save: %v", err)
+				logWarnf("⚠️ (behavior,fail) save: %v", err)
 			}
 		}
 		os.Exit(0)

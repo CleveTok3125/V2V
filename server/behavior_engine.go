@@ -42,12 +42,12 @@ func initBehaviorEngines() (*BehaviorEngine, *PowScreener) {
 		logGeoipWarnings(warns)
 		if r != nil {
 			geo = r
-			logInfof("🌍 (config,geoip) GeoIP enabled from %s", Cfg.Static.BehaviorGeoIPDir)
+			logInfof("🌍 (config,geoip) enabled from %s", Cfg.Static.BehaviorGeoIPDir)
 		}
 	}
 	eng := NewBehaviorEngine(behavior.NewStore(behaviorStoreCap), behavior.NewStats(), geo, Cfg.Static.BehaviorFilePath)
 	if err := eng.Load(); err != nil {
-		logFatalf("❌ (behavior,config,fail,fatal) behavior load: %v", err)
+		logFatalf("❌ (behavior,config,fail,fatal) load: %v", err)
 	}
 	return eng, NewPowScreener(eng)
 }

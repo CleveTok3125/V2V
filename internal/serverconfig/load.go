@@ -249,7 +249,7 @@ func LoadProxyChain(dir string, names []string) (*ProxyChainInfo, []string, erro
 	}
 	var warns []string
 	if extraWarn != "" {
-		warns = append(warns, fmt.Sprintf("Trusted proxy: %s", extraWarn))
+		warns = append(warns, extraWarn)
 	}
 	return &ProxyChainInfo{
 		Chain:        chain,
@@ -267,7 +267,7 @@ func LoadOnionTrust(dir string) ([]*net.IPNet, []string, error) {
 	set, err := trustedproxy.LoadTrustFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, []string{fmt.Sprintf("Onion: %s missing; only loopback hops accepted", path)}, nil
+			return nil, []string{fmt.Sprintf("%s missing; only loopback hops accepted", path)}, nil
 		}
 		return nil, nil, err
 	}
