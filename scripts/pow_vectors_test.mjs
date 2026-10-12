@@ -1,6 +1,6 @@
 // Cross-language parity test: read web/vectors.json and assert the
 // vendored @noble/hashes bundle produces the same argon2id key and PoW
-// nonce as Go (internal/pow). Run with `make test-web`.
+// nonce as Go (lib/pow). Run with `make test-web`.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

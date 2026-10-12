@@ -8,9 +8,9 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/CleveTok3125/V2V/internal/behavior"
-	"github.com/CleveTok3125/V2V/internal/guard"
 	"github.com/CleveTok3125/V2V/internal/serverconfig"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/guard"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 func slowServer(t *testing.T) *ChatServer {

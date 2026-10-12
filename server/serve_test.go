@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/config"
+	"github.com/CleveTok3125/V2V/lib/config"
 	"github.com/gorilla/websocket"
 
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // readLimitFor must never yield a negative limit (gorilla treats a

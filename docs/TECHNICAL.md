@@ -28,24 +28,29 @@ For a friendly getting-started guide, see [README.md](../README.md).
 
 ```
 .
-├── client/           # CLI and WASM client (shared Go code, platform-specific shims; render.go holds display helpers, client.go the session loop)
-├── server/           # WebSocket server, history, auth, WebAuthn
-├── internal/
-│   ├── identity/     # Shared key file logic (Load/Save, encryption)
-│   ├── filter/       # Injection filter (ValidateMessage / SanitizeForDisplay / SanitizeSingleLine)
+├── lib/              # Importable library: third-party clients may import this
+│   ├── wire/         # Single protocol source (TripMeta/WireMessage/AuthPacket/HistorySync); client/server alias these types, wire_test pins the JSON key set
+│   ├── chain/        # Global message hash chain (Hash/VerifyLink/genesis)
 │   ├── trip/         # Trip verification (Verify)
 │   ├── tripcolor/    # Badge color palette + CanonicalPayload
-│   ├── chain/        # Global message hash chain (Hash/VerifyLink/genesis)
-│   ├── wire/         # Single protocol source (TripMeta/WireMessage/AuthPacket/HistorySync); client/server alias these types, wire_test pins the JSON key set
-│   ├── strength/     # Shared zxcvbn policy (bands, weak gate, bit cap) for client + v2vctl
-│   ├── strutil/      # One-line log-truncation helper shared by the two package-main binaries
-│   ├── passprompt/   # Masked password entry + strength meter (uses tui line readers and TTY probes)
+│   ├── pow/          # Proof-of-work derivation shared by client, server and the wasm worker
+│   ├── filter/       # Injection filter (ValidateMessage / SanitizeForDisplay / SanitizeSingleLine)
 │   ├── guard/        # Pure send/rate/ban/tripcode policy (fully unit-tested)
+│   ├── identity/     # Shared key file logic (Load/Save, encryption)
 │   ├── config/       # Client/server config schema + defaults
+│   ├── configdir/    # XDG-aware default dirs
+│   ├── env/          # Typed environment helpers
+│   ├── strutil/      # One-line log-truncation helper shared by the package-main binaries
+│   └── markup/       # Forum markdown facade over codebg + linkify
+├── internal/         # Not importable outside this module
+│   ├── serverconfig/ # Server env/trust/abuse config loading + validation
 │   ├── trustedproxy/ # Explicit proxy chain (none/cloudflare/direct) + trust-file loading
-│   └── configdir/    # XDG-aware default dirs
-│   └── tui/          # General huh confirms/selects + piped fallbacks
-│   ├── markup/       # Forum markdown facade over codebg + linkify
+│   ├── behavior/     # Abuse scoring engine (features, groups, tiers)
+│   ├── geoip/        # MaxMind-format adapter for behavior grouping
+│   ├── tui/          # General huh confirms/selects + piped fallbacks
+│   ├── passprompt/   # Masked password entry + strength meter
+│   ├── strength/     # Shared zxcvbn policy (bands, weak gate, bit cap) for client + v2vctl
+│   ├── configmerge/  # Template-first config merge for v2vctl
 │   ├── linkify/      # URL → OSC8 hyperlink
 │   └── codebg/       # inline `code` + ``` blocks → background SGR + chroma highlight (display only)
 ├── webterm/          # Browser terminal (xterm.js + WASM glue)
@@ -117,10 +122,10 @@ One binary serves many instances: an instance is a directory holding `.env`, `co
 
 ## Client Configuration
 
-- Locations follow the OS (`internal/configdir`): config dir holds `key.json` + read-only `config.jsonc` (`~/.config/V2V/` Linux, `%AppData%\V2V` Windows, `~/Library/Application Support/V2V` macOS); cache dir holds `history.tmp`. Config is JSONC (`//` and `/* */` comments allowed, no trailing commas), never written by the app (missing file means in-memory defaults), and optionally passphrase-sealed with the identity envelope (`v2v --encrypt-config`, `V2V_PASSPHRASE` or TTY prompt to unlock).
+- Locations follow the OS (`lib/configdir`): config dir holds `key.json` + read-only `config.jsonc` (`~/.config/V2V/` Linux, `%AppData%\V2V` Windows, `~/Library/Application Support/V2V` macOS); cache dir holds `history.tmp`. Config is JSONC (`//` and `/* */` comments allowed, no trailing commas), never written by the app (missing file means in-memory defaults), and optionally passphrase-sealed with the identity envelope (`v2v --encrypt-config`, `V2V_PASSPHRASE` or TTY prompt to unlock).
 - Override with `-c/--config-dir` (`V2V_CONFIG_DIR`) and `-C/--cache-dir` (`V2V_CACHE_DIR`).
 - Identity flags: `-k` uses the default key in the config dir, `-K/--key-file <path>` uses an explicit path (old `v2v -k <path>` now errors). No key given means guest mode.
-- `template/client/config.jsonc` documents every group (`defaults`, `network`, `limits`, `guard`, `channels`, `crypto`, `ui`, `commands`, `timeouts`, `tabs`); `internal/config` loads it with `LoadOrCreate`.
+- `template/client/config.jsonc` documents every group (`defaults`, `network`, `limits`, `guard`, `channels`, `crypto`, `ui`, `commands`, `timeouts`, `tabs`); `lib/config` loads it with `LoadOrCreate`.
 - Partial files stay usable: missing `tabs`/`codeStyle` sections, numeric `limits`, and `ui.meta.show` are backfilled.
 - Sensitive fields (tripcode, passphrases, private keys) never go in `config.json` — they stay in encrypted `key.json`.
 - `ui.meta.show` (default true, `*bool` so absent ≠ false) toggles the trailing `#height:hash` line; `/meta` overrides it for the session only.
@@ -169,7 +174,7 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 ## Wire Protocol & History
 
 ### Live messages
-Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `internal/wire` alone; client and server alias it, and `wire_test` pins the exact key set so drift fails loudly instead of dropping fields silently:
+Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `lib/wire` alone; client and server alias it, and `wire_test` pins the exact key set so drift fails loudly instead of dropping fields silently:
 
 ```json
 {"type":"chat","time":"15:04","sent_at":"2026-09-27T03:27:45+07:00","displayName":"[Admin] Alice#ab12","text":"hello","tmp_id":7,"reply_to":3,"trip":{"pub":"...","seq":1,"prev":"...","sig":"...","server_pub":"...","msg_hash":"...","display_name":"...","tmp_id":7},"chain_prev":"...","chain_hash":"...","chain_height":1234}
@@ -204,7 +209,7 @@ Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `interna
 
 ## Message Chain
 
-Every chat and audit message links to the previous one (`internal/chain`, `server/chain.go`) — altering any byte of a linked message breaks the link and every link after it, with no per-user signing required. Join/leave/date notifications never link: they carry no authorship or ordering evidence.
+Every chat and audit message links to the previous one (`lib/chain`, `server/chain.go`) — altering any byte of a linked message breaks the link and every link after it, with no per-user signing required. Join/leave/date notifications never link: they carry no authorship or ordering evidence.
 
 - **Link:** `chain_hash = sha256("V2V-chain-v1" ‖ len-prefixed(prev, height, tmp_id, reply_to, type, time, displayName, text, tripSig))`, versioned by `chain_ver`.
 - Version 1 = pre-reply encoding without the replyTo segment, always 2 on new links; old records keep verifying.
@@ -225,7 +230,7 @@ Every chat and audit message links to the previous one (`internal/chain`, `serve
 ## Authentication
 
 ### Ed25519 (key file)
-- Key file `key.json` (`internal/identity/identity.go`) is a versioned container (`version:3`) with one `ed25519` slot.
+- Key file `key.json` (`lib/identity/identity.go`) is a versioned container (`version:3`) with one `ed25519` slot.
 - `Ed25519Identity` stores `role`, `private_key` (hex 128), `hmac_shield` (hex 32), `server_pubkey` (hex 64, from `data/server_identity.json`).
 - Handshake: server sends `auth_challenge {nonce, serverPubkey, serverSig}` where `serverSig = ed25519.Sign(serverPriv, "V2V-SERVER-v1\x00"+nonce+"\x00"+host)`.
 - Client verifies `serverSig` against `serverPubkey` pin (or `server_pubkey` in `key.json`), warns on mismatch, then signs `dataToSign = nonce|role|username|serverPub` with its private key.
@@ -335,7 +340,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - Colors come from a fixed 10-color `38;2` palette rotated by `sha256(badge)[0]`.
 
 ### Per-message
-- `msgHash = sha256(text)`, `payload = serverPub\x00seq\x00prev\x00msgHash\x00pub\x00displayName\x00tmpID\x00replyTo` (`internal/tripcolor.CanonicalPayload`), `sig = ed25519.Sign(priv, payload)`, `prev' = sha256(prev|sig|msgHash)`, `seq` strictly increasing per `pub` (enforced via `TripChains` per-pub mutex `TripChainsMu`).
+- `msgHash = sha256(text)`, `payload = serverPub\x00seq\x00prev\x00msgHash\x00pub\x00displayName\x00tmpID\x00replyTo` (`lib/tripcolor.CanonicalPayload`), `sig = ed25519.Sign(priv, payload)`, `prev' = sha256(prev|sig|msgHash)`, `seq` strictly increasing per `pub` (enforced via `TripChains` per-pub mutex `TripChainsMu`).
 
 ### Transport
 - `client/tripchain.go:TripMessage` JSON `{text,pub,seq,prev,sig,displayName,tmp_id}` via `WriteJSON`; server `ReadPump` parses it, validates `filter.ValidateMessage(text)`, checks `pub == session.TripPub`, checks `seq == last+1` and `prev == lastPrev`, verifies `msgHash` and `ed25519`, updates chain, stores `WireMessage{Text, TripMeta}`.
@@ -354,7 +359,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - Chain-level evidence (`hash`/`prev`/chain verdict) is deliberately absent from the page: the endpoint is stateless and carries no `text`, so it cannot recompute a link, and `raw` is left out because the page never inlines message content.
 - `height` and `sent_at` reach the page as query parameters and are covered by neither the trip signature nor the chain hash, so editing them in the URL cannot change the verdict. Their labels carry `không xác minh` to keep them from reading as evidence, unlike every other row.
 - Clicking the badge in the web terminal copies the verify URL and asks with a native `window.confirm` whether to open the verify page in a new tab; a blocked popup leaves the copied link as the fallback.
-- Every web-terminal link click is routed by hand: `v2v://expand/<height>` injects `/expand` into the line editor, a verify link takes the copy-and-confirm path above, and any remaining `http(s)` link asks a `window.confirm` that spells out the destination before opening a new tab. Nothing else reaches `window.open`, so a scheme crafted into a message can never be executed (`internal/filter.osc8TargetAllowed` already strips non-`http(s)` OSC8 targets; this is the second gate).
+- Every web-terminal link click is routed by hand: `v2v://expand/<height>` injects `/expand` into the line editor, a verify link takes the copy-and-confirm path above, and any remaining `http(s)` link asks a `window.confirm` that spells out the destination before opening a new tab. Nothing else reaches `window.open`, so a scheme crafted into a message can never be executed (`lib/filter.osc8TargetAllowed` already strips non-`http(s)` OSC8 targets; this is the second gate).
 - The page re-fetches the same URL with `Accept: application/json`, so curl/fetch behavior is unchanged.
 - `/copy <height>[:hash]` copies raw message text to the OS clipboard for pasting into the page (plaintext lives in the clipboard until auto-cleared or overwritten — any local app can read it).
 - Verify pages require HTTPS/localhost, and plain-HTTP shows a warning banner since pasted text could be intercepted in transit.
@@ -380,7 +385,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - Unmatched backticks, empty spans and text containing ESC pass through unchanged.
 - `codebg.RenderWithStyle` adds chroma syntax highlighting for fenced blocks with a known language tag (custom per-line SGR emitter, truecolor `38;2` foreground on the configured background, every line self-closed so tab buffers stay consistent).
 - Inline spans, untagged blocks, unknown languages and oversize blocks (>64KiB) fall back to the plain background.
-- Palette comes from `ui.codeStyle` in `config.json` (`background`, `keyword`, `string`, `comment`, `number`, `name`, `function`, `type`, `operator` as `[r,g,b]`; a `[0,0,0]` entry falls back to the compiled default), backfilled by `internal/config` like `tripPalette`.
+- Palette comes from `ui.codeStyle` in `config.json` (`background`, `keyword`, `string`, `comment`, `number`, `name`, `function`, `type`, `operator` as `[r,g,b]`; a `[0,0,0]` entry falls back to the compiled default), backfilled by `lib/config` like `tripPalette`.
 - Applied client-side after `SanitizeForDisplay` on incoming chat text; the sender placeholder echo keeps plain `Render` so highlight resets don't cancel its grey wrapper (line counts match either way).
 - Applied client-side after `SanitizeForDisplay` on incoming chat text and after `Linkify` on the sender placeholder echo (whole text rendered before splitting, so fence state survives across lines).
 
@@ -399,7 +404,7 @@ Paths below are relative to the instance root (`V2V_ROOT`, default `instances/de
 
 ## Security Model
 
-- **Injection:** All inbound `text` and `username` go through `internal/filter`.
+- **Injection:** All inbound `text` and `username` go through `lib/filter`.
 - `ValidateMessage` rejects `Cf/Mn/Me/Zl/Zp/0xFFFD/non-graphic`, `SanitizeForDisplay` keeps only whitelisted `SGR \x1b[...m` and OSC8 links (`\x1b]8;...;uri\x1b\\`) whose target is `http(s)` or the client-generated `v2v://expand/`; every other OSC (clipboard write, palette/color, kitty) is dropped, and an unterminated OSC drops the tail instead of leaking the link target.
 - Client double-filters before display, so a compromised server's tampered history cannot execute `ESC[2J` etc.
 - Server-controlled fields outside message `text` are sanitized at their render sink: `time`/`displayName`/`sent_at` through `SanitizeSingleLine`, free text (server host, auth error, dial response body, `--info` page) through `SanitizeForDisplay`, chain/trip hex only when it really is hex, and all trip-verify URL parameters percent-encoded. The same filter backs the WASM web client.
@@ -470,7 +475,7 @@ requires `?gate_pass=`/`X-V2V-Pass` when `POW_FIRST_CONNECT=always`, or
 only while under attack (`under-attack`, default). The gate check runs
 before the connection cooldown so a rejected pre-gate dial never stamps
 it. Challenge issuance is throttled per IP (2s, internal).
-- **PoW** (`internal/pow`): one argon2id (`t/m/p` per tier, memory-hard)
+- **PoW** (`lib/pow`): one argon2id (`t/m/p` per tier, memory-hard)
 plus a sha256 leading-zero search (`difficulty` bits), so the server
 verifies with one argon2id plus one hash. Presets come from
 `POW_P{n}_T/M/P/DIFF/EST_MS` (tier 0 = no PoW), clamped to `T1-10`,
@@ -542,7 +547,7 @@ Planned work grouped by dependency, in recommended order. Each item stays self-c
 
 - **Session surgery** — client split into display/chain/verify/pending groups with a fixed `Display -> Chain -> Pending` order (tip persist outside the lock, queue-only pending guards); server split into `ChainService` (tip, history, store) and `Hub` (presence and send ordering) with the lock order unchanged. — *DONE*
 - **Dependency arrows** — `markup` is the sole facade (`Style` alias, `DefaultStyle`, `NeedsContinuation`, `Linkify` passthroughs): `client` no longer imports `codebg`/`linkify` directly; `strength` owns its report type and `guard` takes a plain limits struct are done. — *DONE*
-- **Env/log/error unification** — typed getenv helper (`internal/env/env.go:20`) and leveled logging (`server/loglevel.go:10`) are done; the `%w` rule lives in [Error Handling](#error-handling). — *DONE*
+- **Env/log/error unification** — typed getenv helper (`lib/env/env.go:20`) and leveled logging (`server/loglevel.go:10`) are done; the `%w` rule lives in [Error Handling](#error-handling). — *DONE*
 
 ### Phase 1 — Evidence
 
@@ -563,6 +568,6 @@ Frontend (`server/blog/render.go`, `webterm/blog/cactus.css`) shipped; backend p
 ### Phase 3 — Hardening & Coverage
 
 - **Wasm and timing tests** — js-tagged client tests run under node (`make test-wasm`, `scripts/wasm_exec_runner.js`): wasm terminal line editing and the wasm proxy error path; production sleeps replaced by bounded waits (`sendWithRetry` waits up to 20ms for buffer space, `gracefulQuit` waits for pump exit with a 500ms cap). — *DONE*
-- **Client config encryption** — guard limits load from the v3 envelope (`internal/config/config.go:15,447`, `client/config_other.go:70`); passphrase flows reused. — *DONE*
+- **Client config encryption** — guard limits load from the v3 envelope (`lib/config/config.go:15,447`, `client/config_other.go:70`); passphrase flows reused. — *DONE*
 - **Blog docs** — `TECHNICAL.md` blog section + README EN+VI + E2E for the blog feature. — *BACKLOG*
 - **Relay mesh** — a lightweight distribution network outside the server: each relay connects to one server plus many relays, and each client connects to one server plus many relays (CDN-style reads). Writes go to the server only (relays are read-only); relays share one wire protocol subset, alert each other with the client as the consumer, and serve as backup sources the client verifies against known chain tips. Not a federation: no cross-server identity or routing, one server's content only. — *NOT DONE*

@@ -8,7 +8,7 @@ import (
 	"errors"
 	"syscall/js"
 
-	"github.com/CleveTok3125/V2V/internal/pow"
+	"github.com/CleveTok3125/V2V/lib/pow"
 )
 
 // callBridge invokes a window.v2v* bridge function that uses the

@@ -16,10 +16,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/filter"
-	"github.com/CleveTok3125/V2V/internal/markup"
-	"github.com/CleveTok3125/V2V/internal/trip"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/filter"
+	"github.com/CleveTok3125/V2V/lib/markup"
+	"github.com/CleveTok3125/V2V/lib/trip"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 func renderChatText(text string) string {

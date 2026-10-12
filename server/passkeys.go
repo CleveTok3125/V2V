@@ -17,7 +17,7 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 
-	"github.com/CleveTok3125/V2V/internal/env"
+	"github.com/CleveTok3125/V2V/lib/env"
 )
 
 type webauthnConfig struct {

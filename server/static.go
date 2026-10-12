@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/CleveTok3125/V2V/internal/env"
+	"github.com/CleveTok3125/V2V/lib/env"
 )
 
 // webtermDir is the directory holding the web assets, resolved once at

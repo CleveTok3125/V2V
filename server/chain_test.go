@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/chain"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/chain"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 func testChainCfg() func() {

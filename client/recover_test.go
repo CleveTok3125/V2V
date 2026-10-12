@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/chain"
-	"github.com/CleveTok3125/V2V/internal/config"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/chain"
+	"github.com/CleveTok3125/V2V/lib/config"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // captureConn records outbound frames for gap-recovery assertions.

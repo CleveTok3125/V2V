@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CleveTok3125/V2V/internal/filter"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/filter"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // TestParseHistoryBoundary: the replay state machine, the fork check and

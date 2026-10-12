@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/config"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/config"
+	"github.com/CleveTok3125/V2V/lib/wire"
 	"github.com/gorilla/websocket"
 )
 

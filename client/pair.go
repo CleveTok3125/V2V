@@ -15,7 +15,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/CleveTok3125/V2V/internal/filter"
+	"github.com/CleveTok3125/V2V/lib/filter"
 )
 
 // validateAuthFlags refuses a login that names two credentials. -P owns the

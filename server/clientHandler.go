@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/filter"
-	"github.com/CleveTok3125/V2V/internal/guard"
-	"github.com/CleveTok3125/V2V/internal/trip"
 	"github.com/CleveTok3125/V2V/internal/trustedproxy"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/filter"
+	"github.com/CleveTok3125/V2V/lib/guard"
+	"github.com/CleveTok3125/V2V/lib/trip"
+	"github.com/CleveTok3125/V2V/lib/wire"
 
 	"github.com/gorilla/websocket"
 )

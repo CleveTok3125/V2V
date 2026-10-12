@@ -83,7 +83,7 @@ import { gateFetch } from "./pow_bridge.js";
   // connecting, so the panel is the pre-connect surface for these; the live
   // session still owns them afterwards through /meta, /showjoin,
   // /autoverify, /notify.
-  // The notice taxonomy, mirroring internal/wire AllTags(): parents before
+  // The notice taxonomy, mirroring lib/wire AllTags(): parents before
   // children, so the panel reads as the tree and muting a node covers its
   // subtree. Keep the two in step; a Go test compares them.
   var NOTIFY_TAGS = [

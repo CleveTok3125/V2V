@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/CleveTok3125/V2V/internal/tripcolor"
+	"github.com/CleveTok3125/V2V/lib/tripcolor"
 )
 
 func signFixture(t *testing.T, tmpID uint64, replyTo uint64, legacy bool) (VerifyParams, []byte) {

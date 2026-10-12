@@ -6,7 +6,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/CleveTok3125/V2V/internal/filter"
+	"github.com/CleveTok3125/V2V/lib/filter"
 )
 
 // Limits carries the three send-gate numbers ValidateMessageForSend

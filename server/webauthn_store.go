@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/identity"
-	"github.com/CleveTok3125/V2V/internal/strutil"
+	"github.com/CleveTok3125/V2V/lib/identity"
+	"github.com/CleveTok3125/V2V/lib/strutil"
 )
 
 const (

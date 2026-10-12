@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/wire"
 
 	"github.com/alecthomas/kong"
 )
@@ -46,7 +46,7 @@ var CLI struct {
 	EncryptConfig bool `help:"Mã hóa config bằng passphrase" name:"encrypt-config"`
 }
 
-// Protocol schema lives in internal/wire (single source). Aliases keep
+// Protocol schema lives in lib/wire (single source). Aliases keep
 // every existing reference compiling while guaranteeing client and
 // server serialize identically.
 type (

@@ -10,7 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // TestBroadcastDateCarriesMachineDay: the banner a client draws is a

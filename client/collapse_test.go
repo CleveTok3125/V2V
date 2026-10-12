@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CleveTok3125/V2V/internal/config"
+	"github.com/CleveTok3125/V2V/lib/config"
 )
 
 func TestEstimateRows(t *testing.T) {

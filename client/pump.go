@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/filter"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/filter"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // Session read pump and async verify worker (moved from main).

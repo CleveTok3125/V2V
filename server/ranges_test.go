@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 func seedHeights(s *ChatServer, heights ...uint64) {

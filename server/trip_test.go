@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/tripcolor"
+	"github.com/CleveTok3125/V2V/lib/tripcolor"
 )
 
 func TestHistoryTripChainPersistenceAndTamper(t *testing.T) {

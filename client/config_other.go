@@ -10,12 +10,12 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/CleveTok3125/V2V/internal/config"
-	"github.com/CleveTok3125/V2V/internal/configdir"
-	"github.com/CleveTok3125/V2V/internal/env"
-	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/passprompt"
 	"github.com/CleveTok3125/V2V/internal/tui"
+	"github.com/CleveTok3125/V2V/lib/config"
+	"github.com/CleveTok3125/V2V/lib/configdir"
+	"github.com/CleveTok3125/V2V/lib/env"
+	"github.com/CleveTok3125/V2V/lib/identity"
 )
 
 var ClientCfg *config.ClientConfig

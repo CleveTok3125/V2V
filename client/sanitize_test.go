@@ -2,7 +2,7 @@ package main
 
 // Hardening tests: server-controlled fields must never carry terminal
 // escape sequences into the rendered output. The shared string filter
-// (internal/filter) is covered by its own tests; these pin the client
+// (lib/filter) is covered by its own tests; these pin the client
 // call sites that compose raw fields with client-generated SGR/OSC8.
 
 import (
@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/chain"
-	"github.com/CleveTok3125/V2V/internal/config"
+	"github.com/CleveTok3125/V2V/lib/chain"
+	"github.com/CleveTok3125/V2V/lib/config"
 	"github.com/gorilla/websocket"
 )
 

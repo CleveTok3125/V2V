@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/chain"
+	"github.com/CleveTok3125/V2V/lib/chain"
 )
 
 // pumpFeedConn is a fake wsConn that replays queued frames, then parks

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // Session input-loop dispatch (moved from main).

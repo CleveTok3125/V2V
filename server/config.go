@@ -5,9 +5,9 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/CleveTok3125/V2V/internal/config"
-	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/serverconfig"
+	"github.com/CleveTok3125/V2V/lib/config"
+	"github.com/CleveTok3125/V2V/lib/env"
 )
 
 // StaticConfig and OnionConfig are aliases of the shared loader types so

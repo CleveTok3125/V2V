@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/CleveTok3125/V2V/internal/config"
-	"github.com/CleveTok3125/V2V/internal/env"
 	"github.com/CleveTok3125/V2V/internal/trustedproxy"
+	"github.com/CleveTok3125/V2V/lib/config"
+	"github.com/CleveTok3125/V2V/lib/env"
 )
 
 // History disk-lookup tiers for on-demand older segments beyond RAM,

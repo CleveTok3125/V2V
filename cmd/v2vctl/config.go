@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/CleveTok3125/V2V/internal/configdir"
 	"github.com/CleveTok3125/V2V/internal/configmerge"
-	"github.com/CleveTok3125/V2V/internal/identity"
 	"github.com/CleveTok3125/V2V/internal/serverconfig"
+	"github.com/CleveTok3125/V2V/lib/configdir"
+	"github.com/CleveTok3125/V2V/lib/identity"
 	"github.com/joho/godotenv"
 	"github.com/pmezard/go-difflib/difflib"
 )

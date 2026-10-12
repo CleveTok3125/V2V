@@ -5,7 +5,7 @@
 // verifies cheaply with one argon2id plus one hash; difficulty tunes
 // solving cost without touching the memory-hard part.
 //
-// Preset bounds mirror internal/identity argon2 clamps (Time 1-10,
+// Preset bounds mirror lib/identity argon2 clamps (Time 1-10,
 // Memory 8MiB-256MiB in KiB, Threads 1-8); wasm forces Threads=1. The
 // concrete ladder lives in config, never here.
 package pow

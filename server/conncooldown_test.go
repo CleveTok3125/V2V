@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/guard"
+	"github.com/CleveTok3125/V2V/lib/guard"
 )
 
 // retryAfterSeconds reads the header and returns it as a number, failing the

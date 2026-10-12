@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/chain"
-	"github.com/CleveTok3125/V2V/internal/tripcolor"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/chain"
+	"github.com/CleveTok3125/V2V/lib/tripcolor"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // chainedTripWire wraps a trip meta in a valid v2 chained wire for tests.

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/guard"
-	"github.com/CleveTok3125/V2V/internal/tripcolor"
+	"github.com/CleveTok3125/V2V/lib/guard"
+	"github.com/CleveTok3125/V2V/lib/tripcolor"
 )
 
 var guardTripCooldown = guard.NewCooldownMap()

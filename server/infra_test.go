@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/env"
+	"github.com/CleveTok3125/V2V/lib/env"
 )
 
 // Env loader must parse ints/durations/bools and surface errors on

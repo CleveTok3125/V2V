@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/strutil"
+	"github.com/CleveTok3125/V2V/lib/strutil"
 )
 
 // Session carries the chat session state shared by the read pump, the

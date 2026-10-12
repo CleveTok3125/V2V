@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/identity"
+	"github.com/CleveTok3125/V2V/lib/identity"
 )
 
 // helper to run in temp dir with chdir

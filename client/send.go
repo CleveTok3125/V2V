@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/filter"
-	"github.com/CleveTok3125/V2V/internal/guard"
-	"github.com/CleveTok3125/V2V/internal/markup"
-	"github.com/CleveTok3125/V2V/internal/tripcolor"
+	"github.com/CleveTok3125/V2V/lib/filter"
+	"github.com/CleveTok3125/V2V/lib/guard"
+	"github.com/CleveTok3125/V2V/lib/markup"
+	"github.com/CleveTok3125/V2V/lib/tripcolor"
 )
 
 // Session send path (moved from main).

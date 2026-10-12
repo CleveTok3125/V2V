@@ -11,8 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/CleveTok3125/V2V/internal/guard"
-	"github.com/CleveTok3125/V2V/internal/strutil"
+	"github.com/CleveTok3125/V2V/lib/guard"
+	"github.com/CleveTok3125/V2V/lib/strutil"
 	"net/http"
 	"time"
 )

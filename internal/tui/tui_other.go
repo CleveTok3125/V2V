@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/huh"
 	xterm "github.com/charmbracelet/x/term"
 
-	"github.com/CleveTok3125/V2V/internal/env"
+	"github.com/CleveTok3125/V2V/lib/env"
 )
 
 // Interactive reports whether stdin is a real terminal. Stdin-reading

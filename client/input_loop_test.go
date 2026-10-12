@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CleveTok3125/V2V/internal/config"
+	"github.com/CleveTok3125/V2V/lib/config"
 )
 
 // Input-loop smoke coverage: dispatch routing, reply one-shot targets,

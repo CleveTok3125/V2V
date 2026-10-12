@@ -14,7 +14,7 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // Domain separators keep each use in its own hash domain.

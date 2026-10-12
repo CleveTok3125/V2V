@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/pow"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/pow"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // Client proof-of-work: pre-connect join gate and in-chat screening.

@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/CleveTok3125/V2V/internal/identity"
+	"github.com/CleveTok3125/V2V/lib/identity"
 )
 
 // InstanceCmd manages per-environment instances: each is a directory under

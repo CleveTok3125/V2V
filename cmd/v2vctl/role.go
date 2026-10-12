@@ -8,7 +8,7 @@ import (
 	"strings"
 	"encoding/json"
 
-	"github.com/CleveTok3125/V2V/internal/identity"
+	"github.com/CleveTok3125/V2V/lib/identity"
 	"github.com/CleveTok3125/V2V/internal/tui"
 	"github.com/charmbracelet/huh"
 )

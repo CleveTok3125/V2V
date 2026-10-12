@@ -39,7 +39,7 @@ it — see [Compatibility](#compatibility).
 
 ## Tag tree
 
-Declared in `internal/wire/tags.go`; `AllTags()` returns it in tree order
+Declared in `lib/wire/tags.go`; `AllTags()` returns it in tree order
 and is what `/notify` and the web settings panel render.
 
 | Tag | Covers | Produced by |
@@ -238,7 +238,7 @@ of `web/app.ts` and compares it to `AllTags()`, so the two cannot drift.
 
 ## Adding a new tag
 
-1. Add the constant to `internal/wire/tags.go` and, if it has children or
+1. Add the constant to `lib/wire/tags.go` and, if it has children or
    a parent beyond the root, its position in `tagTree` — parents first,
    siblings stable.
 2. Add it to `NOTIFY_TAGS` in `web/app.ts` and re-run `make web-ts`, then

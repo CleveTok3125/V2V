@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/CleveTok3125/V2V/internal/identity"
+	"github.com/CleveTok3125/V2V/lib/identity"
 )
 
 func TestEncryptedCounterSaveStaysEncrypted(t *testing.T) {

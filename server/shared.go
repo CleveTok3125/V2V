@@ -10,9 +10,9 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/CleveTok3125/V2V/internal/env"
-	"github.com/CleveTok3125/V2V/internal/guard"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/env"
+	"github.com/CleveTok3125/V2V/lib/guard"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 type Identity struct {
@@ -63,7 +63,7 @@ type TripChain struct {
 	LastSeen time.Time
 }
 
-// Protocol schema lives in internal/wire (single source). Aliases keep
+// Protocol schema lives in lib/wire (single source). Aliases keep
 // every existing reference compiling while guaranteeing client and
 // server serialize identically.
 type (

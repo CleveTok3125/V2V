@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // dateBanner builds the wire the server publishes for a new day.

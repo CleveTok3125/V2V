@@ -12,8 +12,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/guard"
-	"github.com/CleveTok3125/V2V/internal/strutil"
+	"github.com/CleveTok3125/V2V/lib/guard"
+	"github.com/CleveTok3125/V2V/lib/strutil"
 )
 
 // pairRequestCooldown bounds how often one address may ask. A desktop asks

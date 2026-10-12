@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/chain"
+	"github.com/CleveTok3125/V2V/lib/chain"
 )
 
 // Global message chain ("blockchain-lite"): every broadcast message links

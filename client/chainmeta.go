@@ -16,11 +16,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/CleveTok3125/V2V/internal/chain"
-	"github.com/CleveTok3125/V2V/internal/filter"
-	"github.com/CleveTok3125/V2V/internal/trip"
-	"github.com/CleveTok3125/V2V/internal/tripcolor"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/chain"
+	"github.com/CleveTok3125/V2V/lib/filter"
+	"github.com/CleveTok3125/V2V/lib/trip"
+	"github.com/CleveTok3125/V2V/lib/tripcolor"
+	"github.com/CleveTok3125/V2V/lib/wire"
 	"github.com/charmbracelet/x/ansi"
 )
 

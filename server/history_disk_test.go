@@ -10,7 +10,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/CleveTok3125/V2V/internal/config"
+	"github.com/CleveTok3125/V2V/lib/config"
 )
 
 // heightsOf extracts chained heights from stored lines in order,

@@ -2,8 +2,8 @@
 // PoW + argon2 Web Worker. Runs the CPU-heavy crypto off the main
 // thread so the page (and the Go WASM client) never freeze. Uses the
 // vendored @noble/hashes bundle for argon2id and sha256; the password
-// for PoW is the fixed domain string, matching internal/pow.
-// Same domain separator as internal/pow.DeriveKey.
+// for PoW is the fixed domain string, matching lib/pow.
+// Same domain separator as lib/pow.DeriveKey.
 const POW_DOMAIN = "V2V-pow-v1";
 const nobleURL = "/web/vendor/noble.js";
 let noblePromise = null;

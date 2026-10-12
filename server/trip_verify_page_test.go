@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CleveTok3125/V2V/internal/tripcolor"
+	"github.com/CleveTok3125/V2V/lib/tripcolor"
 )
 
 // signedVerifyURL builds a fully valid /api/trip/verify query against srv.

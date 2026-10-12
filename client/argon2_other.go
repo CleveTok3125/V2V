@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/crypto/argon2"
 
-	"github.com/CleveTok3125/V2V/internal/pow"
+	"github.com/CleveTok3125/V2V/lib/pow"
 )
 
 // platformArgon2 runs argon2id in-process on the desktop/native build.

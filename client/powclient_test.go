@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/pow"
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/pow"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 func signTestOffer(t *testing.T, o wire.PowOffer) (string, string) {

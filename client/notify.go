@@ -3,7 +3,7 @@ package main
 import (
 	"strings"
 
-	"github.com/CleveTok3125/V2V/internal/wire"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // Notification gates: informational notices can be muted on screen with
@@ -14,7 +14,7 @@ import (
 // Gates are tag paths, the same vocabulary the server publishes, so muting
 // a node hides its whole subtree and a notice kind added later needs no new
 // switch. The constants that spelled the kinds out are gone; use the tags
-// from internal/wire.
+// from lib/wire.
 
 // NotifyState is the set of muted tag paths, adjustable at runtime.
 type NotifyState struct {

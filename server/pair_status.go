@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/guard"
+	"github.com/CleveTok3125/V2V/lib/guard"
 )
 
 // pairStatusCooldown bounds how often one address may poll. It sits below

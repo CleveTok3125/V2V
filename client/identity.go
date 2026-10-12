@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/CleveTok3125/V2V/internal/env"
-	"github.com/CleveTok3125/V2V/internal/identity"
+	"github.com/CleveTok3125/V2V/lib/env"
+	"github.com/CleveTok3125/V2V/lib/identity"
 
 	"github.com/CleveTok3125/V2V/internal/passprompt"
 	"github.com/CleveTok3125/V2V/internal/tui"

@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"runtime"
 
-	"github.com/CleveTok3125/V2V/internal/identity"
-	"github.com/CleveTok3125/V2V/internal/tripcolor"
+	"github.com/CleveTok3125/V2V/lib/identity"
+	"github.com/CleveTok3125/V2V/lib/tripcolor"
 )
 
 // deriveTripKey derives an ed25519 keypair from passphrase + serverPub hex.

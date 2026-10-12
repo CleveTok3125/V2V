@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CleveTok3125/V2V/internal/pow"
+	"github.com/CleveTok3125/V2V/lib/pow"
 )
 
 var testGatePreset = pow.Preset{Time: 1, Memory: 8 * 1024, Threads: 1, Difficulty: 8}
