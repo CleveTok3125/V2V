@@ -21,12 +21,12 @@ func LoadOrCreateServerIdentity(path string) (*ServerIdentity, error) {
 				if err2 == nil && len(pub) == ed25519.PublicKeySize {
 					privKey := ed25519.PrivateKey(priv)
 					if pub != nil && string(pub) == string(privKey.Public().(ed25519.PublicKey)) {
-						logInfof("🔑 (identity) Đã nạp Server identity từ %s (pub %s…)", path, s.PublicKey[:16])
+						logInfof("🔑 (config,identity) Đã nạp Server identity từ %s (pub %s…)", path, s.PublicKey[:16])
 						return &s, nil
 					}
 				}
 			}
-			logWarnf("⚠️ (identity) Server identity file %s không hợp lệ, tạo mới", path)
+			logWarnf("⚠️ (identity,created,fail) Server identity file %s không hợp lệ, tạo mới", path)
 		}
 	}
 	// Create new
@@ -48,7 +48,7 @@ func LoadOrCreateServerIdentity(path string) (*ServerIdentity, error) {
 	if err := os.Rename(tmp, path); err != nil {
 		return nil, err
 	}
-	logInfof("🔑 (identity) Đã tạo Server identity mới tại %s (pub %s…)", path, s.PublicKey[:16])
+	logInfof("🔑 (identity,created) Đã tạo Server identity mới tại %s (pub %s…)", path, s.PublicKey[:16])
 	// Also print for admin to pin in key files
 	fmt.Printf("🔑 Server public key (để pin trong key.json): %s\n", s.PublicKey)
 	return s, nil

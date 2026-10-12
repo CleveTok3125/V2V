@@ -97,21 +97,21 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.WebAuthn.PruneExpired()
-	logInfof("🔐 (enroll,begin) ticket=%s… from=%s", strutil.Short(code), getClientIP(r))
+	logInfof("🔐 (begin,enroll,ticket) ticket=%s… from=%s", strutil.Short(code), getClientIP(r))
 
 	challenge, err := randomB64url(32)
 	if err != nil {
-		logErrorf("❌ (enroll,begin) ticket=%s… entropy error: %v", strutil.Short(code), err)
+		logErrorf("❌ (begin,enroll,fail) ticket=%s… entropy error: %v", strutil.Short(code), err)
 		http.Error(w, "entropy error", http.StatusInternalServerError)
 		return
 	}
 	role, err := s.WebAuthn.BindChallenge(code, challenge)
 	if err != nil {
-		logErrorf("❌ (enroll,begin) ticket=%s… bind failed: %v", strutil.Short(code), err)
+		logErrorf("❌ (begin,enroll,fail,ticket) ticket=%s… bind failed: %v", strutil.Short(code), err)
 		enrollFailure(w, err)
 		return
 	}
-	logInfof("✅ (enroll,begin) ticket=%s… role=%s challenge=%s…", strutil.Short(code), role, strutil.Short(challenge))
+	logInfof("✅ (begin,enroll,ticket) ticket=%s… role=%s challenge=%s…", strutil.Short(code), role, strutil.Short(challenge))
 	userID, _ := randomB64url(16)
 
 	requireResidentKey := true
@@ -169,27 +169,27 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 	}
 	var req finishRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&req); err != nil {
-		logErrorf("❌ (enroll,finish) bad payload from %s: %v", r.RemoteAddr, err)
+		logErrorf("❌ (enroll,fail,finish) bad payload from %s: %v", r.RemoteAddr, err)
 		http.Error(w, "bad payload", http.StatusBadRequest)
 		return
 	}
 	if req.Ticket == "" || req.ID == "" || req.ClientDataJSON == "" || req.AttestationObject == "" {
-		logErrorf("❌ (enroll,finish) ticket=%s… missing fields (id=%q)", strutil.Short(req.Ticket), req.ID)
+		logErrorf("❌ (enroll,fail,finish,ticket) ticket=%s… missing fields (id=%q)", strutil.Short(req.Ticket), req.ID)
 		http.Error(w, "missing fields", http.StatusBadRequest)
 		return
 	}
 
-	logInfof("🔐 (enroll,finish) ticket=%s… id=%s… from=%s", strutil.Short(req.Ticket), strutil.Short(req.ID), r.RemoteAddr)
+	logInfof("🔐 (enroll,finish,ticket) ticket=%s… id=%s… from=%s", strutil.Short(req.Ticket), strutil.Short(req.ID), r.RemoteAddr)
 	_, boundChallenge, err := s.WebAuthn.PendingInfo(req.Ticket)
 	if err != nil {
-		logErrorf("❌ (enroll,finish) ticket=%s… pending lookup failed: %v", strutil.Short(req.Ticket), err)
+		logErrorf("❌ (enroll,fail,finish,ticket) ticket=%s… pending lookup failed: %v", strutil.Short(req.Ticket), err)
 		enrollFailure(w, err)
 		return
 	}
-	logInfof("🔍 (enroll,finish) ticket=%s… boundChallenge=%s…", strutil.Short(req.Ticket), strutil.Short(boundChallenge))
+	logInfof("🔍 (enroll,finish,ticket) ticket=%s… boundChallenge=%s…", strutil.Short(req.Ticket), strutil.Short(boundChallenge))
 	created, err := parseCreationLib(req.ClientDataJSON, req.AttestationObject, boundChallenge, req.ID)
 	if err != nil {
-		logErrorf("❌ (enroll,finish) ticket=%s… parse failed: %v", strutil.Short(req.Ticket), err)
+		logErrorf("❌ (enroll,fail,finish,ticket) ticket=%s… parse failed: %v", strutil.Short(req.Ticket), err)
 		enrollFailure(w, err)
 		return
 	}
@@ -204,11 +204,11 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 		BackupState:    created.BackupState,
 	})
 	if err != nil {
-		logErrorf("❌ (enroll,finish) ticket=%s… store failed: %v", strutil.Short(req.Ticket), err)
+		logErrorf("❌ (enroll,fail,finish,ticket) ticket=%s… store failed: %v", strutil.Short(req.Ticket), err)
 		enrollFailure(w, err)
 		return
 	}
-	logInfof("✅ (enroll,finish) ticket=%s… stored credential_id=%s…", strutil.Short(req.Ticket), strutil.Short(created.CredentialID))
+	logInfof("✅ (enroll,finish,store,success) ticket=%s… stored credential_id=%s…", strutil.Short(req.Ticket), strutil.Short(created.CredentialID))
 	writeJSON(w, map[string]any{"ok": true, "credential_id": created.CredentialID})
 }
 

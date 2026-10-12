@@ -52,7 +52,7 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 	clientIP := getClientIP(r)
 	// Use shared CooldownMap via guard logic (200ms)
 	if !guardTripCooldown.Allow(clientIP, 200*time.Millisecond) {
-		logWarnf("⛔ (verify,rate) %s bị hạn chế", clientIP)
+		logWarnf("⛔ (limit,rate,verify) %s bị hạn chế", clientIP)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]any{"valid": false, "error": "rate limited, slow down"})
@@ -69,7 +69,7 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(data)
 			return
 		}
-		logWarnf("⚠️ (verify,page) %s missing, falling back to JSON", verifyPagePath())
+		logWarnf("⚠️ (config,page,verify) %s missing, falling back to JSON", verifyPagePath())
 	}
 
 	pubHex := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("pub")))

@@ -297,13 +297,13 @@ func (s *ChatServer) behaviorTick(now time.Time, lastSave, lastStats *time.Time)
 			s.Behavior.Prune(now, ret, ret[0])
 		}
 		if err := s.Behavior.Save(); err != nil {
-			logWarnf("⚠️ (behavior) save: %v", err)
+			logWarnf("⚠️ (behavior,fail) save: %v", err)
 		}
 		*lastSave = now
 	}
 	if bc.StatsEnabled && now.Sub(*lastStats) >= bc.StatsWindow {
 		if err := s.Behavior.SnapshotStats(s.Behavior.file+".stats", now); err != nil {
-			logWarnf("⚠️ (behavior) stats: %v", err)
+			logWarnf("⚠️ (behavior,fail) stats: %v", err)
 		}
 		*lastStats = now
 	}

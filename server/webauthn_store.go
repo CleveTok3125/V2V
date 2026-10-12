@@ -213,7 +213,7 @@ func (s *WebAuthnStore) CreatePendingTicket(role, label string, ttl time.Duratio
 	if err == nil {
 		logInfof("🎫 (ticket,created) code=%s… role=%s label=%q expires=%s", strutil.Short(code), role, label, time.Now().Add(ttl).Format(time.RFC3339))
 	} else {
-		logErrorf("❌ (ticket,create_failed) role=%s: %v", role, err)
+		logErrorf("❌ (ticket,create_failed,fail) role=%s: %v", role, err)
 	}
 	return code, err
 }
@@ -237,7 +237,7 @@ func (s *WebAuthnStore) BindChallenge(code, challengeB64 string) (role string, e
 		return nil
 	})
 	if err != nil {
-		logErrorf("❌ (ticket,bind) code=%s… failed: %v", strutil.Short(code), err)
+		logErrorf("❌ (ticket,bind,fail) code=%s… failed: %v", strutil.Short(code), err)
 	} else {
 		logInfof("🔗 (ticket,bind) code=%s… role=%s challenge=%s…", strutil.Short(code), role, strutil.Short(challengeB64))
 	}
@@ -265,9 +265,9 @@ func (s *WebAuthnStore) CompleteEnrollment(code string, cred *WAStoredCred) erro
 		return nil
 	})
 	if err != nil {
-		logErrorf("❌ (enroll,store) CompleteEnrollment code=%s… failed: %v", strutil.Short(code), err)
+		logErrorf("❌ (enroll,fail,store) CompleteEnrollment code=%s… failed: %v", strutil.Short(code), err)
 	} else {
-		logInfof("✅ (enroll,store) CompleteEnrollment code=%s… credential_id=%s… stored", strutil.Short(code), strutil.Short(cred.CredentialID))
+		logInfof("✅ (enroll,store,success) CompleteEnrollment code=%s… credential_id=%s… stored", strutil.Short(code), strutil.Short(cred.CredentialID))
 	}
 	return err
 }
@@ -302,7 +302,7 @@ func (s *WebAuthnStore) Credential(role, credentialID string) (*WAStoredCred, bo
 		// The caller only sees a failed login, which is the right answer to
 		// give a client. Without this line the operator cannot tell an
 		// unreachable store from a credential that does not exist.
-		logErrorf("🚨 (passkey) không đọc được webauthn store khi tra credential cho role [%s]: %v", role, err)
+		logErrorf("🚨 (passkey,store,fail) không đọc được webauthn store khi tra credential cho role [%s]: %v", role, err)
 		return nil, false
 	}
 	if out == nil {

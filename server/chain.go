@@ -120,7 +120,7 @@ func (c *ChainService) initChainLocked(serverPub string) {
 		tip, height = want, wire.ChainHeight
 	}
 	if broken {
-		logWarnf("⛔ (chain,tamper) history failed verification on load; tip adopted, online clients detect forks via persisted tips")
+		logWarnf("⛔ (chain,history,tamper) history failed verification on load; tip adopted, online clients detect forks via persisted tips")
 	}
 	if anchored && height == 0 {
 		// Legacy-only log: the next message anchors to the last legacy

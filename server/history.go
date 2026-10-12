@@ -188,9 +188,9 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 			next, status := applyTripChain(tip, has, tripForChain.Seq, prevBytes, newPrev)
 			switch status {
 			case tripChainGap:
-				logWarnf("⛔ (chain,gap) %s: seq %d follows %d — missing records, adopting tip", strutil.Short(tripForChain.Pub), tripForChain.Seq, tip.Seq)
+				logWarnf("⛔ (chain,gap,history) %s: seq %d follows %d — missing records, adopting tip", strutil.Short(tripForChain.Pub), tripForChain.Seq, tip.Seq)
 			case tripChainFork:
-				logWarnf("⛔ (chain,fork) %s: seq %d prev does not continue seq %d, adopting tip", strutil.Short(tripForChain.Pub), tripForChain.Seq, tip.Seq)
+				logWarnf("⛔ (chain,fork,history) %s: seq %d prev does not continue seq %d, adopting tip", strutil.Short(tripForChain.Pub), tripForChain.Seq, tip.Seq)
 			}
 			if status != tripChainStale {
 				next.LastSeen = time.Now()
@@ -949,6 +949,6 @@ func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, mo
 		dropped++
 	}
 	if dropped > 0 {
-		logWarnf("⚠️ (history,replay) Dropped %d/%d lines for slow peer (buffer full)", dropped, len(lines)+3)
+		logWarnf("⚠️ (history,limit,replay) Dropped %d/%d lines for slow peer (buffer full)", dropped, len(lines)+3)
 	}
 }

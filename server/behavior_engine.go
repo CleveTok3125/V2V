@@ -22,7 +22,7 @@ const behaviorStoreCap = 50000
 // no marker at all.
 func logGeoipWarnings(warns []string) {
 	for _, w := range warns {
-		logWarnf("⚠️ (geoip) %s", w)
+		logWarnf("⚠️ (config,geoip) %s", w)
 	}
 }
 
@@ -43,7 +43,7 @@ func initBehaviorEngines() (*BehaviorEngine, *PowScreener) {
 		logGeoipWarnings(warns)
 		if r != nil {
 			geo = r
-			logInfof("🌍 (geoip) GeoIP enabled from %s", Cfg.Static.BehaviorGeoIPDir)
+			logInfof("🌍 (config,geoip) GeoIP enabled from %s", Cfg.Static.BehaviorGeoIPDir)
 		}
 	}
 	eng := NewBehaviorEngine(behavior.NewStore(behaviorStoreCap), behavior.NewStats(), geo, Cfg.Static.BehaviorFilePath)
