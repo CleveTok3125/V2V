@@ -55,7 +55,7 @@ func (s *ChatServer) acquireIPConnection(w http.ResponseWriter, clientIP string)
 	dynCfg := Cfg.Dynamic.Load()
 
 	if s.IpCounts[clientIP] >= dynCfg.MaxConnectionsPerIP {
-		logWarnf("⛔ (ban,limit) Từ chối: %s đã vượt quá giới hạn %d kết nối.\n", clientIP, dynCfg.MaxConnectionsPerIP)
+		logWarnf("⛔ (ban,limit) Từ chối: %s đã vượt quá giới hạn %d kết nối.", clientIP, dynCfg.MaxConnectionsPerIP)
 		http.Error(w, "Bạn đã mở quá nhiều kết nối từ địa chỉ IP này.", http.StatusTooManyRequests)
 		return false
 	}
@@ -118,7 +118,7 @@ func (h *Hub) registerClient(session *ClientSession, clientIP string) {
 	h.CheckAndBroadcastDate(joinTime)
 
 	joinMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã tham gia phòng chat!", joinTime.Format("15:04"), session.DisplayName)
-	logInfof("🟢 (session,join) %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
+	logInfof("🟢 (session,join) %s %s (IP: %s)", session.DisplayName, session.Tripcode, clientIP)
 	// The joiner receives its own join too (nil sender): chain continuity
 	// requires every client to see every link; display gating (!showJoin)
 	// still hides it locally.
@@ -158,7 +158,7 @@ func (h *Hub) unregisterClient(session *ClientSession, clientIP string) {
 	h.CheckAndBroadcastDate(leaveTime)
 
 	leaveMsg := fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: %s đã rời phòng chat.", leaveTime.Format("15:04"), session.DisplayName)
-	logInfof("🔴 (session,leave) %s %s (IP: %s)\n", session.DisplayName, session.Tripcode, clientIP)
+	logInfof("🔴 (session,leave) %s %s (IP: %s)", session.DisplayName, session.Tripcode, clientIP)
 	h.BroadcastNotice(leaveMsg, []string{wire.TagLeave}, nil)
 }
 
@@ -279,7 +279,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				dynCfg := Cfg.Dynamic.Load()
 				if dynCfg.IdleChatTimeout > 0 && time.Since(lastChatActivity) >= dynCfg.IdleChatTimeout {
-					logInfof("⏱️ (session,idle_timeout) %s %s (IP: %s) bị ngắt do không chat trong %v.\n", session.DisplayName, session.Tripcode, clientIP, dynCfg.IdleChatTimeout)
+					logInfof("⏱️ (session,idle_timeout) %s %s (IP: %s) bị ngắt do không chat trong %v.", session.DisplayName, session.Tripcode, clientIP, dynCfg.IdleChatTimeout)
 				}
 			}
 			break

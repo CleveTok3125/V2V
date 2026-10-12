@@ -156,7 +156,7 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 	// accepted join is recorded here rather than at disconnect.
 	s.observeHTTP(clientIP, "join_ws", http.StatusOK)
 
-	logInfof("🔌 (proxy,request) New request | Client IP: %s | Proxy IP: %s | Via: %s trusted=%v | Upgrade: %s | %s\n", clientIP, r.RemoteAddr, outcome.Provider, outcome.Trusted, r.Header.Get("Upgrade"), proxyHeadersForLog(r))
+	logInfof("🔌 (proxy,request) New request | Client IP: %s | Proxy IP: %s | Via: %s trusted=%v | Upgrade: %s | %s", clientIP, r.RemoteAddr, outcome.Provider, outcome.Trusted, r.Header.Get("Upgrade"), proxyHeadersForLog(r))
 
 	conn, err := s.Upgrader.Upgrade(w, r, nil)
 	if err != nil {

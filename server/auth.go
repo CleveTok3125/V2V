@@ -449,7 +449,7 @@ func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string)
 		cooldown := Cfg.Dynamic.Load().ConnectionCooldown
 		if ok, _ := guard.CheckConnectionRate(now, rec, lastTime, cooldown); !ok {
 			s.LastConnectMu.Unlock()
-			logWarnf("⛔ (ban,limit) Từ chối: %s kết nối ra/vào quá nhanh.\n", clientIP)
+			logWarnf("⛔ (ban,limit) Từ chối: %s kết nối ra/vào quá nhanh.", clientIP)
 			setRetryAfter(w, cooldown-time.Since(lastTime))
 			http.Error(w, "Bạn thao tác ra/vào quá nhanh! Vui lòng đợi vài giây rồi thử lại.", http.StatusTooManyRequests)
 			return false
