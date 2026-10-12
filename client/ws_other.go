@@ -8,11 +8,13 @@ import (
 	"os"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/CleveTok3125/V2V/lib/clientcore"
 )
 
 // resolvedProxy caches the session proxy: the wizard must ask once
 // even though dialWS runs again on ws->wss retry.
-var resolvedProxy *proxyConfig
+var resolvedProxy *clientcore.ProxyConfig
 var proxyResolved bool
 var proxyResolveErr error
 
@@ -31,15 +33,15 @@ func dialWS(wsURL string) (wsConn, *http.Response, error) {
 		conn, resp, err := websocket.DefaultDialer.Dial(wsURL, headers)
 		return conn, resp, err
 	}
-	fmt.Printf("🔀 Proxy: %s\n", resolvedProxy.logString())
+	fmt.Printf("🔀 Proxy: %s\n", resolvedProxy.LogString())
 	if resolvedProxy.Scheme == "socks5" {
 		return dialSocks5WS(wsURL, headers, resolvedProxy)
 	}
 	d := *websocket.DefaultDialer
-	d.Proxy = http.ProxyURL(resolvedProxy.dialURL())
+	d.Proxy = http.ProxyURL(resolvedProxy.DialURL())
 	conn, resp, err := d.Dial(wsURL, headers)
 	if err == nil {
-		resolvedProxy.wipe()
+		resolvedProxy.Wipe()
 	}
 	return conn, resp, err
 }

@@ -10,10 +10,12 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/CleveTok3125/V2V/lib/clientcore"
 )
 
 // pinProxyCache sets the shared proxy resolution outcome for one test.
-func pinProxyCache(p *proxyConfig, err error) func() {
+func pinProxyCache(p *clientcore.ProxyConfig, err error) func() {
 	oldResolved, oldProxy, oldErr := proxyResolved, resolvedProxy, proxyResolveErr
 	proxyResolved, resolvedProxy, proxyResolveErr = true, p, err
 	return func() { proxyResolved, resolvedProxy, proxyResolveErr = oldResolved, oldProxy, oldErr }
@@ -34,7 +36,7 @@ func TestServerHTTPClientDirect(t *testing.T) {
 }
 
 func TestServerHTTPClientSocks(t *testing.T) {
-	defer pinProxyCache(&proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: 9050}, nil)()
+	defer pinProxyCache(&clientcore.ProxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: 9050}, nil)()
 	c, err := serverHTTPClient()
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +51,7 @@ func TestServerHTTPClientSocks(t *testing.T) {
 }
 
 func TestServerHTTPClientHTTPProxy(t *testing.T) {
-	defer pinProxyCache(&proxyConfig{Scheme: "http", Host: "127.0.0.1", Port: 8080}, nil)()
+	defer pinProxyCache(&clientcore.ProxyConfig{Scheme: "http", Host: "127.0.0.1", Port: 8080}, nil)()
 	c, err := serverHTTPClient()
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +175,7 @@ func TestVersionFetchViaSocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pinProxyCache(&proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, proxyPort)}, nil)()
+	defer pinProxyCache(&clientcore.ProxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, proxyPort)}, nil)()
 	c, err := serverHTTPClient()
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +216,7 @@ func TestServerInfoBodyViaSocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pinProxyCache(&proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, proxyPort)}, nil)()
+	defer pinProxyCache(&clientcore.ProxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, proxyPort)}, nil)()
 	c, err := serverHTTPClient()
 	if err != nil {
 		t.Fatal(err)
@@ -239,7 +241,7 @@ func TestVersionFetchViaSocksRefused(t *testing.T) {
 		_, _ = w.Write([]byte(`{"version":"s9"}`))
 	}))
 	defer srv.Close()
-	defer pinProxyCache(&proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: deadPort(t)}, nil)()
+	defer pinProxyCache(&clientcore.ProxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: deadPort(t)}, nil)()
 	c, err := serverHTTPClient()
 	if err != nil {
 		t.Fatal(err)

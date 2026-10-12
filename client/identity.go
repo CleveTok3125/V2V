@@ -1,13 +1,14 @@
 package main
 
-// Login-side glue over the shared identity package: encrypted key.json
-// unlock with hidden prompt and deep-link TTY fallback.
+// Login-side glue over the shared identity package: the client's Prompter
+// implementation, the remembered unlock secret, and the save path that uses
+// it. The unlock flow itself lives in lib/clientcore.
 
 import (
 	"fmt"
 	"os"
 
-	"github.com/CleveTok3125/V2V/lib/env"
+	"github.com/CleveTok3125/V2V/lib/clientcore"
 	"github.com/CleveTok3125/V2V/lib/identity"
 
 	"github.com/CleveTok3125/V2V/internal/passprompt"
@@ -20,54 +21,46 @@ type (
 	IdentityFile    = identity.IdentityFile
 )
 
-// LoadIdentityFile reads key.json, handling encrypted files (version 3).
-func LoadIdentityFile(path string) (*IdentityFile, error) {
-	if enc, _ := identity.IsEncrypted(path); enc {
-		if pass := env.Passphrase(); pass != "" {
-			// Env unlock only warns when weak: refusing here would
-			// lock out legitimate files. No personal context feeds
-			// this check; it still catches trivial secrets.
-			if AssessPassphrase(pass, nil).Weak {
-				fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
-			}
-			pw := []byte(pass)
-			pass = ""
-			defer identity.ZeroBytes(pw)
-			idf, err := identity.LoadEncrypted(path, pw)
-			if err != nil {
-				return nil, err
-			}
-			rememberLoadedPassphrase(pw)
-			return idf, nil
-		}
-		// Prompt for passphrase (hidden input). TTY sessions use the
-		// shared program; piped input keeps the legacy hidden reader.
-		var pass string
-		var err error
+// cliPrompter is the terminal Prompter: a hidden prompt on a TTY, and the
+// legacy plain reader when input is piped (CI).
+type cliPrompter struct{}
+
+func (cliPrompter) Secret(reason clientcore.SecretReason) (string, error) {
+	switch reason {
+	case clientcore.ReasonKeyFilePassphrase:
+		const title = "🔒 Nhập passphrase cho key file"
 		if tui.Interactive() {
-			pass, err = passprompt.Password(passprompt.PasswordOpts{
-				Title: "🔒 Nhập passphrase cho key file",
-			})
-		} else {
-			fmt.Print("🔒 Nhập passphrase cho key file: ")
-			// Try to use term.ReadPassword if available, fallback to plain
-			pass, err = readPassphrase()
-			fmt.Println()
+			return passprompt.Password(passprompt.PasswordOpts{Title: title})
 		}
-		if err != nil {
-			return nil, err
-		}
-		pw := []byte(pass)
-		pass = ""
-		defer identity.ZeroBytes(pw)
-		idf, err := identity.LoadEncrypted(path, pw)
-		if err != nil {
-			return nil, err
-		}
-		rememberLoadedPassphrase(pw)
-		return idf, nil
+		fmt.Print(title + ": ")
+		pass, err := readPassphrase()
+		fmt.Println()
+		return pass, err
+	default:
+		return "", fmt.Errorf("clientcore: unknown secret reason %d", reason)
 	}
-	return identity.Load(path)
+}
+
+// warnWeakPassphrase is the note the core cannot make: the strength policy
+// lives here.
+func warnWeakPassphrase(pass string) {
+	if AssessPassphrase(pass, nil).Weak {
+		fmt.Println("⚠️ V2V_PASSPHRASE yếu, cân nhắc đổi.")
+	}
+}
+
+// LoadIdentityFile reads key.json, handling encrypted files (version 3),
+// and keeps the unlock secret for later saves.
+func LoadIdentityFile(path string) (*IdentityFile, error) {
+	idf, pw, err := clientcore.LoadIdentityFile(path, cliPrompter{}, warnWeakPassphrase)
+	if err != nil {
+		return nil, err
+	}
+	if len(pw) != 0 {
+		rememberLoadedPassphrase(pw)
+		identity.ZeroBytes(pw)
+	}
+	return idf, nil
 }
 
 var loadedPassphrase []byte

@@ -1,8 +1,9 @@
 //go:build !js
 
-// Desktop-only: the wizard and resolve live in proxy_other.go, and TTY
-// branches need terminal detection.
 package main
+
+// Desktop-only: the wizard, the resolver and the SOCKS5 dialer live in
+// client/proxy_other.go; the parsing they build on lives in lib/clientcore.
 
 import (
 	"context"
@@ -13,75 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CleveTok3125/V2V/lib/clientcore"
 	"github.com/CleveTok3125/V2V/lib/identity"
 )
-
-func TestParseProxyURL(t *testing.T) {
-	cfg, err := parseProxyURL("socks5://127.0.0.1:1080")
-	if err != nil || cfg.Scheme != "socks5" || cfg.Host != "127.0.0.1" || cfg.Port != 1080 {
-		t.Errorf("socks5 = %+v, %v", cfg, err)
-	}
-	cfg, err = parseProxyURL("http://user:secret@proxy.local")
-	if err != nil || cfg.Port != 8080 || cfg.User != "user" || string(cfg.Pass) != "secret" {
-		t.Errorf("http default port/auth = %+v, %v", cfg, err)
-	}
-	cfg, err = parseProxyURL("socks5h://proxy.local:1080")
-	if err != nil || cfg.Scheme != "socks5" {
-		t.Errorf("socks5h alias = %+v, %v", cfg, err)
-	}
-	for _, raw := range []string{
-		"ftp://proxy.local:21",
-		"http://:8080",
-		"http://:secret@proxy.local:8080",
-		"http://proxy.local:99999",
-		"http://proxy.local:abc",
-		"://bad",
-		"",
-	} {
-		if _, err := parseProxyURL(raw); err == nil {
-			t.Errorf("parseProxyURL(%q) must fail", raw)
-		}
-	}
-}
-
-func TestParseProxyURLAuthMatrix(t *testing.T) {
-	cases := []struct {
-		raw      string
-		user     string
-		pass     string
-		hasPass  bool
-		failFast bool
-	}{
-		{"http://proxy.local:8080", "", "", false, false},
-		{"http://user@proxy.local:8080", "user", "", false, false},
-		{"http://user:pass@proxy.local:8080", "user", "pass", true, false},
-		{"http://user:@proxy.local:8080", "user", "", true, false},
-		{"http://:pass@proxy.local:8080", "", "", false, true},
-	}
-	for _, c := range cases {
-		cfg, err := parseProxyURL(c.raw)
-		if c.failFast {
-			if err == nil {
-				t.Errorf("parseProxyURL(%q) must fail fast", c.raw)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("parseProxyURL(%q): %v", c.raw, err)
-			continue
-		}
-		if cfg.User != c.user {
-			t.Errorf("parseProxyURL(%q) user = %q, want %q", c.raw, cfg.User, c.user)
-		}
-		if got := string(cfg.Pass); got != c.pass {
-			t.Errorf("parseProxyURL(%q) pass = %q, want %q", c.raw, got, c.pass)
-		}
-		if (cfg.Pass != nil) != c.hasPass {
-			t.Errorf("parseProxyURL(%q) pass presence = %v, want %v",
-				c.raw, cfg.Pass != nil, c.hasPass)
-		}
-	}
-}
 
 func TestResolveProxyPrecedence(t *testing.T) {
 	oldProxy, oldAsk := CLI.Proxy, CLI.AskProxy
@@ -103,33 +38,6 @@ func TestResolveProxyPrecedence(t *testing.T) {
 	if err != nil || cfg != nil {
 		t.Errorf("nothing set must resolve direct: %+v, %v", cfg, err)
 	}
-}
-
-func TestProxyLogStringMasksPassword(t *testing.T) {
-	s := (&proxyConfig{Scheme: "http", Host: "h", Port: 8080, User: "u", Pass: []byte("secret")}).logString()
-	if strings.Contains(s, "secret") || !strings.Contains(s, "u:***@h:8080") {
-		t.Errorf("password must be masked: %q", s)
-	}
-	s = (&proxyConfig{Scheme: "socks5", Host: "h", Port: 1080}).logString()
-	if s != "socks5://h:1080" {
-		t.Errorf("no-auth form: %q", s)
-	}
-}
-
-func TestProxyWipe(t *testing.T) {
-	cfg, err := parseProxyURL("http://u:p@h:8080")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.wipe()
-	if cfg.Pass != nil {
-		t.Error("wipe must drop the password bytes")
-	}
-	if cfg.User != "u" || cfg.Host != "h" {
-		t.Errorf("wipe must keep non-sensitive fields: %+v", cfg)
-	}
-	var nilCfg *proxyConfig
-	nilCfg.wipe() // must not panic
 }
 
 func TestPromptProxyConfig(t *testing.T) {
@@ -180,6 +88,7 @@ func TestPromptProxySchemePiped(t *testing.T) {
 
 // fakeSocks5Server speaks just enough server side for one handshake:
 // sends method/reply selections, records what the client sent.
+
 func fakeSocks5Server(t *testing.T, conn net.Conn, method byte, user, pass string, reply byte, got *[]byte) {
 	t.Helper()
 	defer conn.Close()
@@ -230,6 +139,7 @@ func fakeSocks5Server(t *testing.T, conn net.Conn, method byte, user, pass strin
 // dials target through it with the production x/net-based dialer. It
 // returns the client conn (nil plus the error on failure) and the raw
 // bytes the fake server saw, so tests assert the wire transcript.
+
 func dialViaFakeProxy(t *testing.T, method byte, user, pass string, reply byte, target, cfgUser string, cfgPass []byte) (net.Conn, []byte, error) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -251,7 +161,7 @@ func dialViaFakeProxy(t *testing.T, method byte, user, pass string, reply byte, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, port), User: cfgUser, Pass: cfgPass}
+	p := &clientcore.ProxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, port), User: cfgUser, Pass: cfgPass}
 	conn, err := socks5NetDialer(p)(context.Background(), "tcp", target)
 	<-done
 	if err != nil {
@@ -342,6 +252,7 @@ func TestSocks5HandshakeAuthFail(t *testing.T) {
 
 // TestDialSocks5WS_AuthFail: end-to-end dial against a proxy that
 // rejects the password must surface an error, not hang or proceed.
+
 func TestDialSocks5WS_AuthFail(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -361,7 +272,7 @@ func TestDialSocks5WS_AuthFail(t *testing.T) {
 		}
 	}()
 	_, port, _ := net.SplitHostPort(ln.Addr().String())
-	p := &proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, port), User: "u", Pass: []byte("WRONG")}
+	p := &clientcore.ProxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, port), User: "u", Pass: []byte("WRONG")}
 	if _, _, err := dialSocks5WS("ws://127.0.0.1:1/ws", http.Header{}, p); err == nil {
 		t.Error("dial through auth-rejecting proxy must fail")
 	}
@@ -369,8 +280,9 @@ func TestDialSocks5WS_AuthFail(t *testing.T) {
 
 // TestDialSocks5WS_Unreachable: a dead proxy address must fail within
 // the handshake timeout, never hang the dial.
+
 func TestDialSocks5WS_Unreachable(t *testing.T) {
-	p := &proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: deadPort(t)}
+	p := &clientcore.ProxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: deadPort(t)}
 	start := time.Now()
 	if _, _, err := dialSocks5WS("ws://127.0.0.1:1/ws", http.Header{}, p); err == nil {
 		t.Error("dial through dead proxy must fail")
@@ -381,6 +293,7 @@ func TestDialSocks5WS_Unreachable(t *testing.T) {
 }
 
 // deadPort reserves then releases a loopback port, so nothing listens.
+
 func deadPort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -399,4 +312,29 @@ func mustAtoi(t *testing.T, s string) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// TestParseProxyURLWording pins the exact lines the client has always shown
+// for a refused proxy URL. The core reports a reason and the offending part,
+// so the wording lives here and must not drift.
+func TestParseProxyURLWording(t *testing.T) {
+	cases := map[string]string{
+		"://bad":                          "proxy URL không hợp lệ",
+		"":                                `proxy scheme không hỗ trợ: "" (dùng http/https/socks5)`,
+		"ftp://proxy.local:21":            `proxy scheme không hỗ trợ: "ftp" (dùng http/https/socks5)`,
+		"http://:8080":                    "proxy thiếu host",
+		"http://proxy.local:99999":        `proxy port không hợp lệ: "99999"`,
+		"http://proxy.local:abc":          "proxy URL không hợp lệ",
+		"http://:secret@proxy.local:8080": "proxy có password nhưng thiếu username",
+	}
+	for raw, want := range cases {
+		_, err := parseProxyURL(raw)
+		if err == nil || err.Error() != want {
+			t.Errorf("parseProxyURL(%q) err = %v, want %q", raw, err, want)
+		}
+	}
+	cfg, err := parseProxyURL("socks5://127.0.0.1:1080")
+	if err != nil || cfg == nil || cfg.Port != 1080 {
+		t.Fatalf("a valid URL must pass through: %+v, %v", cfg, err)
+	}
 }

@@ -47,5 +47,5 @@ func serverHTTPTransport() (http.RoundTripper, error) {
 	if resolvedProxy.Scheme == "socks5" {
 		return &http.Transport{DialContext: socks5NetDialer(resolvedProxy)}, nil
 	}
-	return &http.Transport{Proxy: http.ProxyURL(resolvedProxy.dialURL())}, nil
+	return &http.Transport{Proxy: http.ProxyURL(resolvedProxy.DialURL())}, nil
 }

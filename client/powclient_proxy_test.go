@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/CleveTok3125/V2V/lib/clientcore"
 )
 
 // TestHTTPPostJSONGoesThroughTheConfiguredProxy: the join gate is reached
@@ -44,7 +46,7 @@ func TestHTTPPostJSONGoesThroughTheConfiguredProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pinProxyCache(&proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, proxyPort)}, nil)()
+	defer pinProxyCache(&clientcore.ProxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, proxyPort)}, nil)()
 
 	body, status, err := httpPostJSON(srv.URL+"/api/join-gate",
 		map[string]any{"step": "status"}, 10*time.Second)

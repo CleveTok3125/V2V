@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/CleveTok3125/V2V/lib/clientcore"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -280,7 +282,7 @@ func TestPollGoesThroughTheConfiguredProxy(t *testing.T) {
 	t.Cleanup(func() {
 		resolvedProxy, proxyResolved, proxyResolveErr = savedProxy, savedResolved, savedErr
 	})
-	resolvedProxy = &proxyConfig{Scheme: "http", Host: host, Port: port}
+	resolvedProxy = &clientcore.ProxyConfig{Scheme: "http", Host: host, Port: port}
 	proxyResolved = true
 	proxyResolveErr = nil
 

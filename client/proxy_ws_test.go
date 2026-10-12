@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CleveTok3125/V2V/lib/clientcore"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -130,7 +132,7 @@ func TestSocks5WSSingleTLS(t *testing.T) {
 	targetAddr := strings.TrimPrefix(target.URL, "https://")
 
 	proxy := startFakeSocksProxy(t)
-	p := &proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: proxyPort(t, proxy)}
+	p := &clientcore.ProxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: proxyPort(t, proxy)}
 	headers := http.Header{}
 	d := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, HandshakeTimeout: 10 * time.Second}
 	conn, _, err := dialSocks5WSWithDialer("wss://localhost:"+targetPort(targetAddr)+"/ws", headers, p, d)
@@ -200,7 +202,7 @@ func TestSocks5WipeOnlyAfterWSSuccess(t *testing.T) {
 	defer plain.Close()
 	plainAddr := strings.TrimPrefix(plain.URL, "http://")
 
-	p := &proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: proxyPort(t, proxy),
+	p := &clientcore.ProxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: proxyPort(t, proxy),
 		User: "u", Pass: []byte("secret")}
 	headers := http.Header{}
 	d := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, HandshakeTimeout: 10 * time.Second}
@@ -228,7 +230,7 @@ func TestSocks5WipeOnlyAfterWSSuccess(t *testing.T) {
 }
 
 func TestDialSocks5WSRejectsBadURL(t *testing.T) {
-	p := &proxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: 1}
+	p := &clientcore.ProxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: 1}
 	for _, u := range []string{
 		"http://127.0.0.1:1/ws",
 		"https://127.0.0.1:1/ws",

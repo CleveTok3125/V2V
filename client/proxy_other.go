@@ -25,6 +25,7 @@ import (
 	"github.com/gorilla/websocket"
 	"golang.org/x/net/proxy"
 
+	"github.com/CleveTok3125/V2V/lib/clientcore"
 	"github.com/CleveTok3125/V2V/lib/env"
 	"github.com/CleveTok3125/V2V/lib/identity"
 
@@ -41,7 +42,7 @@ const socks5DialTimeout = 45 * time.Second
 // bare stream. gorilla applies TLS itself when the URL asks for wss.
 // The target hostname travels unresolved (socks5h semantics): the
 // proxy resolves it, nothing is looked up locally.
-func socks5NetDialer(p *proxyConfig) func(ctx context.Context, network, addr string) (net.Conn, error) {
+func socks5NetDialer(p *clientcore.ProxyConfig) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, portStr, err := net.SplitHostPort(addr)
 		if err != nil || host == "" {
@@ -81,13 +82,13 @@ func socks5NetDialer(p *proxyConfig) func(ctx context.Context, network, addr str
 
 // dialSocks5WS connects to a ws/wss URL through a SOCKS5 proxy. The
 // target hostname is never resolved locally; the proxy resolves it.
-func dialSocks5WS(wsURL string, headers http.Header, p *proxyConfig) (wsConn, *http.Response, error) {
+func dialSocks5WS(wsURL string, headers http.Header, p *clientcore.ProxyConfig) (wsConn, *http.Response, error) {
 	return dialSocks5WSWithDialer(wsURL, headers, p, websocket.Dialer{HandshakeTimeout: socks5DialTimeout})
 }
 
 // dialSocks5WSWithDialer is dialSocks5WS with an injectable dialer so
 // tests can set TLSClientConfig against a local TLS server.
-func dialSocks5WSWithDialer(wsURL string, headers http.Header, p *proxyConfig, d websocket.Dialer) (wsConn, *http.Response, error) {
+func dialSocks5WSWithDialer(wsURL string, headers http.Header, p *clientcore.ProxyConfig, d websocket.Dialer) (wsConn, *http.Response, error) {
 	u, err := url.Parse(wsURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("URL server không hợp lệ: %w", err)
@@ -108,7 +109,7 @@ func dialSocks5WSWithDialer(wsURL string, headers http.Header, p *proxyConfig, d
 		// Wipe only after the FULL dial succeeds: dialWS retries ws->wss
 		// with this same config, and wiping after a mere TCP+SOCKS
 		// success would starve the retry of its password.
-		p.wipe()
+		p.Wipe()
 	}
 	return conn, resp, err
 }
@@ -117,7 +118,7 @@ func dialSocks5WSWithDialer(wsURL string, headers http.Header, p *proxyConfig, d
 // --ask-proxy wizard beats everything; then --proxy flag, then
 // V2V_PROXY env. Nil means direct: gorilla's DefaultDialer still
 // honors the system HTTP(S)_PROXY/NO_PROXY on its own.
-func resolveProxy(r io.Reader) (*proxyConfig, error) {
+func resolveProxy(r io.Reader) (*clientcore.ProxyConfig, error) {
 	if CLI.AskProxy {
 		return promptProxyConfig(r)
 	}
@@ -128,6 +129,33 @@ func resolveProxy(r io.Reader) (*proxyConfig, error) {
 		return parseProxyURL(proxyEnv)
 	}
 	return nil, nil
+}
+
+// parseProxyURL words the core's typed refusal. The core reports which rule
+// the URL broke and the offending part; the message is the client's, because
+// a third-party client is not Vietnamese.
+func parseProxyURL(raw string) (*clientcore.ProxyConfig, error) {
+	cfg, err := clientcore.ParseProxyURL(raw)
+	if err == nil {
+		return cfg, nil
+	}
+	var refused *clientcore.ProxyURLError
+	if !errors.As(err, &refused) {
+		return nil, err
+	}
+	switch refused.Reason {
+	case clientcore.ProxyURLInvalid:
+		return nil, errors.New("proxy URL không hợp lệ")
+	case clientcore.ProxySchemeUnsupported:
+		return nil, fmt.Errorf("proxy scheme không hỗ trợ: %q (dùng http/https/socks5)", refused.Value)
+	case clientcore.ProxyHostMissing:
+		return nil, errors.New("proxy thiếu host")
+	case clientcore.ProxyPortInvalid:
+		return nil, fmt.Errorf("proxy port không hợp lệ: %q", refused.Value)
+	case clientcore.ProxyUsernameMissing:
+		return nil, errors.New("proxy có password nhưng thiếu username")
+	}
+	return nil, err
 }
 
 // wizardLine prints a prompt and reads one trimmed line. A closed
@@ -146,7 +174,7 @@ func wizardLine(r io.Reader, prompt string) (string, error) {
 // prompt only when a username was given. The password gets no meter
 // and no weak gate: it belongs to the proxy, not to this project.
 // Results stay in RAM for this session.
-func promptProxyConfig(r io.Reader) (*proxyConfig, error) {
+func promptProxyConfig(r io.Reader) (*clientcore.ProxyConfig, error) {
 	if tui.Interactive() {
 		return promptProxyConfigHuh()
 	}
@@ -156,15 +184,15 @@ func promptProxyConfig(r io.Reader) (*proxyConfig, error) {
 // promptProxyConfigHuh runs the wizard as huh forms: scheme select,
 // one 3-field form for host/port/user with inline validation, then
 // the hidden password prompt when a username was given.
-func promptProxyConfigHuh() (*proxyConfig, error) {
+func promptProxyConfigHuh() (*clientcore.ProxyConfig, error) {
 	idx, err := promptProxyScheme(os.Stdin)
 	if err != nil {
 		return nil, err
 	}
 	scheme := []string{"http", "socks5", "https"}[idx]
-	cfg := &proxyConfig{Scheme: scheme}
+	cfg := &clientcore.ProxyConfig{Scheme: scheme}
 	var host, user string
-	portStr := strconv.Itoa(defaultProxyPort(scheme))
+	portStr := strconv.Itoa(clientcore.DefaultProxyPort(scheme))
 	form := huh.NewForm(huh.NewGroup(
 		huh.NewInput().Title("Proxy host").Value(&host).Validate(nonEmptyLine),
 		huh.NewInput().Title("Proxy port").Value(&portStr).Validate(validPort),
@@ -214,13 +242,13 @@ func validPort(s string) error {
 	return nil
 }
 
-func promptProxyConfigPiped(r io.Reader) (*proxyConfig, error) {
+func promptProxyConfigPiped(r io.Reader) (*clientcore.ProxyConfig, error) {
 	idx, err := promptProxyScheme(r)
 	if err != nil {
 		return nil, err
 	}
 	scheme := []string{"http", "socks5", "https"}[idx]
-	cfg := &proxyConfig{Scheme: scheme}
+	cfg := &clientcore.ProxyConfig{Scheme: scheme}
 	for {
 		host, err := wizardLine(r, "Proxy host: ")
 		if err != nil {
@@ -232,7 +260,7 @@ func promptProxyConfigPiped(r io.Reader) (*proxyConfig, error) {
 		}
 		fmt.Println("❌ Host trống, nhập lại.")
 	}
-	defPort := defaultProxyPort(scheme)
+	defPort := clientcore.DefaultProxyPort(scheme)
 	for {
 		raw, err := wizardLine(r, fmt.Sprintf("Proxy port (Enter = %d): ", defPort))
 		if err != nil {
