@@ -606,7 +606,7 @@ func main() {
 		}
 		if chatApp.Behavior != nil {
 			if err := chatApp.Behavior.Save(); err != nil {
-				logInfof("⚠️ behavior save: %v", err)
+				logWarnf("⚠️ behavior save: %v", err)
 			}
 		}
 		os.Exit(0)
