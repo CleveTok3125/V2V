@@ -69,9 +69,7 @@ func gateChallengeBody(resp *http.Response) (raw string, isGate bool) {
 	}
 	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, dialErrorBody))
 	raw = filter.SanitizeForDisplay(strings.TrimSpace(string(bodyBytes)))
-	var probe struct {
-		Required bool `json:"required"`
-	}
+	var probe gateStatus
 	if resp.StatusCode == http.StatusTooManyRequests && json.Unmarshal(bodyBytes, &probe) == nil {
 		isGate = probe.Required
 	}

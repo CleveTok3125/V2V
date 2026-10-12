@@ -22,7 +22,7 @@ type cliGate struct{}
 func (cliGate) Pass(url string) string { return preDialPass(url) }
 
 func (cliGate) Solve(wsURL, pin string) (string, bool) {
-	return runGateFlow(gateHTTPBase(wsURL), pin)
+	return clientcore.RunGateFlow(clientcore.GateHTTPBase(wsURL), gateConfig(pin))
 }
 
 // cliDialOutput renders the core's dial events in the client's language.

@@ -12,7 +12,7 @@ import (
 	"github.com/CleveTok3125/V2V/lib/clientcore"
 )
 
-// TestHTTPPostJSONGoesThroughTheConfiguredProxy: the join gate is reached
+// TestGateProbeGoesThroughTheConfiguredProxy: the join gate is reached
 // before the chat session is dialled, so these requests do not go through
 // the socket and the socket's proxy does not carry them. A bare client here
 // connected from the real address, which is the worst place for it: the
@@ -20,7 +20,7 @@ import (
 //
 // The relay is a real SOCKS5 server, so a pass means the bytes actually
 // traversed the tunnel rather than that a Transport was merely configured.
-func TestHTTPPostJSONGoesThroughTheConfiguredProxy(t *testing.T) {
+func TestGateProbeGoesThroughTheConfiguredProxy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"required":true}`))
@@ -48,16 +48,8 @@ func TestHTTPPostJSONGoesThroughTheConfiguredProxy(t *testing.T) {
 	}
 	defer pinProxyCache(&clientcore.ProxyConfig{Scheme: "socks5", Host: "127.0.0.1", Port: mustAtoi(t, proxyPort)}, nil)()
 
-	body, status, err := httpPostJSON(srv.URL+"/api/join-gate",
-		map[string]any{"step": "status"}, 10*time.Second)
-	if err != nil {
-		t.Fatalf("post through the proxy: %v", err)
-	}
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, want 200", status)
-	}
-	if string(body) != `{"required":true}` {
-		t.Fatalf("body = %q", body)
+	if !clientcore.GateRequiredNow(srv.URL, gateConfig("")) {
+		t.Fatal("the gate probe must reach the server through the proxy")
 	}
 
 	select {
