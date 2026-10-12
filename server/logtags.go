@@ -41,6 +41,7 @@ var logTagCatalog = []logTag{
 	{"created", "a record was created"},
 	{"enroll", "passkey enrollment"},
 	{"fail", "an attempt or an operation failed"},
+	{"fatal", "the process is about to exit"},
 	{"filter", "a display name, a prefix or a message was refused"},
 	{"finish", "a ceremony or flow was submitted"},
 	{"fork", "the chain forked"},

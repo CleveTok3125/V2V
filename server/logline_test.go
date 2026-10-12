@@ -21,7 +21,7 @@ type logCall struct {
 }
 
 var (
-	logCallSite = regexp.MustCompile(`(logInfo|logInfof|logWarn|logWarnf|logError|logErrorf)\(\s*"([^"]*)"`)
+	logCallSite = regexp.MustCompile(`(logInfo|logInfof|logWarn|logWarnf|logError|logErrorf|logFatalf)\(\s*"([^"]*)"`)
 	logTagGroup = regexp.MustCompile(`^\S+ \(([a-z0-9_]+(?:,[a-z0-9_]+)*)\) `)
 )
 
@@ -132,7 +132,7 @@ func TestLogEmojiMatchesLevel(t *testing.T) {
 	levels := map[string]string{
 		"logInfo": "INFO", "logInfof": "INFO",
 		"logWarn": "WARN", "logWarnf": "WARN",
-		"logError": "ERROR", "logErrorf": "ERROR",
+		"logError": "ERROR", "logErrorf": "ERROR", "logFatalf": "ERROR",
 	}
 	checked := 0
 	for _, call := range logCalls(t) {
@@ -149,6 +149,57 @@ func TestLogEmojiMatchesLevel(t *testing.T) {
 	}
 	if checked < 50 {
 		t.Fatalf("only %d severity lines matched; the scan is not seeing the call sites", checked)
+	}
+}
+
+// TestFatalCallSitesSayFatal: logFatalf exits the process, and the level alone
+// does not say so. The "fatal" tag is what tells a reader the process is about
+// to die, so every fatal call site has to carry it.
+func TestFatalCallSitesSayFatal(t *testing.T) {
+	seen := 0
+	for _, call := range logCalls(t) {
+		if call.function != "logFatalf" {
+			continue
+		}
+		seen++
+		m := logTagGroup.FindStringSubmatch(call.format)
+		if m == nil {
+			continue // the shape test reports this one
+		}
+		if !strings.Contains(","+m[1]+",", ",fatal,") {
+			t.Errorf("%s: logFatalf does not carry the fatal tag: (%s)", call.file, m[1])
+		}
+	}
+	if seen < 10 {
+		t.Fatalf("only %d logFatalf call sites found; the scan is not seeing them", seen)
+	}
+}
+
+// TestNoUnlevelledFatalCallSites: a boot failure goes through logFatalf, which
+// carries the level and the tags the standard asks of every line. A bare
+// log.Fatal would print a line with neither, so no call site may use one.
+func TestNoUnlevelledFatalCallSites(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := regexp.MustCompile(`\blog\.Fatal(f)?\(`)
+	checked := 0
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") || file == "loglevel.go" {
+			continue
+		}
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checked++
+		if bare.Match(src) {
+			t.Errorf("%s: a boot failure must go through logFatalf, not log.Fatal", file)
+		}
+	}
+	if checked < 10 {
+		t.Fatalf("only %d files scanned", checked)
 	}
 }
 

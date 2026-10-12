@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -373,44 +372,44 @@ func main() {
 
 	staticCfg, err := loadStaticConfig()
 	if err != nil {
-		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+		logFatalf("❌ (config,fail,fatal) %v", err)
 	}
 	Cfg.Static = staticCfg
 
 	proxyChain, err := initProxyChain(Cfg.Static.TrustedProxyDir, Cfg.Static.ProxyChain)
 	if err != nil {
-		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+		logFatalf("❌ (config,fail,fatal,proxy) %v", err)
 	}
 	ProxyChain = proxyChain
 
 	if Cfg.Static.OnionEnabled() {
 		onionTrust, err := initOnionTrust(Cfg.Static.TrustedProxyDir)
 		if err != nil {
-			log.Fatalf("❌ CRITICAL ERROR: onion trust: %v", err)
+			logFatalf("❌ (config,fail,fatal,onion) onion trust: %v", err)
 		}
 		Cfg.Static.Onion.Trust = onionTrust
 	}
 
 	initialDynamic, err := loadDynamicConfig()
 	if err != nil {
-		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+		logFatalf("❌ (config,fail,fatal) %v", err)
 	}
 	Cfg.Dynamic.Store(&initialDynamic)
 
 	initialAbuse, err := loadAbuseConfig()
 	if err != nil {
-		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+		logFatalf("❌ (config,fail,fatal) %v", err)
 	}
 	Cfg.Abuse.Store(&initialAbuse)
 
 	if err := InitLogger(Cfg.Static.LogFilePath, Cfg.Static.MaxLogSizeMB); err != nil {
-		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+		logFatalf("❌ (config,fail,fatal) %v", err)
 	}
 
 	chatApp := NewChatServer()
 	blNets, blWarn, err := loadBlocklist(Cfg.Static.BlocklistFile)
 	if err != nil {
-		log.Fatalf("❌ CRITICAL ERROR: blocklist: %v", err)
+		logFatalf("❌ (blocklist,config,fail,fatal) blocklist: %v", err)
 	}
 	if blWarn != "" {
 		logWarnf("⚠️ (blocklist) %s", blWarn)
@@ -422,17 +421,17 @@ func main() {
 	chatApp.Behavior, chatApp.Screener = initBehaviorEngines()
 	sid, err := LoadOrCreateServerIdentity(dataPath("server_identity.json"))
 	if err != nil {
-		log.Fatalf("❌ CRITICAL ERROR: cannot load server identity: %v", err)
+		logFatalf("❌ (config,fail,fatal,identity) cannot load server identity: %v", err)
 	}
 	chatApp.ServerID = sid
 	if err := chatApp.InitHistoryStore(Cfg.Static.HistoryFilePath, Cfg.Static.MaxHistoryFileSizeMB); err != nil {
-		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+		logFatalf("❌ (config,fail,fatal,history) %v", err)
 	}
 
 	// Booting without roles would silently grant default permissions
 	// to everyone: fail closed instead.
 	if err := chatApp.LoadRoles(); err != nil {
-		log.Fatalf("❌ CRITICAL ERROR: %v", err)
+		logFatalf("❌ (config,fail,fatal) %v", err)
 	}
 	chatApp.WatchEnvFile()
 	chatApp.WatchRolesFile()
@@ -465,7 +464,7 @@ func main() {
 	// belongs here, while the operator is still watching.
 	if WAConfig.Enabled {
 		if err := chatApp.WebAuthn.verifyUsable(); err != nil {
-			log.Fatalf("❌ CRITICAL ERROR: %v", err)
+			logFatalf("❌ (config,fail,fatal,store) %v", err)
 		}
 	}
 	mux.HandleFunc("/webauthn/enroll/begin", chatApp.instrumentHTTP("webauthn_begin", func(w http.ResponseWriter, r *http.Request) {
@@ -618,5 +617,5 @@ func main() {
 	}
 
 	logInfof("🚀 (boot,config) Server đang chạy tại port %v (version %s, instance %s)", Cfg.Static.Port, Version, Cfg.Static.Root)
-	log.Fatal(server.ListenAndServe())
+	logFatalf("❌ (boot,fail,fatal) %v", server.ListenAndServe())
 }

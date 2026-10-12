@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"os"
 	"strings"
 	"sync"
@@ -38,7 +37,7 @@ func initBehaviorEngines() (*BehaviorEngine, *PowScreener) {
 	if Cfg.Static.BehaviorGeoIPDir != "" {
 		r, warns, err := geoip.Open(Cfg.Static.BehaviorGeoIPDir)
 		if err != nil {
-			log.Fatalf("❌ CRITICAL ERROR: geoip: %v", err)
+			logFatalf("❌ (config,fail,fatal,geoip) geoip: %v", err)
 		}
 		logGeoipWarnings(warns)
 		if r != nil {
@@ -48,7 +47,7 @@ func initBehaviorEngines() (*BehaviorEngine, *PowScreener) {
 	}
 	eng := NewBehaviorEngine(behavior.NewStore(behaviorStoreCap), behavior.NewStats(), geo, Cfg.Static.BehaviorFilePath)
 	if err := eng.Load(); err != nil {
-		log.Fatalf("❌ CRITICAL ERROR: behavior load: %v", err)
+		logFatalf("❌ (behavior,config,fail,fatal) behavior load: %v", err)
 	}
 	return eng, NewPowScreener(eng)
 }

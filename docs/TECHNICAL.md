@@ -532,7 +532,7 @@ exhausting host fds, threads, RAM or disk.
 
 - Return paths wrap with `%w` so callers can `errors.Is`/`errors.As`: sentinel auth errors (`server/auth_errors.go`, byte-identical legacy text), `config.ErrEncrypted`, env parse errors up to the boot fatal.
 - Terminal sinks use `%v`: `logInfof`/`logWarnf`/`logErrorf` and test failures never unwrap further, so `%w` there would only mislead.
-- `log.Fatal` stays reserved for process death at boot (`server/main.go`); everywhere else degrades or returns the error.
+- A boot failure goes through `logFatalf` (`server/loglevel.go`): it logs the line at `ERROR` and then `os.Exit(1)`, so process death carries the same level and tags as every other line. Every other failure degrades or returns the error.
 
 ## Roadmap
 

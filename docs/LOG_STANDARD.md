@@ -18,7 +18,8 @@ finds it by what happened rather than by how it was phrased.
 ```
 
 - `[LEVEL]` is `INFO`, `WARN` or `ERROR`, prepended by `server/loglevel.go`.
-  `log.Fatal` stays outside the levels: it is process death, not a level.
+  A boot failure goes through `logFatalf`, which reports the line at `ERROR`
+  and then exits, so no line is printed without a level.
 - `<emoji>` is one visible marker immediately after the level.
 - `(<tag>[,<tag>])` follows the emoji, one space either side, no space inside
   the parentheses.
@@ -73,6 +74,7 @@ catalog, never a spelling invented at a call site.
 | `created` | a record was created |
 | `enroll` | passkey enrollment |
 | `fail` | an attempt or an operation failed |
+| `fatal` | the process is about to exit |
 | `filter` | a display name, a prefix or a message was refused |
 | `finish` | a ceremony or flow was submitted |
 | `fork` | the chain forked |
