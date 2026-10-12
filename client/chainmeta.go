@@ -533,9 +533,6 @@ func (x *wireIndex) oldest() (uint64, bool) {
 // formatInfoBlock renders the full metadata detail of one indexed wire.
 // Both verdicts recompute locally without network: the chain content
 // hash and, for signed messages, the trip signature.
-// formatInfoBlock renders the full metadata detail of one indexed wire.
-// Both verdicts recompute locally without network: the chain content
-// hash and, for signed messages, the trip signature.
 //
 // Layout is one field per line with a fixed label width, so every value
 // starts at the same column; trip inputs carry an explicit trip prefix
