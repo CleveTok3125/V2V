@@ -542,7 +542,7 @@ func formatInfoBlock(msg WireMessage) []string {
 	row := func(label, value string) string {
 		return fmt.Sprintf("|   %-13s %s\n", label, value)
 	}
-	out := []string{fmt.Sprintf("| [Local] #%d — chi tiết metadata:\n", msg.ChainHeight)}
+	out := []string{fmt.Sprintf("| [Local]: #%d — chi tiết metadata:\n", msg.ChainHeight)}
 	out = append(out, row("height:", strconv.FormatUint(msg.ChainHeight, 10)))
 	out = append(out, row("tmp_id:", strconv.FormatUint(msg.TmpID, 10)))
 	out = append(out, row("reply_to:", strconv.FormatUint(msg.ReplyTo, 10)))

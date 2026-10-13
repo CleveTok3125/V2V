@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"sync"
 	"testing"
 )
@@ -34,11 +35,14 @@ func TestEmitWhoami_ReleasesMutex(t *testing.T) {
 		t.Fatal("guest: displayMu still held after /whoami")
 	}
 	mu.Unlock()
-	// Role path keeps both lines.
+	// Role path keeps both rows, as one entry.
 	lines = nil
 	emitWhoami(&mu, emit, "Bob", "key", "admin", true, "[A] ")
-	if len(lines) != 2 {
-		t.Fatalf("role: expected 2 lines, got %d", len(lines))
+	if len(lines) != 1 {
+		t.Fatalf("role: expected 1 entry, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "Bob") || !strings.Contains(lines[0], "Role: admin") {
+		t.Fatalf("role: both rows must ride the entry: %q", lines[0])
 	}
 	if !mu.TryLock() {
 		t.Fatal("role: displayMu still held after /whoami")

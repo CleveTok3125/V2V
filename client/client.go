@@ -113,16 +113,19 @@ type inputTerminal interface {
 // historyFile is set in parseFlags from CacheDir (UserCacheDir/V2V/history.tmp by default).
 var historyFile string
 
-// emitWhoami prints the /whoami identity lines under the session DisplayMu. The mutex
-// is released on every path via defer: guests (empty role) take no early
-// return that could skip the unlock and freeze the terminal.
+// emitWhoami prints the /whoami identity block under the session DisplayMu as
+// one entry: every entry carries a trailing gap row, so a line per entry would
+// space the block out. The mutex is released on every path via defer: guests
+// (empty role) take no early return that could skip the unlock and freeze the
+// terminal.
 func emitWhoami(mu *sync.Mutex, emit func(string), uname, authType, role string, unlimited bool, prefix string) {
 	mu.Lock()
 	defer mu.Unlock()
-	emit(fmt.Sprintf("| [Local]: Người dùng: %s | Xác thực: %s\n", serverField(uname), serverField(authType)))
+	rows := []string{fmt.Sprintf("| [Local]: Người dùng: %s | Xác thực: %s", serverField(uname), serverField(authType))}
 	if role != "" {
-		emit(fmt.Sprintf("| [Local]: Role: %s | Unlimited: %v | Prefix: %q\n", serverField(role), unlimited, serverField(prefix)))
+		rows = append(rows, fmt.Sprintf("|   Role: %s | Unlimited: %v | Prefix: %q", serverField(role), unlimited, serverField(prefix)))
 	}
+	emit(strings.Join(rows, "\n"))
 }
 
 func main() {

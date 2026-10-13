@@ -179,34 +179,70 @@ func (s *Session) cmdStatus(text string) bool {
 	return true
 }
 
+// helpLine is one /help row: a usage and a one-line description. A row with
+// no usage is prose and takes no column.
+type helpLine struct {
+	usage string
+	desc  string
+}
+
+// helpUsageCap bounds the usage column. The table has one usage far longer than
+// the rest; letting it set the column would push every description past the
+// screen edge, so that row breaks out of the column instead.
+const helpUsageCap = 30
+
+// helpLines is the command table, in reading order.
+func helpLines() []helpLine {
+	return []helpLine{
+		{"/help, /h", "Hiển thị bảng trợ giúp này"},
+		{"/clear, /c", "Xóa sạch màn hình chat"},
+		{"/clearhistory, /ch", "Xóa file lịch sử gõ phím lưu trên máy"},
+		{"/quit, /q", "Rời phòng chat và tắt ứng dụng"},
+		{"/showjoin, /sj", "Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp"},
+		{"/whoami, /w", "Thông tin danh tính và quyền hiện tại"},
+		{"/status", "Trạng thái kết nối và phiên bản client"},
+		{"/autoverify, /av", "Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)"},
+		{"/notify, /nt [<tag> on|off | all on|off | powmin <N>]", "Ẩn/hiện thông báo theo tag"},
+		{"/info <n>[:hash]", "Xem đầy đủ metadata tin nhắn (verify lại tại local)"},
+		{"/expand <n>, /xpan", "Mở đầy đủ tin bị thu gọn (vd /expand 1234)"},
+		{"/copy <n>[:hash]", "Copy nội dung thô tin nhắn vào clipboard"},
+		{"/tab, /t [1|2]", "Chuyển tab chat / local & system"},
+		{"/meta, /m [on|off]", "Hiện/ẩn dòng meta #height:hash (mặc định hiện, chain vẫn verify)"},
+		{"/find, /f <n>[:hash]", "Tìm tin theo số height trong bộ nhớ (vd /find 1234)"},
+		{"/older [n]", "Lấy thêm n tin cũ hơn từ server (mặc định 50)"},
+		{"/reply <n>[:hash] text", "Trả lời tin #n kèm quote (vd /reply 1234 đồng ý)"},
+		{"/reply <n>", "Soạn reply nháp, dòng tiếp theo là nội dung"},
+		{desc: "Gõ @#n (vd @#1234) trong tin để nhắc tới tin khác (sáng lên khi còn trong bộ nhớ)"},
+		{desc: "Lệnh lạ bắt đầu bằng / bị chặn, không gửi đi (muốn gửi chữ / đầu dòng thì dùng codeblock)"},
+		{desc: "Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng (^C hủy nhập)"},
+		{desc: "Bọc chữ trong `dấu backtick` để hiện nền riêng (inline code một dòng)"},
+	}
+}
+
 func (s *Session) cmdHelp(text string) bool {
 	if !(text == "/help" || text == "/h") {
 		return false
 	}
+	lines := helpLines()
+	width := 0
+	for _, l := range lines {
+		if n := len(l.usage); n > width && n <= helpUsageCap {
+			width = n
+		}
+	}
+	rows := make([]string, 0, len(lines)+1)
+	rows = append(rows, "| [Local]: Trợ giúp — danh sách lệnh:")
+	for _, l := range lines {
+		if l.usage == "" {
+			rows = append(rows, "|   - "+l.desc)
+			continue
+		}
+		rows = append(rows, fmt.Sprintf("|   - %-*s: %s", width, l.usage, l.desc))
+	}
 	s.Display.DisplayMu.Lock()
-	s.emitLocalFeedback("  [Trợ giúp]: Danh sách các lệnh có thể sử dụng:\n")
-	s.emitLocalFeedback("    - /help, /h      : Hiển thị bảng trợ giúp này\n")
-	s.emitLocalFeedback("    - /clear, /c     : Xóa sạch màn hình chat\n")
-	s.emitLocalFeedback("    - /clearhistory, /ch: Xóa file lịch sử gõ phím lưu trên máy\n")
-	s.emitLocalFeedback("    - /quit, /q      : Rời phòng chat và tắt ứng dụng\n")
-	s.emitLocalFeedback("    - /showjoin, /sj : Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp\n")
-	s.emitLocalFeedback("    - /whoami, /w    : Thông tin danh tính và quyền hiện tại\n")
-	s.emitLocalFeedback("    - /status        : Trạng thái kết nối và phiên bản client\n")
-	s.emitLocalFeedback("    - /autoverify, /av: Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)\n")
-	s.emitLocalFeedback("    - /notify, /nt [<tag> on|off | all on|off | powmin <N>]: Ẩn/hiện thông báo theo tag\n")
-	s.emitLocalFeedback("    - /info <n>[:hash]: Xem đầy đủ metadata tin nhắn (verify lại tại local)\n")
-	s.emitLocalFeedback("    - /expand <n>, /xpan  : Mở đầy đủ tin bị thu gọn (vd /expand 1234)\n")
-	s.emitLocalFeedback("    - /copy <n>[:hash]: Copy nội dung thô tin nhắn vào clipboard\n")
-	s.emitLocalFeedback("    - /tab, /t [1|2]  : Chuyển tab chat / local & system\n")
-	s.emitLocalFeedback("    - /meta, /m [on|off]: Hiện/ẩn dòng meta #height:hash (mặc định hiện, chain vẫn verify)\n")
-	s.emitLocalFeedback("    - /find, /f <n>[:hash]: Tìm tin theo số height trong bộ nhớ (vd /find 1234)\n")
-	s.emitLocalFeedback("    - /older [n]   : Lấy thêm n tin cũ hơn từ server (mặc định 50)\n")
-	s.emitLocalFeedback("    - /reply <n>[:hash] text: Trả lời tin #n kèm quote (vd /reply 1234 đồng ý)\n")
-	s.emitLocalFeedback("    - /reply <n>          : Soạn reply nháp, dòng tiếp theo là nội dung\n")
-	s.emitLocalFeedback("    - Gõ @#n (vd @#1234) trong tin để nhắc tới tin khác (sáng lên khi còn trong bộ nhớ)\n")
-	s.emitLocalFeedback("    - Lệnh lạ bắt đầu bằng / bị chặn, không gửi đi (muốn gửi chữ / đầu dòng thì dùng codeblock)\n")
-	s.emitLocalFeedback("    - Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng (^C hủy nhập)\n")
-	s.emitLocalFeedback("    - Bọc chữ trong `dấu backtick` để hiện nền riêng (inline code một dòng)\n")
+	// One entry: every entry carries a trailing gap row, so a row per entry
+	// would put a blank row between each pair.
+	s.emitLocalFeedback(strings.Join(rows, "\n"))
 	s.Display.DisplayMu.Unlock()
 	return true
 }
@@ -245,6 +281,21 @@ func (s *Session) cmdAutoverify(text string) bool {
 	return true
 }
 
+// notifyTagWidth is the room the tag tree gives each tag before its state,
+// indent included. Counting the indent against this budget is what keeps the
+// states in one column as the tree deepens.
+const notifyTagWidth = 28
+
+// notifyTagRow renders one tag-tree row with the state in a fixed column.
+func notifyTagRow(tag, state string) string {
+	indent := strings.Repeat("  ", strings.Count(tag, "."))
+	width := notifyTagWidth - len(indent)
+	if width < 1 {
+		width = 1
+	}
+	return fmt.Sprintf("|   %s%-*s %s", indent, width, tag, state)
+}
+
 // cmdNotify lists or toggles the informational notice gates. Muting a
 // kind hides it live while it still lands in the system tab.
 func (s *Session) cmdNotify(text string) bool {
@@ -262,18 +313,23 @@ func (s *Session) cmdNotify(text string) bool {
 		fields[0] = strings.ToLower(fields[0])
 	}
 	if len(fields) == 0 {
+		rows := make([]string, 0, len(wire.AllTags())+4)
+		rows = append(rows, "| [Local]: Thông báo (tag → trạng thái):")
 		for _, tag := range wire.AllTags() {
 			state := onOffLabel(s.notifyTagEnabled(tag))
 			// Indent by depth so the subtree reads as one, and show the
 			// gate that actually applies: a child of a muted parent is off
 			// whether or not its own key is set.
-			depth := strings.Count(tag, ".")
-			s.emitLocalFeedback(fmt.Sprintf("| [Local]: %s%-28s %s\n",
-				strings.Repeat("  ", depth), tag, state))
+			rows = append(rows, notifyTagRow(tag, state))
 		}
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: powmin = %d\n", s.notifyPowMinTier()))
-		s.emitLocalFeedback("| [Local]: Dùng /notify <tag> on|off | all on|off | powmin <N> (off: ẩn live, vẫn lưu tab 2)\n")
-		s.emitLocalFeedback("| [Local]: powmin ẩn thông báo PoW trong phòng; thông báo PoW lúc vào cửa theo ui.powMinTier\n")
+		rows = append(rows,
+			fmt.Sprintf("|   powmin = %d", s.notifyPowMinTier()),
+			"|   Dùng /notify <tag> on|off | all on|off | powmin <N> (off: ẩn live, vẫn lưu tab 2)",
+			"|   powmin ẩn thông báo PoW trong phòng; thông báo PoW lúc vào cửa theo ui.powMinTier",
+		)
+		// The listing is one entry: every row carries a trailing gap row
+		// otherwise, which would space the tree out.
+		s.emitLocalFeedback(strings.Join(rows, "\n"))
 		return true
 	}
 	if fields[0] == "powmin" {
@@ -476,31 +532,32 @@ func (s *Session) cmdFind(text string) bool {
 	if suffix != "" {
 		header += ":" + suffix
 	}
-	s.emitLocalFeedback(header + " trong bộ nhớ:\n")
+	rows := []string{header + " trong bộ nhớ:"}
 	// Snapshot matches before emitting: emitting appends to
 	// sess.Display.TabSys, whose eviction could shift indices mid-scan.
 	var hits []string
 	for _, buf := range []*tabBuffer{s.Display.TabChat, s.Display.TabSys} {
 		if idx := entryIndexByHeight(buf.lines, height, suffix); idx >= 0 {
 			// One entry holds the whole message, so there is no second row
-			// to pair it with.
-			hits = append(hits, buf.lines[idx].text())
+			// to pair it with. Its rendered text ends with the gap row, which
+			// the join would double.
+			hits = append(hits, strings.TrimRight(buf.lines[idx].text(), "\n"))
 			shown++
 		}
 	}
 	// Replay inside the same dim heredoc frame as /expand so replayed
 	// lines never read as live chat. No buffer surgery: markers only.
 	if shown > 0 {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m\n", height))
+		rows = append(rows, fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m", height))
 	}
-	for _, h := range hits {
-		s.emitLocalFeedback(h)
-	}
+	rows = append(rows, hits...)
 	if shown == 0 {
-		s.emitLocalFeedback("| [Local]: Không thấy (tin cũ đã bị evict khỏi bộ nhớ hoặc chưa sync).\n")
+		rows = append(rows, "| [Local]: Không thấy (tin cũ đã bị evict khỏi bộ nhớ hoặc chưa sync).")
 	} else {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m\n", height))
+		rows = append(rows, fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m", height))
 	}
+	// One entry, so the frame and the lines it wraps stay together.
+	s.emitLocalFeedback(strings.Join(rows, "\n"))
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
 	return true
@@ -543,11 +600,12 @@ func (s *Session) cmdExpand(text string) bool {
 	withMeta := s.Display.ShowMeta
 	s.Display.ShowMetaMu.RUnlock()
 	full, _ := s.buildChatBlock(wire, av, withMeta)
-	s.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m\n", height))
-	for _, line := range strings.Split(strings.TrimSuffix(full.text(), "\n"), "\n") {
-		s.emitLocalFeedback(line + "\n")
-	}
-	s.emitLocalFeedback(fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m\n", height))
+	// One entry, so the frame and the block it wraps stay together.
+	s.emitLocalFeedback(strings.Join([]string{
+		fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m", height),
+		strings.TrimRight(full.text(), "\n"),
+		fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m", height),
+	}, "\n"))
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
 	return true
@@ -580,9 +638,9 @@ func (s *Session) cmdInfo(text string) bool {
 		s.refreshTerminal()
 		return true
 	}
-	for _, line := range formatInfoBlock(wire) {
-		s.emitLocalFeedback(line)
-	}
+	// One entry: the rows already end with a newline, so joining them empty
+	// keeps the block together and trimming drops the last one.
+	s.emitLocalFeedback(strings.TrimRight(strings.Join(formatInfoBlock(wire), ""), "\n"))
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
 	return true

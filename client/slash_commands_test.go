@@ -79,8 +79,12 @@ func TestCmdWhoamiLines(t *testing.T) {
 	if got := out.String(); !strings.Contains(got, "Role:") {
 		t.Fatalf("key whoami must show role: %q", got)
 	}
-	if len(sess.Display.TabSys.lines) != 2 {
-		t.Fatalf("key whoami must emit 2 lines, got %d", len(sess.Display.TabSys.lines))
+	// Both rows ride one entry, so the block never gets spaced out.
+	if len(sess.Display.TabSys.lines) != 1 {
+		t.Fatalf("key whoami must emit 1 entry, got %d", len(sess.Display.TabSys.lines))
+	}
+	if got := out.String(); !strings.Contains(got, "Bob") || !strings.Contains(got, "\n|   Role:") {
+		t.Fatalf("key whoami rows must be adjacent: %q", got)
 	}
 }
 
