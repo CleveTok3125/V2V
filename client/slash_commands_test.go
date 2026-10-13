@@ -113,6 +113,134 @@ func TestCmdHelpListsCommands(t *testing.T) {
 	}
 }
 
+// TestCommandsAnswerInOneEntry: a command answers in one entry. Every entry
+// carries a trailing gap row, so a command that emitted a row per entry would
+// space its own output out.
+func TestCommandsAnswerInOneEntry(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*Session)
+	}{
+		{"help", func(s *Session) { s.cmdHelp("/h") }},
+		{"notify listing", func(s *Session) { s.cmdNotify("/notify") }},
+		{"whoami", func(s *Session) { s.cmdWhoami("/w") }},
+		{"status", func(s *Session) { s.cmdStatus("/status") }},
+		{"showjoin", func(s *Session) { s.cmdShowjoin("/sj") }},
+		{"autoverify", func(s *Session) { s.cmdAutoverify("/av") }},
+		{"meta", func(s *Session) { s.cmdMeta("/meta on") }},
+		{"clearhistory", func(s *Session) { s.cmdClearhistory("/ch") }},
+		{"copy usage", func(s *Session) { s.cmdCopy("/copy") }},
+		{"older usage", func(s *Session) { s.cmdOlder("/older x") }},
+		{"info usage", func(s *Session) { s.cmdInfo("/info") }},
+		{"unknown command", func(s *Session) { s.dispatch("/halp") }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sess, _ := behaviorSession(t)
+			c.run(sess)
+			if n := len(sess.Display.TabSys.lines); n != 1 {
+				t.Fatalf("%s must answer in one entry, got %d", c.name, n)
+			}
+		})
+	}
+}
+
+// TestCmdHelpRowsShareOneEntry: the help table is a header plus continuation
+// rows, and the usage column is measured so it holds for every row except the
+// one usage longer than the cap.
+func TestCmdHelpRowsShareOneEntry(t *testing.T) {
+	sess, out := behaviorSession(t)
+	if !sess.cmdHelp("/h") {
+		t.Fatal("/h must match")
+	}
+	if n := len(sess.Display.TabSys.lines); n != 1 {
+		t.Fatalf("the table must be one entry, got %d", n)
+	}
+	got := out.String()
+	if !strings.Contains(got, "| [Local]: Trợ giúp — danh sách lệnh:\n|   - /help, /h") {
+		t.Fatalf("the header must carry the first row: %q", got)
+	}
+	if strings.Contains(got, "\n\n|   - ") {
+		t.Fatalf("table rows must not be separated: %q", got)
+	}
+	col := -1
+	for _, line := range strings.Split(got, "\n") {
+		if !strings.HasPrefix(line, "|   - ") {
+			continue
+		}
+		at := strings.Index(line, ": ")
+		if at < 0 || at > len("|   - ")+helpUsageCap {
+			continue // the row that breaks out of the column
+		}
+		if col < 0 {
+			col = at
+			continue
+		}
+		if at != col {
+			t.Fatalf("usage column %d, want %d: %q", at, col, line)
+		}
+	}
+	if col < 0 {
+		t.Fatal("no usage column found")
+	}
+}
+
+// TestCmdNotifyListingIsOneAlignedEntry: the gate listing is one entry, with
+// the states in one column whatever the tag's depth.
+func TestCmdNotifyListingIsOneAlignedEntry(t *testing.T) {
+	sess, out := behaviorSession(t)
+	sess.Display.Notify = NotifyState{Muted: map[string]bool{}, PowMinTier: 1}
+	if !sess.cmdNotify("/notify") {
+		t.Fatal("/notify must match")
+	}
+	if n := len(sess.Display.TabSys.lines); n != 1 {
+		t.Fatalf("the listing must be one entry, got %d", n)
+	}
+	got := out.String()
+	if !strings.Contains(got, "| [Local]: Thông báo (tag → trạng thái):\n|   system") {
+		t.Fatalf("the header must carry the tree: %q", got)
+	}
+	col := -1
+	for _, line := range strings.Split(got, "\n") {
+		at := strings.Index(line, "BẬT")
+		if at < 0 {
+			at = strings.Index(line, "TẮT")
+		}
+		if at < 0 {
+			continue
+		}
+		if col < 0 {
+			col = at
+			continue
+		}
+		if at != col {
+			t.Fatalf("state column %d, want %d: %q", at, col, line)
+		}
+	}
+	if col < 0 {
+		t.Fatal("the listing must show gate states")
+	}
+}
+
+// TestCmdInfoBlockIsOneEntry: the metadata detail is one block, so its rows
+// never land a blank row apart.
+func TestCmdInfoBlockIsOneEntry(t *testing.T) {
+	sess, out := behaviorSession(t)
+	seedIndexedWire(sess, 42)
+	if !sess.cmdInfo("/info 42") {
+		t.Fatal("/info must match")
+	}
+	if n := len(sess.Display.TabSys.lines); n != 1 {
+		t.Fatalf("the metadata block must be one entry, got %d", n)
+	}
+	if got := out.String(); !strings.Contains(got, "| [Local]: #42 — chi tiết metadata:") {
+		t.Fatalf("the block must open with its header: %q", got)
+	}
+	if got := out.String(); strings.Contains(got, "\n\n|   ") {
+		t.Fatalf("block rows must not be separated: %q", got)
+	}
+}
+
 func TestCmdClearRepaintsGreeting(t *testing.T) {
 	sess, out := behaviorSession(t)
 	sess.Username = "Tester"
@@ -228,6 +356,11 @@ func TestCmdFindSearchesBuffer(t *testing.T) {
 	if got := out.String(); !strings.Contains(got, "<<<<<<< #1234") || !strings.Contains(got, ">>>>>>> #1234") {
 		t.Fatalf("find hits must replay inside frame: %q", got)
 	}
+	// The frame and the hit it wraps are one entry, so nothing inside it gets
+	// spaced out (a marker row, a hit row and a closing row would be three).
+	if n := len(sess.Display.TabSys.lines); n != 1 {
+		t.Fatalf("the framed hit must be one entry, got %d", n)
+	}
 
 	sess, out = behaviorSession(t)
 	seedChatHeight(sess, 1234)
@@ -297,6 +430,11 @@ func TestCmdExpandReplaysFull(t *testing.T) {
 	got := out.String()
 	if !strings.Contains(got, "<<<<<<< #42") || !strings.Contains(got, ">>>>>>> #42") {
 		t.Fatalf("expand must replay inside frame: %q", got)
+	}
+	// The frame and the block it wraps are one entry, so the replayed rows stay
+	// together (one per row would be five entries for a two-row block).
+	if n := len(sess.Display.TabSys.lines); n != 1 {
+		t.Fatalf("the framed block must be one entry, got %d", n)
 	}
 	if !strings.Contains(got, "hello world") {
 		t.Fatalf("expand must show full text: %q", got)
