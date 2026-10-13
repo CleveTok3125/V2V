@@ -285,7 +285,7 @@ func (s *Session) runPump() {
 				s.Display.DisplayMu.Unlock()
 				// Lost-connection line rides the same queue so it never
 				// interleaves with (or jumps ahead of) queued chat lines.
-				s.enqueueOutput("\r\033[K\n ❌ Mất kết nối server\n")
+				s.enqueueOutput("\r\033[K\n| [Local]: ❌ Mất kết nối server\n")
 				// Flush before exit: os.Exit skips deferred
 				// s.Display.Term.Close/flushChainTip, losing the newest tip and
 				// leaving the terminal raw.

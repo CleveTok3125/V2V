@@ -139,7 +139,7 @@ func (s *Session) gracefulQuit() {
 	s.releaseCatchupLocked()
 	s.flushPendingGreetingLocked()
 	s.Display.DisplayMu.Unlock()
-	s.enqueueOutput("👋 Đang ngắt kết nối... Tạm biệt!\n")
+	s.enqueueOutput("| [Local]: 👋 Đang ngắt kết nối... Tạm biệt!\n")
 	// Let the goodbye flush and the pump tear down instead of racing
 	// them: return as soon as the pump exits, same 500ms cap as the
 	// old fixed sleep when it never does.
@@ -684,7 +684,7 @@ func (s *Session) cmdClearhistory(text string) bool {
 	}
 	os.Remove(historyFile)
 	s.Display.DisplayMu.Lock()
-	s.emitLocalFeedback(fmt.Sprintf("🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile))
+	s.emitLocalFeedback(fmt.Sprintf("| [Local]: 🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile))
 	s.Display.DisplayMu.Unlock()
 	return true
 }
