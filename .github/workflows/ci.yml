@@ -21,6 +21,10 @@ jobs:
         run: make vet
       - name: Test
         run: make test
+      - name: Race detector
+        # Only -race sees a shared-state violation: the concurrency tests in
+        # client/ and lib/clientcore cannot see one without it.
+        run: make test-race
       - name: Entrypoint tests
         # Same target local check runs (self-skips without root);
         # sudo here for the full matrix on runners.
