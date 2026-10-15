@@ -2,7 +2,6 @@ package identity
 
 import "testing"
 
-
 func TestDataEnvelopeRoundtrip(t *testing.T) {
 	plain := []byte(`{"tripcode":"s3cret"}`)
 	enc, err := EncryptData(plain, []byte("unlock"))

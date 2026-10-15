@@ -33,12 +33,16 @@ type uiRefreshMsg struct{}
 // target re-arms it).
 type uiPromptMsg struct{ prompt string }
 
+// uiHistoryMsg carries one submitted line the session wants in the recall list.
+type uiHistoryMsg struct{ line string }
+
 // uiSink is the session's handle on the running app. The session never
 // writes the screen itself: it keeps its tab buffers and calls Notify,
 // and the app pulls the active tab and repaints.
 type uiSink interface {
 	Notify()
 	SetPrompt(p string)
+	RecordHistory(line string)
 	Quit()
 }
 
@@ -96,6 +100,10 @@ func (k *tuiSink) send(m tea.Msg) {
 }
 
 func (k *tuiSink) SetPrompt(p string) { k.send(uiPromptMsg{prompt: p}) }
+
+// RecordHistory hands a submitted line to the app's recall list. The session
+// decides what belongs there, so the app never guesses from a prefix.
+func (k *tuiSink) RecordHistory(line string) { k.send(uiHistoryMsg{line: line}) }
 
 func (k *tuiSink) Quit() {
 	if pr := k.program; pr != nil {
@@ -328,6 +336,11 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiPromptMsg:
 		a.prompt = msg.prompt
 		return a, nil
+	case uiHistoryMsg:
+		if a.hist != nil {
+			a.hist.add(msg.line)
+		}
+		return a, nil
 	case tea.MouseWheelMsg:
 		var cmd tea.Cmd
 		a.viewport, cmd = a.viewport.Update(msg)
@@ -508,9 +521,6 @@ func (a *app) submit() tea.Cmd {
 		text = "/" + text
 	}
 	a.setCmdMode(false)
-	if a.hist != nil {
-		a.hist.add(text)
-	}
 	a.input.Reset()
 	a.layout()
 	a.dirty = true

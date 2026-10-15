@@ -8,6 +8,21 @@ import (
 // histMax bounds the recall list; older entries drop from the front.
 const histMax = 1000
 
+// recordHistory offers a submitted line to the app's recall list. Commands
+// always belong there; a chat message only when ui.history.saveMessages asks
+// for it, so private text stays out of the on-disk history by default. The
+// decision comes from what dispatch did, never from a prefix, so a message
+// that happens to start with "/" is still a message.
+func (s *Session) recordHistory(line string, isCommand bool) {
+	if s.Display.Sink == nil {
+		return
+	}
+	if !isCommand && (ClientCfg == nil || !ClientCfg.SaveMessageHistory()) {
+		return
+	}
+	s.Display.Sink.RecordHistory(line)
+}
+
 // inputHistory is the arrow-up/down recall list. It persists to the same
 // file readline used (historyFile) so /clearhistory keeps its meaning.
 // The newest entry is last; idx == len(lines) means "editing a fresh
@@ -43,8 +58,9 @@ func loadHistory(path string) *inputHistory {
 }
 
 // add records a submitted line, skipping an immediate duplicate, and
-// persists. Callers pass the raw draft; a trailing newline is dropped so
-// a multi-line send still stores one entry.
+// persists. Callers pass the raw draft; a trailing newline is dropped so a
+// multi-line send still stores one entry. The session decides what belongs
+// here (see Session.recordHistory), so this stores whatever it is given.
 func (h *inputHistory) add(line string) {
 	line = strings.TrimRight(line, "\n")
 	if line == "" {
