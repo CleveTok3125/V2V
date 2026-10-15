@@ -112,9 +112,18 @@ func (s *Session) handlePowOffer(offer wire.PowOffer) {
 		return
 	}
 	s.Display.DisplayMu.Lock()
-	s.emitLocalFeedbackLive(s.notifyPowLive(offer.Tier), fmt.Sprintf("| [Local]: Đang giải PoW (tier %d)…\n", offer.Tier))
+	s.Verify.AutoVerifyMu.Lock()
+	s.Verify.PowTier = offer.Tier
+	s.Verify.AutoVerifyMu.Unlock()
 	s.Display.DisplayMu.Unlock()
+	s.refreshTerminal()
 	nonce, err := platformSolvePoW(preset, offer.Salt, maxCostMs)
+	s.Display.DisplayMu.Lock()
+	s.Verify.AutoVerifyMu.Lock()
+	s.Verify.PowTier = 0
+	s.Verify.AutoVerifyMu.Unlock()
+	s.Display.DisplayMu.Unlock()
+	s.refreshTerminal()
 	if err != nil {
 		s.Display.DisplayMu.Lock()
 		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Bỏ PoW (%v).\n", err))

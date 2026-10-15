@@ -859,6 +859,9 @@ func TestAppSelectionCopiesContentOnly(t *testing.T) {
 	if !strings.Contains(raw, "48;5;238mtin của mình") {
 		t.Fatalf("the highlight must start at the text, not the inset: %q", raw)
 	}
+	if strings.Contains(raw, "48;5;238m│") || strings.Contains(raw, "48;5;238m╭") {
+		t.Fatalf("no frame cell may be highlighted: %q", raw)
+	}
 }
 
 func TestAppDragDoesNotRebuildContent(t *testing.T) {
@@ -877,5 +880,77 @@ func TestAppDragDoesNotRebuildContent(t *testing.T) {
 	}
 	if a.selCursor == a.selAnchor {
 		t.Fatal("a drag motion must still move the selection")
+	}
+}
+
+func TestAppJumpToLatest(t *testing.T) {
+	a, sess := newTestApp()
+	for i := 0; i < 60; i++ {
+		sess.Display.TabChat.append(entry{header: "line", body: "x", height: uint64(i + 1)})
+	}
+	a.dirty = true
+	a.refreshContent()
+	a.viewport.GotoTop()
+	if a.viewport.AtBottom() {
+		t.Fatal("setup: the viewport must start scrolled up")
+	}
+	if !strings.Contains(a.renderFooter(), "về mới nhất") {
+		t.Fatalf("a scrolled-up footer must offer the jump: %q", a.renderFooter())
+	}
+	a.jumpToLatest()
+	if !a.viewport.AtBottom() {
+		t.Fatal("jumpToLatest must reach the bottom")
+	}
+	if strings.Contains(a.renderFooter(), "về mới nhất") {
+		t.Fatal("the hint must clear once back at the latest line")
+	}
+}
+
+func TestAppSubmitJumpsToLatest(t *testing.T) {
+	a, sess := newTestApp()
+	for i := 0; i < 60; i++ {
+		sess.Display.TabChat.append(entry{header: "line", body: "x", height: uint64(i + 1)})
+	}
+	a.dirty = true
+	a.refreshContent()
+	a.viewport.GotoTop()
+	if a.viewport.AtBottom() {
+		t.Fatal("setup: the viewport must start scrolled up")
+	}
+	a.input.SetValue("xin chào")
+	a.submit()
+	if !a.viewport.AtBottom() {
+		t.Fatal("sending must pull the chat back to the newest line")
+	}
+}
+
+func TestAppTabClickSwitches(t *testing.T) {
+	a, _ := newTestApp()
+	click := func(want int) {
+		x := -1
+		for col := 0; col < a.width; col++ {
+			if i, ok := a.tabAt(col); ok && i == want {
+				x = col
+				break
+			}
+		}
+		if x < 0 {
+			t.Fatalf("tab %d must be clickable", want)
+		}
+		model, _ := a.Update(tea.MouseClickMsg{X: x, Y: 0, Button: tea.MouseLeft})
+		next, ok := model.(*app)
+		if !ok {
+			t.Fatal("Update must return the app model")
+		}
+		if next.active != want {
+			t.Fatalf("click at x=%d must switch to tab %d, got %d", x, want, next.active)
+		}
+	}
+	click(1)
+	click(0)
+	// A click past the last label belongs to no tab and must not switch.
+	model, _ := a.Update(tea.MouseClickMsg{X: a.width - 1, Y: 0, Button: tea.MouseLeft})
+	if app, ok := model.(*app); ok && app.active != 0 {
+		t.Fatalf("a click off the labels must not switch tabs, got %d", app.active)
 	}
 }

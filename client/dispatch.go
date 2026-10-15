@@ -720,9 +720,16 @@ func (s *Session) olderAvailable() bool {
 func (s *Session) uiStatus() string {
 	s.Display.DisplayMu.Lock()
 	defer s.Display.DisplayMu.Unlock()
+	s.Verify.AutoVerifyMu.Lock()
+	tier := s.Verify.PowTier
+	s.Verify.AutoVerifyMu.Unlock()
 	switch {
+	case tier > 0:
+		return fmt.Sprintf("Đang giải PoW (tier %d)…", tier)
 	case s.Chain.InOlder:
 		return "Đang tải lịch sử cũ…"
+	case s.Chain.Loading:
+		return "Đang tải lịch sử…"
 	case s.Chain.InRecover:
 		return "Đang khôi phục tin bị thiếu…"
 	case s.Pending.ReplyDraft > 0:
