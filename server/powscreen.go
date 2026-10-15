@@ -188,14 +188,12 @@ func (s *ChatServer) unicastData(sess *ClientSession, data []byte) {
 }
 
 // unicastNotice delivers a system line to one client as a tagged wire.
-// leaves names the tag leaves, and the root-to-leaf chain is built here so
-// the client filters the line by tag instead of matching its wording.
+// leaves names the tag leaves; the root-to-leaf chain builds here so the
+// client filters by tag, never wording.
 //
-// The line is not stored and not chained: a notice is per-client and
-// live-only, so it carries no evidence and never enters a replay. Text
-// keeps the "[Hệ thống]: " prefix so the display is unchanged. The queue
-// write stays non-blocking: a warning dropped because
-// WritePump is wedged beats a wedged ReadPump.
+// The line is not stored and not chained: per-client and live-only, it
+// carries no evidence and never enters replay. The queue write stays
+// non-blocking: a dropped warning beats a wedged ReadPump.
 func (s *ChatServer) unicastNotice(sess *ClientSession, text string, leaves ...string) {
 	data, err := json.Marshal(noticeWire(time.Now(), text, leaves...))
 	if err != nil {

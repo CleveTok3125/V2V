@@ -1,11 +1,9 @@
 package main
 
-// WebAuthn verification through the go-webauthn library: the adapter
-// translates the repo's compact wire fields into standard ceremony
-// documents and lets the library enforce challenge, origin, RP ID,
-// flags, signature, counter and credential policy. Hand-rolled
-// verification was deleted; this file plus the library own the whole
-// ceremony surface now.
+// WebAuthn verification through the go-webauthn library: this adapter
+// translates the compact wire fields into standard ceremony documents
+// and the library enforces challenge, origin, RP ID, flags, signature,
+// counter and credential policy.
 //
 // Hard policy lives here, not in callers: user verification required,
 // ES256 only, attestation "none" rejected, credential IDs clamped to

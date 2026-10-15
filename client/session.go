@@ -19,20 +19,16 @@ import (
 	"github.com/CleveTok3125/V2V/lib/strutil"
 )
 
-// Session carries the chat session state shared by the read pump, the
-// input loop, the render path and the chain tracker. Sub-state lives
-// in the Display, Chain, Verify and Pending groups; the root keeps
-// only identity and connection lifecycle.
+// Session carries chat session state shared by the read pump, input loop,
+// render path and chain tracker. Sub-state lives in the Display, Chain,
+// Verify and Pending groups; the root keeps identity and connection
+// lifecycle.
 //
-// Lock order is fixed Display -> Chain -> Pending: group locks nest
-// only in that direction, never the reverse. DisplayMu stays the
-// god-lock for the tab buffers and the placeholder/echo state (they
-// must stay atomic); ChainMu serializes tip updates between the pump
-// and the input loop; PendingMu guards the placeholder/echo queues at
-// the two threads that share them. Pump-side chain reads (InSync,
-// SyncHeights, HaveTip in checkChainLink and handleHistorySync) stay
-// under caller-held DisplayMu with no ChainMu: the pump is their
-// only writer, so a second lock would add nothing.
+// Lock order is fixed Display -> Chain -> Pending, never the reverse.
+// DisplayMu stays the god-lock for tab buffers and placeholder/echo
+// state (they must stay atomic); ChainMu serializes tip updates between
+// pump and input loop. Pump-side chain reads stay under caller-held
+// DisplayMu with no ChainMu: the pump is their only writer.
 type Session struct {
 	// Connection and identity.
 	Conn      wsConn

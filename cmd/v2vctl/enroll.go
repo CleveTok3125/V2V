@@ -112,5 +112,3 @@ func activeEnvValue(data []byte, key string) string {
 	}
 	return ""
 }
-
-// --- migrate ----------------------------------------------------------------

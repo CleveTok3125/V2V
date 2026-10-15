@@ -9,20 +9,16 @@ type logTag struct {
 
 // logTagCatalog is the vocabulary of log tags, in the order
 // docs/LOG_STANDARD.md tabulates them. A line reports its event as
+// [LEVEL] <emoji> (<tag>[,<tag>]) <message>.
 //
-//	[LEVEL] <emoji> (<tag>[,<tag>]) <message>
+// Tags are independent labels, not a path: each is one fact about the
+// line, and a line carries every fact that applies. "fail" is the same
+// tag in "auth,fail" and "passkey,fail", so a grep for one fact finds
+// every line carrying it. Order is not significant; a tag never repeats.
 //
-// The tags are independent labels, not a path: each one is a fact about the
-// line, and a line carries every fact that applies. "auth,fail" says the line
-// is about authentication and that it failed; "passkey,fail" says the same
-// about a passkey, and "fail" is the same tag in both, so a grep for one fact
-// finds every line that carries it. Order is not significant and a tag is
-// never repeated.
-//
-// TestLogCallSitesUseDeclaredTags keeps every call site in step with this list
-// and TestLogTagsAreDocumented keeps the list in step with the spec, in both
-// directions, so a new tag is a deliberate addition and never a typo that only
-// shows up in production.
+// TestLogCallSitesUseDeclaredTags keeps call sites in step with this list
+// and TestLogTagsAreDocumented keeps the list in step with the spec, so a
+// new tag is deliberate, never a typo surfacing only in production.
 var logTagCatalog = []logTag{
 	{"alert", "an attempt that looks like an attack"},
 	{"auth", "authentication and authorization"},

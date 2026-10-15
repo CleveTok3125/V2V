@@ -250,20 +250,16 @@ func (c *renderCache) put(key string, b renderedBlock) {
 
 // headerMetaRe matches the message number inside a header row
 // ("| 14:19 Name#83e4 | #1234:abcd"). It anchors on the "| HH:MM " the
-// header opens with, so a body row that happens to contain "#12:" cannot
-// be mistaken for one.
+// header opens with, so a body row containing "#12:" cannot match.
 //
-// The ".*" is greedy on purpose. A display name may itself contain "#1:ff"
-// (names allow "#" and ":"), and the renderer's reference is the last one
-// on the row, so matching the last keeps a name from standing in for it.
-// The hash part may be empty while scanning and is compared apart.
-// headerMetaRe used to recover the message number by scanning a rendered
-// header. Entries carry height and hashHex instead, so nothing parses a row
-// back into structure.
+// The ".*" is greedy on purpose: a display name may itself contain "#1:ff",
+// and the renderer reads the last one, so matching the last keeps a name
+// from standing in for it. The hash part may be empty while scanning and
+// compares apart.
 
 // mentionRe matches @-mentions of message heights ("@#1234", "@#1234:abcd").
-// The @ prefix keeps them distinct from server-stamped "name#hash"
-// display names, which never open with "@#".
+// The @ prefix separates them from server-stamped "name#hash" display
+// names, which never open with "@#".
 var mentionRe = regexp.MustCompile(`@#(\d+)(?::([0-9a-fA-F]{1,16}))?`)
 
 // mention is one @#height reference with byte offsets into its source.
@@ -778,15 +774,13 @@ func (s *Session) initChainState() {
 }
 
 // verifyReplayWire runs echo matching and link verification for one
-// replayed wire, unless it belongs to an on-demand older segment: an
-// older height can never verify against the running tip, so verifying
-// would warn falsely and rewind the tip. Recovery windows verify
-// against their own anchor instead. Stashing is disabled during a
-// catch-up replay too: historical echoes can never match a future
-// placeholder, so stashing them would only age into false "ID altered"
-// warnings. It reports whether a recovery window already rendered the
-// wire, in which case the caller must not render it again. Caller must
-// hold DisplayMu.
+// replayed wire. On-demand older segments skip both: an older height can
+// never verify against the running tip, so verifying would warn falsely
+// and rewind the tip. Recovery windows verify against their own anchor.
+// Stashing stays off during catch-up replay: historical echoes can never
+// match a future placeholder, and would only age into false "ID altered"
+// warnings. Reports whether a recovery window already rendered the wire
+// (caller must not render again). Caller holds DisplayMu.
 func (s *Session) verifyReplayWire(msg WireMessage, allowStash bool) bool {
 	s.Chain.RecoverRendered = false
 	if s.Chain.InOlder {
@@ -1021,15 +1015,10 @@ func (s *Session) renderRecoveredInPlace(msg WireMessage) {
 	}
 }
 
-// finishRecovery settles the pending refill at its trailer: a fully
-// received window confirms, anything else reports what landed. A
-// follow-up gap queued meanwhile is then started against its own
-// anchor, so an extended loss still gets refilled. Caller must hold
-// DisplayMu.
 // finishRecovery settles one refill attempt: a window with nothing left
 // missing confirms; otherwise it retries the remainder after the
 // configured delay, up to history.recoverRetries, and finally reports
-// the loss. Caller must hold DisplayMu.
+// the loss. Caller holds DisplayMu.
 func (s *Session) finishRecovery() {
 	p := s.Chain.RecoverPending
 	if p == nil {

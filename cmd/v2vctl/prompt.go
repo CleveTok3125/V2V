@@ -169,5 +169,3 @@ func resolveInstancePath(p string) string {
 	}
 	return filepath.Join(v2vctlRoot, p)
 }
-
-// --- keygen ed25519 -----------------------------------------------------

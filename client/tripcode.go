@@ -100,14 +100,13 @@ func toAssessment(rep StrengthReport) passprompt.Assessment {
 }
 
 // meteredTripcodeEntry is the unified TTY flow: single masked entry,
-// immediate re-entry check, the 64-byte cap, weak warn+confirm, then
-// the encrypted-save offer. The value is verified before anything is
-// asked about saving. Session-only typos show up on the badge
-// immediately, while a saved typo (or a wrong unlock passphrase) is
-// permanent. ctx feeds the meter's personal-info context. Assessment
-// stays a client-side callback so passprompt never imports zxcvbn.
-// The piped path keeps the upfront double-entry order for script
-// stability.
+// immediate re-entry check, the 64-byte cap, weak warn+confirm, then the
+// encrypted-save offer. The value verifies before anything asks about
+// saving. Session-only typos show on the badge at once, while a saved
+// typo (or wrong unlock passphrase) is permanent. ctx feeds the meter's
+// personal-info context. Assessment stays a client-side callback so
+// passprompt never imports zxcvbn. The piped path keeps the upfront
+// double-entry order for script stability.
 func meteredTripcodeEntry(path string, ctx []string) (string, error) {
 	assess := func(s string) passprompt.Assessment {
 		return toAssessment(AssessPassphrase(s, ctx))

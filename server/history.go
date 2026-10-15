@@ -252,29 +252,25 @@ func (h *Hub) fanout(data []byte, sender *websocket.Conn, isSystem, echo bool) {
 }
 
 // BroadcastNotice sends a server-originated notification (join/leave)
-// that never enters the hash chain: it carries no authorship or ordering
-// evidence, only display text. Stored for replay, broadcast live.
-// Management lines that must serve as evidence use BroadcastAudit;
-// unicast warnings stay raw strings (per-client, never chained).
+// that never enters the hash chain: display text only, no authorship
+// or ordering evidence. Stored for replay, broadcast live. Evidence
+// lines use BroadcastAudit instead.
 //
-// leaves names the tag leaves, not the finished tag list: they are turned
-// into the full root-to-leaf chain here so a caller cannot publish a
-// partial chain and quietly escape a mute its parents are subject to.
+// leaves names tag leaves, not finished tag lists: the full chain builds
+// here so a caller cannot publish a partial chain and escape a mute.
 func (h *Hub) BroadcastNotice(text string, leaves []string, sender *websocket.Conn) {
 	h.broadcastSystem(text, leaves, "", sender)
 }
 
 // BroadcastDate announces a new calendar day. It carries the day as data
-// (sys_date) next to the rendered banner, so a client that already showed
-// this day — from the replay tail, or from a server that restarted and
-// re-announced it — can recognise the repeat without comparing banner text.
+// (sys_date), so a client that already showed this day recognizes the
+// repeat without comparing banner text.
 func (h *Hub) BroadcastDate(text, day string, sender *websocket.Conn) {
 	h.broadcastSystem(text, []string{wire.TagDate}, day, sender)
 }
 
-// serverLocation is the timezone a notice is stamped in. Production always
-// resolves a location from config, but a zero Timezone would panic Time.In,
-// so fall back to UTC rather than trust the caller.
+// serverLocation is the timezone notices stamp in. A zero Timezone would
+// panic Time.In, so fall back to UTC rather than trust the caller.
 func serverLocation() *time.Location {
 	if loc := Cfg.Static.Timezone; loc != nil {
 		return loc
@@ -554,14 +550,12 @@ func (c *ChainService) historyInfo() HistoryInfo {
 }
 
 // collectSegment gathers up to limit stored lines older than before in
-// replay order, without sending. before is an exclusive chain height; 0
-// means the tail window over the whole history. Unchained lines carry no
-// height, so they travel with their neighbors by position: the cutoff is
-// the first line at or above before. Lines evicted from RAM are served
-// from disk when the lookup level allows (see windowBefore); the RAM
-// seam may repeat a few unchained lines, chained content stays exact.
-// Kept separate from the send so disk I/O and zstd decode run outside
-// BroadcastMu.
+// replay order, without sending. before is an exclusive chain height;
+// 0 means the tail window. Unchained lines carry no height, so the
+// cutoff is the first line at or above before. Lines evicted from RAM
+// come from disk when the lookup level allows; the RAM seam may repeat
+// a few unchained lines, chained content stays exact. Disk I/O and zstd
+// decode run outside BroadcastMu.
 func (c *ChainService) collectSegment(before uint64, limit int) []string {
 	if limit <= 0 {
 		return nil
@@ -746,20 +740,16 @@ func (s *ChatServer) serveHistoryRanges(session *ClientSession, ranges []HeightR
 
 // sendReplay renders stored lines in replay format: header, content,
 // human footer with counts, and a HistorySync trailer. lines must be a
-// private copy. Sends never block (drops on a full peer buffer are
-// counted and logged); the trailer reports what was actually queued.
-// A segment footer is labeled as older history, a recovery footer
-// as refill history; both say plainly when the window holds no
-// chained line (exhausted) instead of a bare zero count. All footer
-// variants keep the boundary substring so the client still opens and
-// closes the replay window.
+// private copy. Sends never block (drops on a full peer buffer count
+// and log); the trailer reports what actually queued. All footer variants
+// keep the boundary substring so the client still opens and closes the
+// replay window.
 // historySyncTrailer encodes the machine-readable trailer closing a
-// replay. Dropped is the number of sends the peer's full buffer
-// refused: the client skips its fork check when it is non-zero, since
-// an incomplete window cannot prove the log changed.
-// pageMeta carries the seq-cursor metadata for a paged response. Zero
-// values mean "not a seq page": the connect/segment/recovery replays
-// keep the legacy trailer fields only.
+// replay. Dropped counts sends a full peer buffer refused: the client
+// skips its fork check when non-zero, since an incomplete window cannot
+// prove the log changed.
+// pageMeta carries seq-cursor metadata for a paged response. Zero values
+// mean "not a seq page": other replays keep legacy trailer fields only.
 type pageMeta struct {
 	Direction string
 	NextSeq   uint64

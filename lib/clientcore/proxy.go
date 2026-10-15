@@ -1,13 +1,12 @@
 package clientcore
 
 // Outbound proxy support: --proxy / V2V_PROXY for scripted use, --ask-proxy
-// for an interactive wizard in the built-in client. HTTP(S) proxies ride
-// the gorilla Dialer; SOCKS5 handshakes via x/net/proxy (RFC 1928/1929)
-// so gorilla itself owns TLS for wss targets. Hostnames always go to
-// the proxy unresolved: no local DNS lookup leaks the target. The
-// proxy password is the proxy's secret, not the project's: no meter,
-// no weak gate, and it wipes from RAM right after dial. WASM never
-// runs this file; the browser owns proxying there.
+// for an interactive wizard. HTTP(S) proxies ride the gorilla Dialer;
+// SOCKS5 handshakes via x/net/proxy so gorilla itself owns TLS for wss
+// targets. Hostnames always go to the proxy unresolved: no local DNS
+// lookup leaks the target. The proxy password is the proxy's secret, not
+// the project's: no meter, no weak gate, wiped from RAM right after dial.
+// WASM never runs this file; the browser owns proxying there.
 
 import (
 	"fmt"

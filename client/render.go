@@ -181,26 +181,22 @@ func (s *Session) refreshCoalesced() {
 	s.Display.RefreshMu.Unlock()
 }
 
-// erasePlaceholderLocked splices a placeholder block out of the tab
-// buffer and rewrites the screen region, reprinting any lines that
-// intervened after it. Caller must hold s.Display.DisplayMu.
-// consumeEchoLocked matches a server echo of our own message against
-// pending placeholders by exact tmp_id (duplicate texts stay
-// unambiguous), with the legacy oldest-text match as fallback. A match
-// drops the entry and erases the placeholder. An echo from us that
-// matches nothing is stashed: it may have beaten its placeholder
-// (local echo race) and is retried when placeholders are tracked;
-// entries never matched expire with a warning, which is how
-// server-side ID tampering surfaces. allowStash is false for history
-// replay: our own old messages must never pollute the stash (their
-// tmpIDs belong to previous sessions). Caller must hold s.Display.DisplayMu.
+// erasePlaceholderLocked splices a placeholder block out of the tab buffer
+// and rewrites the screen region. Caller holds s.Display.DisplayMu.
+// consumeEchoLocked matches a server echo of the local user's own message
+// against pending placeholders by exact tmp_id (duplicate texts stay
+// unambiguous), oldest-text match as fallback. A match drops the entry
+// and erases the placeholder. An unmatched echo is stashed: it may have
+// beaten its placeholder (local echo race) and retries when placeholders
+// track; entries never matched expire with a warning, which surfaces
+// server-side ID tampering. allowStash is false for history replay: old
+// messages must never pollute the stash (their tmpIDs belong to previous
+// sessions). Caller holds s.Display.DisplayMu.
 
-// verifyLinkBase returns "https://<host>" for the connected server, or
-// "" when the host is unknown. Badge links must be absolute: the
-// display sanitizer drops an OSC8 target that has no http(s) scheme,
-// so a host-relative verify path would render as plain text instead of
-// a clickable link (native terminals and the xterm.js link handler both
-// require a full URL).
+// verifyLinkBase returns "https://<host>" for the connected server, or ""
+// when the host is unknown. Badge links must be absolute: the display
+// sanitizer drops an OSC8 target with no http(s) scheme, so a
+// host-relative path would render as plain text, never a link.
 func (s *Session) verifyLinkBase() string {
 	if u, err := url.Parse(s.WSURL); err == nil && u.Host != "" {
 		return "https://" + u.Host

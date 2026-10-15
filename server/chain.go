@@ -8,14 +8,14 @@ import (
 	"github.com/CleveTok3125/V2V/lib/chain"
 )
 
-// Global message chain ("blockchain-lite"): every broadcast message links
-// to the previous one, so altering any byte of any message breaks the link
-// and every link after it. No per-user signing is needed for tamper
-// evidence; trip signatures keep their authorship role on top.
+// Global message chain ("blockchain-lite"): every broadcast links to the
+// previous one, so altering any byte breaks that link and every link after
+// it. No per-user signing needed for tamper evidence; trip signatures keep
+// authorship on top.
 //
-// Ordering rule: the server defines the order at link time. Link, store
-// and send happen under BroadcastMu so every client receives messages in
-// chain order and prev-continuity checks never false-positive on reorder.
+// Ordering rule: the server defines order at link time. Link, store and
+// send happen under BroadcastMu so every client receives chain order and
+// prev-continuity checks never false-positive on reorder.
 
 // chainVersion is the link encoding in use. Version 1 (no replyTo
 // segment) verifies pre-reply records; new links always carry 2.

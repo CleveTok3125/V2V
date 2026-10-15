@@ -1,11 +1,10 @@
-// Package passprompt is the single shared secret-entry component for
-// the repo: hidden password input with optional live strength meter,
-// double-entry confirmation, and default-No confirmation. Interactive
-// TTY sessions get a Bubble Tea program (per-keystroke meter updates,
-// which huh cannot do); piped or non-TTY input falls back to plain
-// line reads with identical semantics so scripts and tests keep
-// working. The package never imports zxcvbn: callers supply an
-// Assessment callback, keeping the meter display-only.
+// Package passprompt is the shared secret-entry component: hidden password
+// input with optional live strength meter, double-entry confirmation, and
+// default-No confirmation. Interactive TTY sessions get a Bubble Tea
+// program (per-keystroke meter updates, which huh cannot do); piped or
+// non-TTY input falls back to plain line reads with identical semantics.
+// The package never imports zxcvbn: callers supply an Assessment
+// callback, keeping the meter display-only.
 package passprompt
 
 import (

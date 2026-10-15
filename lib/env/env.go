@@ -1,13 +1,12 @@
-// Package env is the single registry of environment variables the
-// repo reads. Adding a variable means adding one Key constant, one
-// accessor and one test case; changing read behavior means changing
-// one function while the compiler finds every caller.
+// Package env is the single registry of environment variables the repo
+// reads. Adding a variable means one Key constant, one accessor and one
+// test case; read behavior changes in one function while the compiler
+// finds every caller.
 //
-// Two read paths exist by design. Bare runtime lookups go through the
-// accessors here. Kong flag tags (V2V_PROXY, V2V_CONFIG_DIR,
-// V2V_CACHE_DIR, WEBAUTHN_STORE) keep literal strings because struct
-// tags cannot reference constants; their keys are still pinned below
-// so the registry lists every variable exactly once.
+// Two read paths exist by design. Bare runtime lookups use the accessors
+// here. Kong flag tags keep literal strings because struct tags cannot
+// reference constants; their keys are still pinned below so the registry
+// lists every variable exactly once.
 package env
 
 import (

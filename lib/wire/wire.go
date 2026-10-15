@@ -1,12 +1,9 @@
-// Package wire is the single source of the chat protocol schema: the
-// structs below define every message the client and server exchange.
-// Both binaries alias these types (type WireMessage = wire.WireMessage)
-// instead of redeclaring them: JSON silently drops unknown fields, so
-// separate copies lose fields without warning (DisplayName, TmpID/ReplyTo
-// and IdentityPub each existed in only some copies). Add fields here,
-// never in a local copy.
+// Package wire is the single source of the chat protocol schema.
+// Both binaries alias these types instead of redeclaring them: JSON
+// silently drops unknown fields, so separate copies lose fields
+// without warning. Add fields here, never in a local copy.
 //
-// All optional fields carry omitempty (IdentityPub is never serialized),
+// Optional fields carry omitempty (IdentityPub is never serialized),
 // so zero values keep the exact bytes legacy peers expect.
 package wire
 
@@ -31,55 +28,41 @@ type WireMessage struct {
 	Type        string `json:"type"`
 	Time        string `json:"time,omitempty"`
 	DisplayName string `json:"displayName,omitempty"`
-	// Tags classify a line at the source, most general first: a notice
-	// carries its leaf tags and the ancestors they imply, e.g. a
-	// screening challenge is
-	// ["system","system.pow","system.pow.screening"]. The client
-	// filters on tags instead of matching message text, and muting a
-	// node hides its whole subtree. History replay filters join/leave
-	// unless the client asked for them; dates, audits and untagged lines
-	// are always sent. Only audit lines chain.
+	// Tags classify a line at the source, most general first, e.g.
+	// ["system","system.pow","system.pow.screening"]. The client filters
+	// on tags, never message text; muting a node hides its subtree.
+	// History replay filters join/leave unless asked for; dates, audits
+	// and untagged lines always pass. Only audit lines chain.
 	//
-	// There is no backward compatibility with the sys_kind field this
-	// replaced, so a history file written by an older build yields
-	// untagged notices: its join/leave records replay as ordinary system
-	// lines and ignore the client's join filters. Deploy against an
-	// empty history.
+	// No back compatibility with the sys_kind field this replaced: old
+	// history replays join/leave as plain system lines. Deploy against
+	// an empty history.
 	Tags []string `json:"tags,omitempty"`
-	// SysPowTier is the proof-of-work tier a server-sent challenge is
-	// worth, so the client can apply ui.powMinTier to it. The notice's
-	// text also names the tier, but that is a pre-rendered string and
-	// nothing parses it. Zero means the notice carries no tier: a
-	// deadline or a result is not filtered by a floor that only says how
-	// much work to announce. Same shape and same reasoning as SysDate.
+	// SysPowTier is the tier a server-sent challenge is worth, so the
+	// client can apply ui.powMinTier. Zero means the notice carries no
+	// tier (deadlines, results). Same shape as SysDate.
 	SysPowTier int `json:"sys_pow_tier,omitempty"`
-	// SysDate is the calendar day a date banner announces, as
-	// "2006-01-02". The banner text alone is a pre-rendered string, so
-	// without this the client could only recognise a repeat by comparing
-	// the text it had already drawn. Not covered by the chain hash:
-	// date notices are unchained, and this is display metadata.
+	// SysDate is the calendar day a date banner announces ("2006-01-02").
+	// Display metadata only: date notices are unchained, and this stays
+	// outside the chain hash.
 	SysDate string    `json:"sys_date,omitempty"`
 	Text    string    `json:"text,omitempty"`
 	Trip    *TripMeta `json:"trip,omitempty"`
 	// TmpID is the sender's per-session counter, relayed verbatim and
-	// never assigned by the server. ReplyTo quotes a chain height for
-	// replies, relayed verbatim and covered by the link (v2+).
+	// never assigned by the server. ReplyTo quotes a chain height,
+	// relayed verbatim and covered by the link (v2+).
 	TmpID       uint64 `json:"tmp_id,omitempty"`
 	ReplyTo     uint64 `json:"reply_to,omitempty"`
 	ChainPrev   string `json:"chain_prev,omitempty"` // hex 64
 	ChainHash   string `json:"chain_hash,omitempty"` // hex 64
 	ChainHeight uint64 `json:"chain_height,omitempty"`
 	ChainVer    int    `json:"chain_ver,omitempty"` // link encoding, current 2
-	// Seq is the server-assigned history cursor: a monotonic counter
-	// over every stored line (chained and unchained alike). It orders
-	// paging and relay mirroring and is not covered by the chain hash,
-	// so it is an ordering aid, never an integrity proof.
+	// Seq is the server-assigned history cursor over every stored line.
+	// Ordering aid only: outside the chain hash, never an integrity proof.
 	Seq uint64 `json:"seq,omitempty"`
-	// SentAt is the server-side send timestamp in RFC3339 with the
-	// server's timezone offset, used for human-facing display (/info,
-	// the verify page). It is not covered by the chain hash, so it is a
-	// display aid, never an integrity proof; wire.Time stays the hashed
-	// link input.
+	// SentAt is the server-side send timestamp (RFC3339 with timezone
+	// offset) for display. Outside the chain hash; wire.Time stays the
+	// hashed link input.
 	SentAt string `json:"sent_at,omitempty"`
 }
 
@@ -92,8 +75,8 @@ type AuthPacket struct {
 	Username  string `json:"username,omitempty"`
 	Tripcode  string `json:"tripcode,omitempty"`
 
-	// TripPub is the hex-encoded ed25519 pubkey derived from passphrase.
-	// Sent in AuthPacket alongside Tripcode for hashchain sync.
+	// TripPub is the hex ed25519 pubkey derived from the passphrase,
+	// sent alongside Tripcode for hashchain sync.
 	TripPub string `json:"trip_pub,omitempty"`
 
 	// WebAuthn assertion (all base64url). When present, the nonce is
@@ -126,30 +109,26 @@ type AuthPacket struct {
 	TripPrev string `json:"trip_prev,omitempty"` // hex 64
 
 	// HistoryJoins asks the server to include join/leave lines in the
-	// catch-up replay. Absent means filtered: replay carries chats,
-	// date banners and other system lines only.
+	// catch-up replay. Absent means filtered.
 	HistoryJoins bool `json:"history_joins,omitempty"`
 
 	// Platform declares the client runtime ("native" or "web") so the
-	// server can offer platform-fitting PoW presets. Absent means
-	// native.
+	// server can offer fitting PoW presets. Absent means native.
 	Platform string `json:"platform,omitempty"`
 
-	// PairTicket carries the proof a browser ceremony produced. The desktop
-	// asks for the ticket over HTTP and spends it on the one dial it makes,
-	// so this is the only pairing field the wire still needs.
+	// PairTicket carries the proof a browser ceremony produced. The
+	// desktop fetches the ticket over HTTP and spends it on its one
+	// dial, so this is the only pairing field the wire needs.
 	PairTicket string `json:"pair_ticket,omitempty"`
 }
 
 // HistorySync is the machine-readable trailer closing a history
-// response, sent after the human footer. Fork-check logic keys off its
-// window bounds: a persisted tip inside the window but absent from the
-// replayed lines means the log changed. MinHeight/MaxHeight cover the
-// chained lines the response intended to send; Dropped counts the sends
-// a full peer buffer refused, so a trailer with Dropped > 0 describes an
-// incomplete window whose holes prove nothing about the log. Direction,
-// FirstSeq, LastSeq, NextSeq and More drive the seq-cursor paging used
-// by the initial load, /older, refills and relay mirroring.
+// response. Fork-check logic keys off its window bounds: a persisted
+// tip inside the window but absent from the replayed lines means the
+// log changed. MinHeight/MaxHeight cover the intended chained lines;
+// Dropped counts sends a full peer buffer refused, so Dropped > 0
+// marks an incomplete window whose holes prove nothing. Direction,
+// FirstSeq, LastSeq, NextSeq and More drive seq-cursor paging.
 type HistorySync struct {
 	Type      string `json:"type"` // "history_sync"
 	MinHeight uint64 `json:"min_height,omitempty"`
@@ -165,9 +144,7 @@ type HistorySync struct {
 }
 
 // HistoryInfo announces the available history window once after connect,
-// so a peer can choose where to start paging without guessing. It
-// replaces the connect-time push replay: the peer asks for the slice it
-// wants instead of receiving a burst.
+// so a peer pages the slice it wants instead of receiving a burst.
 type HistoryInfo struct {
 	Type      string `json:"type"` // "history_info"
 	MinSeq    uint64 `json:"min_seq,omitempty"`
@@ -202,9 +179,8 @@ type HistoryRequest struct {
 }
 
 // PowOffer is a server-issued proof-of-work challenge, signed with the
-// server key. The client verifies OfferSig against the pinned server
-// pubkey before spending work, then answers with PowResult or
-// PowDecline. Tier 0 is never offered (no PoW needed).
+// server key. Verify OfferSig against the pinned server pubkey before
+// spending work. Tier 0 is never offered.
 type PowOffer struct {
 	Type        string `json:"type"` // "pow_offer"
 	Tier        int    `json:"tier,omitempty"`
@@ -226,8 +202,8 @@ type PowResult struct {
 	Nonce       uint64 `json:"nonce,omitempty"`
 }
 
-// PowDecline refuses a challenge (client over local budget). The
-// server mutes chat sends until a later challenge passes.
+// PowDecline refuses a challenge (client over local budget). The server
+// then mutes chat sends until a later challenge passes.
 type PowDecline struct {
 	Type        string `json:"type"` // "pow_decline"
 	ChallengeID string `json:"challenge_id,omitempty"`

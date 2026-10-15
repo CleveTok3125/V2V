@@ -1,11 +1,9 @@
-// Package serverconfig is the single source of truth for loading and
-// validating the V2V server configuration. Both the server binary and
-// the v2vctl config validate command use it, so a setting can never be
-// parsed differently in the two places.
+// Package serverconfig loads and validates the V2V server configuration.
+// Both the server binary and the v2vctl config validate command use it,
+// so a setting can never parse differently in the two places.
 //
-// The package never writes to a logger: every loader returns warnings as
-// strings and leaves it to the caller to log them. Fatal problems are
-// returned as errors.
+// The package never logs: loaders return warnings as strings for the
+// caller to log. Fatal problems return as errors.
 package serverconfig
 
 import (

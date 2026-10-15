@@ -1,8 +1,7 @@
 // Package chain implements the global message log as a hash chain
 // ("blockchain-lite"): every chat message links to the previous one, so
-// altering any byte of any message (content, author, timestamp or ID)
-// breaks the link and every link after it. No per-user signing is needed
-// for tamper evidence; trip signatures keep their authorship role on top.
+// altering any byte breaks the link and every link after it. No per-user
+// signing needed for tamper evidence; trip signatures keep authorship.
 //
 // Wire encoding of the link lives in WireMessage (chain_prev, chain_hash,
 // chain_height); this package only hashes and verifies.

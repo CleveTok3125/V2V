@@ -37,13 +37,12 @@ func resolveClientIP(r *http.Request) trustedproxy.Outcome {
 }
 
 // getClientIP returns the resolved client IP for rate limiting, auth
-// binding and logging. Untrusted proxy headers never reach here:
-// strict chains reject before this is called.
+// binding and logging. Untrusted proxy headers never reach here: strict
+// chains reject first.
 //
-// Note: a rejected request resolves to the empty string. Handlers that
-// call getClientIP directly (rather than going through ServeWS) must be
-// guarded with rejectUntrustedProxy first, or every rejected request
-// shares one rate-limit bucket.
+// A rejected request resolves to "": handlers calling getClientIP
+// directly (not through ServeWS) must guard with rejectUntrustedProxy
+// first, or every rejected request shares one rate-limit bucket.
 func getClientIP(r *http.Request) string {
 	return resolveClientIP(r).ClientIP
 }

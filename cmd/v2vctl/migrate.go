@@ -214,6 +214,4 @@ func (m *MigrateCmd) Run() error {
 	return nil
 }
 
-// --- list -----------------------------------------------------------------
-
 // waPending mirrors the server's pending-ticket schema.

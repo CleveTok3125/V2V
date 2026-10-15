@@ -729,13 +729,11 @@ func (a *app) withScrollbar(content string) string {
 	return strings.Join(lines, "\n")
 }
 
-// refreshContent pulls the active tab and repaints the viewport. The
-// session mutates its buffers under DisplayMu, so the entries are copied
-// under that lock and rendered outside it. The scroll position is kept
-// when the user is reading history; it only follows the bottom when the
-// viewport was already there.
-// chatContent renders the active buffer for the viewport: every entry as a
-// bordered block. A date banner is dropped when its day was already shown (the
+// refreshContent pulls the active tab and repaints the viewport. Entries
+// copy under DisplayMu and render outside it. Scroll sticks when the user
+// reads history; it follows the bottom only when already there.
+// chatContent renders the active buffer for the viewport, one bordered
+// block per entry. A date banner drops when its day already showed (the
 // server sends one per window).
 // selPos is a point in chat-content coordinates: the rendered row and the
 // column on it.
@@ -939,21 +937,10 @@ func (a *app) copySelection() {
 	a.notice = fmt.Sprintf("Đã copy %d dòng", strings.Count(text, "\n")+1)
 }
 
-// renderEntryBox draws one entry as a bordered block that hugs its content up
-// to the viewport width:
-//
-//	╭──────────────╮
-//	│ header       │
-//	├──────────────┤
-//	│ ╭──────────╮ │
-//	│ │ quote    │ │
-//	│ ╰──────────╯ │
-//	│ body         │
-//	╰──────────────╯
-//
-// The border colour follows the entry kind. The frame, the divider and the
-// nested quote block are drawn here because lipgloss has no border label, mid
-// divider, or nested block.
+// renderEntryBox draws one entry as a bordered block hugging its content
+// up to the viewport width. Border color follows the entry kind; frame,
+// divider and nested quote draw here because lipgloss has no border
+// label, mid divider, or nested block.
 // boxStyle picks the border colour of a block from its kind, so a nested
 // quote keeps the real style of the block it shows.
 func (a *app) boxStyle(kind int) lipgloss.Style {
