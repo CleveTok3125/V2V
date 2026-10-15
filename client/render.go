@@ -330,8 +330,10 @@ func (s *Session) quoteLinesFor(replyTo uint64, pending bool) []string {
 	// Rich path first: the struct carries clean time/author plus a
 	// content verdict. System wires are never quotable (date/join
 	// markers), only chat. Buffer fallback keeps legacy heads quotable.
-	if wire, ok := s.Chain.WireIdx.get(replyTo); ok && quotable(wire) {
-		return []string{formatQuoteRich(wire, pending, ClientCfg.QuoteMaxRunes())}
+	if s.Chain.WireIdx != nil {
+		if wire, ok := s.Chain.WireIdx.get(replyTo); ok && quotable(wire) {
+			return []string{formatQuoteRich(wire, pending, ClientCfg.QuoteMaxRunes())}
+		}
 	}
 	for _, buf := range []*tabBuffer{s.Display.TabChat, s.Display.TabSys} {
 		if idx := entryIndexByHeight(buf.lines, replyTo, ""); idx >= 0 {
@@ -343,6 +345,23 @@ func (s *Session) quoteLinesFor(replyTo uint64, pending bool) []string {
 		}
 	}
 	return nil
+}
+
+// replyPreviewLine is the reply target shown above the input box, "" when no
+// reply is pending (a draft or a one-shot target). Caller must hold DisplayMu.
+func (s *Session) replyPreviewLine() string {
+	height := s.Pending.ReplyDraft
+	pending := height > 0
+	if height == 0 {
+		height = s.Pending.PendingReplyTo
+	}
+	if height == 0 {
+		return ""
+	}
+	for _, q := range s.quoteLinesFor(height, pending) {
+		return stripGutter(q)
+	}
+	return ""
 }
 
 // buildChatBlock renders one wire into a buffer entry without emitting. Pure

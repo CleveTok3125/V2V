@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -156,6 +157,7 @@ type tuiStyles struct {
 	boxLocal    lipgloss.Style
 	boxSystem   lipgloss.Style
 	boxQuote    lipgloss.Style
+	reply       lipgloss.Style
 }
 
 // newTUIStyles resolves the chrome styles, falling back to the built-in
@@ -184,6 +186,7 @@ func newTUIStyles() tuiStyles {
 		boxLocal:    lipgloss.NewStyle().Foreground(lipgloss.Color(commandBorderColor)),
 		boxSystem:   lipgloss.NewStyle().Foreground(lipgloss.Color(bananaYellow)),
 		boxQuote:    lipgloss.NewStyle().Foreground(dim),
+		reply:       lipgloss.NewStyle().Foreground(dim),
 	}
 }
 
@@ -209,6 +212,7 @@ type app struct {
 	styles   tuiStyles
 
 	hist         *inputHistory
+	replyLine    string
 	active       int
 	width        int
 	height       int
@@ -379,19 +383,16 @@ func (a *app) handleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "ctrl+d":
 		a.quitting = true
 		return true, tea.Quit
-	case "ctrl+c":
+	case "ctrl+c", "esc":
+		if a.sess.cancelReply() {
+			a.prompt = "| > "
+		}
 		if a.cmdMode || strings.TrimSpace(a.input.Value()) != "" {
 			a.setCmdMode(false)
 			a.input.Reset()
 			a.layout()
 		}
-		return true, nil
-	case "esc":
-		if a.cmdMode || strings.TrimSpace(a.input.Value()) != "" {
-			a.setCmdMode(false)
-			a.input.Reset()
-			a.layout()
-		}
+		a.dirty = true
 		return true, nil
 	case "f1":
 		a.showHelp = true
@@ -407,10 +408,17 @@ func (a *app) handleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		a.maybeLoadOlder()
 		return true, cmd
 	case "backspace":
-		if a.cmdMode && a.input.Value() == "" {
-			// Backspace on the bare command marker leaves command mode.
-			a.setCmdMode(false)
-			return true, nil
+		if a.input.Value() == "" {
+			if a.sess.cancelReply() {
+				a.prompt = "| > "
+				a.dirty = true
+				return true, nil
+			}
+			if a.cmdMode {
+				// Backspace on the bare command marker leaves command mode.
+				a.setCmdMode(false)
+				return true, nil
+			}
 		}
 	case "up", "down":
 		if a.histNav(msg.String() == "up") {
@@ -543,6 +551,9 @@ func (a *app) layout() {
 		inputH = 1
 	}
 	chrome := 1 + (inputH + 2) + 1 // tabs + bordered input + footer
+	if a.replyLine != "" {
+		chrome++ // reply preview above the input
+	}
 	vpH := a.height - chrome
 	if vpH < 1 {
 		vpH = 1
@@ -795,14 +806,21 @@ func stripGutter(s string) string {
 	return strings.Join(lines, "\n")
 }
 
+// leadANSIRe matches the escape sequences a row may start with (SGR or OSC8),
+// so the gutter behind them is still found: the placeholder and a pending quote
+// arrive dim-wrapped.
+var leadANSIRe = regexp.MustCompile(`^(?:\x1b\[[0-9;]*m|\x1b\]8;;[^\x1b]*\x1b\\)+`)
+
 func stripGutterLine(line string) string {
+	prefix := leadANSIRe.FindString(line)
+	line = line[len(prefix):]
 	line = strings.TrimPrefix(line, "|")
 	for i := 0; i < 3 && strings.HasPrefix(line, " "); i++ {
 		line = line[1:]
 	}
 	line = strings.TrimPrefix(line, "> ")
 	line = strings.TrimPrefix(line, "... ")
-	return line
+	return prefix + line
 }
 
 func (a *app) refreshContent() {
@@ -867,15 +885,39 @@ func (a *app) inputMode() int {
 	}
 }
 
-func (a *app) renderInput() string {
+// inputStyle is the input box style for the current mode.
+func (a *app) inputStyle() lipgloss.Style {
 	switch a.inputMode() {
 	case inputModeCommand:
-		return a.styles.inputCmd.Render(a.input.View())
+		return a.styles.inputCmd
 	case inputModeText:
-		return a.styles.inputText.Render(a.input.View())
+		return a.styles.inputText
 	default:
-		return a.styles.inputEmpty.Render(a.input.View())
+		return a.styles.inputEmpty
 	}
+}
+
+// renderInputArea is the input box. A pending reply rides as a bordered row on
+// top of it, sharing the frame, so the two read as one control.
+func (a *app) renderInputArea() string {
+	st := a.inputStyle()
+	if a.replyLine == "" {
+		return st.Render(a.input.View())
+	}
+	head := st.Border(replyBorder(), true, true, true, true).Width(a.width).
+		Render(a.styles.reply.Render(" " + a.replyLine))
+	body := st.Border(lipgloss.RoundedBorder(), false, true, true, true).Width(a.width).
+		Render(a.input.View())
+	return head + "\n" + body
+}
+
+// replyBorder is the rounded border with a T-junction footer, so the reply row
+// reads as attached to the input box below it.
+func replyBorder() lipgloss.Border {
+	b := lipgloss.RoundedBorder()
+	b.BottomLeft = "├"
+	b.BottomRight = "┤"
+	return b
 }
 
 // renderFooter shows transient state (a background-load status or the reply
@@ -921,18 +963,29 @@ func (a *app) View() tea.View {
 	if a.quitting {
 		return tea.NewView("")
 	}
+	a.syncReplyLine()
 	a.refreshContent()
 	chat := a.withScrollbar(a.viewport.View())
 	if a.showHelp {
 		chat = a.helpView()
 	}
-	v := tea.NewView(strings.Join([]string{
-		a.renderTabs(),
-		chat,
-		a.renderInput(),
-		a.renderFooter(),
-	}, "\n"))
+	parts := []string{a.renderTabs(), chat}
+	parts = append(parts, a.renderInputArea(), a.renderFooter())
+	v := tea.NewView(strings.Join(parts, "\n"))
 	// Capture the mouse so the wheel scrolls the chat; clicks are ignored.
 	v.MouseMode = tea.MouseModeCellMotion
 	return v
+}
+
+// syncReplyLine refreshes the reply preview shown above the input box and
+// re-lays out when it appears or disappears, so the chat keeps its height.
+func (a *app) syncReplyLine() {
+	a.sess.Display.DisplayMu.Lock()
+	line := a.sess.replyPreviewLine()
+	a.sess.Display.DisplayMu.Unlock()
+	if line == a.replyLine {
+		return
+	}
+	a.replyLine = line
+	a.layout()
 }
