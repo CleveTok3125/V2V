@@ -618,14 +618,39 @@ func TestAppInputBorderModes(t *testing.T) {
 func TestAppPromptMarkers(t *testing.T) {
 	a, _ := newTestApp()
 	if got := a.promptFor(textarea.PromptInfo{LineNumber: 0}); got != "> " {
-		t.Fatalf("first-line prompt = %q", got)
-	}
-	if got := a.promptFor(textarea.PromptInfo{LineNumber: 1}); got != "..." {
-		t.Fatalf("continuation prompt = %q", got)
+		t.Fatalf("chat prompt = %q", got)
 	}
 	a.cmdMode = true
 	if got := a.promptFor(textarea.PromptInfo{LineNumber: 0}); got != " /" {
 		t.Fatalf("command prompt = %q, want \" /\"", got)
+	}
+	// A multi-line draft is the full text editor: no prompt on any line.
+	a.cmdMode = false
+	a.input.SetValue("line one\nline two")
+	if got := a.promptFor(textarea.PromptInfo{LineNumber: 0}); got != "" {
+		t.Fatalf("full text edit must carry no prompt, got %q", got)
+	}
+	if got := a.promptFor(textarea.PromptInfo{LineNumber: 1}); got != "" {
+		t.Fatalf("continuation must carry no prompt, got %q", got)
+	}
+}
+
+func TestAppInputModeName(t *testing.T) {
+	a, _ := newTestApp()
+	if got := a.inputModeName(); got != "chat" {
+		t.Fatalf("mode = %q, want chat", got)
+	}
+	a.Update(key("/"))
+	if got := a.inputModeName(); got != "lệnh" {
+		t.Fatalf("mode = %q, want lệnh", got)
+	}
+	a.cmdMode = false
+	a.input.SetValue("a\nb")
+	if got := a.inputModeName(); got != "soạn nhiều dòng" {
+		t.Fatalf("mode = %q, want soạn nhiều dòng", got)
+	}
+	if got := a.renderFooter(); !strings.Contains(got, "soạn nhiều dòng") {
+		t.Fatalf("footer must show the mode, got %q", got)
 	}
 }
 

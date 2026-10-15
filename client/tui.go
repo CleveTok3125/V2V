@@ -134,6 +134,10 @@ const bananaYellow = "222"
 // index 198 (#ff0087), the closest match to #ff2776.
 const commandBorderColor = "198"
 
+// footerFg is the status-line foreground: a light grey, brighter than the dim
+// chrome so the mode and status stand out (ANSI 250).
+const footerFg = "250"
+
 // tuiStyles holds the chrome styles. Colours come from the client config
 // theme (ui.theme.accent) instead of being hardcoded, so a themed config is
 // honoured; the idle input border and the footer use a neutral grey.
@@ -171,13 +175,13 @@ func newTUIStyles() tuiStyles {
 		inputEmpty:  lipgloss.NewStyle().Border(rounded).BorderForeground(dim),
 		inputText:   lipgloss.NewStyle().Border(rounded).BorderForeground(accent),
 		inputCmd:    lipgloss.NewStyle().Border(rounded).BorderForeground(lipgloss.Color(commandBorderColor)),
-		footer:      lipgloss.NewStyle().Foreground(dim),
+		footer:      lipgloss.NewStyle().Foreground(lipgloss.Color(footerFg)),
 		help:        lipgloss.NewStyle().Border(rounded).BorderForeground(accent).Padding(1, 2),
 		helpTitle:   lipgloss.NewStyle().Bold(true),
 		scrollTrack: lipgloss.NewStyle().Foreground(dim),
 		scrollThumb: lipgloss.NewStyle().Foreground(accent),
-		boxChat:     lipgloss.NewStyle().Foreground(accent),
-		boxLocal:    lipgloss.NewStyle().Foreground(dim),
+		boxChat:     lipgloss.NewStyle().Foreground(dim),
+		boxLocal:    lipgloss.NewStyle().Foreground(lipgloss.Color(commandBorderColor)),
 		boxSystem:   lipgloss.NewStyle().Foreground(lipgloss.Color(bananaYellow)),
 		boxQuote:    lipgloss.NewStyle().Foreground(dim),
 	}
@@ -254,12 +258,12 @@ func newApp(sess *Session) *app {
 	return a
 }
 
-// promptFor renders the textarea prompt: the mode marker on the first line,
-// a continuation marker on the rest. Command mode shows "/" like neovim's
-// ":" prompt; the slash is not part of the draft, it is restored on submit.
+// promptFor renders the textarea prompt. A multi-line draft is the full text
+// editor, so it carries no prompt at all; a single-line draft shows the chat
+// marker, or the command marker in slash mode.
 func (a *app) promptFor(info textarea.PromptInfo) string {
-	if info.LineNumber > 0 {
-		return "..."
+	if a.multiLine() {
+		return ""
 	}
 	if a.cmdMode {
 		// A leading space keeps the command aligned with "> " while the
@@ -267,6 +271,24 @@ func (a *app) promptFor(info textarea.PromptInfo) string {
 		return " /"
 	}
 	return "> "
+}
+
+// multiLine reports whether the draft has grown past one line, which is what
+// puts the input into full text edit mode.
+func (a *app) multiLine() bool {
+	return strings.Contains(a.input.Value(), "\n")
+}
+
+// inputModeName labels the current input mode for the footer.
+func (a *app) inputModeName() string {
+	switch {
+	case a.multiLine():
+		return "soạn nhiều dòng"
+	case a.cmdMode:
+		return "lệnh"
+	default:
+		return "chat"
+	}
 }
 
 // setCmdMode switches command mode and blanks the placeholder while it is on,
@@ -639,9 +661,9 @@ func (a *app) renderEntryBox(e entry) string {
 	if maxW < 12 {
 		maxW = 12
 	}
-	headerText := strings.TrimPrefix(e.header, "| ")
-	bodyText := stripRowPrefix(e.body)
-	quoteText := strings.TrimPrefix(stripRowPrefix(e.quote), "> ")
+	headerText := stripGutter(e.header)
+	bodyText := stripGutter(e.body)
+	quoteText := stripGutter(e.quote)
 
 	// Width: the block hugs the widest row, capped at the viewport.
 	natural := maxLineWidth(headerText, bodyText)
@@ -674,7 +696,7 @@ func (a *app) renderEntryBox(e entry) string {
 	}
 	border := a.styles.boxChat
 	switch e.kind {
-	case kindLocal:
+	case kindLocal, kindNotice:
 		border = a.styles.boxLocal
 	case kindSystem:
 		border = a.styles.boxSystem
@@ -758,17 +780,29 @@ func drawBox(headerRows, bodyRows []string, width int, border lipgloss.Style) st
 	return strings.Join(out, "\n")
 }
 
-// stripRowPrefix removes the "|   " gutter the quote and body rows carry, so
-// the box supplies its own inset.
-func stripRowPrefix(s string) string {
+// stripGutter removes the "|" line gutter (plus the up-to-three spaces that
+// follow it) and an input marker ("> " or "...") when present, on every row.
+// The box supplies its own inset, and a multi-row header (an input echo, a
+// heredoc frame) must not keep a stray "|" on its later rows.
+func stripGutter(s string) string {
 	if s == "" {
 		return ""
 	}
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
-		lines[i] = strings.TrimPrefix(line, chatBodyPrefix)
+		lines[i] = stripGutterLine(line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func stripGutterLine(line string) string {
+	line = strings.TrimPrefix(line, "|")
+	for i := 0; i < 3 && strings.HasPrefix(line, " "); i++ {
+		line = line[1:]
+	}
+	line = strings.TrimPrefix(line, "> ")
+	line = strings.TrimPrefix(line, "... ")
+	return line
 }
 
 func (a *app) refreshContent() {
@@ -844,16 +878,19 @@ func (a *app) renderInput() string {
 	}
 }
 
-// renderFooter shows transient state: a background-load status, or the reply
-// prompt; when idle it points at the help overlay. The key list itself lives
-// in that overlay.
+// renderFooter shows transient state (a background-load status or the reply
+// prompt) plus the current input mode, with a pointer at the help overlay when
+// nothing else is pending.
 func (a *app) renderFooter() string {
 	line := a.status
 	if line == "" && a.prompt != "" && a.prompt != "| > " {
 		line = strings.TrimSpace(a.prompt)
 	}
+	mode := a.inputModeName()
 	if line == "" {
-		line = "? trợ giúp"
+		line = mode + " • ? trợ giúp"
+	} else {
+		line = line + " • " + mode
 	}
 	return a.styles.footer.MaxWidth(a.width).Render(line)
 }
