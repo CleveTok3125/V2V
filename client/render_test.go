@@ -296,7 +296,6 @@ func TestHandleReplayMarkerRespectsNotifyGates(t *testing.T) {
 		sess.Chain.RenderCache = newRenderCache(8)
 		sess.Display.Notify = NotifyState{Muted: map[string]bool{muted: true}, PowMinTier: 1}
 		sess.handleReplayMarker(marker(wire.TagHistoryOlder))
-		sess.flushOutputNow()
 
 		if strings.Contains(out.String(), "MARKERTEXT") {
 			t.Errorf("muting %q must stop a replay marker printing live", muted)
@@ -312,7 +311,6 @@ func TestHandleReplayMarkerRespectsNotifyGates(t *testing.T) {
 	sess.Chain.RenderCache = newRenderCache(8)
 	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagJoin: true}, PowMinTier: 1}
 	sess.handleReplayMarker(marker(wire.TagHistoryOlder))
-	sess.flushOutputNow()
 	if !strings.Contains(out.String(), "MARKERTEXT") {
 		t.Error("muting join must not silence a replay marker")
 	}
@@ -356,8 +354,6 @@ func TestOneMessageIsOneEntry(t *testing.T) {
 	sess.Chain.WireIdx = newWireIndex(1000)
 	sess.Chain.RenderCache = newRenderCache(200)
 	sess.Display.ActiveTab = TabChat
-	var out strings.Builder
-	sess.Display.Out = &out
 	sess.Display.Term = &fakeTerm{}
 
 	first := chainWireWithText(1, "nội dung gốc", 1)
@@ -368,7 +364,6 @@ func TestOneMessageIsOneEntry(t *testing.T) {
 	sess.renderChatBlock(first)
 	sess.renderChatBlock(reply)
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	if got := len(sess.Display.TabChat.lines); got != 2 {
 		t.Fatalf("two messages must be two entries, got %d: %q", got, entriesText(sess.Display.TabChat.lines))
@@ -387,9 +382,10 @@ func TestOneMessageIsOneEntry(t *testing.T) {
 	if e.body != "trả lời đây" {
 		t.Fatalf("entry body = %q, want the body alone", e.body)
 	}
-	// And the queue carries the same two units, in order.
-	if got := strings.Count(out.String(), "↩"); got != 1 {
-		t.Fatalf("the quote must be printed once, got %d in %q", got, out.String())
+	// And the painted chat carries the same two units, in order.
+	chat := &chatSpy{sess: sess}
+	if got := strings.Count(chat.String(), "↩"); got != 1 {
+		t.Fatalf("the quote must be printed once, got %d in %q", got, chat.String())
 	}
 }
 

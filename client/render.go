@@ -80,10 +80,6 @@ func parseHistoryBoundary(tags []string) (boundary bool, start bool) {
 	return true, !wire.HasAnyTag(tags, wire.TagHistoryEnd, wire.TagHistoryExhausted)
 }
 
-// collectCodeblock gathers a fenced code block after its opening line.
-// It returns the joined text, or canceled=true when the user aborted with
-// Ctrl+C or the stream ended — in which case the caller must discard
-// everything and send nothing.
 func normalizeURL(input string) string {
 	input = strings.TrimSpace(input)
 	if !strings.Contains(input, "://") {

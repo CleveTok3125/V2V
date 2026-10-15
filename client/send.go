@@ -34,14 +34,6 @@ func (s *Session) echoInputLine(text string) slotRef {
 
 // extendInputEcho rewrites the input echo as more lines arrive, so a fenced
 // block reads as one growing entry rather than a row that stops changing.
-// collectBody gathers a multi-line codeblock when fenced, extending the input
-// echo's entry as it goes.
-func (s *Session) collectBody(text string, slot slotRef) (string, slotRef, bool) {
-	// The TUI textarea already holds the whole message, newlines and all, so
-	// there is no continuation to read.
-	return text, slot, true
-}
-
 // checkSendGuards runs the client-side content and cooldown gates.
 func (s *Session) checkSendGuards(text string) bool {
 	if err := filter.ValidateMessage(text); err != nil {

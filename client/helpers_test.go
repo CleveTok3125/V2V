@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"io"
 	"strings"
 	"testing"
@@ -31,28 +30,17 @@ func (f *fakeTerm) Refresh()           {}
 func (f *fakeTerm) Close()             {}
 func (f *fakeTerm) Writer() io.Writer  { return io.Discard }
 
-// queueTestSession builds a session whose display renders into a buffer.
-func queueTestSession(t *testing.T) (*Session, *bytes.Buffer) {
-	t.Helper()
-	sess := NewSession()
-	var out bytes.Buffer
-	sess.Display.Out = &out
-	sess.Display.Term = &fakeTerm{}
-	sess.Display.ActiveTab = TabChat
-	sess.Display.TabSys = newTabBuffer(100, 100000)
-	sess.Display.TabChat = newTabBuffer(100, 100000)
-	sess.Chain.TipPath = t.TempDir() + "/tip.json"
-	return sess, &out
-}
+// chatSpy reads the chat tab the way the app paints it: muted lines stay
+// out, so a notice the live chat hides cannot leak into an assertion.
+type chatSpy struct{ sess *Session }
 
-// flushOutputNow renders the visible stream (tab 1) into Display.Out, which is
-// what the app paints, so tests can assert the chat text.
-func (s *Session) flushOutputNow() {
+func (c *chatSpy) String() string { return c.sess.visibleChat() }
+func (c *chatSpy) Len() int       { return len(c.sess.visibleChat()) }
+
+// visibleChat renders the visible stream (tab 1).
+func (s *Session) visibleChat() string {
 	s.Display.DisplayMu.Lock()
 	defer s.Display.DisplayMu.Unlock()
-	if s.Display.Out == nil {
-		return
-	}
 	var sb strings.Builder
 	for _, e := range s.Display.TabChat.lines {
 		if e.muted {
@@ -60,5 +48,17 @@ func (s *Session) flushOutputNow() {
 		}
 		sb.WriteString(e.text())
 	}
-	_, _ = s.Display.Out.Write([]byte(sb.String()))
+	return sb.String()
+}
+
+// queueTestSession builds a session with the tab buffers a display expects.
+func queueTestSession(t *testing.T) (*Session, *chatSpy) {
+	t.Helper()
+	sess := NewSession()
+	sess.Display.Term = &fakeTerm{}
+	sess.Display.ActiveTab = TabChat
+	sess.Display.TabSys = newTabBuffer(100, 100000)
+	sess.Display.TabChat = newTabBuffer(100, 100000)
+	sess.Chain.TipPath = t.TempDir() + "/tip.json"
+	return sess, &chatSpy{sess: sess}
 }

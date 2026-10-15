@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"testing"
 	"time"
 )
@@ -9,7 +8,6 @@ import (
 func sessionForDispatch(t *testing.T) *Session {
 	t.Helper()
 	sess := NewSession()
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabChat = newTabBuffer(100, 100000)
 	sess.Display.TabSys = newTabBuffer(100, 100000)
@@ -144,7 +142,7 @@ func TestGracefulQuitNilPumpDone(t *testing.T) {
 	sess := &Session{
 		Conn:     &stubConn{},
 		Quitting: make(chan bool, 1),
-		Display:  DisplayState{Out: io.Discard, Term: &fakeTerm{}},
+		Display:  DisplayState{Term: &fakeTerm{}},
 	}
 	start := time.Now()
 	sess.gracefulQuit()

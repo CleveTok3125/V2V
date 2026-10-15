@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -373,8 +372,7 @@ func TestRecoveryMergesInOrder(t *testing.T) {
 	sess := recoverTestSession(t, 9, conn)
 	sess.Display.TabSys = newTabBuffer(100, 100000)
 	sess.Display.TabChat = newTabBuffer(100, 100000)
-	var out bytes.Buffer
-	sess.Display.Out = &out
+	out := &chatSpy{sess: sess}
 	sess.Display.ActiveTab = TabChat
 	sess.Display.ShowMeta = true
 	anchor := [32]byte{9}
@@ -400,7 +398,6 @@ func TestRecoveryMergesInOrder(t *testing.T) {
 	sess.checkRecoverWire(wires[2])
 	sess.finishRecovery()
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	text := out.String()
 	prev := -1
@@ -451,8 +448,7 @@ func TestGreetingAfterCatchup(t *testing.T) {
 	sess := recoverTestSession(t, 9, conn)
 	sess.Display.TabSys = newTabBuffer(100, 100000)
 	sess.Display.TabChat = newTabBuffer(100, 100000)
-	var out bytes.Buffer
-	sess.Display.Out = &out
+	out := &chatSpy{sess: sess}
 	sess.Display.ActiveTab = TabChat
 	sess.Display.PendingGreeting = "GREETING\n"
 	anchor := [32]byte{9}
@@ -474,7 +470,6 @@ func TestGreetingAfterCatchup(t *testing.T) {
 	go sess.runPump()
 	waitHoldReleased(t, sess, 3*time.Second)
 	stopPump(t, sess, func() { close(conn.frames) })
-	sess.flushOutputNow()
 
 	text := out.String()
 	gi := strings.Index(text, "GREETING")
@@ -508,7 +503,6 @@ func TestLoadPagesUntilMaxSeq(t *testing.T) {
 	sess := recoverTestSession(t, 9, conn)
 	sess.Display.TabSys = newTabBuffer(100, 100000)
 	sess.Display.TabChat = newTabBuffer(100, 100000)
-	sess.Display.Out = io.Discard
 	sess.Display.ActiveTab = TabChat
 	anchor := [32]byte{9}
 	wires := recoverTestChain(anchor, 1, 3) // heights 1..3
@@ -563,8 +557,7 @@ func TestLoadAnnouncesSync(t *testing.T) {
 	sess := recoverTestSession(t, 9, conn)
 	sess.Display.TabSys = newTabBuffer(100, 100000)
 	sess.Display.TabChat = newTabBuffer(100, 100000)
-	var out bytes.Buffer
-	sess.Display.Out = &out
+	out := &chatSpy{sess: sess}
 	sess.Display.ActiveTab = TabChat
 	anchor := [32]byte{9}
 	wires := recoverTestChain(anchor, 1, 1)
@@ -584,7 +577,6 @@ func TestLoadAnnouncesSync(t *testing.T) {
 	go sess.runPump()
 	waitHoldReleased(t, sess, 3*time.Second)
 	stopPump(t, sess, func() { close(conn.frames) })
-	sess.flushOutputNow()
 
 	text := out.String()
 	bi := strings.Index(text, "[Local]: Đang tải lịch sử")

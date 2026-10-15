@@ -1,9 +1,5 @@
 package main
 
-import (
-	"strings"
-)
-
 // Tab IDs for the single-terminal switching view: TabChat shows chat and
 // trip badges, TabSystem shows local, system, date and history lines.
 const (
@@ -13,31 +9,6 @@ const (
 
 // tabLabels lists tabs in order; activeTab holds a 1-based index into it.
 var tabLabels = []string{"1:chat", "2:system"}
-
-// tabBarLine renders a column-aligned tab bar: the active tab is wrapped in
-// brackets while inactive tabs get exactly one leading space, so every
-// label starts at the same column in both lines. The separator shrinks to
-// one space after an active column to compensate for the brackets.
-func tabBarLine(active int) string {
-	var sb strings.Builder
-	sb.WriteString("| [Local] ")
-	for i, l := range tabLabels {
-		if i > 0 {
-			if i == active {
-				sb.WriteString(" ")
-			} else {
-				sb.WriteString("  ")
-			}
-		}
-		if i+1 == active {
-			sb.WriteString("[" + l + "]")
-		} else {
-			sb.WriteString(" " + l)
-		}
-	}
-	sb.WriteString("\n")
-	return sb.String()
-}
 
 // tabBuffer is a FIFO ring holding entries for one tab with dual-limit
 // eviction (entries + bytes), mirroring server ChatHistory. Caps come from

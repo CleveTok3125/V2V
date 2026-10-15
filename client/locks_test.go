@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/hex"
-	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -19,7 +18,6 @@ import (
 // turns a lock-order deadlock into a failure instead of a hang.
 func TestChainTipConcurrent(t *testing.T) {
 	sess := NewSession()
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabChat = newTabBuffer(100, 100000)
 	sess.Display.TabSys = newTabBuffer(100, 100000)
@@ -60,7 +58,6 @@ func TestChainTipConcurrent(t *testing.T) {
 // bounded by a 30s timeout so a deadlock fails loudly instead of hanging.
 func TestPendingTrackConcurrent(t *testing.T) {
 	sess := NewSession()
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabChat = newTabBuffer(100, 100000)
 	sess.Display.TabSys = newTabBuffer(100, 100000)
@@ -108,7 +105,6 @@ func TestPendingTrackConcurrent(t *testing.T) {
 // tip and warns nothing.
 func TestCheckChainLinkSuccessPath(t *testing.T) {
 	sess := NewSession()
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabSys = newTabBuffer(100, 100000)
 	var prev [32]byte
@@ -133,7 +129,6 @@ func TestCheckChainLinkSuccessPath(t *testing.T) {
 // and erase decision under the real nesting.
 func TestConsumeEchoMatchPath(t *testing.T) {
 	sess := NewSession()
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabChat = newTabBuffer(100, 100000)
 	sess.Display.TabSys = newTabBuffer(100, 100000)
@@ -157,7 +152,6 @@ func TestConsumeEchoMatchPath(t *testing.T) {
 // deadlock into a failure.
 func TestNotifyGateConcurrent(t *testing.T) {
 	sess := NewSession()
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.Notify = NotifyState{Muted: map[string]bool{}, PowMinTier: 1}
 	msg := WireMessage{Type: "system", Tags: wire.WithTags(wire.TagJoin), Text: "x"}

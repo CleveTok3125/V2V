@@ -49,12 +49,6 @@ func DefaultStyle() Style {
 	return codebg.DefaultStyle()
 }
 
-// NeedsContinuation reports whether a first fence line needs more
-// input lines before the block is complete.
-func NeedsContinuation(firstLine string) bool {
-	return codebg.NeedsContinuation(firstLine)
-}
-
 // Linkify wraps bare http(s) URLs in OSC8 hyperlinks. Displayed
 // characters are unchanged, keeping cell arithmetic intact.
 func Linkify(text string) string {

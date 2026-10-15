@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -46,17 +45,5 @@ func TestTabBufferSpliceOut(t *testing.T) {
 	b.spliceOut(-5, 99)
 	if len(b.lines) != 0 || b.size != 0 {
 		t.Fatalf("clamp splice failed: %q %d", entriesText(b.lines), b.size)
-	}
-}
-
-func TestTabBarLineAligned(t *testing.T) {
-	a := strings.TrimSuffix(tabBarLine(TabChat), "\n")
-	b := strings.TrimSuffix(tabBarLine(TabSystem), "\n")
-	// Every label must start at the same column in both lines, whether
-	// bracketed (active) or space-padded (inactive).
-	for _, label := range tabLabels {
-		if strings.Index(a, label) != strings.Index(b, label) {
-			t.Errorf("label %q misaligned: %q vs %q", label, a, b)
-		}
 	}
 }

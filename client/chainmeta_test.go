@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
 	"time"
@@ -682,7 +681,6 @@ func TestForkWarning(t *testing.T) {
 // warning, no tip rewind — even though its prev cannot match the tip.
 func TestVerifyReplayWireSkipsSegment(t *testing.T) {
 	sess := NewSession()
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabSys = newTabBuffer(100, 100000)
 	sess.Display.TabChat = newTabBuffer(100, 100000)
@@ -727,7 +725,6 @@ func TestVerifyReplayWireSkipsSegment(t *testing.T) {
 // at or below the tip is a duplicate and is skipped.)
 func TestVerifyReplayWireLiveStillVerifies(t *testing.T) {
 	sess := NewSession()
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabSys = newTabBuffer(100, 100000)
 	sess.Display.TabChat = newTabBuffer(100, 100000)
@@ -755,7 +752,6 @@ func TestVerifyReplayWireLiveStillVerifies(t *testing.T) {
 // re-sent page line or a replayed echo, not a tamper signal.
 func TestDuplicateWireSkipped(t *testing.T) {
 	sess := chainTestSession(t, 9)
-	sess.Display.Out = io.Discard
 	dup := chainTestWire(100, 0x11) // same height as the tip
 	sess.Display.DisplayMu.Lock()
 	sess.checkChainLink(dup)
@@ -785,7 +781,6 @@ func stopPump(t *testing.T, sess *Session, closeSource func()) {
 func chainTestSession(t *testing.T, tip byte) *Session {
 	t.Helper()
 	sess := NewSession()
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabSys = newTabBuffer(100, 100000)
 	sess.Display.TabChat = newTabBuffer(100, 100000)

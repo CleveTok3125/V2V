@@ -114,7 +114,6 @@ func TestEmitLocalFeedbackTagsMutesLiveButBuffers(t *testing.T) {
 	sess.Display.DisplayMu.Lock()
 	sess.emitLocalFeedbackTags(wire.WithTags(wire.TagPow), "| [Local]: muted\n")
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	if out.String() != "" {
 		t.Fatalf("muted notice must not print live, got %q", out.String())
@@ -127,7 +126,6 @@ func TestEmitLocalFeedbackTagsMutesLiveButBuffers(t *testing.T) {
 	sess.Display.DisplayMu.Lock()
 	sess.emitLocalFeedbackTags(wire.WithTags(wire.TagPow), "| [Local]: loud\n")
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	if !strings.Contains(out.String(), "loud") {
 		t.Fatalf("unmuted notice must print live, got %q", out.String())
@@ -143,7 +141,6 @@ func TestCriticalNoticeBypassesGates(t *testing.T) {
 	sess.Display.DisplayMu.Lock()
 	sess.emitLocalFeedback("| [Local]: Chuỗi tin bị đứt\n")
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	if !strings.Contains(out.String(), "bị đứt") {
 		t.Fatalf("critical notice must always print live, got %q", out.String())
@@ -193,7 +190,6 @@ func TestRenderChatBlockMutedSystemBuffersTabSys(t *testing.T) {
 	sess.Display.DisplayMu.Lock()
 	sess.renderChatBlock(sysWire)
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	if strings.Contains(out.String(), "rate limit") {
 		t.Fatalf("muted system wire must not print live, got %q", out.String())
@@ -206,7 +202,6 @@ func TestRenderChatBlockMutedSystemBuffersTabSys(t *testing.T) {
 	sess.Display.DisplayMu.Lock()
 	sess.renderChatBlock(WireMessage{Type: "system", Tags: wire.WithTags(wire.TagLimit), Text: "[Hệ thống]: live now"})
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	if !strings.Contains(out.String(), "live now") {
 		t.Fatalf("unmuted system wire must print live, got %q", out.String())
@@ -222,7 +217,6 @@ func TestPowNoticeMutedStillBuffers(t *testing.T) {
 	sess.Display.DisplayMu.Lock()
 	sess.emitLocalFeedbackLive(sess.notifyPowLive(1), "| [Local]: Đang giải PoW (tier 1)…\n")
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	if out.String() != "" {
 		t.Fatalf("muted pow notice must not print live, got %q", out.String())
@@ -246,7 +240,6 @@ func TestRawFrameIsNotClassifiedByWording(t *testing.T) {
 	sess.Display.DisplayMu.Lock()
 	sess.emitRawLineLocked("| [Hệ thống]: Bạn đang chat quá nhanh!")
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	if !strings.Contains(out.String(), "quá nhanh") {
 		t.Fatalf("a raw frame must still print, got %q", out.String())
@@ -421,16 +414,13 @@ func TestCmdNotifyReportsPowMinScope(t *testing.T) {
 	if !sess.cmdNotify("/notify powmin 3") {
 		t.Fatal("/notify powmin should be handled")
 	}
-	sess.flushOutputNow()
 	if !strings.Contains(out.String(), "trong phòng") {
 		t.Errorf("the confirmation must scope the change to the in-chat notice: %q", out.String())
 	}
 
-	out.Reset()
 	if !sess.cmdNotify("/notify") {
 		t.Fatal("/notify with no argument should list the gates")
 	}
-	sess.flushOutputNow()
 	text := out.String()
 	if !strings.Contains(text, "powmin = 3") {
 		t.Errorf("the listing must report the floor just set: %q", text)
@@ -502,7 +492,6 @@ func TestPowFloorEndToEnd(t *testing.T) {
 		sess.Display.DisplayMu.Lock()
 		sess.renderChatBlock(notice)
 		sess.Display.DisplayMu.Unlock()
-		sess.flushOutputNow()
 	}
 	text := out.String()
 	if strings.Contains(text, "CHALLENGE1") || strings.Contains(text, "CHALLENGE2") {

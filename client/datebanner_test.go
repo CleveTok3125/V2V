@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 
@@ -28,7 +27,7 @@ func countLines(lines []entry, needle string) int {
 }
 
 // dateSession returns a session that can render date banners into TabSystem.
-func dateSession(t *testing.T) (*Session, *bytes.Buffer) {
+func dateSession(t *testing.T) (*Session, *chatSpy) {
 	t.Helper()
 	sess, out := queueTestSession(t)
 	sess.Chain.WireIdx = newWireIndex(8)
@@ -49,7 +48,6 @@ func TestDateBannerDedupsOnSysDate(t *testing.T) {
 	sess.Pending.PendingDateBannerWire = &second
 	sess.flushDateBannerLocked()
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	if got := countLines(sess.Display.TabSys.lines, "Ngày"); got != 1 {
 		t.Fatalf("same sys_date twice must render once, got %d", got)
@@ -64,7 +62,6 @@ func TestDateBannerDedupsOnSysDate(t *testing.T) {
 	sess.Pending.PendingDateBannerWire = &next
 	sess.flushDateBannerLocked()
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	if got := countLines(sess.Display.TabSys.lines, "Ngày"); got != 2 {
 		t.Fatalf("a new sys_date must render, got %d banners", got)
@@ -149,7 +146,6 @@ func TestDateBannerGatedByDateSwitch(t *testing.T) {
 	sess.Pending.PendingDateBannerWire = &banner
 	sess.flushDateBannerLocked()
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	if out.String() != "" {
 		t.Fatalf("muted date banner must not print live, got %q", out.String())

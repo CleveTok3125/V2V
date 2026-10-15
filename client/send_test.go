@@ -56,7 +56,6 @@ func TestSendMessagePlainLoopback(t *testing.T) {
 	sess := NewSession()
 	sess.Conn = conn
 	sess.Username = "u"
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabChat = newTabBuffer(100, 100000)
 	sess.Pending.PendingReplyTo = 7
@@ -80,20 +79,6 @@ func TestSendMessagePlainLoopback(t *testing.T) {
 	}
 }
 
-// TestCollectBodyPassthrough covers the non-fence fast path and the
-// guard happy path without a terminal.
-func TestCollectBodyPassthrough(t *testing.T) {
-	sess := NewSession()
-	body, _, ok := sess.collectBody("hi", slotRef{})
-	if !ok || body != "hi" {
-		t.Fatalf("got %q,%v", body, ok)
-	}
-	if !sess.checkSendGuards("hi") {
-		t.Fatal("simple greeting blocked")
-	}
-	// Empty input is dropped by the input loop before guards run.
-}
-
 func tripSessionForSend(t *testing.T, conn wsConn) *Session {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -105,7 +90,6 @@ func tripSessionForSend(t *testing.T, conn wsConn) *Session {
 	sess.TripPriv = priv
 	sess.TripPub = pub
 	sess.Username = "u"
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabChat = newTabBuffer(100, 100000)
 	return sess
@@ -186,7 +170,6 @@ func assertSwapEraseCoversDrawnRows(t *testing.T, body string, replyTo uint64) {
 	if got := sess.Display.TabChat.lines[slot.index]; got != phEntry {
 		t.Fatalf("the block did not take the input echo's slot")
 	}
-	sess.flushOutputNow()
 
 	echo := WireMessage{
 		Type: "chat", Time: "12:00", DisplayName: "A#1", Text: body,
@@ -200,7 +183,6 @@ func assertSwapEraseCoversDrawnRows(t *testing.T, body string, replyTo uint64) {
 	sess.Pending.Mu.Unlock()
 	sess.renderChatBlock(echo)
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	if lines := sess.Display.TabChat.lines; len(lines) != 1 {
 		t.Fatalf("buffer holds %d entries after the echo, want 1 (the echo)", len(lines))
@@ -250,8 +232,6 @@ func TestOneMessageIsOneSlotFromInputToEcho(t *testing.T) {
 		t.Fatalf("the block must take the echo's slot: %q", entriesText(lines))
 	}
 
-	sess.flushOutputNow()
-	beforeEcho := out.Len()
 	echo := WireMessage{
 		Type: "chat", Time: "12:00", DisplayName: "A#1", Text: "xin chào",
 		TmpID: 7, ChainHeight: 1, ChainHash: "ab", ChainVer: 2,
@@ -265,7 +245,6 @@ func TestOneMessageIsOneSlotFromInputToEcho(t *testing.T) {
 	sess.Pending.Mu.Unlock()
 	sess.renderChatBlock(echo)
 	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
 
 	lines := sess.Display.TabChat.lines
 	if len(lines) != 1 {
@@ -274,7 +253,9 @@ func TestOneMessageIsOneSlotFromInputToEcho(t *testing.T) {
 	if strings.Contains(lines[0].text(), "⏳") {
 		t.Fatalf("the block survived the echo: %q", lines[0].text())
 	}
-	drawn := out.String()[beforeEcho:]
+	// The spy paints the whole chat, so a duplicate would show up as a
+	// second copy of the body.
+	drawn := out.String()
 	if got := strings.Count(drawn, "xin chào"); got != 1 {
 		t.Fatalf("the body was drawn %d times in one replace: %q", got, drawn)
 	}
