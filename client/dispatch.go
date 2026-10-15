@@ -710,6 +710,51 @@ func (s *Session) cmdClearhistory(text string) bool {
 // carries the oldest height in memory, so the server answers with the
 // window right below it. The segment returns in replay format and the
 // pump renders it like the join burst.
+// requestOlder asks the server for the window below the oldest height in
+// memory. Reports ok=false when nothing is in memory to page below.
+func (s *Session) requestOlder(limit int) (bool, error) {
+	s.Display.DisplayMu.Lock()
+	before, ok := s.Chain.WireIdx.oldest()
+	s.Display.DisplayMu.Unlock()
+	if !ok {
+		return false, nil
+	}
+	return true, s.sendJSON(HistoryRequest{Type: "history_request", Before: before, Limit: limit})
+}
+
+// olderAvailable reports whether a page-up at the top could return more
+// history: something is in memory, it starts above height 1, and no older
+// segment is already in flight.
+func (s *Session) olderAvailable() bool {
+	s.Display.DisplayMu.Lock()
+	defer s.Display.DisplayMu.Unlock()
+	oldest, ok := s.Chain.WireIdx.oldest()
+	return ok && oldest > 1 && !s.Chain.InOlder
+}
+
+// uiStatus is a short footer status for in-flight background loads.
+func (s *Session) uiStatus() string {
+	s.Display.DisplayMu.Lock()
+	defer s.Display.DisplayMu.Unlock()
+	switch {
+	case s.Chain.InOlder:
+		return "Đang tải lịch sử cũ…"
+	case s.Chain.InRecover:
+		return "Đang khôi phục tin bị thiếu…"
+	default:
+		return ""
+	}
+}
+
+// emitOlderNotice is a local line for the /older paths, which run outside
+// the input loop and must take DisplayMu themselves.
+func (s *Session) emitOlderNotice(line string) {
+	s.Display.DisplayMu.Lock()
+	s.emitLocalFeedback(line)
+	s.Display.DisplayMu.Unlock()
+	s.refreshTerminal()
+}
+
 func (s *Session) cmdOlder(text string) bool {
 	if !(text == "/older" || strings.HasPrefix(text, "/older ")) {
 		return false
@@ -718,29 +763,18 @@ func (s *Session) cmdOlder(text string) bool {
 	if rest := strings.TrimSpace(strings.TrimPrefix(text, "/older")); rest != "" {
 		n, err := strconv.Atoi(rest)
 		if err != nil || n <= 0 {
-			s.Display.DisplayMu.Lock()
-			s.emitLocalFeedback("| [Local]: Dùng /older [số dòng] (vd /older 50).\n")
-			s.Display.DisplayMu.Unlock()
-			s.refreshTerminal()
+			s.emitOlderNotice("| [Local]: Dùng /older [số dòng] (vd /older 50).\n")
 			return true
 		}
 		limit = n
 	}
-	s.Display.DisplayMu.Lock()
-	before, ok := s.Chain.WireIdx.oldest()
-	s.Display.DisplayMu.Unlock()
+	ok, err := s.requestOlder(limit)
 	if !ok {
-		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback("| [Local]: Chưa có tin nào trong bộ nhớ — không có gì để lùi.\n")
-		s.Display.DisplayMu.Unlock()
-		s.refreshTerminal()
+		s.emitOlderNotice("| [Local]: Chưa có tin nào trong bộ nhớ — không có gì để lùi.\n")
 		return true
 	}
-	if err := s.sendJSON(HistoryRequest{Type: "history_request", Before: before, Limit: limit}); err != nil {
-		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Không gửi được yêu cầu lịch sử cũ: %v.\n", err))
-		s.Display.DisplayMu.Unlock()
-		s.refreshTerminal()
+	if err != nil {
+		s.emitOlderNotice(fmt.Sprintf("| [Local]: Không gửi được yêu cầu lịch sử cũ: %v.\n", err))
 	}
 	return true
 }

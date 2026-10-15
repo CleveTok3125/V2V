@@ -128,6 +128,8 @@ var (
 	inputChatStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("62"))
 	inputCmdStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("214"))
 	footerStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	helpStyle        = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("212")).Padding(1, 2)
+	helpTitleStyle   = lipgloss.NewStyle().Bold(true)
 )
 
 // app is the Bubble Tea model: a tab bar, the chat viewport and the input
@@ -142,13 +144,19 @@ type app struct {
 	viewport viewport.Model
 	input    textarea.Model
 
-	active   int
-	width    int
-	height   int
-	prompt   string
-	enhanced bool
-	dirty    bool
-	quitting bool
+	hist         *inputHistory
+	active       int
+	width        int
+	height       int
+	prompt       string
+	enhanced     bool
+	cmdMode      bool
+	dirty        bool
+	quitting     bool
+	showHelp     bool
+	atTopArmed   bool
+	pendingOlder bool
+	status       string
 }
 
 func newApp(sess *Session) *app {
@@ -171,10 +179,26 @@ func newApp(sess *Session) *app {
 	ti.DynamicHeight = true
 	ti.MinHeight = 1
 	ti.MaxHeight = 6
-	ti.Prompt = "> "
 	ti.Focus()
 	a.input = ti
+	// The prompt marker is per line: the first line carries the mode marker
+	// and every continuation line gets "...", so a multi-line draft reads as
+	// one block. Width 0 disables the component's left padding.
+	a.input.SetPromptFunc(0, a.promptFor)
+	a.hist = loadHistory(historyFile)
+	a.atTopArmed = true
 	return a
+}
+
+// promptFor renders the textarea prompt: the input marker on the first
+// line, a continuation marker on the rest. Command mode is signalled by
+// the border colour, not by the marker, so the draft keeps the literal
+// slash the user typed.
+func (a *app) promptFor(info textarea.PromptInfo) string {
+	if info.LineNumber > 0 {
+		return "..."
+	}
+	return "> "
 }
 
 func (a *app) Init() tea.Cmd {
@@ -211,24 +235,70 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleKey routes the keys the app owns; anything else falls through to
-// the textarea for editing.
+// the textarea for editing. The help overlay is modal: it swallows keys
+// except the ones that close it (and Ctrl+D, which still quits).
 func (a *app) handleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+	if a.showHelp {
+		switch msg.String() {
+		case "ctrl+d":
+			a.quitting = true
+			return true, tea.Quit
+		case "esc", "f1", "?", "enter":
+			a.showHelp = false
+		}
+		return true, nil
+	}
 	switch msg.String() {
 	case "ctrl+d":
 		a.quitting = true
 		return true, tea.Quit
-	case "ctrl+c", "esc":
+	case "ctrl+c":
 		if strings.TrimSpace(a.input.Value()) != "" {
 			a.input.Reset()
 			a.layout()
 		}
 		return true, nil
+	case "esc":
+		if strings.TrimSpace(a.input.Value()) != "" {
+			a.input.Reset()
+			a.layout()
+		}
+		return true, nil
+	case "f1":
+		a.showHelp = true
+		return true, nil
+	case "?":
+		if a.input.Value() == "" {
+			a.showHelp = true
+			return true, nil
+		}
+	case "pgup", "pgdown":
+		var cmd tea.Cmd
+		a.viewport, cmd = a.viewport.Update(msg)
+		a.maybeLoadOlder()
+		return true, cmd
+	case "up", "down":
+		if a.histNav(msg.String() == "up") {
+			return true, nil
+		}
 	case "tab":
-		a.switchTab(tabIndexSystem)
+		a.cycleTab(1)
 		return true, nil
 	case "shift+tab":
-		a.switchTab(tabIndexChat)
+		a.cycleTab(-1)
 		return true, nil
+	case "/":
+		switch {
+		case a.cmdMode && a.input.Value() == "/":
+			// A second slash on the bare command marker leaves command mode;
+			// both slashes stay as a literal draft.
+			a.cmdMode = false
+		case !a.cmdMode && a.input.Value() == "":
+			// The first slash arms command mode. The slash itself is inserted
+			// below, so the draft reads "/help" and never "/ /help".
+			a.cmdMode = true
+		}
+		// Fall through: the textarea inserts the slash.
 	case "enter":
 		return true, a.submit()
 	case "shift+enter":
@@ -243,19 +313,65 @@ func (a *app) handleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
+// histNav recalls a history entry. It only applies to a single-line draft:
+// a multi-line draft needs the arrows for its own cursor. Reports false
+// when the key should fall through to the textarea.
+func (a *app) histNav(up bool) bool {
+	if a.hist == nil || strings.Contains(a.input.Value(), "\n") {
+		return false
+	}
+	var val string
+	var ok bool
+	if up {
+		val, ok = a.hist.prev(a.input.Value())
+	} else {
+		val, ok = a.hist.next()
+	}
+	if !ok {
+		return false
+	}
+	a.input.SetValue(val)
+	a.cmdMode = strings.HasPrefix(val, "/")
+	a.input.CursorEnd()
+	a.layout()
+	return true
+}
+
+// maybeLoadOlder fires one older-history request when the user pages up to
+// the top, so scrolling back loads the previous segment automatically.
+func (a *app) maybeLoadOlder() {
+	if !a.viewport.AtTop() {
+		a.atTopArmed = true
+		return
+	}
+	if !a.atTopArmed || !a.sess.olderAvailable() {
+		return
+	}
+	a.atTopArmed = false
+	if _, err := a.sess.requestOlder(50); err == nil {
+		a.pendingOlder = true
+	}
+	a.dirty = true
+}
+
 // insertNewline grows the draft by one row, since plain Enter submits.
 func (a *app) insertNewline() {
 	a.input.InsertString("\n")
 	a.layout()
 }
 
-// submit hands the draft to the session and clears the input box.
+// submit hands the draft to the session and clears the input box. The
+// draft already carries its leading slash in command mode.
 func (a *app) submit() tea.Cmd {
 	text := a.input.Value()
+	a.cmdMode = false
+	if a.hist != nil {
+		a.hist.add(text)
+	}
 	a.input.Reset()
 	a.layout()
 	a.dirty = true
-	if strings.TrimSpace(text) == "" {
+	if strings.TrimSpace(text) == "" || text == "/" {
 		return nil
 	}
 	select {
@@ -272,6 +388,13 @@ func (a *app) switchTab(i int) {
 	a.active = i
 	a.sess.switchTab(i + 1)
 	a.dirty = true
+}
+
+// cycleTab moves the active tab by delta, wrapping around so Tab leaves
+// the last tab and returns to the first.
+func (a *app) cycleTab(delta int) {
+	n := len(tabLabels)
+	a.switchTab(((a.active+delta)%n + n) % n)
 }
 
 // layout fits the viewport between the tab bar and the input box: the
@@ -296,11 +419,16 @@ func (a *app) layout() {
 
 // refreshContent pulls the active tab and repaints the viewport. The
 // session mutates its buffers under DisplayMu, so the entries are copied
-// under that lock and rendered outside it.
+// under that lock and rendered outside it. The scroll position is kept
+// when the user is reading history; it only follows the bottom when the
+// viewport was already there.
 func (a *app) refreshContent() {
 	if !a.dirty {
 		return
 	}
+	oldOffset := a.viewport.YOffset()
+	atBottom := a.viewport.AtBottom()
+
 	a.sess.Display.DisplayMu.Lock()
 	a.active = a.sess.Display.ActiveTab - 1
 	var lines []entry
@@ -315,8 +443,22 @@ func (a *app) refreshContent() {
 	for _, e := range lines {
 		sb.WriteString(e.text())
 	}
+	prevLines := a.viewport.TotalLineCount()
 	a.viewport.SetContent(sb.String())
-	a.viewport.GotoBottom()
+	newLines := a.viewport.TotalLineCount()
+
+	switch {
+	case a.pendingOlder:
+		// Older history was prepended: move down by the inserted lines so
+		// the text under the cursor stays put.
+		a.pendingOlder = false
+		a.viewport.SetYOffset(oldOffset + (newLines - prevLines))
+	case atBottom:
+		a.viewport.GotoBottom()
+	default:
+		a.viewport.SetYOffset(oldOffset)
+	}
+	a.status = a.sess.uiStatus()
 	a.dirty = false
 }
 
@@ -334,23 +476,44 @@ func (a *app) renderTabs() string {
 }
 
 func (a *app) renderInput() string {
-	if strings.HasPrefix(a.input.Value(), "/") {
-		a.input.Prompt = "/ "
+	if a.cmdMode {
 		return inputCmdStyle.Render(a.input.View())
 	}
-	a.input.Prompt = "> "
 	return inputChatStyle.Render(a.input.View())
 }
 
 func (a *app) renderFooter() string {
-	hint := "Enter gửi • Shift+Enter xuống dòng • Tab đổi tab • Ctrl+D thoát"
+	hint := "Enter gửi • Shift+Enter xuống dòng • Tab đổi tab • ? trợ giúp • Ctrl+D thoát"
 	if !a.enhanced {
-		hint = "Enter gửi • Alt+Enter xuống dòng • Tab đổi tab • Ctrl+D thoát"
+		hint = "Enter gửi • Alt+Enter xuống dòng • Tab đổi tab • ? trợ giúp • Ctrl+D thoát"
 	}
-	if a.prompt != "" && a.prompt != "| > " {
+	switch {
+	case a.status != "":
+		hint = a.status
+	case a.prompt != "" && a.prompt != "| > ":
 		hint = strings.TrimSpace(a.prompt) + "  " + hint
 	}
 	return footerStyle.MaxWidth(a.width).Render(hint)
+}
+
+// helpView is the keybinding overlay, centred over the chat area.
+func (a *app) helpView() string {
+	lines := []string{
+		helpTitleStyle.Render("Phím tắt"),
+		"",
+		"Tab / Shift+Tab     đổi tab (1:chat, 2:system)",
+		"Enter               gửi tin nhắn",
+		"Shift+Enter         xuống dòng (cần terminal hỗ trợ)",
+		"Alt+Enter / Ctrl+J  xuống dòng (dự phòng)",
+		"↑ / ↓               lịch sử nhập (khi nháp một dòng)",
+		"PgUp / PgDn         cuộn chat; tới đỉnh để tải thêm",
+		"Ctrl+C              xóa nháp",
+		"Ctrl+D              thoát",
+		"? / F1              đóng trợ giúp",
+		"Esc                 đóng trợ giúp",
+	}
+	box := helpStyle.Render(strings.Join(lines, "\n"))
+	return lipgloss.Place(a.width, a.viewport.Height(), lipgloss.Center, lipgloss.Center, box)
 }
 
 func (a *app) View() tea.View {
@@ -358,9 +521,13 @@ func (a *app) View() tea.View {
 		return tea.NewView("")
 	}
 	a.refreshContent()
+	chat := a.viewport.View()
+	if a.showHelp {
+		chat = a.helpView()
+	}
 	return tea.NewView(strings.Join([]string{
 		a.renderTabs(),
-		a.viewport.View(),
+		chat,
 		a.renderInput(),
 		a.renderFooter(),
 	}, "\n"))

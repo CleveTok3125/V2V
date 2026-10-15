@@ -5,10 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 )
 
 func newTestApp() (*app, *Session) {
+	historyFile = ""
 	sess := NewSession()
 	sess.Display.TabChat = newTabBuffer(100, 100000)
 	sess.Display.TabSys = newTabBuffer(100, 100000)
@@ -42,6 +44,18 @@ func key(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}
 	case "shift+enter":
 		return tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}
+	case "up":
+		return tea.KeyPressMsg{Code: tea.KeyUp}
+	case "down":
+		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "pgup":
+		return tea.KeyPressMsg{Code: tea.KeyPgUp}
+	case "pgdown":
+		return tea.KeyPressMsg{Code: tea.KeyPgDown}
+	case "esc":
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "f1":
+		return tea.KeyPressMsg{Code: tea.KeyF1}
 	}
 	panic("unknown key " + s)
 }
@@ -214,5 +228,180 @@ func TestAppRefreshRendersActiveTab(t *testing.T) {
 	view = a.viewport.View()
 	if !strings.Contains(view, "sys-only") || strings.Contains(view, "chat-only") {
 		t.Fatalf("system tab view:\n%s", view)
+	}
+}
+
+func TestAppHistoryNav(t *testing.T) {
+	a, _ := newTestApp()
+	a.hist.add("first")
+	a.hist.add("second")
+	a.input.SetValue("draft")
+	a.Update(key("up"))
+	if a.input.Value() != "second" {
+		t.Fatalf("up 1 = %q", a.input.Value())
+	}
+	a.Update(key("up"))
+	if a.input.Value() != "first" {
+		t.Fatalf("up 2 = %q", a.input.Value())
+	}
+	a.Update(key("down"))
+	if a.input.Value() != "second" {
+		t.Fatalf("down 1 = %q", a.input.Value())
+	}
+	a.Update(key("down"))
+	if a.input.Value() != "draft" {
+		t.Fatalf("down must restore the draft, got %q", a.input.Value())
+	}
+}
+
+func TestAppHistoryNavSkipsMultiline(t *testing.T) {
+	a, _ := newTestApp()
+	a.hist.add("first")
+	a.input.SetValue("line1\nline2")
+	a.Update(key("up"))
+	if a.input.Value() != "line1\nline2" {
+		t.Fatalf("a multi-line draft must keep the arrows, got %q", a.input.Value())
+	}
+}
+
+func TestAppHelpToggleAndModal(t *testing.T) {
+	a, _ := newTestApp()
+	a.Update(key("?"))
+	if !a.showHelp {
+		t.Fatal("? on an empty draft must open help")
+	}
+	a.Update(key("x"))
+	if a.input.Value() != "" {
+		t.Fatalf("help must swallow typing, got %q", a.input.Value())
+	}
+	a.Update(key("esc"))
+	if a.showHelp {
+		t.Fatal("esc must close help")
+	}
+	a.input.SetValue("q")
+	a.Update(key("?"))
+	if a.showHelp {
+		t.Fatal("? with a non-empty draft must type, not open help")
+	}
+	a.Update(key("f1"))
+	if !a.showHelp {
+		t.Fatal("f1 must open help")
+	}
+	a.Update(key("enter"))
+	if a.showHelp {
+		t.Fatal("enter must close help")
+	}
+}
+
+func TestAppMaybeLoadOlderGuards(t *testing.T) {
+	a, sess := newTestApp()
+	sess.Chain.WireIdx = newWireIndex(16)
+	a.atTopArmed = true
+	a.maybeLoadOlder()
+	if a.pendingOlder {
+		t.Fatal("must not request older history when none is available")
+	}
+
+	sess.Conn = &stubConn{}
+	sess.Chain.WireIdx.put(WireMessage{ChainHeight: 7})
+	a.atTopArmed = true
+	a.maybeLoadOlder()
+	if !a.pendingOlder {
+		t.Fatal("a page-up at the top must request older history")
+	}
+}
+
+func TestAppTabCycles(t *testing.T) {
+	a, _ := newTestApp()
+	a.Update(key("tab"))
+	if a.active != tabIndexSystem {
+		t.Fatalf("tab must move to system, got %d", a.active)
+	}
+	a.Update(key("tab"))
+	if a.active != tabIndexChat {
+		t.Fatalf("tab on the last tab must wrap to chat, got %d", a.active)
+	}
+	a.Update(key("shift+tab"))
+	if a.active != tabIndexSystem {
+		t.Fatalf("shift+tab must wrap to system, got %d", a.active)
+	}
+}
+
+func TestAppSlashModeToggle(t *testing.T) {
+	a, _ := newTestApp()
+	a.Update(key("/"))
+	if !a.cmdMode || a.input.Value() != "/" {
+		t.Fatalf("first slash: cmdMode=%v value=%q", a.cmdMode, a.input.Value())
+	}
+	// The next character must not be swallowed.
+	a.Update(key("h"))
+	if a.input.Value() != "/h" {
+		t.Fatalf("char after the slash = %q, want /h", a.input.Value())
+	}
+	a.input.SetValue("/")
+	a.Update(key("/"))
+	if a.cmdMode || a.input.Value() != "//" {
+		t.Fatalf("second slash: cmdMode=%v value=%q", a.cmdMode, a.input.Value())
+	}
+}
+
+func TestAppSlashModeSubmitSendsLiteral(t *testing.T) {
+	a, _ := newTestApp()
+	for _, ch := range "/help" {
+		a.Update(key(string(ch)))
+	}
+	if !a.cmdMode {
+		t.Fatalf("command mode not armed for %q", a.input.Value())
+	}
+	a.Update(key("enter"))
+	select {
+	case got := <-a.lines:
+		if got != "/help" {
+			t.Fatalf("submitted %q, want /help", got)
+		}
+	default:
+		t.Fatal("command must be submitted")
+	}
+	if a.cmdMode {
+		t.Fatal("cmdMode must reset after submit")
+	}
+}
+
+func TestAppSlashModeEmptySubmitIgnored(t *testing.T) {
+	a, _ := newTestApp()
+	a.Update(key("/"))
+	a.Update(key("enter"))
+	select {
+	case got := <-a.lines:
+		t.Fatalf("bare command mode must not submit, got %q", got)
+	default:
+	}
+	if a.cmdMode {
+		t.Fatal("cmdMode must reset after submit")
+	}
+}
+
+func TestAppSlashMidDraftIsLiteral(t *testing.T) {
+	a, _ := newTestApp()
+	for _, ch := range "hi" {
+		a.Update(key(string(ch)))
+	}
+	a.Update(key("/"))
+	if a.cmdMode || a.input.Value() != "hi/" {
+		t.Fatalf("mid-draft slash: cmdMode=%v value=%q", a.cmdMode, a.input.Value())
+	}
+}
+
+func TestAppPromptMarkers(t *testing.T) {
+	a, _ := newTestApp()
+	if got := a.promptFor(textarea.PromptInfo{LineNumber: 0}); got != "> " {
+		t.Fatalf("first-line prompt = %q", got)
+	}
+	if got := a.promptFor(textarea.PromptInfo{LineNumber: 1}); got != "..." {
+		t.Fatalf("continuation prompt = %q", got)
+	}
+	a.cmdMode = true
+	if got := a.promptFor(textarea.PromptInfo{LineNumber: 0}); got != "> " {
+		t.Fatalf("command-mode prompt must stay the input marker, got %q", got)
 	}
 }
