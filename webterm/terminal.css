@@ -6,6 +6,9 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
+  /* The terminal fills the viewport and the connect panel scrolls inside
+     itself, so the page never needs a scrollbar. */
+  overflow: hidden;
   background: #101014;
   color: #d8dee8;
   font-family: "DejaVu Sans", Arial, sans-serif;
@@ -262,4 +265,11 @@ label.check input {
 
 .xterm .xterm-viewport {
   background-color: #101014 !important;
+  /* xterm keeps overflow-y: scroll, which reserves a scrollbar gutter even
+     with no scrollback. The app draws its own bar inside the chat area. */
+  scrollbar-width: none;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar {
+  display: none;
 }
