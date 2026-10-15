@@ -29,12 +29,25 @@ func BadgeColor(badge string) string {
 // (e.g. from client config). Out-of-range channels are clamped; an empty
 // palette falls back to the fixed one so output is never uncolored.
 func BadgeColorWithPalette(badge string, pal [][3]int) string {
+	r, g, b := BadgeRGBWithPalette(badge, pal)
+	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b)
+}
+
+// BadgeRGB returns the palette colour for a badge as 8-bit channels, for
+// callers that style the badge themselves.
+func BadgeRGB(badge string) (r, g, b uint8) {
+	return BadgeRGBWithPalette(badge, palette)
+}
+
+// BadgeRGBWithPalette is BadgeRGB with a caller-supplied palette. Out-of-range
+// channels are clamped; an empty palette falls back to the fixed one.
+func BadgeRGBWithPalette(badge string, pal [][3]int) (r, g, b uint8) {
 	if len(pal) == 0 {
 		pal = palette
 	}
 	h := sha256.Sum256([]byte(badge))
 	c := pal[int(h[0])%len(pal)]
-	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", clamp(c[0]), clamp(c[1]), clamp(c[2]))
+	return uint8(clamp(c[0])), uint8(clamp(c[1])), uint8(clamp(c[2]))
 }
 
 func clamp(v int) int {

@@ -45,11 +45,12 @@ func isWASMRuntime() bool {
 	return runtime.GOOS == "js"
 }
 
-func badgeColor(badge string) string {
-	if ClientCfg != nil && len(ClientCfg.UI.TripPalette) > 0 {
-		return tripcolor.BadgeColorWithPalette(badge, ClientCfg.UI.TripPalette)
+func badgeRGB(badge string) (r, g, b uint8) {
+	pal := [][3]int(nil)
+	if ClientCfg != nil {
+		pal = ClientCfg.UI.TripPalette
 	}
-	return tripcolor.BadgeColor(badge)
+	return tripcolor.BadgeRGBWithPalette(badge, pal)
 }
 
 // TripMessage is the JSON envelope for signed chat messages.

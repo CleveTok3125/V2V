@@ -1,9 +1,24 @@
 package tripcolor
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestBadgeRGBMatchesColor(t *testing.T) {
+	badge := "abcd1234"
+	r, g, b := BadgeRGB(badge)
+	if want := fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b); BadgeColor(badge) != want {
+		t.Fatalf("BadgeColor = %q, want %q", BadgeColor(badge), want)
+	}
+	if r2, g2, b2 := BadgeRGBWithPalette(badge, [][3]int{{300, -5, 128}}); r2 != 255 || g2 != 0 || b2 != 128 {
+		t.Fatalf("clamped = %d,%d,%d", r2, g2, b2)
+	}
+	if rr, gg, bb := BadgeRGBWithPalette(badge, nil); rr != r || gg != g || bb != b {
+		t.Fatalf("empty palette must fall back to the fixed one")
+	}
+}
 
 func TestBadgeColorWithPaletteCustom(t *testing.T) {
 	got := BadgeColorWithPalette("◆ abc12345", [][3]int{{1, 2, 3}})

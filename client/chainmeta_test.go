@@ -317,32 +317,32 @@ func TestFindMentions(t *testing.T) {
 
 func TestRenderMentions(t *testing.T) {
 	resolve := func(h uint64, s string) bool { return h == 7 && (s == "" || s == "ab") }
-	open, close := mentionSGR([3]int{0, 255, 255})
-	if open != "\x1b[1;96m" || close != "\x1b[22;39m" {
-		t.Fatalf("default must stay 16-color, got %q %q", open, close)
+	def := mentionStyle([3]int{0, 255, 255})
+	if got := def.Render("@#7"); got != "\x1b[1;96m@#7\x1b[m" {
+		t.Fatalf("default must stay 16-color, got %q", got)
 	}
-	open, close = mentionSGR([3]int{255, 0, 0})
-	if open != "\x1b[1;38;2;255;0;0m" {
-		t.Fatalf("custom must be truecolor, got %q", open)
+	custom := mentionStyle([3]int{255, 0, 0})
+	if got := custom.Render("@#7"); got != "\x1b[1;38;2;255;0;0m@#7\x1b[m" {
+		t.Fatalf("custom must be truecolor, got %q", got)
 	}
-	got := renderMentions("see @#7 and @#8 and @#7:zz", resolve, true, open, close)
-	if !strings.Contains(got, "\x1b[1;38;2;255;0;0m@#7\x1b[22;39m") {
+	got := renderMentions("see @#7 and @#8 and @#7:zz", resolve, true, custom)
+	if !strings.Contains(got, "\x1b[1;38;2;255;0;0m@#7\x1b[m") {
 		t.Fatalf("resolved mention must highlight: %q", got)
 	}
 	if strings.Contains(got, "@#8\x1b") || strings.Contains(got, "@#7:zz\x1b") {
 		t.Fatalf("unresolved/suffix-mismatch must stay plain: %q", got)
 	}
 	// Disabled renders everything plain.
-	if got := renderMentions("see @#7", resolve, false, open, close); got != "see @#7" {
+	if got := renderMentions("see @#7", resolve, false, custom); got != "see @#7" {
 		t.Fatalf("disabled must stay plain: %q", got)
 	}
 	// SGR spans are never entered.
 	in := "\x1b[48;5;236m@#7\x1b[49m tail @#7"
-	got = renderMentions(in, resolve, true, open, close)
+	got = renderMentions(in, resolve, true, custom)
 	if strings.Contains(got, "\x1b[48;5;236m\x1b[1;") {
 		t.Fatalf("must not highlight inside SGR span: %q", got)
 	}
-	if !strings.Contains(got, "\x1b[1;38;2;255;0;0m@#7\x1b[22;39m") {
+	if !strings.Contains(got, "\x1b[1;38;2;255;0;0m@#7\x1b[m") {
 		t.Fatalf("plain mention must still highlight: %q", got)
 	}
 }
@@ -368,7 +368,7 @@ func TestFormatQuote(t *testing.T) {
 	// The quote source carries no mark of its own, so any hourglass here
 	// would come from the wrapper rather than from the text.
 	got = formatQuote(12, "| 15:04 Alice: x\n", true, 80)
-	if !strings.HasPrefix(got, "\x1b[90m|   ┌─  ↩ #12:") || !strings.HasSuffix(got, "\x1b[0m") {
+	if !strings.HasPrefix(got, "\x1b[90m|   ┌─  ↩ #12:") || !strings.HasSuffix(got, "\x1b[m") {
 		t.Fatalf("pending quote must be grey: %q", got)
 	}
 	if strings.Contains(got, "⏳") {
@@ -548,21 +548,21 @@ func TestFormatQuoteRich(t *testing.T) {
 		t.Fatalf("intact quote must carry no mark: %q", got)
 	}
 	got = formatQuoteRich(wire, true, 80)
-	if !strings.HasPrefix(got, "\x1b[90m") || !strings.HasSuffix(got, "\x1b[0m") {
+	if !strings.HasPrefix(got, "\x1b[90m") || !strings.HasSuffix(got, "\x1b[m") {
 		t.Fatalf("pending shape broken: %q", got)
 	}
 	if strings.Contains(got, "⏳") {
 		t.Fatalf("the pending mark must not ride the quote: %q", got)
 	}
-	// Grey must span the whole pending line: no full reset may appear
-	// before the trailing one (attribute-off codes only inside).
-	if inner := got[len("\x1b[90m") : len(got)-len("\x1b[0m")]; strings.Contains(inner, "\x1b[0m") {
+	// Grey must span the whole pending line: no reset may appear before the
+	// trailing one (the tamper mark only lands on a bad line).
+	if inner := got[len("\x1b[90m") : len(got)-len("\x1b[m")]; strings.Contains(inner, "\x1b[m") {
 		t.Fatalf("pending grey broken mid-line: %q", got)
 	}
 	// Tampered target appends a bright-red mark, trip-tamper style.
 	bad := wire
 	bad.Text = "edited"
-	if got := formatQuoteRich(bad, false, 80); !strings.Contains(got, "\x1b[91m✗\x1b[39m") {
+	if got := formatQuoteRich(bad, false, 80); !strings.Contains(got, "\x1b[91m✗\x1b[m") {
 		t.Fatalf("tampered target must mark red ✗: %q", got)
 	}
 	// Single line always, and never shaped like a meta line. The quote preview
