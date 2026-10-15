@@ -29,10 +29,12 @@ jobs:
         # Same target local check runs (self-skips without root);
         # sudo here for the full matrix on runners.
         run: sudo make test-sh
-      - name: WASM build
-        # Build only: several server-only dependency trees are not
-        # js-compatible, so vet ./... cannot run under GOOS=js.
-        run: GOOS=js GOARCH=wasm go build -o /dev/null ./client/
+      - name: WASM compile check
+        # Build only, through the stub overlay: Bubble Tea v2 and
+        # atotto/clipboard ship no js backend, so a raw GOOS=js build
+        # fails. Server trees are not js-compatible either, so vet
+        # ./... cannot run under GOOS=js.
+        run: make check-wasm
       - name: WASM tests
         # js-tagged client tests (wasm terminal, wasm proxy path)
         # under node, which ubuntu runners provide.
