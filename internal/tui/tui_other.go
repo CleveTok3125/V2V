@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 	xterm "github.com/charmbracelet/x/term"
 
 	"github.com/CleveTok3125/V2V/lib/env"

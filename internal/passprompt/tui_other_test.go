@@ -3,10 +3,12 @@
 package passprompt
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func TestRenderMeterLine(t *testing.T) {
@@ -40,17 +42,17 @@ func TestRenderMeterLine(t *testing.T) {
 func TestMeterColorBands(t *testing.T) {
 	cases := []struct {
 		in   Assessment
-		want string
+		want color.Color
 	}{
-		{Assessment{Score: 0, Label: "yếu", Weak: true}, "1"},
-		{Assessment{Score: 1, Label: "yếu", Weak: true}, "1"},
-		{Assessment{Score: 2, Label: "trung bình"}, "3"},
-		{Assessment{Score: 3, Label: "mạnh"}, "2"},
-		{Assessment{Score: 4, Label: "rất mạnh"}, "6"},
+		{Assessment{Score: 0, Label: "yếu", Weak: true}, lipgloss.Color("1")},
+		{Assessment{Score: 1, Label: "yếu", Weak: true}, lipgloss.Color("1")},
+		{Assessment{Score: 2, Label: "trung bình"}, lipgloss.Color("3")},
+		{Assessment{Score: 3, Label: "mạnh"}, lipgloss.Color("2")},
+		{Assessment{Score: 4, Label: "rất mạnh"}, lipgloss.Color("6")},
 	}
 	for _, c := range cases {
-		if got := string(meterColor(c.in)); got != c.want {
-			t.Errorf("meterColor(%+v) = %q, want %q", c.in, got, c.want)
+		if got := meterColor(c.in); got != c.want {
+			t.Errorf("meterColor(%+v) = %v, want %v", c.in, got, c.want)
 		}
 	}
 }
@@ -82,14 +84,14 @@ func TestMeterConsistentLabel(t *testing.T) {
 	}
 }
 
-func keyRunes(s string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+func keyRunes(s string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }
 
-func keyType(t tea.KeyType) tea.KeyMsg { return tea.KeyMsg{Type: t} }
+func keyType(c rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: c} }
 
 // drive feeds keys through Update and returns the final passwordModel.
-func drive(m passwordModel, keys []tea.KeyMsg) passwordModel {
+func drive(m passwordModel, keys []tea.KeyPressMsg) passwordModel {
 	for _, k := range keys {
 		next, _ := m.Update(k)
 		m = next.(passwordModel)
@@ -100,15 +102,15 @@ func drive(m passwordModel, keys []tea.KeyMsg) passwordModel {
 	return m
 }
 
-func typeKeys(s string) []tea.KeyMsg {
-	var out []tea.KeyMsg
+func typeKeys(s string) []tea.KeyPressMsg {
+	var out []tea.KeyPressMsg
 	for _, r := range s {
-		out = append(out, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		out = append(out, tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 	return out
 }
 
-func enter() []tea.KeyMsg { return []tea.KeyMsg{keyType(tea.KeyEnter)} }
+func enter() []tea.KeyPressMsg { return []tea.KeyPressMsg{keyType(tea.KeyEnter)} }
 
 func assessStub(label string) func(string) Assessment {
 	return func(s string) Assessment {
@@ -134,7 +136,7 @@ func TestPasswordModelLiveAssess(t *testing.T) {
 	if m.snap.Bits != 3 {
 		t.Errorf("snap.Bits = %v, want 3", m.snap.Bits)
 	}
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "3 bits — yếu") {
 		t.Errorf("view missing live meter:\n%s", view)
 	}
@@ -148,7 +150,7 @@ func TestPasswordModelLiveAssess(t *testing.T) {
 
 func TestViewOrder(t *testing.T) {
 	m := drive(newPasswordModel(PasswordOpts{Title: "Nhập", Assess: assessStub("mạnh")}), typeKeys("ab"))
-	view := m.View()
+	view := m.View().Content
 	iTitle := strings.Index(view, "Nhập")
 	iMeter := strings.Index(view, "bits —")
 	iInput := strings.Index(view, "> ")
@@ -172,7 +174,7 @@ func TestPasswordModelExpect(t *testing.T) {
 	if !m.done || m.aborted || m.fail != nil || m.value != "secret" {
 		t.Fatalf("match: done=%v aborted=%v fail=%v value=%q", m.done, m.aborted, m.fail, m.value)
 	}
-	var keys2 []tea.KeyMsg
+	var keys2 []tea.KeyPressMsg
 	for i := 0; i < 2; i++ {
 		keys2 = append(keys2, typeKeys("x")...)
 		keys2 = append(keys2, enter()...)
@@ -182,13 +184,13 @@ func TestPasswordModelExpect(t *testing.T) {
 		t.Errorf("exhaustion: done=%v fail=%v, want ErrMismatch", m2.done, m2.fail)
 	}
 	m3 := drive(newExpect(), typeKeys("sec"))
-	if view := m3.View(); strings.Contains(view, "bits") {
+	if view := m3.View().Content; strings.Contains(view, "bits") {
 		t.Errorf("confirm field must not show a meter:\n%s", view)
 	}
-	if !strings.Contains(m3.View(), "Nhập lại") {
-		t.Errorf("expect mode must show the confirm title:\n%s", m3.View())
+	if !strings.Contains(m3.View().Content, "Nhập lại") {
+		t.Errorf("expect mode must show the confirm title:\n%s", m3.View().Content)
 	}
-	m4 := drive(newExpect(), []tea.KeyMsg{keyType(tea.KeyEsc)})
+	m4 := drive(newExpect(), []tea.KeyPressMsg{keyType(tea.KeyEsc)})
 	if !m4.done || !m4.aborted {
 		t.Errorf("esc: done=%v aborted=%v", m4.done, m4.aborted)
 	}
@@ -218,7 +220,7 @@ func TestPasswordModelDoubleEntry(t *testing.T) {
 
 func TestPasswordModelMismatchRetryCap(t *testing.T) {
 	opts := PasswordOpts{Title: "Nhập", ConfirmTitle: "Nhập lại", Confirm: true, MaxRounds: 2}
-	var keys []tea.KeyMsg
+	var keys []tea.KeyPressMsg
 	for i := 0; i < 2; i++ {
 		keys = append(keys, typeKeys("a")...)
 		keys = append(keys, enter()...)
@@ -246,7 +248,7 @@ func TestPasswordModelEmptyRejected(t *testing.T) {
 }
 
 func TestPasswordModelEscAborts(t *testing.T) {
-	m := drive(newPasswordModel(PasswordOpts{Title: "Nhập"}), []tea.KeyMsg{keyType(tea.KeyEsc)})
+	m := drive(newPasswordModel(PasswordOpts{Title: "Nhập"}), []tea.KeyPressMsg{keyType(tea.KeyEsc)})
 	if !m.done || !m.aborted {
 		t.Errorf("esc: done=%v aborted=%v", m.done, m.aborted)
 	}

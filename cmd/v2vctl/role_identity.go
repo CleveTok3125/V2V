@@ -7,10 +7,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 
-	"github.com/CleveTok3125/V2V/lib/identity"
 	"github.com/CleveTok3125/V2V/internal/tui"
+	"github.com/CleveTok3125/V2V/lib/identity"
 )
 
 type RoleAddIdentityCmd struct {
@@ -22,7 +22,6 @@ type RoleAddIdentityCmd struct {
 	File         string `help:"Đọc JSON từ file" short:"f"`
 	Force        bool   `help:"Ghi đè nếu identity đã tồn tại" short:"F"`
 }
-
 
 type RoleImportCmd struct {
 	File  string `help:"File JSON roles để import" short:"f"`

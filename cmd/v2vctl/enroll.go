@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/huh/v2"
 	"github.com/CleveTok3125/V2V/internal/tui"
 	"github.com/CleveTok3125/V2V/lib/env"
-	"github.com/charmbracelet/huh"
 )
 
 type EnrollCmd struct {

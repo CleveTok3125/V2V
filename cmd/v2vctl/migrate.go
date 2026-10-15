@@ -1,17 +1,17 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"encoding/json"
 	"path/filepath"
 
-	"github.com/CleveTok3125/V2V/lib/env"
-	"github.com/CleveTok3125/V2V/lib/identity"
+	"charm.land/huh/v2"
 	"github.com/CleveTok3125/V2V/internal/strength"
 	"github.com/CleveTok3125/V2V/internal/tui"
-	"github.com/charmbracelet/huh"
+	"github.com/CleveTok3125/V2V/lib/env"
+	"github.com/CleveTok3125/V2V/lib/identity"
 )
 
 type MigrateCmd struct {
@@ -216,4 +216,4 @@ func (m *MigrateCmd) Run() error {
 
 // --- list -----------------------------------------------------------------
 
- // waPending mirrors the server's pending-ticket schema.
+// waPending mirrors the server's pending-ticket schema.
