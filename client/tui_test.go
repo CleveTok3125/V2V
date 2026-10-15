@@ -366,6 +366,7 @@ func TestOlderWindowAnchorsAboveBanner(t *testing.T) {
 }
 
 func TestChatContentDedupesDateBanners(t *testing.T) {
+	a, _ := newTestApp()
 	lines := []entry{
 		{header: "| --- Ngày 11/10/2026 ---", banner: true, day: "2026-10-11"},
 		{header: "| 09:00 B", height: 3},
@@ -373,12 +374,39 @@ func TestChatContentDedupesDateBanners(t *testing.T) {
 		{header: "| 10:00 A", height: 5},
 		{header: "| --- Ngày 12/10/2026 ---", banner: true, day: "2026-10-12"},
 	}
-	got := stripANSIForFind(chatContent(lines))
+	got := stripANSIForFind(a.chatContent(lines))
 	if n := strings.Count(got, "Ngày 11/10/2026"); n != 1 {
 		t.Fatalf("a repeated day must keep one banner, got %d: %q", n, got)
 	}
 	if n := strings.Count(got, "Ngày 12/10/2026"); n != 1 {
 		t.Fatalf("a new day must keep its banner, got %d: %q", n, got)
+	}
+}
+
+func TestEntryAlignmentAndMine(t *testing.T) {
+	if (entry{kind: kindChat}).rightAligned() {
+		t.Fatal("another's chat must sit left")
+	}
+	if !(entry{kind: kindMine}).rightAligned() {
+		t.Fatal("our echoed message must sit right")
+	}
+	if !(entry{kind: kindLocal}).rightAligned() {
+		t.Fatal("our pending echo must sit right")
+	}
+	if (entry{kind: kindNotice}).rightAligned() {
+		t.Fatal("a local notice must sit left")
+	}
+	if (entry{kind: kindSystem}).rightAligned() {
+		t.Fatal("a system line must sit left")
+	}
+
+	sess := NewSession()
+	sess.Username = "Me#0001"
+	if !sess.isMine(WireMessage{DisplayName: "Me#0001"}) {
+		t.Fatal("our display name must count as ours")
+	}
+	if sess.isMine(WireMessage{DisplayName: "Other#0002"}) {
+		t.Fatal("another display name must not count as ours")
 	}
 }
 

@@ -40,7 +40,7 @@ func inputEchoEntry(lines []string) entry {
 		}
 		rows = append(rows, inputContinuationPrefix+line)
 	}
-	return entry{header: strings.Join(rows, "\n")}
+	return entry{header: strings.Join(rows, "\n"), kind: kindLocal}
 }
 
 // echoInputLine records the submitted line as a buffer entry and prints it.
@@ -131,6 +131,7 @@ func (s *Session) renderPlaceholder(text string, slot slotRef) (e entry, out slo
 	phShown = s.Display.ActiveTab == TabChat
 	s.Display.DisplayMu.Lock()
 	defer s.Display.DisplayMu.Unlock()
+	e.kind = kindLocal
 
 	// Render markup on the whole text first so fenced blocks
 	// keep their state across lines; phRows then counts rendered

@@ -126,6 +126,10 @@ func (t *tuiTerm) Refresh()           {}
 func (t *tuiTerm) Close()             { t.once.Do(func() { close(t.closed) }) }
 func (t *tuiTerm) Writer() io.Writer  { return io.Discard }
 
+// bananaYellow is the system-box border: ANSI 256 index 222 (#ffd75f), close
+// to banana yellow (#ffe135).
+const bananaYellow = "222"
+
 // commandBorderColor is the input border in slash command mode: ANSI 256
 // index 198 (#ff0087), the closest match to #ff2776.
 const commandBorderColor = "198"
@@ -144,6 +148,10 @@ type tuiStyles struct {
 	helpTitle   lipgloss.Style
 	scrollTrack lipgloss.Style
 	scrollThumb lipgloss.Style
+	boxChat     lipgloss.Style
+	boxLocal    lipgloss.Style
+	boxSystem   lipgloss.Style
+	boxQuote    lipgloss.Style
 }
 
 // newTUIStyles resolves the chrome styles, falling back to the built-in
@@ -168,6 +176,10 @@ func newTUIStyles() tuiStyles {
 		helpTitle:   lipgloss.NewStyle().Bold(true),
 		scrollTrack: lipgloss.NewStyle().Foreground(dim),
 		scrollThumb: lipgloss.NewStyle().Foreground(accent),
+		boxChat:     lipgloss.NewStyle().Foreground(accent),
+		boxLocal:    lipgloss.NewStyle().Foreground(dim),
+		boxSystem:   lipgloss.NewStyle().Foreground(lipgloss.Color(bananaYellow)),
+		boxQuote:    lipgloss.NewStyle().Foreground(dim),
 	}
 }
 
@@ -584,10 +596,10 @@ func (a *app) withScrollbar(content string) string {
 // under that lock and rendered outside it. The scroll position is kept
 // when the user is reading history; it only follows the bottom when the
 // viewport was already there.
-// chatContent renders the active buffer for the viewport. A date banner is
-// dropped when its day was already shown: the server sends one banner per
-// window, so paging older history can repeat a day.
-func chatContent(lines []entry) string {
+// chatContent renders the active buffer for the viewport: every entry as a
+// bordered block. A date banner is dropped when its day was already shown (the
+// server sends one per window).
+func (a *app) chatContent(lines []entry) string {
 	var sb strings.Builder
 	seen := make(map[string]bool, 4)
 	for _, e := range lines {
@@ -597,9 +609,166 @@ func chatContent(lines []entry) string {
 			}
 			seen[e.day] = true
 		}
-		sb.WriteString(e.text())
+		box := a.renderEntryBox(e)
+		if box == "" {
+			continue
+		}
+		sb.WriteString(box)
+		sb.WriteString(entryGapRow)
 	}
 	return sb.String()
+}
+
+// renderEntryBox draws one entry as a bordered block that hugs its content up
+// to the viewport width:
+//
+//	╭──────────────╮
+//	│ header       │
+//	├──────────────┤
+//	│ ╭──────────╮ │
+//	│ │ quote    │ │
+//	│ ╰──────────╯ │
+//	│ body         │
+//	╰──────────────╯
+//
+// The border colour follows the entry kind. The frame, the divider and the
+// nested quote block are drawn here because lipgloss has no border label, mid
+// divider, or nested block.
+func (a *app) renderEntryBox(e entry) string {
+	maxW := a.chatWidth()
+	if maxW < 12 {
+		maxW = 12
+	}
+	headerText := strings.TrimPrefix(e.header, "| ")
+	bodyText := stripRowPrefix(e.body)
+	quoteText := strings.TrimPrefix(stripRowPrefix(e.quote), "> ")
+
+	// Width: the block hugs the widest row, capped at the viewport.
+	natural := maxLineWidth(headerText, bodyText)
+	if quoteText != "" {
+		if qn := maxLineWidth(quoteText) + 4; qn > natural {
+			natural = qn
+		}
+	}
+	w := natural + 4
+	if w > maxW {
+		w = maxW
+	}
+	if w < 12 {
+		w = 12
+	}
+	inner := w - 4
+
+	headerRows := wrapText(headerText, inner)
+	bodyRows := wrapText(bodyText, inner)
+	if quoteText != "" {
+		quoteW := maxLineWidth(quoteText) + 4
+		if quoteW > inner {
+			quoteW = inner
+		}
+		quote := drawBox(nil, wrapText(quoteText, quoteW-4), quoteW, a.styles.boxQuote)
+		bodyRows = append(strings.Split(quote, "\n"), bodyRows...)
+	}
+	if len(headerRows) == 0 && len(bodyRows) == 0 {
+		return ""
+	}
+	border := a.styles.boxChat
+	switch e.kind {
+	case kindLocal:
+		border = a.styles.boxLocal
+	case kindSystem:
+		border = a.styles.boxSystem
+	}
+	box := drawBox(headerRows, bodyRows, w, border)
+	if e.rightAligned() && maxW > w {
+		box = padLeftLines(box, maxW-w)
+	}
+	return box
+}
+
+// padLeftLines indents every line by n spaces, right-aligning a block.
+func padLeftLines(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	pad := strings.Repeat(" ", n)
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = pad + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// maxLineWidth is the widest display row in s (ANSI-aware).
+func maxLineWidth(parts ...string) int {
+	w := 0
+	for _, part := range parts {
+		for _, line := range strings.Split(part, "\n") {
+			if d := ansi.StringWidth(line); d > w {
+				w = d
+			}
+		}
+	}
+	return w
+}
+
+// wrapText word-wraps s to width (ANSI-aware), one row per line.
+func wrapText(s string, width int) []string {
+	if s == "" {
+		return nil
+	}
+	if width < 1 {
+		width = 1
+	}
+	return strings.Split(ansi.Wrap(s, width, " "), "\n")
+}
+
+// drawBox frames the header rows, a divider, then the body rows, at width.
+func drawBox(headerRows, bodyRows []string, width int, border lipgloss.Style) string {
+	inner := width - 4
+	if inner < 1 {
+		inner = 1
+	}
+	side := border.Render("│")
+	row := func(s string) string {
+		if pad := inner - ansi.StringWidth(s); pad > 0 {
+			s += strings.Repeat(" ", pad)
+		}
+		return side + " " + s + " " + side
+	}
+	rule := width - 2
+	if rule < 0 {
+		rule = 0
+	}
+	bar := func(left, right string) string {
+		return border.Render(left + strings.Repeat("─", rule) + right)
+	}
+	out := make([]string, 0, len(headerRows)+len(bodyRows)+4)
+	out = append(out, bar("╭", "╮"))
+	for _, r := range headerRows {
+		out = append(out, row(r))
+	}
+	if len(headerRows) > 0 && len(bodyRows) > 0 {
+		out = append(out, bar("├", "┤"))
+	}
+	for _, r := range bodyRows {
+		out = append(out, row(r))
+	}
+	out = append(out, bar("╰", "╯"))
+	return strings.Join(out, "\n")
+}
+
+// stripRowPrefix removes the "|   " gutter the quote and body rows carry, so
+// the box supplies its own inset.
+func stripRowPrefix(s string) string {
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimPrefix(line, chatBodyPrefix)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (a *app) refreshContent() {
@@ -620,12 +789,7 @@ func (a *app) refreshContent() {
 	a.sess.Display.DisplayMu.Unlock()
 
 	prevLines := a.viewport.TotalLineCount()
-	// Wrap at word boundaries (ANSI-aware) before handing the text to the
-	// viewport, whose own SoftWrap would break mid-word.
-	content := chatContent(lines)
-	if w := a.chatWidth(); w > 0 {
-		content = ansi.Wrap(content, w, " ")
-	}
+	content := a.chatContent(lines)
 	a.viewport.SetContent(content)
 	newLines := a.viewport.TotalLineCount()
 

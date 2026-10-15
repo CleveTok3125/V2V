@@ -362,13 +362,13 @@ func TestMatchPendingReplyTo(t *testing.T) {
 
 func TestFormatQuote(t *testing.T) {
 	got := formatQuote(12, "| 15:04 Alice: hello world\n", false, 80)
-	if got != "|   ┌─  ↩ #12: 15:04 Alice: hello world" {
+	if got != "|   > ↩ #12: 15:04 Alice: hello world" {
 		t.Fatalf("got %q", got)
 	}
 	// The quote source carries no mark of its own, so any hourglass here
 	// would come from the wrapper rather than from the text.
 	got = formatQuote(12, "| 15:04 Alice: x\n", true, 80)
-	if !strings.HasPrefix(got, "\x1b[90m|   ┌─  ↩ #12:") || !strings.HasSuffix(got, "\x1b[m") {
+	if !strings.HasPrefix(got, "\x1b[90m|   > ↩ #12:") || !strings.HasSuffix(got, "\x1b[m") {
 		t.Fatalf("pending quote must be grey: %q", got)
 	}
 	if strings.Contains(got, "⏳") {
@@ -534,15 +534,12 @@ func TestFormatInfoBlockTripDetail(t *testing.T) {
 func TestFormatQuoteRich(t *testing.T) {
 	wire := chainedTripWire(mustTestTrip(t), "hello base msg")
 	got := formatQuoteRich(wire, false, 80)
-	want := "|   ┌─  ↩ #50 • 15:04 Alice: hello base msg"
-	// Hook alignment: ┌ sits where the content time-colon sits (col 4),
-	// ↩ where the username starts (col 8).
-	runes := []rune(want)
-	if string(runes[4]) != "┌" || string(runes[8]) != "↩" {
-		t.Fatalf("hook misaligned: %q", want)
-	}
+	want := "|   > ↩ #50 • 15:04 Alice: hello base msg"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
+	}
+	if !strings.HasPrefix(got, "|   > ↩ #50") {
+		t.Fatalf("quote must lead with the reply marker: %q", got)
 	}
 	if strings.Contains(got, "✓") {
 		t.Fatalf("intact quote must carry no mark: %q", got)

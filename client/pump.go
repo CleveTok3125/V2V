@@ -60,7 +60,7 @@ func (s *Session) showDateBannerLocked(day string) bool {
 // TabChat ungated rather than being classified by wording.
 // Caller must hold DisplayMu.
 func (s *Session) emitRawLineLocked(line string) {
-	s.emitTabLive(true, TabChat, noticeEntry(fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line))))
+	s.emitTabLive(true, TabChat, systemEntry(fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line))))
 }
 
 // trackReplayWindow updates the replay window flags for one boundary
@@ -119,7 +119,7 @@ func (s *Session) handleReplayMarker(msg WireMessage) {
 		// Markers are notices like any other, so muting the history branch
 		// or the root has to silence them. Suppressed either way they still
 		// land in the tab.
-		s.emitTabLive(s.notifyTagsAllowed(tags), TabChat, noticeEntry(fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(msg.Text))))
+		s.emitTabLive(s.notifyTagsAllowed(tags), TabChat, systemEntry(fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(msg.Text))))
 	}
 	// A recovery footer settles its refill after the footer line, so the
 	// confirmation reads as a result of the window instead of preceding its

@@ -58,15 +58,11 @@ func serverField(s string) string { return filter.SanitizeSingleLine(s) }
 // before the allowlist can still carry them, and history is not rewritten.
 func authorField(s string) string { return filter.NeutralizeDisplayName(filter.SanitizeSingleLine(s)) }
 
-// tabForWire routes a wire to its tab. A replay marker delimits the chat
-// history stream, so it belongs to TabChat next to the messages it frames;
-// every other system line goes to TabSystem. The type and the tags decide,
-// never the wording.
+// tabForWire routes a wire to its tab. Every system line belongs to TabSystem
+// so tab 2 stays a complete system log, including the history markers and
+// date banners that frame the chat stream.
 func tabForWire(msg WireMessage) int {
 	if msg.Type != "system" {
-		return TabChat
-	}
-	if wire.HasTag(msg.Tags, wire.TagHistory) {
 		return TabChat
 	}
 	return TabSystem
@@ -360,6 +356,7 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (e entry, t
 		// deduped when paging repeats a day.
 		e.banner = msg.SysDate != ""
 		e.day = msg.SysDate
+		e.kind = kindSystem
 		return e, tabForWire(msg)
 	}
 	// Author and chain position share one header row; the text hangs below
@@ -396,11 +393,23 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (e entry, t
 	e.quote = quote.String()
 	e.header = header
 	e.body = chatBodyIndent(body)
+	if s.isMine(msg) {
+		e.kind = kindMine
+	}
 	if wantsMeta(msg, withMeta) {
 		e.height = msg.ChainHeight
 		e.hashHex = shortHashHex(msg.ChainHash)
 	}
 	return e, tab
+}
+
+// isMine reports whether a wire is one of our own messages: its trip public
+// key matches ours, or, without a trip, it carries our display name.
+func (s *Session) isMine(msg WireMessage) bool {
+	if msg.Trip != nil && len(s.TripPub) > 0 {
+		return strings.EqualFold(msg.Trip.Pub, hex.EncodeToString(s.TripPub))
+	}
+	return s.Username != "" && msg.DisplayName == s.Username
 }
 
 // chatBodyPrefix is the indent every text row of a message shares. It sits
