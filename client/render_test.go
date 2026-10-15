@@ -397,3 +397,18 @@ func TestOneMessageIsOneEntry(t *testing.T) {
 // queued. The bar used to be emitted on its own, so it sat on the queue while
 // readline was already drawing the prompt and landed on the input line; the
 // clear, the dump and the bar are now one ordered chunk.
+
+func TestLoneFenceRendersLiteral(t *testing.T) {
+	// A fence with nothing in it is text, not an empty block.
+	if got := stripANSIForFind(renderChatText("```")); got != "```" {
+		t.Fatalf("lone fence = %q, want the literal text", got)
+	}
+	// A closed fence with nothing between the markers renders nothing, so the
+	// body falls back to the raw text.
+	sess, _ := queueTestSession(t)
+	sess.Chain.WireIdx = newWireIndex(4)
+	e, _ := sess.buildChatBlock(WireMessage{Type: "chat", Time: "15:04", DisplayName: "A", Text: "```\n```"}, false, false)
+	if got := stripANSIForFind(e.body); !strings.Contains(got, "```") {
+		t.Fatalf("empty body = %q, want the raw text", got)
+	}
+}

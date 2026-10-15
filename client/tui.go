@@ -274,7 +274,9 @@ func newApp(sess *Session) *app {
 // editor, so it carries no prompt at all; a single-line draft shows the chat
 // marker, or the command marker in slash mode.
 func (a *app) promptFor(info textarea.PromptInfo) string {
-	if a.multiLine() {
+	// The textarea asks per display row, so a single long line that wraps
+	// would repeat the prompt on every row. Only the first row carries it.
+	if info.LineNumber > 0 || a.multiLine() {
 		return ""
 	}
 	if a.cmdMode {
