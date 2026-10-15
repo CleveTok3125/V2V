@@ -8,15 +8,14 @@ import (
 	"time"
 )
 
-// serverHTTPClient is the client every request to the server uses. Going
-// through one builder is what keeps the session proxy from being skipped:
-// a bare http.Client falls back to http.DefaultTransport and therefore to
-// the HTTP_PROXY environment variables, which resolveProxy never writes —
-// so such a client connects from the real address while the rest of the
-// session rides the proxy.
+// serverHTTPClient is the client every server request uses. One builder
+// keeps the session proxy from being skipped: a bare http.Client falls
+// back to DefaultTransport and the HTTP_PROXY variables, which
+// resolveProxy never writes, so such a client would connect from the
+// real address while the rest rides the proxy.
 //
-// Direct keeps the 5s fail-fast bound; an explicit proxy gets 30s because
-// circuit setup is slow.
+// Direct keeps the 5s fail-fast bound; an explicit proxy gets 30s
+// because circuit setup is slow.
 func serverHTTPClient() (*http.Client, error) {
 	tr, err := serverHTTPTransport()
 	if err != nil {

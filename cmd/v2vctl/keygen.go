@@ -82,5 +82,3 @@ func (c *Ed25519Keygen) Run() error {
 	fmt.Println("\nHoặc paste JSON:\n", string(out))
 	return nil
 }
-
-// --- enroll ---------------------------------------------------------------

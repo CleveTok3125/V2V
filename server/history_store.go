@@ -356,12 +356,11 @@ func (h *HistoryStore) rotate() error {
 		} else if err := os.Remove(oldFile); err != nil {
 			// A leftover .old next to a fresh .old.zst would double-load
 			// every record on restart: fail loudly instead. Mirror the
-			// loader's skip (.old ignored when .zst exists): drop the
-			// old archive, then relabel the raw entry to the fresh
-			// archive bounds so paging still serves the new content.
-			// (If no raw entry exists — an unchained-only .old builds
-			// none — the archive stays unindexed until the next boot
-			// load; files stay correct, only deep paging misses it.)
+			// loader's skip (.old ignored when .zst exists): drop the old
+			// archive, then relabel raw to the fresh archive bounds so
+			// paging still serves the new content. With no raw entry (an
+			// unchained-only .old builds none) the archive stays unindexed
+			// until next boot; files stay correct, only deep paging misses.
 			h.dropGenLocked(DiskLookupArchive)
 			h.relabelGenLocked(DiskLookupRaw, DiskLookupArchive)
 			return fmt.Errorf("cannot remove compressed-aside %s: %w", oldFile, err)
@@ -609,12 +608,11 @@ func (h *HistoryStore) relabelGenLocked(from, to int) bool {
 // windowBefore merges disk generations old→new into ring, stopping at
 // the first chained height at or above bound (excluded). Generations
 // above level are skipped; the caller bounds disk against RAM first so
-// chained content never overlaps what RAM will feed. Unchained lines
-// travel by position, which may repeat a few across the RAM seam.
-// Files are opened per request and never locked: rotation renames
-// atomically, so a scan sees a consistent (if slightly stale) view.
-// Missing files (stale index, concurrent rotation) are skipped, never
-// fatal. Transient memory stays within generations×limit lines.
+// chained content never overlaps RAM. Unchained lines travel by position
+// and may repeat a few across the RAM seam. Files open per request,
+// never locked: rotation renames atomically, so a scan sees a
+// consistent (if slightly stale) view. Missing files are skipped, never
+// fatal.
 func (h *HistoryStore) windowBefore(ring *windowRing, bound uint64, level int) {
 	if h == nil || ring == nil {
 		return

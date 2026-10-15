@@ -1,13 +1,12 @@
-// Package pow is argon2id-backed proof of work with a fine-grained
-// sha256 difficulty search. Each challenge runs one argon2id (memory
-// hard, ASIC-resistant) and then searches a nonce whose
-// sha256(key||nonce) carries Difficulty leading zero bits. The server
-// verifies cheaply with one argon2id plus one hash; difficulty tunes
-// solving cost without touching the memory-hard part.
+// Package pow is argon2id-backed proof of work with a sha256 difficulty
+// search. One challenge runs one argon2id (memory-hard, ASIC-resistant),
+// then searches a nonce whose sha256(key||nonce) carries Difficulty
+// leading zero bits. Difficulty tunes solving cost without touching the
+// memory-hard part.
 //
-// Preset bounds mirror lib/identity argon2 clamps (Time 1-10,
-// Memory 8MiB-256MiB in KiB, Threads 1-8); wasm forces Threads=1. The
-// concrete ladder lives in config, never here.
+// Preset bounds mirror the identity argon2 clamps (Time 1-10, Memory
+// 8MiB-256MiB, Threads 1-8); wasm forces Threads=1. The concrete ladder
+// lives in config, never here.
 package pow
 
 import (

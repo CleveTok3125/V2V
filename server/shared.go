@@ -107,12 +107,9 @@ type ChainService struct {
 	Store       *HistoryStore
 }
 
-// Hub owns presence and send ordering: the client set, the identity
-// slots, the display-name serials and the date marker, plus BroadcastMu
-// which serializes link+send so every client receives messages in chain
-// order (see server/chain.go). chain is a one-way back-ref; ChainService
-// never points back.
-//
+// Hub owns presence and send ordering: the client set, identity slots,
+// display-name serials and the date marker, plus BroadcastMu which
+// serializes link+send so every client receives messages in chain order.
 // Lock order: BroadcastMu -> LastMessageDateMu -> HistoryMu (Chain.Mu)
 // -> ClientsMu.
 type Hub struct {

@@ -1,15 +1,15 @@
 package main
 
-// v2vctl is the identity & server management tool split out of the chat
-// client and the server.
+// v2vctl is the identity and server management tool split out of the
+// chat client and the server.
 //
-// Layout mirrors real CLIs: `keygen` is a parent command with one leaf per
+// Layout mirrors real CLIs: `keygen` is a parent with one leaf per
 // identity flavor, so each flavor owns exactly the flags it needs.
 //
-// Interactive TTY sessions drive huh forms; scripts stay strictly
-// flag-driven (defaults apply, hard errors on missing required values).
-// The tool only touches local files: key.json, roles.json (opt-in merge)
-// and the WEBAUTHN_STORE. No network, no daemon.
+// Interactive TTY sessions drive huh forms; scripts stay flag-driven
+// (defaults apply, hard errors on missing required values). Local files
+// only: key.json, roles.json (opt-in merge) and the WEBAUTHN_STORE.
+// No network, no daemon.
 
 import (
 	"github.com/alecthomas/kong"

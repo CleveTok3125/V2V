@@ -7,17 +7,14 @@ import (
 	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
-// Notification gates: informational notices can be muted on screen with
-// /notify or the ui.notify config, while still landing in the system tab
-// so nothing is lost. Critical warnings (chain integrity, send guards,
-// connection loss, command output) are never gated.
+// Notification gates: informational notices can mute on screen through
+// /notify or ui.notify, while still landing in the system tab. Critical
+// warnings (chain integrity, send guards, connection loss, command
+// output) never gate.
 //
-// Gates are tag paths, the same vocabulary the server publishes, so muting
-// a node hides its whole subtree and a notice kind added later needs no new
-// switch. The constants that spelled the kinds out are gone; use the tags
-// from lib/wire.
+// Gates are tag paths in the vocabulary the server publishes, so muting
+// a node hides its subtree and a new notice kind needs no new switch.
 
-// NotifyState is the set of muted tag paths, adjustable at runtime.
 // NotifyState is the core's gate state; the client keeps it inside Display
 // and owns the lock.
 type NotifyState = clientcore.Notices

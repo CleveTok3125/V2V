@@ -33,14 +33,10 @@ func executableDir() string {
 	return filepath.Dir(exe)
 }
 
-// resolveWebtermDir picks the web asset directory in this order:
-//  1. WEBTERM_DIR when set (explicit operator override),
-//  2. "<exeDir>/webterm" when exeDir is non-empty and that dir exists,
-//  3. "webterm" relative to the current working directory.
-//
-// This keeps a binary launched from an arbitrary cwd (e.g. a systemd
-// unit or an extracted release tarball) able to find its assets next to
-// itself, without breaking source-tree and Docker runs.
+// resolveWebtermDir picks the web asset directory: WEBTERM_DIR when set,
+// else "<exeDir>/webterm" when that dir exists, else "webterm" under the
+// cwd. A binary launched from an arbitrary cwd (systemd unit, release
+// tarball) still finds assets next to itself.
 func resolveWebtermDir(exeDir string) string {
 	if dir := strings.TrimSpace(env.WebtermDir()); dir != "" {
 		return dir

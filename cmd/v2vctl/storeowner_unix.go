@@ -9,14 +9,14 @@ import (
 )
 
 // adoptDirOwner gives path the owner of the directory it sits in, so the
-// service that reads it later is not left out. The operator runs v2vctl as
-// root on the host while the server reads the same instance as its own user;
-// a write that keeps the writer's owner would hand the store to root, and the
-// instance data directory is the operator's statement of who the service is.
+// service reading it later is not left out. The operator runs v2vctl as
+// root while the server reads as its own user; a write keeping the
+// writer's owner would hand the store to root. The instance data directory
+// states who the service is.
 //
-// Best effort in the common case: when writer and directory already agree,
-// nothing is touched. A writer that is not root cannot chown and does not
-// need to, because it already owns the result.
+// Best effort: when writer and directory already agree, nothing is
+// touched. A non-root writer cannot chown and needs nothing, owning the
+// result already.
 func adoptDirOwner(path string) error {
 	fileInfo, err := os.Stat(path)
 	if err != nil {

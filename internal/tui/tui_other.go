@@ -16,16 +16,16 @@ import (
 	"github.com/CleveTok3125/V2V/lib/env"
 )
 
-// Interactive reports whether stdin is a real terminal. Stdin-reading
-// programs (passprompt, piped fallbacks) gate on this.
-// HasControllingTTY reports whether a controlling terminal device
-// exists (/dev/tty probe). huh forms open /dev/tty directly and ignore
-// piped stdin, so they gate on this instead: piped stdin with a live
-// tty can still run huh, but must not run stdin readers.
+// Interactive reports whether stdin is a real terminal. Stdin readers
+// (passprompt, piped fallbacks) gate on this.
+// HasControllingTTY reports whether a controlling terminal device exists
+// (/dev/tty probe). huh forms open /dev/tty directly and ignore piped
+// stdin, so they gate on this instead: piped stdin with a live tty can
+// still run huh, but must not run stdin readers.
 //
 // Both return false under the V2V_NO_TTY/CI override so automated runs
-// (e.g. `go test` from a terminal, where /dev/tty opens but no human
-// can answer) always take the non-interactive path instead of hanging.
+// (where /dev/tty opens but no human can answer) always take the
+// non-interactive path instead of hanging.
 func Interactive() bool {
 	if env.NoTTY() {
 		return false

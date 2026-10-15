@@ -232,19 +232,18 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 	return perms, resp, fmt.Errorf("%w", ErrVerificationFailed)
 }
 
-// authErrIsProbe reports whether a rejected handshake is evidence of a
-// client asking for more than it is entitled to. The axis is direction, not
-// blame: a client that gives up returns a slot and owes nothing, while a
-// client that keeps asking past a budget, or asks with proof that does not
-// verify, is spending the server's attention. Only the second kind is worth
-// remembering.
+// authErrIsProbe reports whether a rejected handshake shows a client
+// asking for more than it is entitled to. Direction, not blame: a client
+// that gives up returns a slot and owes nothing, while one that keeps
+// asking past a budget, or with proof that does not verify, spends the
+// server's attention. Only the second kind is worth remembering.
 //
-// An event that only returns resources must never be recorded: it is the
-// outcome the server wants, so counting it would punish the behaviour the
-// server asks for. Disconnecting is the clearest case.
+// Events that only return resources must never count: disconnecting is
+// the clearest case. Counting that would punish the outcome the server
+// wants.
 //
-// Both the behaviour score and the ban read this, so the two cannot drift
-// apart as they did when each carried its own list.
+// Both the behavior score and the ban read this, so the two cannot drift
+// apart.
 func authErrIsProbe(err error) bool {
 	if err == nil {
 		return false

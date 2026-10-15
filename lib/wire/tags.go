@@ -5,15 +5,14 @@ import "strings"
 // Notice tags: the single source of truth for what a line is, shared by
 // the server that produces it and the client that filters it.
 //
-// A line carries the tags that apply to it, most general first. Every tag
-// is a full dotted path from the root, so a screening challenge is
-// ["system","system.pow","system.pow.screening"]: muting "system" hides
-// every notice, muting "system.pow" hides the PoW flow, and muting
-// "system.pow.screening" hides only that step. A line is hidden when any
+// A line carries the tags that apply, most general first, each a full
+// dotted path from the root: muting "system" hides every notice,
+// muting "system.pow" hides the PoW flow, muting
+// "system.pow.screening" hides only that step. A line hides when any
 // of its tags, or any ancestor of them, is muted.
 //
-// Tags are display metadata, not integrity proof: they are not covered by
-// the chain hash, and a peer can strip or forge them.
+// Tags are display metadata, not integrity proof: outside the chain
+// hash, and a peer can strip or forge them.
 
 // TagRoot is the only filterable root. Chat lines carry no tags and are
 // never filtered.
@@ -37,14 +36,9 @@ const (
 	TagPowGate   = "system.pow.gate"
 	TagPowScreen = "system.pow.screening"
 
-	// TagAudit marks a management line that is chained as evidence, so
-	// verify can replay it. It is a leaf of the root: there is nothing
-	// below it and nothing to group it with.
-	//
-	// Reserved: BroadcastAudit exists but has no producer yet, so no line
-	// carries this tag today and muting it changes nothing. It stays in
-	// the tree so the wire shape is settled before something publishes on
-	// it — a tag added later needs no vocabulary change.
+	// TagAudit marks a management line chained as evidence, so verify can
+	// replay it. Reserved: no producer publishes on it yet, so the wire
+	// shape settles before anything needs it.
 	TagAudit = "system.audit"
 
 	TagLimit    = "system.limit"
@@ -54,8 +48,7 @@ const (
 	TagAuth     = "system.auth"
 )
 
-// tagTree lists every known tag, parents before children, in the order
-// AllTags returns them.
+// tagTree lists every known tag, parents before children.
 var tagTree = []string{
 	TagRoot,
 	TagJoin,
@@ -78,20 +71,16 @@ var tagTree = []string{
 	TagAuth,
 }
 
-// AllTags returns every known tag in tree order: parents before children,
-// siblings stable, so anything that renders the whole taxonomy shows it
-// the way the tree reads.
+// AllTags returns every known tag, parents before children.
 func AllTags() []string {
 	out := make([]string, len(tagTree))
 	copy(out, tagTree)
 	return out
 }
 
-// knownAncestor returns the closest tag enclosing this one that the
-// taxonomy knows, or "" when there is none. It keeps looking past a level it
-// does not recognise, so a leaf a newer peer published as
-// "system.pow.newflow.step" still resolves to system.pow instead of
-// detaching from the tree and escaping every gate above it.
+// knownAncestor returns the closest known tag enclosing this one, or "".
+// It looks past unrecognized levels, so a leaf a newer peer published
+// still resolves instead of escaping every gate above it.
 func knownAncestor(tag string) string {
 	for at := syntacticParent(tag); at != ""; at = syntacticParent(at) {
 		if HasTag(tagTree, at) {
@@ -140,14 +129,13 @@ func HasAnyTag(tags []string, wanted ...string) bool {
 	return false
 }
 
-// BlockedBy returns the muted keys that hide a line carrying tags: a key
-// matches when it is one of the tags or an ancestor of one. A caller hides
-// the line when the result is non-empty, which is what makes muting a node
-// mute its whole subtree.
+// BlockedBy returns the muted keys hiding a line carrying tags: a key
+// matches when it is one of the tags or an ancestor of one. Non-empty
+// means hidden, which is what makes muting a node mute its subtree.
 //
-// Keys that are not part of the taxonomy simply never match, so a caller can
-// pass whatever gate names it holds. Results follow the order of tags, so the
-// same input always yields the same output.
+// Keys outside the taxonomy never match, so callers pass whatever gate
+// names they hold. Results follow tag order, so the same input always
+// yields the same output.
 func BlockedBy(tags []string, muted map[string]bool) []string {
 	if len(muted) == 0 || len(tags) == 0 {
 		return nil

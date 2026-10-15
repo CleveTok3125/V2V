@@ -1,15 +1,13 @@
 // Package behavior scores client behavior from timing/count metadata
 // only: connection/message/history/HTTP events, auth and protocol
 // anomalies. Message content is never read, stored or needed. Profiles
-// are keyed by client IP (guests mint cheap identities, so anything
-// weaker would be trivially rotated); an authenticated identity only
-// lowers scrutiny, never creates a separate profile.
+// key by client IP (guests mint cheap identities, so anything weaker
+// rotates trivially); an authenticated identity only lowers scrutiny,
+// never splits the profile.
 //
-// All tuning lives in caller-supplied params: feature weights, sample
-// floors, ramp bounds, windows and tier thresholds come from config,
-// never from literals here. The fold shape itself (ramp directions,
-// the weighted average, the convex curve, the group mix) is fixed in
-// code; only its parameters are configurable.
+// All tuning lives in caller-supplied params: weights, floors, ramps,
+// windows and thresholds come from config, never literals here. The
+// fold shape itself is fixed in code; only its parameters vary.
 package behavior
 
 import "time"

@@ -1,13 +1,13 @@
 package main
 
-// Passkey (WebAuthn) support. Passkeys are just another identity type inside
-// roles.json: enrollment happens entirely client-side on a static page, and
-// only public material (credential ID + COSE public key) is ever handed to
-// the admin for import — the exact trust model of ed25519 key files.
+// Passkey (WebAuthn) support. Passkeys are another identity type inside
+// roles.json: enrollment runs client-side on a static page, and only
+// public material (credential ID + COSE public key) reaches the admin
+// for import, the same trust model as ed25519 key files.
 //
-// Login-time verification mirrors the key-file flow: the server's auth nonce
-// doubles as the WebAuthn challenge (SHA-256 of the hex nonce), and the
-// assertion is checked against the stored COSE public key.
+// Login mirrors the key-file flow: the server auth nonce doubles as the
+// WebAuthn challenge (SHA-256 of the hex nonce), checked against the
+// stored COSE public key.
 
 import (
 	"crypto/sha256"

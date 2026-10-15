@@ -1,11 +1,9 @@
 // Package markup renders forum-style inline markdown (bold, italic,
 // strikethrough), [text](url) links and > quotes into terminal SGR
-// sequences. All code spans and fenced blocks are delegated to codebg so
-// code styling has a single source; unknown constructs degrade to their
-// raw source text, never lost. Only zero-width SGR/OSC8 sequences are
-// added or removed, so display-cell arithmetic in line editors and the
-// placeholder erase math (which counts newlines, identical on both render
-// paths) are unchanged.
+// sequences. Code spans and fenced blocks delegate to codebg (single
+// source for code styling); unknown constructs degrade to raw source,
+// never lost. Only zero-width SGR/OSC8 sequences change, so display-cell
+// arithmetic stays put.
 package markup
 
 import (

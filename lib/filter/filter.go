@@ -73,19 +73,16 @@ func displayLegacyAllowed(r rune) bool {
 	return true
 }
 
-// ValidateDisplayName accepts only letters, decimal digits, spacing combining
-// marks and displayNameSeparators, and requires at least one letter or digit.
+// ValidateDisplayName accepts letters, decimal digits, spacing combining
+// marks and displayNameSeparators, with at least one letter or digit.
 //
-// An allowlist is used because a denylist cannot name the characters that make
-// a name read as structure: "|", "•", "#", ":" and the client's own glyphs are
-// ordinary punctuation to a denylist, yet each forges a part of the header row.
+// Allowlist, not denylist: a denylist cannot name characters that read
+// as structure ("|", "#", ":" forge header-row parts yet look like
+// ordinary punctuation).
 //
-// The rule only ever refuses more than the one it replaced, never less: it is
-// a subset of displayLegacyAllowed, which
-// TestDisplayNameRuleIsSubsetOfLegacy proves over every code point. Mn and Me
-// stay refused for that reason, so Thai tone marks, Arabic and Hebrew vowel
-// points and decomposed Vietnamese are still rejected — the legacy rule
-// already rejected them, and widening that is a separate decision.
+// Mn and Me stay refused: the legacy rule already refused them, and
+// widening that is a separate decision. TestDisplayNameRuleIsSubsetOfLegacy
+// proves this rule only ever refuses more, never less.
 func ValidateDisplayName(name string) error {
 	if !utf8.ValidString(name) {
 		return fmt.Errorf("%w: invalid utf8", ErrInvalidDisplayName)

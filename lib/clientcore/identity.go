@@ -9,13 +9,13 @@ import (
 )
 
 // LoadIdentityFile reads key.json, unlocking an encrypted file with
-// V2V_PASSPHRASE or, when that is empty, through the caller's Prompter.
+// V2V_PASSPHRASE or, when empty, through the caller's Prompter.
 //
-// It returns the passphrase it unlocked with, nil for a plaintext file, so
-// the caller can keep it and re-encrypt later saves; the caller owns that
-// byte slice and must wipe it. warn, when not nil, receives the env
-// passphrase so the caller can apply its own strength policy — refusing here
-// would lock out legitimate files, so it is a note, not a gate.
+// It returns the passphrase it unlocked with (nil for plaintext), so the
+// caller can re-encrypt later saves; the caller owns that slice and must
+// wipe it. warn receives the env passphrase for the caller's own strength
+// policy: a note, not a gate, since refusing here would lock out
+// legitimate files.
 func LoadIdentityFile(path string, prompter Prompter, warn func(passphrase string)) (*identity.IdentityFile, []byte, error) {
 	if enc, _ := identity.IsEncrypted(path); enc {
 		if pass := env.Passphrase(); pass != "" {

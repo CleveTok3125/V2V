@@ -1,16 +1,14 @@
 package main
 
 // Desktop passkey pairing. A desktop client cannot run a WebAuthn
-// ceremony: the private key lives inside an authenticator the process has
-// no access to. So the desktop asks for a pair ticket, prints the page URL
-// for it, and lets a browser anywhere complete the ceremony.
+// ceremony: the private key lives inside an authenticator the process
+// cannot reach. So the desktop asks for a pair ticket, prints the page
+// URL for it, and a browser anywhere completes the ceremony.
 //
-// The ticket carries the evidence, not a socket. Waiting is the human's
-// job and can take minutes, so it happens over poll requests that hold
-// nothing: a socket held for the whole ceremony would cost a connection
-// slot, and an idle one can be cut by anything on the path. The ticket is
-// unguessable, single-use and tied to the address that asked for it, so a
-// second party cannot ride in on somebody else's ceremony.
+// Waiting is the human's job and can take minutes, so it happens over
+// poll requests that hold nothing: a socket held for the whole ceremony
+// would cost a connection slot. The ticket is unguessable, single-use
+// and tied to the asking address.
 //
 // See docs/TECHNICAL.md, "Desktop pairing", for the request flow.
 
@@ -23,10 +21,9 @@ import (
 	"github.com/CleveTok3125/V2V/internal/serverconfig"
 )
 
-// pairTicketTTL is how long a person has to open the link and confirm the
-// passkey. It is generous because a phone has to wake up, unlock and find
-// the authenticator; the cost of holding a ticket that long is a few
-// hundred bytes, not a connection.
+// pairTicketTTL is how long a person has to open the link and confirm.
+// Generous: a phone must wake, unlock and find the authenticator. Cost
+// of holding a ticket that long is a few hundred bytes, not a connection.
 const pairTicketTTL = 5 * time.Minute
 
 // pairTicketBytes is the ticket's entropy. The challenge a browser signs is
@@ -156,16 +153,12 @@ func (s *ChatServer) markPairVerified(ticket string) bool {
 	return true
 }
 
-// takeVerifiedPairTicket spends a ticket. It is the only way a ticket turns
-// into a session, and it requires the proof, the same address and one use,
-// so a ticket that leaks still cannot be spent from anywhere else.
-// takeVerifiedPairTicket spends a ticket and reports why it could not. It is
-// the only way a ticket turns into a session, and it requires the proof, the
-// same address and one use, so a ticket that leaks still cannot be spent from
-// anywhere else.
+// takeVerifiedPairTicket spends a ticket and reports why it could not. It
+// is the only way a ticket turns into a session: proof, same address
+// and one use, so a leaked ticket still cannot be spent from elsewhere.
 //
-// An unverified ticket is not "expired": the browser simply has not finished,
-// which is the ordinary state while a person is looking for their passkey.
+// An unverified ticket is not "expired": the browser simply has not
+// finished, the ordinary state while a person finds their passkey.
 func (s *ChatServer) takeVerifiedPairTicket(ticket, clientIP string) (*pairTicket, error) {
 	s.PairTicketsMu.Lock()
 	defer s.PairTicketsMu.Unlock()
