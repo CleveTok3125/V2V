@@ -829,3 +829,53 @@ func TestAppPromptOnlyOnFirstRow(t *testing.T) {
 		t.Fatalf("a wrapped row must carry no prompt, got %q", got)
 	}
 }
+
+func TestAppSelectionCopiesContentOnly(t *testing.T) {
+	a, sess := newTestApp()
+	sess.Conn = &stubConn{}
+	sess.Display.TabChat.append(entry{header: "15:04 Alice • #1:abcd", body: "hello world", height: 1, hashHex: "abcd"})
+	sess.Display.TabChat.append(entry{header: "15:05 Bob • #2:ef01", body: "tin của mình", height: 2, hashHex: "ef01", kind: kindMine})
+	a.dirty = true
+	a.refreshContent()
+
+	a.selActive = true
+	a.selAnchor = selPos{row: 0, col: 0}
+	a.selCursor = selPos{row: len(a.rows) - 1, col: a.width}
+	a.dirty = true
+	a.refreshContent()
+
+	got := a.selectionText()
+	if strings.ContainsAny(got, "│╭╮╰╯") {
+		t.Fatalf("the copy must not carry frame characters: %q", got)
+	}
+	if !strings.Contains(got, "hello world") || !strings.Contains(got, "tin của mình") {
+		t.Fatalf("the copy must hold the content: %q", got)
+	}
+	raw := a.View().Content
+	if !strings.Contains(raw, "48;5;238") {
+		t.Fatal("the selection must highlight the content cells, not the frame")
+	}
+	// A right-aligned block keeps its inset and frame unhighlighted.
+	if !strings.Contains(raw, "48;5;238mtin của mình") {
+		t.Fatalf("the highlight must start at the text, not the inset: %q", raw)
+	}
+}
+
+func TestAppDragDoesNotRebuildContent(t *testing.T) {
+	a, sess := newTestApp()
+	sess.Conn = &stubConn{}
+	sess.Display.TabChat.append(entry{header: "15:04 A • #1:ab", body: "hello", height: 1, hashHex: "ab"})
+	a.dirty = true
+	a.refreshContent()
+
+	a.selActive = true
+	a.selAnchor = selPos{row: 0, col: 0}
+	a.dirty = false
+	a.Update(tea.MouseMotionMsg{X: 3, Y: 2, Button: tea.MouseLeft})
+	if a.dirty {
+		t.Fatal("a drag motion must not force a full content rebuild")
+	}
+	if a.selCursor == a.selAnchor {
+		t.Fatal("a drag motion must still move the selection")
+	}
+}

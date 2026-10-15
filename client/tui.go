@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -166,6 +167,7 @@ type tuiStyles struct {
 	boxSystem   lipgloss.Style
 	boxQuote    lipgloss.Style
 	reply       lipgloss.Style
+	sel         lipgloss.Style
 }
 
 // newTUIStyles resolves the chrome styles, falling back to the built-in
@@ -195,6 +197,7 @@ func newTUIStyles() tuiStyles {
 		boxSystem:   lipgloss.NewStyle().Foreground(lipgloss.Color(bananaYellow)),
 		boxQuote:    lipgloss.NewStyle().Foreground(dim),
 		reply:       lipgloss.NewStyle().Foreground(dim),
+		sel:         lipgloss.NewStyle().Background(lipgloss.Color("238")),
 	}
 }
 
@@ -218,6 +221,17 @@ type app struct {
 	viewport viewport.Model
 	input    textarea.Model
 	styles   tuiStyles
+
+	// Mouse selection over the chat content. anchor and cursor are in
+	// content coordinates; rows records, per rendered content row, the
+	// column range that holds its text inside the frame (lo < 0 for a
+	// frame or blank row), so a highlight and a copy cover only the text.
+	selActive bool
+	selAnchor selPos
+	selCursor selPos
+	rows      []rowSpan
+	selLines  []string
+	notice    string
 
 	hist         *inputHistory
 	replyLine    string
@@ -341,6 +355,26 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiHistoryMsg:
 		if a.hist != nil {
 			a.hist.add(msg.line)
+		}
+		return a, nil
+	case tea.MouseClickMsg:
+		if msg.Button == tea.MouseLeft {
+			if p, ok := a.contentPos(msg.X, msg.Y); ok {
+				a.selActive, a.selAnchor, a.selCursor = true, p, p
+			}
+		}
+		return a, nil
+	case tea.MouseMotionMsg:
+		if a.selActive {
+			if p, ok := a.contentPos(msg.X, msg.Y); ok {
+				a.selCursor = p
+			}
+		}
+		return a, nil
+	case tea.MouseReleaseMsg:
+		if a.selActive {
+			a.selActive = false
+			a.copySelection()
 		}
 		return a, nil
 	case tea.MouseWheelMsg:
@@ -523,6 +557,7 @@ func (a *app) submit() tea.Cmd {
 		text = "/" + text
 	}
 	a.setCmdMode(false)
+	a.notice = ""
 	a.input.Reset()
 	a.layout()
 	a.dirty = true
@@ -644,9 +679,23 @@ func (a *app) withScrollbar(content string) string {
 // chatContent renders the active buffer for the viewport: every entry as a
 // bordered block. A date banner is dropped when its day was already shown (the
 // server sends one per window).
+// selPos is a point in chat-content coordinates: the rendered row and the
+// column on it.
+type selPos struct{ row, col int }
+
+// rowSpan is one rendered content row: lo..hi is the column range holding the
+// row's text inside its frame. lo < 0 marks a frame or blank row.
+type rowSpan struct{ lo, hi int }
+
 func (a *app) chatContent(lines []entry, skipMuted bool) string {
 	var sb strings.Builder
 	seen := make(map[string]bool, 4)
+	a.rows = a.rows[:0]
+	appendRow := func(line string, span rowSpan) {
+		a.rows = append(a.rows, span)
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
 	for _, e := range lines {
 		if skipMuted && e.muted {
 			continue
@@ -661,10 +710,132 @@ func (a *app) chatContent(lines []entry, skipMuted bool) string {
 		if box == "" {
 			continue
 		}
-		sb.WriteString(box)
-		sb.WriteString(entryGapRow)
+		boxLines := strings.Split(box, "\n")
+		// A right-aligned box already carries its leading padding, so the
+		// inset and the box width come from its first row, not from the
+		// padded line width.
+		first := stripANSIForFind(boxLines[0])
+		left := len(first) - len(strings.TrimLeft(first, " "))
+		w := ansi.StringWidth(boxLines[0]) - left
+		for _, l := range boxLines {
+			span := rowSpan{lo: -1}
+			// A right-aligned box carries leading padding, so look past it.
+			if strings.HasPrefix(strings.TrimLeft(stripANSIForFind(l), " "), "│") {
+				span = rowSpan{lo: left + 2, hi: left + w - 2}
+			}
+			appendRow(l, span)
+		}
+		appendRow("", rowSpan{lo: -1})
 	}
 	return sb.String()
+}
+
+// highlightSelection styles the selected cells of the rows on screen. Only
+// those rows are touched, so a drag never rebuilds the whole content.
+func (a *app) highlightSelection(chat string) string {
+	if !a.selActive {
+		return chat
+	}
+	lines := strings.Split(chat, "\n")
+	top := a.viewport.YOffset()
+	for i := range lines {
+		row := top + i
+		if row < 0 || row >= len(a.rows) {
+			continue
+		}
+		span := a.rows[row]
+		if span.lo < 0 {
+			continue
+		}
+		if lo, hi := a.selRangeFor(row, span); lo < hi {
+			lines[i] = lipgloss.StyleRanges(lines[i], lipgloss.NewRange(lo, hi, a.styles.sel))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// selRangeFor clamps the active selection to one row's text range.
+func (a *app) selRangeFor(row int, span rowSpan) (int, int) {
+	lo, hi := a.selAnchor, a.selCursor
+	if lo.row > hi.row || (lo.row == hi.row && lo.col > hi.col) {
+		lo, hi = hi, lo
+	}
+	if row < lo.row || row > hi.row {
+		return 0, 0
+	}
+	c0, c1 := span.lo, span.hi
+	if row == lo.row && lo.col > c0 {
+		c0 = lo.col
+	}
+	if row == hi.row && hi.col < c1 {
+		c1 = hi.col
+	}
+	if c1 < c0 {
+		return 0, 0
+	}
+	return c0, c1
+}
+
+// contentPos maps a screen point to a chat-content point. Only the viewport
+// area counts; the tab bar, the input and the footer are ignored.
+func (a *app) contentPos(x, y int) (selPos, bool) {
+	const chatTop = 1 // the tab bar
+	if y < chatTop || y >= chatTop+a.viewport.Height() {
+		return selPos{}, false
+	}
+	row := a.viewport.YOffset() + (y - chatTop)
+	if row < 0 || row >= len(a.rows) {
+		return selPos{}, false
+	}
+	return selPos{row: row, col: x}, true
+}
+
+// selectionText is the text of the selected rows, with no frame character.
+func (a *app) selectionText() string {
+	lo, hi := a.selAnchor, a.selCursor
+	if lo.row > hi.row || (lo.row == hi.row && lo.col > hi.col) {
+		lo, hi = hi, lo
+	}
+	// Strip only the selected rows: the stored content is styled.
+	a.selLines = strings.Split(a.viewport.GetContent(), "\n")
+	for i := range a.selLines {
+		a.selLines[i] = stripANSIForFind(a.selLines[i])
+	}
+	var out []string
+	for row := lo.row; row <= hi.row && row < len(a.rows); row++ {
+		span := a.rows[row]
+		if span.lo < 0 {
+			continue
+		}
+		c0, c1 := a.selRangeFor(row, span)
+		if row >= len(a.selLines) {
+			continue
+		}
+		runes := []rune(a.selLines[row])
+		if c0 >= len(runes) || c1 <= c0 {
+			continue
+		}
+		if c1 > len(runes) {
+			c1 = len(runes)
+		}
+		if text := strings.Trim(string(runes[c0:c1]), " │╭╮╰╯├┤─"); strings.TrimSpace(text) != "" {
+			out = append(out, strings.TrimSpace(text))
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// copySelection puts the selected text on the clipboard and reports it.
+func (a *app) copySelection() {
+	text := a.selectionText()
+	if text == "" {
+		return
+	}
+	if err := copyToClipboard(text); err != nil {
+		a.notice = "Copy lỗi: " + err.Error()
+		return
+	}
+	a.notice = fmt.Sprintf("Đã copy %d dòng", strings.Count(text, "\n")+1)
 }
 
 // renderEntryBox draws one entry as a bordered block that hugs its content up
@@ -966,6 +1137,9 @@ func replyBorder() lipgloss.Border {
 // nothing else is pending.
 func (a *app) renderFooter() string {
 	line := a.status
+	if a.notice != "" {
+		line = a.notice
+	}
 	if line == "" && a.prompt != "" && a.prompt != "| > " {
 		line = strings.TrimSpace(a.prompt)
 	}
@@ -1006,7 +1180,7 @@ func (a *app) View() tea.View {
 	}
 	a.syncReplyLine()
 	a.refreshContent()
-	chat := a.withScrollbar(a.viewport.View())
+	chat := a.highlightSelection(a.withScrollbar(a.viewport.View()))
 	if a.showHelp {
 		chat = a.helpView()
 	}
