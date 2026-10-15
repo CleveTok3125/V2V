@@ -222,9 +222,8 @@ func TestSanitize_OSCNon8Blocked(t *testing.T) {
 	}
 }
 
-// OSC8 hyperlinks may only target http(s) (or the client-generated
-// v2v://expand/ in-app command). Dangerous schemes are dropped, the
-// visible label stays.
+// OSC8 hyperlinks may only target http(s). Dangerous schemes are dropped,
+// the visible label stays.
 func TestSanitize_OSC8SchemeBlocked(t *testing.T) {
 	for _, uri := range []string{
 		"javascript:alert(1)",
@@ -232,6 +231,7 @@ func TestSanitize_OSC8SchemeBlocked(t *testing.T) {
 		"data:text/html,<b>x</b>",
 		"vscode://x",
 		"ssh://host",
+		"v2v://expand/42",
 		"\x1b]52;c;AAAA", // nested escape smuggled as target
 	} {
 		in := "\x1b]8;;" + uri + "\x1b\\label\x1b]8;;\x1b\\"
@@ -245,13 +245,12 @@ func TestSanitize_OSC8SchemeBlocked(t *testing.T) {
 	}
 }
 
-// http and https targets, plus the in-app expand link, stay byte-exact.
+// http and https targets stay byte-exact.
 func TestSanitize_OSC8AllowedSchemes(t *testing.T) {
 	for _, uri := range []string{
 		"http://example.com",
 		"https://example.com/a?b=c",
 		"HTTPS://example.com",
-		"v2v://expand/42",
 	} {
 		in := "\x1b]8;;" + uri + "\x1b\\label\x1b]8;;\x1b\\"
 		if got := SanitizeForDisplay(in); got != in {

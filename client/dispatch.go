@@ -580,21 +580,26 @@ func (s *Session) cmdExpand(text string) bool {
 		return true
 	}
 	s.Display.DisplayMu.Lock()
+	s.expandCollapsedLocked(height)
+	s.Display.DisplayMu.Unlock()
+	s.refreshTerminal()
+	return true
+}
+
+// unfoldableBlockLocked resolves a folded entry to the full block it hides:
+// the buffer index it occupies and the rebuilt entry. Reports false after
+// emitting the reason. Callers must hold displayMu.
+func (s *Session) unfoldableBlockLocked(height uint64) (int, entry, bool) {
 	wire, ok := s.Chain.WireIdx.get(height)
 	if !ok {
 		s.emitLocalFeedback("| [Local]: Tin đã trôi khỏi bộ nhớ hoặc chưa sync.\n")
-		s.Display.DisplayMu.Unlock()
-		s.refreshTerminal()
-		return true
+		return 0, entry{}, false
 	}
-	if collapsedIndex(s.Display.TabChat.lines, height) < 0 {
+	idx := collapsedIndex(s.Display.TabChat.lines, height)
+	if idx < 0 {
 		s.emitLocalFeedback("| [Local]: Tin này không thu gọn.\n")
-		s.Display.DisplayMu.Unlock()
-		s.refreshTerminal()
-		return true
+		return 0, entry{}, false
 	}
-	// Re-render the full block and nest it in a local block, keeping its
-	// own style so the expanded message reads as itself.
 	s.Verify.AutoVerifyMu.RLock()
 	av := s.Verify.AutoVerify
 	s.Verify.AutoVerifyMu.RUnlock()
@@ -602,14 +607,51 @@ func (s *Session) cmdExpand(text string) bool {
 	withMeta := s.Display.ShowMeta
 	s.Display.ShowMetaMu.RUnlock()
 	full, _ := s.buildChatBlock(wire, av, withMeta)
+	return idx, full, true
+}
+
+// expandCollapsedLocked nests the full block of a folded entry under a notice
+// header, keeping the original style so the expanded message reads as itself.
+// Callers must hold displayMu.
+func (s *Session) expandCollapsedLocked(height uint64) {
+	_, full, ok := s.unfoldableBlockLocked(height)
+	if !ok {
+		return
+	}
 	s.emitTabLive(true, TabChat, entry{
 		header:     fmt.Sprintf("Mở rộng #%d:", height),
 		kind:       kindNotice,
 		quoteEntry: &full,
 	})
+}
+
+// expandInPlaceLocked swaps a folded entry for its full block, so the message
+// opens where it was read instead of landing at the end of the buffer.
+// Callers must hold displayMu.
+func (s *Session) expandInPlaceLocked(height uint64) {
+	idx, full, ok := s.unfoldableBlockLocked(height)
+	if !ok {
+		return
+	}
+	s.Display.TabChat.spliceOut(idx, idx+1)
+	s.Display.TabChat.insertAt(idx, []entry{full})
+}
+
+// expandCollapsed unfolds a block from outside the command path, so a click on
+// its trailer needs no command line.
+func (s *Session) expandCollapsed(height uint64) {
+	s.Display.DisplayMu.Lock()
+	s.expandCollapsedLocked(height)
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
-	return true
+}
+
+// expandInPlace unfolds a block where it sits, for a click on its trailer.
+func (s *Session) expandInPlace(height uint64) {
+	s.Display.DisplayMu.Lock()
+	s.expandInPlaceLocked(height)
+	s.Display.DisplayMu.Unlock()
+	s.refreshTerminal()
 }
 
 func (s *Session) cmdInfo(text string) bool {

@@ -8,7 +8,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 
 	xterm "github.com/charmbracelet/x/term"
@@ -56,17 +55,15 @@ func cutCells(s string, budget int) string {
 	return s
 }
 
-// expandTrailer renders the inline trailer addressing a collapsed
-// block: dim "..." plus the expand command. On web just the bracket
-// part becomes an OSC8 link (desktop terminals cannot report clicks,
-// so the ellipsis and the space stay outside the clickable region).
+// expandMarker opens the trailer's command bracket. The renderer and the
+// click handler both read it from here so they cannot drift apart.
+const expandMarker = "[Xem thêm: /expand #"
+
+// expandTrailer renders the inline trailer addressing a collapsed block: dim
+// "..." plus the expand command. The app draws the bracket as a button on
+// every platform, so it carries no link of its own.
 func expandTrailer(height uint64) string {
-	cmd := fmt.Sprintf("[Xem thêm: /expand #%d]", height)
-	tail := dimStyle.Render("...") + " " + cmd
-	if runtime.GOOS == "js" {
-		tail = dimStyle.Render("...") + " " + linkText(fmt.Sprintf("v2v://expand/%d", height), cmd)
-	}
-	return tail
+	return dimStyle.Render("...") + " " + fmt.Sprintf("%s%d]", expandMarker, height)
 }
 
 // collapsedIndex locates the folded entry for height, or -1. The entry

@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/CleveTok3125/V2V/lib/config"
 	"github.com/CleveTok3125/V2V/lib/wire"
@@ -952,5 +953,84 @@ func TestAppTabClickSwitches(t *testing.T) {
 	model, _ := a.Update(tea.MouseClickMsg{X: a.width - 1, Y: 0, Button: tea.MouseLeft})
 	if app, ok := model.(*app); ok && app.active != 0 {
 		t.Fatalf("a click off the labels must not switch tabs, got %d", app.active)
+	}
+}
+
+func TestAppExpandTrailerClick(t *testing.T) {
+	sess, out := behaviorSession(t)
+	seedIndexedWire(sess, 42)
+	sess.Display.TabChat.append(entry{body: "| Alice: hello wo" + expandTrailer(42), height: 42, collapsed: true})
+	a := newApp(sess)
+	a.width, a.height = 80, 24
+	a.layout()
+	a.dirty = true
+	a.refreshContent()
+	if len(a.trailers) != 1 {
+		t.Fatalf("the folded block must expose one trailer, got %d", len(a.trailers))
+	}
+	span := a.trailers[0]
+	y := span.row - a.viewport.YOffset() + chatTop
+
+	// The bracket is a button: clicking it unfolds the block where it sits.
+	if _, cmd := a.Update(tea.MouseClickMsg{X: span.start, Y: y, Button: tea.MouseLeft}); cmd == nil {
+		t.Fatal("a click on the trailer must run the expand")
+	} else {
+		cmd()
+	}
+	lines := sess.Display.TabChat.lines
+	if len(lines) != 1 {
+		t.Fatalf("unfolding in place must not append a block, got %d entries", len(lines))
+	}
+	if lines[0].collapsed || !strings.Contains(lines[0].body, "hello world") {
+		t.Fatalf("the click must unfold the block in place: %+v", lines[0])
+	}
+	if got := out.String(); strings.Contains(got, "Mở rộng") {
+		t.Fatalf("an in-place unfold must not nest a new block: %q", got)
+	}
+
+	// Left of the bracket it stays a plain selection.
+	model, cmd := a.Update(tea.MouseClickMsg{X: span.start - 1, Y: y, Button: tea.MouseLeft})
+	if cmd != nil {
+		t.Fatal("a click left of the bracket must not expand")
+	}
+	if next, ok := model.(*app); !ok || !next.selActive {
+		t.Fatal("a click off the trailer must still start a selection")
+	}
+}
+
+func TestAppTrailerHoverUnderlines(t *testing.T) {
+	sess, _ := behaviorSession(t)
+	seedIndexedWire(sess, 42)
+	sess.Display.TabChat.append(entry{body: "| Alice: hello wo" + expandTrailer(42), height: 42, collapsed: true})
+	a := newApp(sess)
+	a.width, a.height = 80, 24
+	a.layout()
+	a.dirty = true
+	a.refreshContent()
+	if len(a.trailers) != 1 {
+		t.Fatalf("the folded block must expose one trailer, got %d", len(a.trailers))
+	}
+	span := a.trailers[0]
+	y := span.row - a.viewport.YOffset() + chatTop
+
+	// The row that draws the trailer, with its escapes intact.
+	trailerRow := func() string {
+		for _, line := range strings.Split(a.View().Content, "\n") {
+			if strings.Contains(ansi.Strip(line), expandMarker) {
+				return line
+			}
+		}
+		return ""
+	}
+	if strings.Contains(trailerRow(), "\x1b[4m") {
+		t.Fatal("nothing is hovered yet")
+	}
+	a.Update(tea.MouseMotionMsg{X: span.start, Y: y})
+	if !strings.Contains(trailerRow(), "\x1b[4m") {
+		t.Fatalf("a pointer on the trailer must underline it: %q", trailerRow())
+	}
+	a.Update(tea.MouseMotionMsg{X: span.start - 1, Y: y})
+	if strings.Contains(trailerRow(), "\x1b[4m") {
+		t.Fatal("the underline must clear when the pointer leaves the bracket")
 	}
 }

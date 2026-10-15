@@ -737,22 +737,15 @@ import { gateFetch } from "./pow_bridge.js";
 
     term.open(host);
 
-    // Link clicks are routed by hand because every destination is either
-    // an in-app command (v2v://expand), a trip verification (copied, then
-    // confirmed before a tab opens) or external content that always asks
-    // first and shows its URL.
+    // Link clicks are routed by hand because every destination is either a
+    // trip verification (copied, then confirmed before a tab opens) or
+    // external content that always asks first and shows its URL. The expand
+    // trailer is not a link: the app draws it as a button and handles the
+    // click itself.
     try {
       term.options.linkHandler = {
         allowNonHttpProtocols: true,
         activate: function (e, uri) {
-          if (uri && uri.indexOf("v2v://expand/") === 0) {
-            if (e && e.preventDefault) e.preventDefault();
-            // Inject a clean command line: Ctrl+U kills any draft the
-            // user was typing, then the expand command submits itself.
-            var h = uri.slice("v2v://expand/".length).replace(/[^0-9]/g, "");
-            if (h && window.v2vSendKeys) window.v2vSendKeys("\x15/expand #" + h + "\n");
-            return;
-          }
           if (uri && (uri.indexOf("v2v://trip") === 0 || uri.indexOf("/api/trip/verify") !== -1)) {
             if (e && e.preventDefault) e.preventDefault();
             if (uri.indexOf("/api/trip/verify") !== -1) {
