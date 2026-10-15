@@ -31,8 +31,8 @@ func TestInputLoopBuiltinCommands(t *testing.T) {
 	if _, act := sess.dispatch("hello"); act != cmdPass {
 		t.Fatalf("plain message act=%v, want cmdPass", act)
 	}
-	if _, act := sess.dispatch("/nope123"); act != cmdDone {
-		t.Fatalf("unknown slash act=%v, want cmdDone", act)
+	if _, act := sess.dispatch("/nope123"); act != cmdReject {
+		t.Fatalf("unknown slash act=%v, want cmdReject", act)
 	}
 	for _, cmd := range []string{
 		"/whoami", "/status", "/help", "/tab", "/clear",
@@ -58,8 +58,8 @@ func TestInputLoopInlineReply(t *testing.T) {
 
 	for _, body := range []string{"/meta", "/clear"} {
 		sess := smokeSession()
-		if _, act := sess.dispatch("/reply 1234 " + body); act != cmdDone {
-			t.Fatalf("reply with command body %s act=%v, want cmdDone", body, act)
+		if _, act := sess.dispatch("/reply 1234 " + body); act != cmdDone && act != cmdReject {
+			t.Fatalf("reply with command body %s act=%v, want handled", body, act)
 		}
 		if sess.Pending.PendingReplyTo != 0 {
 			t.Fatalf("reply with command body %s left PendingReplyTo=%d", body, sess.Pending.PendingReplyTo)

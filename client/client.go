@@ -206,13 +206,18 @@ func (s *Session) runInputLoop() {
 		// The submitted line becomes a buffer entry the session owns: the
 		// pending block and then the server echo replace it in place, so the
 		// message never occupies two rows.
+		submitted := text
 		slot := s.echoInputLine(text)
 		s.handleDraftGate(text)
 		text, act := s.dispatch(text)
+		// A known command belongs in the recall list; a message only when
+		// the config opts in, and only once it is really sent. A rejected
+		// slash line is not recorded: it may be message text.
+		s.recordHistory(submitted, act == cmdDone || act == cmdQuit)
 		if act == cmdQuit {
 			return
 		}
-		if act == cmdDone {
+		if act == cmdDone || act == cmdReject {
 			continue
 		}
 
@@ -230,6 +235,7 @@ func (s *Session) runInputLoop() {
 			s.Pending.PendingReplyTo = 0
 			continue
 		}
+		s.recordHistory(submitted, false)
 		placeholder, slot, phShown := s.renderPlaceholder(body, slot)
 		if serr := s.sendMessage(body, placeholder, slot, phShown); serr != nil {
 			return

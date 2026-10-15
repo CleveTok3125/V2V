@@ -17,9 +17,10 @@ import (
 type cmdAction int
 
 const (
-	cmdPass cmdAction = iota // not a command: fall through to the send path
-	cmdDone                  // handled: read the next line
-	cmdQuit                  // quit: break the input loop
+	cmdPass   cmdAction = iota // not a command: fall through to the send path
+	cmdDone                    // handled: read the next line
+	cmdReject                  // mistyped slash input: handled, never recorded
+	cmdQuit                    // quit: break the input loop
 )
 
 // dispatch routes one input line. Table order matches the on-screen help.
@@ -64,9 +65,10 @@ func (s *Session) dispatch(text string) (string, cmdAction) {
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		// Rejected input never sends: drop the one-shot reply target
-		// so the next plain message does not inherit the quote.
+		// so the next plain message does not inherit the quote. It is
+		// not recorded either: a mistyped line may be message text.
 		s.Pending.PendingReplyTo = 0
-		return text, cmdDone
+		return text, cmdReject
 	}
 	return text, cmdPass
 }

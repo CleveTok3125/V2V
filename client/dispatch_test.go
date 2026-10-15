@@ -97,8 +97,8 @@ func TestDispatchInlineReplyUnknownBodyClearsPending(t *testing.T) {
 	sess := sessionForDispatch(t)
 	seedChatHeight(sess, 1234)
 	_, act := sess.dispatch("/reply 1234 /clear")
-	if act != cmdDone {
-		t.Fatalf("act=%v want cmdDone", act)
+	if act != cmdDone && act != cmdReject {
+		t.Fatalf("act=%v want handled", act)
 	}
 	if sess.Pending.PendingReplyTo != 0 {
 		t.Fatalf("PendingReplyTo=%d want 0 (rejected body must not leak quote)", sess.Pending.PendingReplyTo)

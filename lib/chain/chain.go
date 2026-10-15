@@ -141,4 +141,3 @@ func ParseHex64(s string) ([32]byte, bool) {
 	copy(out[:], b)
 	return out, true
 }
-

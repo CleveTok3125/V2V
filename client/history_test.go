@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/CleveTok3125/V2V/lib/config"
 )
 
 func TestHistoryLoadAddAndRecall(t *testing.T) {
@@ -39,9 +41,9 @@ func TestHistoryLoadAddAndRecall(t *testing.T) {
 func TestHistoryAddDedupesAndPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "history.tmp")
 	h := loadHistory(path)
-	h.add("a")
-	h.add("a") // immediate duplicate is not stored twice
-	h.add("b")
+	h.add("/a")
+	h.add("/a") // immediate duplicate is not stored twice
+	h.add("/b")
 	if len(h.lines) != 2 {
 		t.Fatalf("lines = %v", h.lines)
 	}
@@ -49,7 +51,7 @@ func TestHistoryAddDedupesAndPersists(t *testing.T) {
 		t.Fatalf("idx = %d, want %d", h.idx, len(h.lines))
 	}
 	reloaded := loadHistory(path)
-	if len(reloaded.lines) != 2 || reloaded.lines[0] != "a" || reloaded.lines[1] != "b" {
+	if len(reloaded.lines) != 2 || reloaded.lines[0] != "/a" || reloaded.lines[1] != "/b" {
 		t.Fatalf("reload = %v", reloaded.lines)
 	}
 }
@@ -61,7 +63,7 @@ func TestHistoryFileIsOwnerOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := loadHistory(path)
-	h.add("y")
+	h.add("/y")
 	fi, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +75,7 @@ func TestHistoryFileIsOwnerOnly(t *testing.T) {
 
 func TestHistoryEmptyPathIsMemoryOnly(t *testing.T) {
 	h := loadHistory("")
-	h.add("x")
+	h.add("/x")
 	if len(h.lines) != 1 || h.idx != 1 {
 		t.Fatalf("memory-only history = %v (idx %d)", h.lines, h.idx)
 	}
@@ -108,5 +110,41 @@ func TestOlderAvailableAndRequest(t *testing.T) {
 	sess.Chain.InOlder = true
 	if sess.olderAvailable() {
 		t.Fatal("an in-flight older segment must suppress a new request")
+	}
+}
+
+// fakeSink records what the session offers to the app.
+type fakeSink struct {
+	record func(string)
+}
+
+func (f *fakeSink) Notify()          {}
+func (f *fakeSink) SetPrompt(string) {}
+func (f *fakeSink) RecordHistory(l string) {
+	if f.record != nil {
+		f.record(l)
+	}
+}
+func (f *fakeSink) Quit() {}
+
+func TestRecordHistoryKeepsCommandsOnly(t *testing.T) {
+	old := ClientCfg
+	ClientCfg = config.DefaultClientConfig()
+	defer func() { ClientCfg = old }()
+
+	var got []string
+	sess := NewSession()
+	sess.Display.Sink = &fakeSink{record: func(l string) { got = append(got, l) }}
+	sess.recordHistory("/help", true)
+	sess.recordHistory("tin nhắn bí mật", false)
+	if len(got) != 1 || got[0] != "/help" {
+		t.Fatalf("recorded = %v, want only /help", got)
+	}
+
+	on := true
+	ClientCfg.UI.History.SaveMessages = &on
+	sess.recordHistory("tin nhắn", false)
+	if len(got) != 2 || got[1] != "tin nhắn" {
+		t.Fatalf("opt-in must record a message: %v", got)
 	}
 }

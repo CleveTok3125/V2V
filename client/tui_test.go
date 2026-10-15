@@ -237,6 +237,12 @@ func TestAppRefreshRendersActiveTab(t *testing.T) {
 }
 
 func TestAppHistoryNav(t *testing.T) {
+	old := ClientCfg
+	ClientCfg = config.DefaultClientConfig()
+	on := true
+	ClientCfg.UI.History.SaveMessages = &on
+	defer func() { ClientCfg = old }()
+
 	a, _ := newTestApp()
 	a.hist.add("first")
 	a.hist.add("second")
@@ -260,6 +266,12 @@ func TestAppHistoryNav(t *testing.T) {
 }
 
 func TestAppHistoryNavSkipsMultiline(t *testing.T) {
+	old := ClientCfg
+	ClientCfg = config.DefaultClientConfig()
+	on := true
+	ClientCfg.UI.History.SaveMessages = &on
+	defer func() { ClientCfg = old }()
+
 	a, _ := newTestApp()
 	a.hist.add("first")
 	a.input.SetValue("line1\nline2")

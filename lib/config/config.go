@@ -185,6 +185,12 @@ type ClientConfig struct {
 			CharAspect float64 `json:"charAspect"`
 			Scrollback int     `json:"scrollback"`
 		} `json:"web"`
+		// History controls the input history file. SaveMessages is a
+		// pointer so an absent section keeps the default (off): only
+		// slash commands are persisted, never chat text.
+		History struct {
+			SaveMessages *bool `json:"saveMessages"`
+		} `json:"history"`
 		// Collapse folds long blocks (head rows + expand trailer).
 		// Rows is the collapse threshold in screen rows, PreviewRows
 		// how many head rows survive. Enabled is a pointer so absent
@@ -588,6 +594,16 @@ func (c *ClientConfig) ReplyEnabled() bool {
 		return true
 	}
 	return *c.UI.Reply.Enabled
+}
+
+// SaveMessageHistory reports whether chat messages are kept in the input
+// history file. Default off: only slash commands are persisted, so a message
+// never lands on disk.
+func (c *ClientConfig) SaveMessageHistory() bool {
+	if c == nil || c.UI.History.SaveMessages == nil {
+		return false
+	}
+	return *c.UI.History.SaveMessages
 }
 
 // QuoteMaxRunes bounds reply preview length (clamped 20-200, default 80)
