@@ -20,6 +20,10 @@ const (
 	tabIndexSystem
 )
 
+// inputPlaceholder is the idle draft hint; it is blanked in command mode so a
+// bare "/" prompt reads as a command prompt instead of an empty draft.
+const inputPlaceholder = "Nhập tin nhắn…"
+
 // uiRefreshMsg tells the app a tab buffer changed and the active tab must
 // be pulled again.
 type uiRefreshMsg struct{}
@@ -200,7 +204,7 @@ func newApp(sess *Session) *app {
 	a.term = &tuiTerm{lines: lines, sink: sink, closed: make(chan struct{})}
 
 	ti := textarea.New()
-	ti.Placeholder = "Nhập tin nhắn…"
+	ti.Placeholder = inputPlaceholder
 	ti.ShowLineNumbers = false
 	ti.CharLimit = 0
 	ti.DynamicHeight = true
@@ -217,15 +221,30 @@ func newApp(sess *Session) *app {
 	return a
 }
 
-// promptFor renders the textarea prompt: the input marker on the first
-// line, a continuation marker on the rest. Command mode is signalled by
-// the border colour, not by the marker, so the draft keeps the literal
-// slash the user typed.
+// promptFor renders the textarea prompt: the mode marker on the first line,
+// a continuation marker on the rest. Command mode shows "/" like neovim's
+// ":" prompt; the slash is not part of the draft, it is restored on submit.
 func (a *app) promptFor(info textarea.PromptInfo) string {
 	if info.LineNumber > 0 {
 		return "..."
 	}
+	if a.cmdMode {
+		// A leading space keeps the command aligned with "> " while the
+		// slash stays adjacent to the text: " /help".
+		return " /"
+	}
 	return "> "
+}
+
+// setCmdMode switches command mode and blanks the placeholder while it is on,
+// so a bare "/" prompt reads as a command prompt instead of an empty draft.
+func (a *app) setCmdMode(on bool) {
+	a.cmdMode = on
+	if on {
+		a.input.Placeholder = ""
+	} else {
+		a.input.Placeholder = inputPlaceholder
+	}
 }
 
 func (a *app) Init() tea.Cmd {
@@ -280,18 +299,41 @@ func (a *app) handleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 		return true, nil
 	}
+	// A slash is matched by code, not text: some terminals report the key
+	// with an empty Text (or a modifier), and the textarea would drop it.
+	// Shift+/ is "?" and must keep opening help.
+	if msg.Code == '/' && msg.Text != "?" {
+		switch {
+		case a.cmdMode && a.input.Value() == "":
+			// A second slash on the bare command marker returns to chat mode;
+			// both slashes stay as a literal draft.
+			a.setCmdMode(false)
+			a.input.SetValue("//")
+			a.input.CursorEnd()
+		case !a.cmdMode && a.input.Value() == "":
+			// The first slash switches to command mode: the marker becomes
+			// "/" and the draft stays empty.
+			a.setCmdMode(true)
+		default:
+			a.input.InsertRune('/')
+		}
+		a.layout()
+		return true, nil
+	}
 	switch msg.String() {
 	case "ctrl+d":
 		a.quitting = true
 		return true, tea.Quit
 	case "ctrl+c":
-		if strings.TrimSpace(a.input.Value()) != "" {
+		if a.cmdMode || strings.TrimSpace(a.input.Value()) != "" {
+			a.setCmdMode(false)
 			a.input.Reset()
 			a.layout()
 		}
 		return true, nil
 	case "esc":
-		if strings.TrimSpace(a.input.Value()) != "" {
+		if a.cmdMode || strings.TrimSpace(a.input.Value()) != "" {
+			a.setCmdMode(false)
 			a.input.Reset()
 			a.layout()
 		}
@@ -309,6 +351,12 @@ func (a *app) handleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		a.viewport, cmd = a.viewport.Update(msg)
 		a.maybeLoadOlder()
 		return true, cmd
+	case "backspace":
+		if a.cmdMode && a.input.Value() == "" {
+			// Backspace on the bare command marker leaves command mode.
+			a.setCmdMode(false)
+			return true, nil
+		}
 	case "up", "down":
 		if a.histNav(msg.String() == "up") {
 			return true, nil
@@ -319,18 +367,6 @@ func (a *app) handleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "shift+tab":
 		a.cycleTab(-1)
 		return true, nil
-	case "/":
-		switch {
-		case a.cmdMode && a.input.Value() == "/":
-			// A second slash on the bare command marker leaves command mode;
-			// both slashes stay as a literal draft.
-			a.cmdMode = false
-		case !a.cmdMode && a.input.Value() == "":
-			// The first slash arms command mode. The slash itself is inserted
-			// below, so the draft reads "/help" and never "/ /help".
-			a.cmdMode = true
-		}
-		// Fall through: the textarea inserts the slash.
 	case "enter":
 		return true, a.submit()
 	case "shift+enter":
@@ -362,8 +398,17 @@ func (a *app) histNav(up bool) bool {
 	if !ok {
 		return false
 	}
-	a.input.SetValue(val)
-	a.cmdMode = strings.HasPrefix(val, "/")
+	// A recalled command keeps command mode; its stored leading slash is the
+	// marker, so it is stripped. A "//..." entry is the literal escape (or a
+	// line saved by an older build), so it stays a plain draft instead of
+	// turning into "/ /...".
+	if strings.HasPrefix(val, "/") && !strings.HasPrefix(val, "//") {
+		a.setCmdMode(true)
+		a.input.SetValue(val[1:])
+	} else {
+		a.setCmdMode(false)
+		a.input.SetValue(val)
+	}
 	a.input.CursorEnd()
 	a.layout()
 	return true
@@ -392,11 +437,14 @@ func (a *app) insertNewline() {
 	a.layout()
 }
 
-// submit hands the draft to the session and clears the input box. The
-// draft already carries its leading slash in command mode.
+// submit hands the draft to the session and clears the input box. In command
+// mode the marker slash is restored, so the session sees "/cmd".
 func (a *app) submit() tea.Cmd {
 	text := a.input.Value()
-	a.cmdMode = false
+	if a.cmdMode {
+		text = "/" + text
+	}
+	a.setCmdMode(false)
 	if a.hist != nil {
 		a.hist.add(text)
 	}

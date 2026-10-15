@@ -54,6 +54,8 @@ func key(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyPgDown}
 	case "esc":
 		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "backspace":
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	case "f1":
 		return tea.KeyPressMsg{Code: tea.KeyF1}
 	}
@@ -330,15 +332,15 @@ func TestAppTabCycles(t *testing.T) {
 func TestAppSlashModeToggle(t *testing.T) {
 	a, _ := newTestApp()
 	a.Update(key("/"))
-	if !a.cmdMode || a.input.Value() != "/" {
+	if !a.cmdMode || a.input.Value() != "" {
 		t.Fatalf("first slash: cmdMode=%v value=%q", a.cmdMode, a.input.Value())
 	}
-	// The next character must not be swallowed.
+	// The next character must not be swallowed and must stay slash-free.
 	a.Update(key("h"))
-	if a.input.Value() != "/h" {
-		t.Fatalf("char after the slash = %q, want /h", a.input.Value())
+	if a.input.Value() != "h" {
+		t.Fatalf("char after the slash = %q, want h", a.input.Value())
 	}
-	a.input.SetValue("/")
+	a.input.SetValue("")
 	a.Update(key("/"))
 	if a.cmdMode || a.input.Value() != "//" {
 		t.Fatalf("second slash: cmdMode=%v value=%q", a.cmdMode, a.input.Value())
@@ -392,6 +394,96 @@ func TestAppSlashMidDraftIsLiteral(t *testing.T) {
 	}
 }
 
+func TestAppSlashWithoutText(t *testing.T) {
+	a, _ := newTestApp()
+	// A terminal that reports "/" with no Text must still arm command mode.
+	a.Update(tea.KeyPressMsg{Code: '/'})
+	if a.input.Value() != "" || !a.cmdMode {
+		t.Fatalf("slash without text: value=%q cmd=%v", a.input.Value(), a.cmdMode)
+	}
+}
+
+func TestAppSlashWithModifier(t *testing.T) {
+	a, _ := newTestApp()
+	// Some layouts report "/" with a modifier and no Text.
+	a.Update(tea.KeyPressMsg{Code: '/', Mod: tea.ModShift})
+	if a.input.Value() != "" || !a.cmdMode {
+		t.Fatalf("slash with modifier: value=%q cmd=%v", a.input.Value(), a.cmdMode)
+	}
+}
+
+func TestAppShiftSlashOpensHelp(t *testing.T) {
+	a, _ := newTestApp()
+	// Shift+/ is "?": it must open help, not insert a slash.
+	a.Update(tea.KeyPressMsg{Code: '/', Text: "?", Mod: tea.ModShift})
+	if !a.showHelp || a.input.Value() != "" {
+		t.Fatalf("shift+/ must open help: showHelp=%v value=%q", a.showHelp, a.input.Value())
+	}
+}
+
+func TestAppHistorySlashRecall(t *testing.T) {
+	a, _ := newTestApp()
+	a.hist.add("/h")
+	a.Update(key("up"))
+	if !a.cmdMode || a.input.Value() != "h" {
+		t.Fatalf("recall of /h: cmd=%v value=%q (want cmd=true value=h)", a.cmdMode, a.input.Value())
+	}
+	a.Update(key("enter"))
+	select {
+	case got := <-a.lines:
+		if got != "/h" {
+			t.Fatalf("recalled command submitted %q, want /h", got)
+		}
+	default:
+		t.Fatal("recalled command must submit")
+	}
+}
+
+func TestAppHistoryDoubleSlashStaysLiteral(t *testing.T) {
+	a, _ := newTestApp()
+	a.hist.add("//h")
+	a.Update(key("up"))
+	if a.cmdMode || a.input.Value() != "//h" {
+		t.Fatalf("recall of //h: cmd=%v value=%q (want cmd=false value=//h)", a.cmdMode, a.input.Value())
+	}
+}
+
+func TestAppBackspaceExitsCommandMode(t *testing.T) {
+	a, _ := newTestApp()
+	a.Update(key("/"))
+	if !a.cmdMode || a.input.Value() != "" {
+		t.Fatalf("setup: cmd=%v value=%q", a.cmdMode, a.input.Value())
+	}
+	a.Update(key("backspace"))
+	if a.cmdMode {
+		t.Fatal("backspace on the bare marker must leave command mode")
+	}
+}
+
+func TestAppBackspaceDeletesThenExits(t *testing.T) {
+	a, _ := newTestApp()
+	a.Update(key("/"))
+	a.Update(key("h"))
+	a.Update(key("backspace"))
+	if !a.cmdMode || a.input.Value() != "" {
+		t.Fatalf("first backspace must only clear the char: cmd=%v value=%q", a.cmdMode, a.input.Value())
+	}
+	a.Update(key("backspace"))
+	if a.cmdMode {
+		t.Fatal("second backspace must leave command mode")
+	}
+}
+
+func TestAppEscExitsCommandMode(t *testing.T) {
+	a, _ := newTestApp()
+	a.Update(key("/"))
+	a.Update(key("h"))
+	a.Update(key("esc"))
+	if a.cmdMode || a.input.Value() != "" {
+		t.Fatalf("esc must clear and leave command mode: cmd=%v value=%q", a.cmdMode, a.input.Value())
+	}
+}
+
 func TestAppPromptMarkers(t *testing.T) {
 	a, _ := newTestApp()
 	if got := a.promptFor(textarea.PromptInfo{LineNumber: 0}); got != "> " {
@@ -401,8 +493,8 @@ func TestAppPromptMarkers(t *testing.T) {
 		t.Fatalf("continuation prompt = %q", got)
 	}
 	a.cmdMode = true
-	if got := a.promptFor(textarea.PromptInfo{LineNumber: 0}); got != "> " {
-		t.Fatalf("command-mode prompt must stay the input marker, got %q", got)
+	if got := a.promptFor(textarea.PromptInfo{LineNumber: 0}); got != " /" {
+		t.Fatalf("command prompt = %q, want \" /\"", got)
 	}
 }
 
