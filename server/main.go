@@ -612,7 +612,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              ":" + Cfg.Static.Port,
-		Handler:           mux,
+		Handler:           corsMiddleware(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

@@ -68,7 +68,9 @@ python3 serve.py --port 9000 --bind 0.0.0.0
 Open the printed URL and enter the chat server address in the form. On
 the server side, list the page's origin in `ALLOWED_ORIGINS` (the loopback
 defaults cover `localhost` and `127.0.0.1`, which browsers treat as
-different origins). The server also has to allow `/web/`
+different origins). The same entry lets the page call the HTTP API
+cross-origin (join gate, version, trip verify). The server also has to
+allow `/web/`
 (`WEB_ENABLED=true`, the default). To serve it behind a real web server
 instead, point that server at the extracted directory with the same
 `/web/` prefix; the assets reference `/web/...` paths.
