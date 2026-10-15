@@ -1,12 +1,7 @@
-// @ts-nocheck -- migrated legacy UI; typing is incremental.
-/* V2V web terminal.
- * Thin glue between the browser terminal (xterm.js) and the Go WASM client.
- * All line editing (echo, backspace, escape sequences, prompts) is handled
- * by the Go client; JS only forwards keystrokes and renders output.
- *  - window.v2vSendKeys(s) : browser -> Go, raw keystroke data
- *  - window.v2vOutput(s)   : Go -> browser, append string to the terminal
- *  - window.v2vConfig      : connection config the Go client reads at startup
- */
+// @ts-nocheck: legacy UI, typing is incremental.
+// Web terminal: JS forwards keystrokes and renders output; the Go client
+// owns line editing. Bridge: v2vSendKeys(s) in, v2vOutput(s) out,
+// v2vConfig read by the Go client at startup.
 import { gateFetch } from "./pow_bridge.js";
 
 (function () {
@@ -65,7 +60,6 @@ import { gateFetch } from "./pow_bridge.js";
         var rolePart = v.slice(0, idx).trim();
         if (rolePart && rolePart !== v) {
           passkeyRoleInput.value = rolePart;
-          // Move cursor to end after parsing
           try { passkeyRoleInput.setSelectionRange(rolePart.length, rolePart.length); } catch (e) {}
         }
       }
@@ -77,15 +71,10 @@ import { gateFetch } from "./pow_bridge.js";
     statusLine.className = isError ? "error" : "";
   }
 
-  // ---- Settings panel ----------------------------------------------------
-  // Mirrors the toggle subset of the desktop client config (ui.meta.show,
-  // join/leave notices, defaults.autoVerify, ui.notify.*). Applied when
-  // connecting, so the panel is the pre-connect surface for these; the live
-  // session still owns them afterwards through /meta, /showjoin,
-  // /autoverify, /notify.
-  // The notice taxonomy, mirroring lib/wire AllTags(): parents before
-  // children, so the panel reads as the tree and muting a node covers its
-  // subtree. Keep the two in step; a Go test compares them.
+  // Settings panel.
+  // Pre-connect surface for the desktop toggles; the live session owns
+  // them after connect (/meta, /showjoin, /autoverify, /notify).
+  // NOTIFY_TAGS mirrors lib/wire AllTags() parent-first; a Go test pins both.
   var NOTIFY_TAGS = [
     "system",
     "system.join", "system.leave", "system.date",
@@ -104,8 +93,7 @@ import { gateFetch } from "./pow_bridge.js";
     notify: {},
     powMinTier: 1,
   };
-  // Every tag defaults to shown; the map only carries the ones a user
-  // turned off, so a tag added later is never silenced by omission.
+  // Absent tags read as shown, so new tags are never silenced by omission.
   NOTIFY_TAGS.forEach(function (t) { OPT_DEFAULTS.notify[t] = true; });
   var OPT_KEY = "v2v.config";
   var opts = cloneOpts(OPT_DEFAULTS);
@@ -122,9 +110,8 @@ import { gateFetch } from "./pow_bridge.js";
     };
   }
 
-  // sessionStorage is the default: the choices survive a reload (which is
-  // what /quit does) but die with the tab. "Lưu lâu dài" additionally
-  // mirrors into localStorage so they outlive the browser session.
+  // Tab storage survives reloads (/quit reloads) but dies with the tab;
+  // the persist switch additionally mirrors to localStorage.
   function loadOpts() {
     var raw = null;
     try {
@@ -137,10 +124,8 @@ import { gateFetch } from "./pow_bridge.js";
         ["meta", "showJoin", "autoVerify"].forEach(function (k) {
           if (typeof got[k] === "boolean") opts[k] = got[k];
         });
-        // powMinTier sits beside notify, not inside it, so it is read
-        // outside the notify guard: a payload that carries the tier but no
-        // notify object would otherwise fall back to 1, which means
-        // "announce every tier".
+        // Tier sits beside notify; read it outside that guard or a
+        // tier-only payload falls back to 1.
         if (typeof got.powMinTier === "number" && got.powMinTier >= 1) {
           opts.powMinTier = Math.floor(got.powMinTier);
         }
@@ -182,15 +167,13 @@ import { gateFetch } from "./pow_bridge.js";
     });
   }
 
-  // notifyLeaf is the part of the path below its parent, so a row reads
-  // "screening" under "system.pow" rather than repeating the whole path.
+  // Row label is the leaf below its parent ("screening", not the full path).
   function notifyLeaf(tag) {
     var cut = tag.lastIndexOf(".");
     return cut < 0 ? tag : tag.slice(cut + 1);
   }
 
-  // The rows are generated from NOTIFY_TAGS so the panel cannot drift from
-  // the taxonomy the way a hand-written row per tag would.
+  // Generate rows from NOTIFY_TAGS so the panel cannot drift from the taxonomy.
   function buildNotifyRows() {
     var host = el("notify-tree");
     if (!host) return;
@@ -217,29 +200,24 @@ import { gateFetch } from "./pow_bridge.js";
     el("opt-powmintier").value = String(opts.powMinTier);
     NOTIFY_TAGS.forEach(function (tag) {
       var input = el("opt-notify-" + tag);
-      // A tag whose parent is muted reads as off even if its own key says
-      // on, so the panel shows the gate that actually applies.
+      // Show the effective gate: a muted parent reads its children as off.
       if (input) input.checked = notifyTagEnabled(tag);
     });
     el("opt-persist").checked = persistEnabled();
     syncJoinDep();
   }
 
-  // [options path, input id] — listed explicitly so the wiring cannot drift
-  // from the markup the way a computed id would.
+  // Explicit [option path, input id] pairs so wiring cannot drift from markup.
   var OPT_SWITCHES = [
     ["meta", "opt-meta"],
     ["showJoin", "opt-showjoin"],
     ["autoVerify", "opt-autoverify"],
   ];
 
-  // notifyTagEnabled mirrors the client's gating: a tag is on unless it, or
-  // any ancestor of it, is off. The list is the tree order, so a parent is
-  // always known by the time its children are read.
+  // Mirrors client gating: a tag is on unless it or any ancestor is off.
+  // Tree order evaluates parents before children.
   function notifyTagEnabled(tag) {
-    // Walk the ancestors, which are earlier in the list, and stop at the tag
-    // itself. A prefix match is enough: NOTIFY_TAGS is in tree order, so
-    // every ancestor of a tag has already been seen.
+    // Ancestors precede the tag, so a prefix match finds them.
     for (var i = 0; i < NOTIFY_TAGS.length; i++) {
       var cur = NOTIFY_TAGS[i];
       if (cur === tag) break;
@@ -287,11 +265,8 @@ import { gateFetch } from "./pow_bridge.js";
     var tier = el("opt-powmintier");
     if (tier) {
       tier.addEventListener("change", function () {
-        // A number input only accepts the locale's numeric syntax, so a
-        // value it could not parse sanitizes to "". Falling back to 1 there
-        // would mean "announce every tier" — the opposite of tightening a
-        // floor — so keep what is already stored instead. Tiers run 1..9
-        // in practice, so that is the whole useful range.
+        // Empty input keeps the stored value: falling back to 1 would
+        // announce every tier instead of tightening the floor.
         var n = Math.floor(Number(this.value));
         if (this.value.trim() === "" || !isFinite(n)) {
           this.value = String(readOpt("powMinTier"));
@@ -302,8 +277,7 @@ import { gateFetch } from "./pow_bridge.js";
         saveOpts();
       });
     }
-    // Toggling a node re-syncs the whole tree, because a child of a muted
-    // parent reads as off even when its own key is untouched.
+    // Re-sync the tree: children of a muted parent read as off.
     var tree = el("notify-tree");
     if (tree) {
       tree.addEventListener("change", function (ev) {
@@ -336,12 +310,11 @@ import { gateFetch } from "./pow_bridge.js";
 
   initConfigPanel();
 
-  // Expose status setter for WASM to show auth errors without a full page reload.
+  // Expose status setter so WASM shows auth errors without a reload.
   window.v2vSetStatus = function (msg, isError) {
     setStatus(msg, !!isError);
     if (isError) {
-      // Show the login panel so the error is visible (it was hidden before
-      // bootWasm). Keep the terminal hidden.
+      // Reveal the login panel (hidden at boot) so the error stays visible.
       panel.style.display = "block";
       wrap.style.display = "none";
     }
@@ -355,8 +328,7 @@ import { gateFetch } from "./pow_bridge.js";
   var CHAR_ASPECT = 0.6;
   var resizeTimer = null;
 
-  // measureCell mirrors the xterm cell metrics.
-  // Canvas measureText("W") with device-pixel rounding; DOM probe fallback.
+  // Mirror xterm cell metrics: canvas measureText("W"), DOM probe fallback.
   function measureCell(fontSize) {
     var dpr = window.devicePixelRatio || 1;
     var letterSpacing = (term && term.options && term.options.letterSpacing) || 0;
@@ -396,12 +368,8 @@ import { gateFetch } from "./pow_bridge.js";
     return { w: deviceCellW / dpr, h: deviceCellH / dpr };
   }
 
-  // resizeTerminal implements dynamic scale + fit: the font size is derived
-  // from the container so the grid fills the available space, with signals
-  // from devicePixelRatio (crispness floor, browser-zoom aware) and pointer
-  // coarseness (mobile gets fewer, larger columns). It runs before any wasm
-  // output so long messages wrap correctly from the first line, and again on
-  // every resize/orientation change (debounced).
+  // Fit font size to the container so the grid fills it; runs before
+  // first output and on every debounced resize.
   function resizeTerminal() {
     if (!term) return;
     var host = document.getElementById("terminal");
@@ -433,15 +401,12 @@ import { gateFetch } from "./pow_bridge.js";
     var rows = Math.max(8, Math.floor(H / cell.h));
     if (term.cols !== cols || term.rows !== rows) {
       term.resize(cols, rows);
-      // Resize reflow desyncs the relative-cursor renderer.
-      // Blank the grid so the repaint starts from a known state.
+      // Blank the grid: resize reflow desyncs the relative-cursor renderer.
       term.clear();
     }
     term.scrollToBottom();
 
-    // One ordered size message is enough.
-    // WindowSizeMsg resizes the renderer, refits layout, marks dirty.
-    // A second refresh would race it and paint a stale-size frame first.
+    // Send one size message; a second refresh would race it and paint stale.
     if (typeof window.v2vSetSize === "function") {
       window.v2vSetSize(term.cols, term.rows);
     }
@@ -468,15 +433,13 @@ import { gateFetch } from "./pow_bridge.js";
     return u;
   };
   var rnd = function (n) { var u = new Uint8Array(n); crypto.getRandomValues(u); return u; };
-  // WebAuthn takes the challenge as bytes. Passing the base64url text of the
-  // digest instead makes the browser sign whatever it coerces that string
-  // into, and every ceremony then fails with "Error validating challenge".
+  // WebAuthn takes raw challenge bytes; signing the base64url text fails validation.
   var sha256bytes = function (text) {
     return crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   };
 
-  // --- Passkey login bridge -----------------------------------------------
-  // The Go client calls v2vRequestAssertion(nonce, role) during the WebSocket
+  // Passkey login bridge.
+  // The Go client calls v2vRequestAssertion(nonce, role) during the
   // handshake and waits on v2vAssertionReady(json).
   window.v2vRequestAssertion = function (nonceHex, role) {
     var respond = function (payload) {
@@ -510,9 +473,7 @@ import { gateFetch } from "./pow_bridge.js";
       .catch(function () { respond({}); });
   };
 
-  // The server sends Retry-After in whole seconds. Anything else — absent, an
-  // HTTP date, junk — falls back to its configured submission window, so the
-  // button is never enabled straight into the same refusal.
+  // Unparsable Retry-After falls back to the submission window.
   var PAIR_RETRY_FALLBACK_SECONDS = 10;
 
   function retryAfterSeconds(raw) {
@@ -521,11 +482,8 @@ import { gateFetch } from "./pow_bridge.js";
     return seconds;
   }
 
-  // WebAuthn failures reach the page as English spec text with a link to the
-  // W3C document, which is nothing a person can act on. The browser raises
-  // one error for a dismissed dialog and for a timeout, so that message has to
-  // cover both; anything unrecognised keeps the original wording in brackets
-  // so a report still carries the detail.
+  // Map browser spec errors to actionable text; dismissal and timeout
+  // share one error, unknown cases keep the raw text in brackets.
   function pairErrorText(e) {
     var raw = (e && e.message) || e;
     switch (e && e.name) {
@@ -544,21 +502,13 @@ import { gateFetch } from "./pow_bridge.js";
     }
   }
 
-  // --- Desktop pair mode (#pair=<ticket>) ---------------------------------
-  // The desktop printed this link and is waiting with its socket open. The
-  // ticket is the challenge: the page signs it and posts the assertion back
-  // to the server, which hands it to the handshake that asked for it. The
-  // page never names a role — the server already decided one.
-  //
-  // Only the pairing controls are reachable here. The connect form would
-  // start a guest session in the very tab that is waiting on the desktop,
-  // and the settings would have nothing to configure.
+  // Desktop pair mode.
+  // Sign the desktop ticket and post the assertion; the server already
+  // chose the role, so the connect form and settings hide.
   function runPairMode(ticket) {
     panel.style.display = "block";
     wrap.style.display = "none";
-    // The connect form would start a guest session in the very tab that is
-    // waiting on the desktop, and the guest wording above it describes
-    // something the person is not doing. Both give way to the pairing title.
+    // The form would start a guest session in the waiting tab.
     [form, el("connect-title"), el("connect-hint"), el("config-btn"), el("config-panel")].forEach(function (node) {
       if (node) node.classList.add("hidden");
     });
@@ -567,9 +517,7 @@ import { gateFetch } from "./pow_bridge.js";
     var retryBtn = el("pair-retry");
     var retryTimer = null;
 
-    // A cancelled dialog never reached the server, so the submission meter is
-    // untouched and there is nothing to wait for. Only a request the server
-    // actually saw leaves a cooldown behind.
+    // Only a request the server saw leaves a cooldown; cancelled dialogs retry at once.
     function armRetry(waitSeconds) {
       if (!retryBtn) return;
       retryBtn.hidden = false;
@@ -601,8 +549,7 @@ import { gateFetch } from "./pow_bridge.js";
     function ask() {
       if (retryBtn) retryBtn.hidden = true;
       setStatus("Đang chờ passkey cho desktop…");
-      // Set once the assertion is on its way, because only then has the
-      // server's submission meter been touched and a wait become necessary.
+      // Set once the assertion leaves: only then does the server meter start.
       var submitted = false;
       sha256bytes(ticket)
         .then(function (challenge) {
@@ -630,10 +577,7 @@ import { gateFetch } from "./pow_bridge.js";
           }, setStatus);
         })
         .then(function (resp) {
-          // 410 means the link is spent or expired, and no ceremony can revive
-          // it: the ticket is bound to one address and one role. Offering a
-          // retry there would only spend another passkey prompt on a link that
-          // cannot complete, so the message sends them back to the desktop.
+          // 410 means the ticket is spent; no retry can revive it.
           if (resp.status === 410) {
             setStatus("❌ Link đã hết hạn hoặc đã dùng. Chạy lại lệnh trên desktop để lấy link mới.", true);
             return;
@@ -647,10 +591,7 @@ import { gateFetch } from "./pow_bridge.js";
           setStatus("✅ Đã xác thực xong. Bạn có thể đóng tab này và quay lại V2V.");
         })
         .catch(function (e) {
-          // Reached when no verdict came back: the person dismissed the
-          // dialog, the authenticator refused, or the reply never arrived.
-          // Without a reply there is no header to read, so this is the one
-          // case that falls back to the server's configured window.
+          // No server verdict arrived, so no header exists; use the configured window.
           setStatus("❌ " + pairErrorText(e), true);
           armRetry(submitted ? PAIR_RETRY_FALLBACK_SECONDS : 0);
         });
@@ -662,14 +603,10 @@ import { gateFetch } from "./pow_bridge.js";
     ask();
   }
 
-  // --- Desktop-issued enrollment (#enroll=<code>) -------------------------
-  // Admin issues a one-time ticket (server -enroll); the member opens the
-  // URL, the browser popup creates a REAL passkey in their password manager,
-  // and only the public half is stored server-side.
-  // Keep the connect panel visible so setStatus remains visible (it lives
-  // inside the panel); the terminal wrap stays hidden during enrollment.
+  // Desktop-issued enrollment.
+  // Create a real passkey from a one-time ticket; only the public half
+  // is stored. The panel stays visible for status output.
   function runEnrollMode(code) {
-    // Ensure panel is visible and wrap hidden for clear status feedback.
     panel.style.display = "block";
     wrap.style.display = "none";
     console.log("[ENROLL] start ticket=" + code.slice(0, 12) + "…");
@@ -723,12 +660,12 @@ import { gateFetch } from "./pow_bridge.js";
   if (initialHash.indexOf("#pair=") === 0) {
     var params = new URLSearchParams(initialHash.slice(1));
     var pairTicket = params.get("pair") || "";
-    location.hash = ""; // clean up so reloads start fresh
+    location.hash = ""; // Drop the ticket so reloads start fresh.
     if (pairTicket) runPairMode(pairTicket);
   } else if (initialHash.indexOf("#enroll=") === 0) {
     var eParams = new URLSearchParams(initialHash.slice(1));
     var enrollCode = eParams.get("enroll") || "";
-    location.hash = "";
+    location.hash = ""; // Drop the ticket so reloads start fresh.
     if (enrollCode) runEnrollMode(enrollCode);
   }
 
@@ -756,20 +693,17 @@ import { gateFetch } from "./pow_bridge.js";
       fontSize: 14,
       fontFamily: FONT_FAMILY,
       convertEol: true,
-      // The app paints a full screen and scrolls its own chat viewport with
-      // its own bar, so a terminal scrollback would only add a second
-      // scrollbar next to it.
+      // The app scrolls its own chat viewport; terminal scrollback would
+      // add a second scrollbar.
       scrollback: 0,
       theme: { background: "#101014" },
     });
 
     term.open(host);
 
-    // Link clicks are routed by hand because every destination is either a
-    // trip verification (copied, then confirmed before a tab opens) or
-    // external content that always asks first and shows its URL. The expand
-    // trailer is not a link: the app draws it as a button and handles the
-    // click itself.
+    // Route link clicks by hand: trip links copy then confirm, external
+    // links ask first with the URL shown. The expand trailer is a button,
+    // not a link, so it needs no handling here.
     try {
       term.options.linkHandler = {
         allowNonHttpProtocols: true,
@@ -782,10 +716,7 @@ import { gateFetch } from "./pow_bridge.js";
                 setStatus(info, !j.valid);
               }).catch(function () { setStatus("Trip link: " + uri, false); });
               if (navigator.clipboard) navigator.clipboard.writeText(uri).catch(function () {});
-              // The URL is already on the clipboard; offer to open the
-              // human-readable verify page in a new tab. If a popup
-              // blocker refuses window.open, the copied link remains the
-              // fallback and nothing else happens.
+              // URL is already on the clipboard; offer the readable page.
               if (window.confirm("Đã copy link verify. Mở trang kiểm tra trong tab mới?")) {
                 window.open(uri, "_blank", "noopener");
               }
@@ -798,11 +729,8 @@ import { gateFetch } from "./pow_bridge.js";
             }
             return;
           }
-          // Any remaining link is plain external content. Ask first and
-          // show the destination so the user can judge where it leads;
-          // only http(s) is ever opened, so a crafted scheme can never
-          // reach window.open. The client already strips non-http(s) OSC8
-          // targets, this is the second gate.
+          // External content always asks first with the URL shown; only
+          // http(s) opens, so crafted schemes never reach window.open.
           if (uri && /^https?:\/\//i.test(uri)) {
             if (e && e.preventDefault) e.preventDefault();
             if (window.confirm("Mở liên kết ngoài?\n\n" + uri)) {
@@ -819,8 +747,7 @@ import { gateFetch } from "./pow_bridge.js";
     }
     window.addEventListener("orientationchange", scheduleResize);
 
-    // Size the grid to the real viewport before any output exists.
-    // Wait for fonts to be ready so measureCell is accurate.
+    // Wait for fonts so the first measure is accurate.
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(function () { resizeTerminal(); });
     }
@@ -834,8 +761,7 @@ import { gateFetch } from "./pow_bridge.js";
       if (term) term.write(s);
     };
 
-    // The Go client calls this after /quit so the page reloads back to the
-    // connect panel instead of leaving a dead terminal on screen.
+    // After /quit reload to the connect panel, not a dead terminal.
     window.v2vExit = function () {
       location.reload();
     };
@@ -890,10 +816,8 @@ import { gateFetch } from "./pow_bridge.js";
       return;
     }
 
-    // index.html and app.js revalidate independently, so a cached page can
-    // briefly pair one version's markup with another's script. Check before
-    // disabling the button, otherwise a mismatch throws here and leaves the
-    // form stuck on "Đang kết nối..." with a dead button.
+    // Cached pages can mix markup and script versions; check before
+    // disabling the button or a mismatch leaves it stuck.
     if (!form || !connectBtn || !serverInput || !userInput) {
       setStatus("Lỗi: trang không khớp phiên bản — tải lại (Ctrl+Shift+R).", true);
       return;
@@ -916,14 +840,13 @@ import { gateFetch } from "./pow_bridge.js";
       powMinTier: opts.powMinTier,
       notify: opts.notify,
     };
-    // Clear passphrase from DOM immediately after copying to WASM
+    // Scrub the passphrase from the DOM once copied.
     tripInput.value = "";
 
     if (usePasskey) {
       var pkRole = passkeyRoleInput.value.trim();
       if (!pkRole) {
-        // A passkey login without a role cannot be honored; fail fast here
-        // instead of letting the client fall back to a guest session.
+        // Fail fast without a role instead of falling back to a guest session.
         setStatus("Nhập role cho đăng nhập bằng Passkey.", true);
         connectBtn.disabled = false;
         return;
