@@ -126,6 +126,10 @@ func (s *Session) flushOutputNow() {
 // prompt ends up wedged between a message's lines. Draining first makes the
 // block whole on screen before anything else is drawn.
 func (s *Session) refreshTerminal() {
+	if s.Display.Sink != nil {
+		s.Display.Sink.Notify()
+		return
+	}
 	s.flushOutputNow()
 	s.Display.Term.Refresh()
 }
@@ -141,6 +145,11 @@ func (s *Session) holdOrEnqueue(line string) {
 // it reports, so a recovered block can be spliced into the held stream at its
 // position instead of being appended.
 func (s *Session) holdOrEnqueueChunk(chunk heldChunk) {
+	if s.Display.Sink != nil {
+		// The app paints from the buffers, so there is no deferred
+		// terminal output to hold or enqueue.
+		return
+	}
 	if s.Display.CatchupHold {
 		s.Display.HoldLines = append(s.Display.HoldLines, chunk)
 		return
@@ -180,8 +189,16 @@ func (s *Session) flushPendingGreetingLocked() {
 	if s.Display.PendingGreeting == "" || s.Display.CatchupHold {
 		return
 	}
-	s.enqueueOutput(s.Display.PendingGreeting)
+	greeting := s.Display.PendingGreeting
 	s.Display.PendingGreeting = ""
+	if s.Display.Sink != nil {
+		e := noticeEntry(strings.TrimSuffix(greeting, "\n"))
+		s.Display.TabChat.append(e)
+		s.Display.TabSys.append(e)
+		s.Display.Sink.Notify()
+		return
+	}
+	s.enqueueOutput(greeting)
 }
 
 func (s *Session) emitTab(tab int, e entry) {
@@ -193,6 +210,16 @@ func (s *Session) emitTab(tab int, e entry) {
 // stays reviewable in the system tab and on tab switches. Caller must
 // hold DisplayMu.
 func (s *Session) emitTabLive(live bool, tab int, e entry) {
+	if s.Display.Sink != nil {
+		// Tab 1 is the full stream (chat plus local and system lines, in
+		// arrival order); tab 2 is system-only.
+		s.Display.TabChat.append(e)
+		if tab == TabSystem {
+			s.Display.TabSys.append(e)
+		}
+		s.Display.Sink.Notify()
+		return
+	}
 	if tab == TabChat {
 		s.Display.TabChat.append(e)
 	} else {
@@ -273,6 +300,10 @@ func (s *Session) replaceSlot(slot slotRef, next entry, repaint bool) bool {
 	}
 	tail := append([]entry{}, lines[slot.index+1:]...)
 	lines[slot.index] = next
+	if s.Display.Sink != nil {
+		s.Display.Sink.Notify()
+		return true
+	}
 	if !repaint {
 		return true
 	}
@@ -308,6 +339,12 @@ func (s *Session) emitLocalFeedbackTags(tags []string, line string) {
 // Caller must hold DisplayMu.
 func (s *Session) emitLocalFeedbackLive(live bool, line string) {
 	e := noticeEntry(line)
+	if s.Display.Sink != nil {
+		s.Display.TabChat.append(e)
+		s.Display.TabSys.append(e)
+		s.Display.Sink.Notify()
+		return
+	}
 	s.Display.TabSys.append(e)
 	if !live {
 		return

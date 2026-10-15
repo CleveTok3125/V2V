@@ -77,9 +77,6 @@ github.com/charmbracelet/x/termios
 # github.com/charmbracelet/x/windows v0.2.2
 ## explicit; go 1.23.0
 github.com/charmbracelet/x/windows
-# github.com/chzyer/readline v1.5.1
-## explicit; go 1.15
-github.com/chzyer/readline
 # github.com/clipperhouse/displaywidth v0.11.0
 ## explicit; go 1.18
 github.com/clipperhouse/displaywidth

@@ -488,6 +488,11 @@ func (s *Session) switchTab(n int) {
 	// The repaint leaves the cursor at the end of the whole buffer, so
 	// nothing drawn earlier can still be erased by moving up.
 	s.Display.LayoutEpoch++
+	if s.Display.Sink != nil {
+		// The app renders whichever tab is active; it just needs to know.
+		s.Display.Sink.Notify()
+		return
+	}
 	// Queued like every other screen write: a full tab dump is large,
 	// and a synchronous write would stall the pump behind a slow
 	// terminal. The dump is one ordered chunk (never dropped by the
