@@ -449,16 +449,28 @@ func formatQuoteRich(msg WireMessage, pending bool, maxRunes int) string {
 // truncated preview line. Single-line output keeps placeholder erase
 // math exact.
 func quoteFirstLine(s string, maxRunes int) string {
-	first := stripANSIForFind(s)
+	plain := stripANSIForFind(s)
+	first := plain
+	// A quote shows one line, so mark it when the message it previews has
+	// more: further lines, or a single line cut to fit.
+	more := false
 	if i := strings.Index(first, "\n"); i >= 0 {
 		first = first[:i]
+		if strings.TrimSpace(plain[i+1:]) != "" {
+			more = true
+		}
 	}
 	first = strings.TrimSpace(filter.SanitizeForDisplay(strings.TrimPrefix(strings.TrimSpace(first), "|")))
 	if maxRunes < 20 {
 		maxRunes = 20
 	}
 	if runes := []rune(first); len(runes) > maxRunes {
-		first = string(runes[:maxRunes]) + "…"
+		first = string(runes[:maxRunes])
+		more = true
+	}
+	if more {
+		// Same dim grey as the collapse trailer's "...".
+		first += dimStyle.Render("...")
 	}
 	return first
 }
