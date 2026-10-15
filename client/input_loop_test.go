@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"io"
 	"strings"
 	"testing"
 
@@ -15,7 +14,6 @@ import (
 
 func smokeSession() *Session {
 	sess := NewSession()
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.TabChat = newTabBuffer(100, 100000)
 	sess.Display.TabSys = newTabBuffer(100, 100000)

@@ -42,7 +42,6 @@ func (c *pumpFeedConn) Close() error                   { return nil }
 // batching) renders every line, not just the first.
 func TestRunPumpParsesBatchedFrame(t *testing.T) {
 	sess := NewSession()
-	sess.Display.Out = io.Discard
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.ActiveTab = TabChat
 	sess.Display.TabSys = newTabBuffer(100, 100000)
@@ -78,20 +77,6 @@ func TestRunPumpParsesBatchedFrame(t *testing.T) {
 	stopPump(t, sess, func() { close(conn.frames) })
 }
 
-// slowWriter simulates a sluggish terminal: every Write parks, so any
-// read-loop write blocks the socket drain — exactly how a slow peer
-// fills the server's per-session queue until frames drop.
-type slowWriter struct {
-	delay time.Duration
-	data  []byte
-}
-
-func (w *slowWriter) Write(p []byte) (int, error) {
-	time.Sleep(w.delay)
-	w.data = append(w.data, p...)
-	return len(p), nil
-}
-
 // pumpBatchWire builds a properly chained wire sequence so verification
 // passes and only terminal I/O slows the pump.
 func pumpBatchWire(prev [32]byte, height uint64) (WireMessage, [32]byte) {
@@ -102,17 +87,13 @@ func pumpBatchWire(prev [32]byte, height uint64) (WireMessage, [32]byte) {
 	return wire, h
 }
 
-// TestRunPumpKeepsReadingWithSlowOutput: a slow terminal must not stall
-// the socket read loop. The pump has to ingest a burst of valid wires
-// on schedule even when every terminal write parks; otherwise the
-// server's per-session queue fills and live frames drop.
-func TestRunPumpKeepsReadingWithSlowOutput(t *testing.T) {
+// TestRunPumpIngestsBurst: the pump must ingest a burst of valid wires on
+// schedule, indexing every height as it lands.
+func TestRunPumpIngestsBurst(t *testing.T) {
 	const count = 100
 	const budget = 600 * time.Millisecond
 
 	sess := NewSession()
-	slow := &slowWriter{delay: 20 * time.Millisecond}
-	sess.Display.Out = slow
 	sess.Display.Term = &fakeTerm{}
 	sess.Display.ActiveTab = TabChat
 	sess.Display.TabSys = newTabBuffer(100, 100000)
@@ -157,10 +138,8 @@ func TestRunPumpKeepsReadingWithSlowOutput(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	stopPump(t, sess, func() { close(conn.release) })
-	// Queued output flushes on demand: all ingested lines must land
-	// exactly once, regardless of terminal speed.
-	sess.flushOutputNow()
-	if got := strings.Count(string(slow.data), "msg"); got != count {
-		t.Fatalf("flushed terminal output = %d/%d lines", got, count)
+	// Every ingested line lands in the chat tab exactly once.
+	if got := strings.Count((&chatSpy{sess: sess}).String(), "msg"); got != count {
+		t.Fatalf("painted chat lines = %d/%d", got, count)
 	}
 }

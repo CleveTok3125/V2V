@@ -32,7 +32,6 @@ func runFrames(t *testing.T, sess *Session, conn *captureConn, frames ...[]byte)
 	// Give the pump time to drain before closing the source.
 	time.Sleep(50 * time.Millisecond)
 	stopPump(t, sess, func() { close(conn.frames) })
-	sess.flushOutputNow()
 	return entriesText(sess.Display.TabSys.lines)
 }
 

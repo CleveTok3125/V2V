@@ -221,14 +221,7 @@ func (s *Session) runInputLoop() {
 			continue
 		}
 
-		body, slot, ok := s.collectBody(text, slot)
-		if !ok {
-			// Codeblock canceled: no send happens, so drop the
-			// one-shot reply target (inline /reply or draft).
-			s.Pending.PendingReplyTo = 0
-			continue
-		}
-		if !s.checkSendGuards(body) {
+		if !s.checkSendGuards(text) {
 			// Guard rejected the message: same one-shot cleanup; only
 			// sendMessage may consume PendingReplyTo. The echo entry stays,
 			// so the rejected line is still on the record.
@@ -236,8 +229,8 @@ func (s *Session) runInputLoop() {
 			continue
 		}
 		s.recordHistory(submitted, false)
-		placeholder, slot, phShown := s.renderPlaceholder(body, slot)
-		if serr := s.sendMessage(body, placeholder, slot, phShown); serr != nil {
+		placeholder, slot, phShown := s.renderPlaceholder(text, slot)
+		if serr := s.sendMessage(text, placeholder, slot, phShown); serr != nil {
 			return
 		}
 	}

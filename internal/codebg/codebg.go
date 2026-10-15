@@ -52,19 +52,6 @@ func DefaultStyle() Style {
 	}
 }
 
-// NeedsContinuation reports whether a first input line that opens a fenced
-// block still needs more input lines to close the fence. It mirrors the
-// toggle semantics of Render: a first line that already contains a closing
-// fence after the opener is complete and must not open multiline
-// collection.
-func NeedsContinuation(firstLine string) bool {
-	t := strings.TrimSpace(firstLine)
-	if !strings.HasPrefix(t, "```") {
-		return false
-	}
-	return !strings.Contains(t[3:], "```")
-}
-
 // Span wraps an already-extracted code span's content in the code
 // background. The caller strips the backtick delimiters, mirroring
 // inline; markup uses this so code styling has a single source.

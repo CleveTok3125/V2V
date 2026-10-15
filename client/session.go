@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"math/rand/v2"
 	"net/url"
 	"os"
@@ -27,10 +26,10 @@ import (
 //
 // Lock order is fixed Display -> Chain -> Pending: group locks nest
 // only in that direction, never the reverse. DisplayMu stays the
-// god-lock for erase math (tabs + PrintGen + pending must stay
-// atomic); ChainMu serializes tip updates between the pump and the
-// input loop; PendingMu guards the placeholder/echo queues at the
-// two threads that share them. Pump-side chain reads (InSync,
+// god-lock for the tab buffers and the placeholder/echo state (they
+// must stay atomic); ChainMu serializes tip updates between the pump
+// and the input loop; PendingMu guards the placeholder/echo queues at
+// the two threads that share them. Pump-side chain reads (InSync,
 // SyncHeights, HaveTip in checkChainLink and handleHistorySync) stay
 // under caller-held DisplayMu with no ChainMu: the pump is their
 // only writer, so a second lock would add nothing.
@@ -103,29 +102,11 @@ type DisplayState struct {
 	// which pulls the active tab and paints it.
 	Term inputTerminal
 	Sink uiSink
-	Out  io.Writer
 
-	// Async terminal queue. Producers (the socket read loop, the input
-	// loop, background jobs) append ordered chunks under OutMu and
-	// return immediately; a single flusher drains the queue outside
-	// every lock, so a slow terminal never stalls the socket read.
-	// OutMu is a leaf lock: never take DisplayMu while holding it.
-	OutMu       sync.Mutex
-	OutBuf      []byte
-	OutFlushing bool
-	// OutWriteMu serializes terminal writes between the async flusher
-	// and synchronous flushes, keeping every batch contiguous. Like
-	// OutMu, a leaf lock held only around Out.Write.
-	OutWriteMu sync.Mutex
-	// OutSkipped counts rendered chunks dropped at the queue cap: their
-	// data stays in the tab buffers, so switching tabs replays them.
-	OutSkipped int
-	// CatchupHold defers terminal output during the join replay and any
-	// refill of its dropped lines: chunks accumulate in HoldLines in
-	// emission order, recovered wires are spliced in at their chain
-	// position, and the whole stream is printed once at release. This
-	// keeps a gapped replay from reaching scrollback, where it could
-	// not be merged afterwards. Under DisplayMu.
+	// CatchupHold defers the shape of the join replay: while it is set,
+	// recovered wires are spliced at their chain position instead of
+	// appended and the greeting waits for the release, so a gapped replay
+	// never reads as the final order. Under DisplayMu.
 	CatchupHold bool
 	// HoldGen invalidates the release timer of a superseded hold.
 	HoldGen uint64

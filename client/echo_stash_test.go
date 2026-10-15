@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"testing"
 )
 
@@ -23,7 +22,6 @@ func stashTestWireReply(name string, tmpID, replyTo uint64) WireMessage {
 func stashTestSession(t *testing.T) *Session {
 	t.Helper()
 	sess := NewSession()
-	sess.Display.Out = io.Discard
 	sess.Display.TabSys = newTabBuffer(100, 100000)
 	sess.Display.TabChat = newTabBuffer(100, 100000)
 	sess.Username = "A#h"

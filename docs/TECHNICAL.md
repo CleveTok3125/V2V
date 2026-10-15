@@ -137,21 +137,20 @@ One binary serves many instances: an instance is a directory holding `.env`, `co
 
 ## Client Tabs
 
-Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system, date, history). `client/render.go:tabForWire` routes each wire by its type and tags: a replay marker belongs to TabChat since it delimits chat history, every other system line to TabSystem. Nothing routes on message text.
+Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system, date, history). `client/render.go:tabForWire` routes each wire by its type: a system wire to Tab 2, every other wire to Tab 1. Nothing routes on message text.
 
-- Tab 1 shows the full legacy stream even when Tab 2 is active (`emitTab` prints when `tab == activeTab || activeTab == TabChat`), so tabs never change Tab 1 behavior.
-- Tab 2 is purely additive and lazyloads (buffered always, rendered on switch).
-- Buffers (`tabBuffer`) are FIFO rings with dual-limit eviction (lines + bytes), mirroring server `ChatHistory`; `spliceOut` removes resolved placeholders.
-- `/tab`, `/tab 1|2`, `/t` switch with a single-lock clear + queued replay; the bar shows `[1:chat] 2:system` with the active tab bracketed (`tabBarLine`, columns padded so labels never shift).
-- Local command responses (`/help`, `/status`, …) queue into the active tab via `emitLocalFeedback` while also buffering into Tab 2 for review.
-- Terminal output is queued, never written inline: the read loop, input path and background jobs append ordered chunks under a leaf lock, and a single flusher drains them outside every lock, so a slow terminal never stalls socket reads (which is what used to fill the server's per-session queue until live frames dropped). The queue caps at 512KiB — oldest rendered chunks drop (counted in `OutSkipped`) while their data stays in the tab buffers, so switching tabs replays them; full tab dumps enqueue whole and are exempt.
+- Chat lines always land in Tab 1's buffer, whichever tab is active; the app paints the active tab and nothing else.
+- Tab 2 is purely additive: system, local, date and history lines are buffered there whether or not it is on screen, so switching to it loses nothing.
+- Buffers (`tabBuffer`) are FIFO rings with dual-limit eviction (lines + bytes), mirroring server `ChatHistory`; `spliceOut` removes resolved placeholders and `insertAt` splices older windows and recovered wires at their chain position.
+- Tab switching: `Tab` / `Shift+Tab` cycle, a click on a label selects that tab, and `/tab`, `/tab 1|2`, `/t` do it from the command line. The bar draws the `1:chat` / `2:system` labels, the active one bold in the accent colour.
+- Local command responses (`/help`, `/status`, …) go to Tab 1 through `emitLocalFeedback` and are mirrored into Tab 2 for review.
 
 ## Placeholders and Server Echo
 
 - Outgoing text is not echoed optimistically: it prints grey with `⏳` (`| Bạn: … ⏳`), then `BroadcastWire` unicasts the same `WireMessage` back to the sender as delivery confirmation.
-- The client tracks pending placeholders (`text/rows/bufEnd/seq/pub`) and on matching echo (same `DisplayName` + `Text`, plus `Pub/Seq` for trip) splices the placeholder out of the tab buffer, erases its screen rows, and reprints any intervening lines.
+- The client tracks a pending placeholder (`text/slot/seq/pub`) and on matching echo (same `DisplayName` + `Text`, plus `Pub/Seq` for trip) replaces that buffer entry in place, so one message never occupies two rows.
 - The echo then renders through the normal path (badge color + verify link).
-- A generation counter (`printGen`) skips the erase when burst output intervened, so wrong rows are never wiped.
+- The replace is keyed on the entry itself: a slot that no longer holds the placeholder — the buffer shifted under it, or a tab switch repainted since — is left alone, so the wrong row is never rewritten.
 
 ## Slash Commands
 
@@ -167,7 +166,7 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 - The trip section shows every signature input (pub, seq, prev, sig, msg_hash with text-match mark, server_pub, payload bytes), so the verdict is checkable by hand with any ed25519 tool.
 - Wires index by height (cap 1000 FIFO); legacy and evicted report as missing.
 - `/find` looks up messages by chain height (the mandatory identifier; a bare hash is rejected since short hashes collide by design, and an appended `:hash` acts only as a typo checksum) across both tab buffers; a hit nests the whole matching block — frame, structure and style — under a `Tìm #height trong bộ nhớ:` header, so a replayed line never reads as live chat. Evicted history reports as not found.
-- Code block input (`client.go:collectCodeblock`): a first line that already closes its fence (`codebg.NeedsContinuation`) sends immediately without multiline collection.
+- Code block input: the textarea holds the whole message, newlines and all, so the input loop sends the draft as typed and never reads a continuation.
 - `Ctrl+C` aborts collection via `ErrInputCancel` (empty line cancels on WASM, any interrupt cancels on desktop) and discards everything silently, while `Ctrl+D` (`io.EOF`) keeps quitting.
 - `Ctrl+C` on the main prompt prints `| [Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.` instead of quitting.
 
@@ -220,7 +219,7 @@ Every chat and audit message links to the previous one (`lib/chain`, `server/cha
 - A broken stored link logs `(chain,tamper)` and adopts the last record (availability); online clients holding older tips flag the fork.
 - **Client:** `client/chainmeta.go` + read loop verify content hash on every wire and prev continuity once a tip is adopted; the tip persists in `<cache>/chain_tip.json`. Only the join-replay trailer runs the fork check (segments and recovery windows record no received-height set): a persisted tip whose height was replayed with a different hash warns, while an absent height is transit loss, not proof; trailers reporting `dropped > 0` skip the check, and tips outside the window adopt silently.
 - **Client gap refill:** a forward height jump files one `history_request{ranges}` for the missing chained heights (one `[from,to]` run per gap). The reply arrives as a recovery window (`--- Lịch sử bù ---`) that verifies each wire against its predecessor's known hash, never moving the running tip. A complete window confirms; otherwise the client waits `history.recoverRetryDelay` and retries the remainder up to `history.recoverRetries` times before reporting the loss. Live-gap refills draw on a per-session budget (`history.liveRecoverCap`, `0` = unlimited). The server charges every history request against the per-IP cost budget (see Paged history).
-- **Load merge:** the initial load is not printed as it arrives. Its lines accumulate in an ordered hold buffer (with local notices and any live traffic); recovered blocks are spliced in right after their chain predecessor (located by the `#height:` meta line) before the whole stream prints in one chunk. This keeps a partial history out of append-only scrollback; a 5s timer releases the hold if the load stalls, and tab switches, `/clear` and exit release it first. Repeated identical date banners are deduplicated.
+- **Load merge:** the initial load does not append blindly. While the hold is on (`CatchupHold`), a recovered block is spliced in right after its chain predecessor (located by the `#height:` meta line) and the greeting waits, so a gapped replay never reads as the final order; a 5s timer releases the hold if the load stalls, and tab switches, `/clear` and exit release it first. Repeated identical date banners are deduplicated.
 - Own echoes match placeholders by exact `tmp_id` (`matchPendingIndex`); echoes arriving before their placeholder are stashed and retried at track time, expiring with a warning after `10s` (how plain-path ID tampering surfaces).
 - `tmp_id` starts at a random 2³² base per connection and history replay never feeds the stash, so reconnects cannot collide with old sessions.
 - `trip.Verify` additionally binds `tmp_id` into the trip signature, so renumbering a signed message fails verification on both ends; `tmp_id 0` falls back to the legacy payload encoding so pre-upgrade history and old browser links verify read-only.
@@ -369,19 +368,19 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 
 - `markup.Span` renders forum markdown client-side: `**bold**` (`1m`), `*italic*` (`3m`), `~~strike~~` (`9m`), `[text](url)` (linkify-styled OSC 8 hyperlink, http(s) only), and `> quote` (grey `│ ` bar), parsed by goldmark with a custom SGR renderer.
 - Code spans and fenced blocks delegate to `codebg`, so code styling has a single source; headings, lists, HTML and images degrade to raw source text, never lost.
-- Only zero-width escapes are added, so erase math holds on both render paths (`Span` for incoming, `SpanPlain` for the placeholder, mirroring the `RenderWithStyle`/`Render` split).
+- Only zero-width escapes are added, so the drawn width is unchanged on both render paths (`Span` for incoming, `SpanPlain` for the placeholder, mirroring the `RenderWithStyle`/`Render` split).
 - Bare URLs stay linkify's job; text with ESC passes through untouched.
 - Mentions `@#height[:hash]` highlight (accent) when the target resolves in the local buffer (suffix checksum, SGR/OSC8 spans skipped, evicted stays plain); `#height` without `@` is plain text.
 - Messages bypass the render cache when they carry mentions or quotes, whose resolution depends on buffer state.
-- Replies (`/reply <height>[:hash] <text>`) render a `| ↩ #height: <first line…>` quote above content in placeholder and echo alike (same builder, so erase math holds); quotes always resolve locally, so misattributed quotes expose the liar.
+- Replies (`/reply <height>[:hash] <text>`) render a `| ↩ #height: <first line…>` quote above content in placeholder and echo alike, since both go through the same builder; quotes always resolve locally, so misattributed quotes expose the liar.
 - Evicted targets reject the reply before send.
 - Every chained chat message renders as content rows plus exactly one trailing meta line: `|   └─  #height:hash4`, with ` | ✍️ ◆ badge` (hyperlink kept) appended for trip messages.
 - Server notices (date, join/leave) are never chained and never verified, and render no meta line. Audit lines chain like chat (evidence) but render as plain system rows.
-- The sender placeholder ends with `|   └─  ··· ⏳` until the echo (carrying the real position) replaces the whole block, so erase counts stay exact.
+- The sender placeholder ends with `|   └─  ··· ⏳` until the echo, carrying the real position, replaces the whole block.
 - One `renderChatBlock` serves live, echo, history and placeholder paths; legacy lines without chain fields render content only, and pure-local lines (`[Local]`, date banners drawn client-side) carry no meta.
 - `codebg.Render` wraps inline `` `code` `` spans and ``` fenced blocks in a background SGR (`48;5;236`, closed with `49m` so ambient foreground survives), stripping the backtick delimiters markdown-style.
 - A ```lang opener becomes a header line showing just the language name (no language means no header), the closing fence is dropped, and single-line ```code``` renders as one background line.
-- Only zero-width escapes are added or removed, so trip `msg_hash` (over raw text) is unaffected; placeholder erase counts are recomputed from the rendered split.
+- Only zero-width escapes are added or removed, so trip `msg_hash` (over raw text) is unaffected.
 - Unmatched backticks, empty spans and text containing ESC pass through unchanged.
 - `codebg.RenderWithStyle` adds chroma syntax highlighting for fenced blocks with a known language tag (custom per-line SGR emitter, truecolor `38;2` foreground on the configured background, every line self-closed so tab buffers stay consistent).
 - Inline spans, untagged blocks, unknown languages and oversize blocks (>64KiB) fall back to the plain background.
@@ -546,7 +545,7 @@ Planned work grouped by dependency, in recommended order. Each item stays self-c
 ### Phase 0 — Foundation
 
 - **Session surgery** — client split into display/chain/verify/pending groups with a fixed `Display -> Chain -> Pending` order (tip persist outside the lock, queue-only pending guards); server split into `ChainService` (tip, history, store) and `Hub` (presence and send ordering) with the lock order unchanged. — *DONE*
-- **Dependency arrows** — `markup` is the sole facade (`Style` alias, `DefaultStyle`, `NeedsContinuation`, `Linkify` passthroughs): `client` no longer imports `codebg`/`linkify` directly; `strength` owns its report type and `guard` takes a plain limits struct are done. — *DONE*
+- **Dependency arrows** — `markup` is the sole facade (`Style` alias, `DefaultStyle`, `Linkify` passthroughs): `client` no longer imports `codebg`/`linkify` directly; `strength` owns its report type and `guard` takes a plain limits struct are done. — *DONE*
 - **Env/log/error unification** — typed getenv helper (`lib/env/env.go:20`) and leveled logging (`server/loglevel.go:10`) are done; the `%w` rule lives in [Error Handling](#error-handling). — *DONE*
 
 ### Phase 1 — Evidence
