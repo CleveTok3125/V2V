@@ -1,4 +1,4 @@
-# Notice Tags
+# Notice tags
 
 Status: implemented. Every server-originated notice, every replay window
 marker and every local informational line carries the tags that apply to
@@ -292,6 +292,6 @@ None. `sys_kind` was replaced, not versioned.
 - **A peer publishing a chain missing a level** is still covered by the
   ancestors it does sit under — see
   [Hierarchy semantics](#hierarchy-semantics).
-- **A tag the client does not know** is carried verbatim and simply never
+- **A tag the client does not know** is carried verbatim and never
   matches a gate, so a newer peer's line still routes by type and reaches
   Tab 2.

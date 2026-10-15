@@ -17,11 +17,11 @@ Chat without accounts. The server never asks for email, phone numbers, or any re
 
 - **No signup** — you join with a name like `Name#a1b2` and start chatting right away. No data links that name to you.
 - **Optional identifier** — a tripcode badge (`◆ ab12`) generated from a passphrase lets others recognize you across sessions, as long as you keep using it.
-- **Disposable identities** — just stop using a name or passphrase and that identity is gone. Starting over leaves no link between the old and the new.
+- **Disposable identities** — stop using a name or passphrase and that identity is gone. Starting over leaves no link between the old and the new.
 - **Transparent history** — every message links into a single server-wide hash chain. If a message is edited or reordered, every client can detect the break.
 - **Passwordless admin login** — moderators use Ed25519 key files or WebAuthn passkeys. No personal identifying information required.
 
-## Why V2V Exists
+## Why V2V exists
 
 Most chat platforms are built around accounts, profiles, and permanent identities. V2V explores a different model: **the conversation itself matters more than who is speaking**.
 
@@ -29,7 +29,7 @@ It fits situations where people don't need an account — joining with just a na
 
 That works for casual communities and for teams alike: any group that needs attributable, verifiable discussion without running account infrastructure.
 
-## Quick Start
+## Quick start
 
 **1. Get a binary**
 
@@ -73,7 +73,7 @@ Chat and system messages live on separate tabs: `/tab` switches between Tab 1 (c
 
 Keys and settings live in your OS config dir (`~/.config/V2V/` on Linux, `%AppData%\V2V` on Windows, `~/Library/Application Support/V2V` on macOS): `key.json` for identities, read-only `config.jsonc` for settings (JSONC comments allowed, copy `template/client/config.jsonc` to customize, `v2v --encrypt-config` to seal it). Override with `-c/--config-dir` (`V2V_CONFIG_DIR`) and `-C/--cache-dir` (`V2V_CACHE_DIR`). Extra flags: `-v` version, `-a` user-agent, `-i` server info, `-j` show join/leave (live display and catch-up history; replays filter joins by default).
 
-## For Admins
+## For admins
 
 Create identities with `v2vctl` (build with `make v2vctl` / `make v2vctl ALL=1` for all platforms):
 
@@ -100,9 +100,9 @@ Web passkey enrollment (one-time link, 10 min):
 
 See `template/server/instances/default/config/roles.json` and `template/server/instances/default/.env` for server configuration. Management commands default to the `instances/default` root; pass `--root instances/<name>` (or set `V2V_ROOT`) to target another instance.
 
-Abuse defense is self-contained: a global connection cap, operator blocklist, under-attack mode with a PoW join gate, and behavior scoring with in-chat PoW screening — all knobs required in `.env` (see [Abuse & Proof-of-Work](docs/TECHNICAL.md#abuse--proof-of-work)).
+Abuse defense is self-contained: a global connection cap, operator blocklist, under-attack mode with a PoW join gate, and behavior scoring with in-chat PoW screening — all knobs required in `.env` (see [Abuse & proof-of-work](docs/TECHNICAL.md#abuse--proof-of-work)).
 
-## Running the Server
+## Running the server
 
 Prebuilt server bundles and the multi-arch container image are published
 with each release; [INSTALL.md](INSTALL.md) is the full deployment guide.
@@ -132,10 +132,10 @@ V2V_ROOT=instances/default ./public/server.bin
 
 Open `http://localhost:10000/web/` for the browser client.
 
-## Learn More
+## Learn more
 
 - **How it works:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — architecture, wire protocol, tripcode crypto, storage, and security model.
-- **Configuration:** `template/server/instances/default/.env` has all env vars with comments (`PORT`, `MAX_MESSAGE_LENGTH`, `HISTORY_FILE_PATH`, `WEBAUTHN_*`, etc.).
-- **Management tool:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`, `config sync/diff/check/manifest/take`, `instance init/list/status/up/down/restart/logs`). Commands longer than three characters have short aliases (`r`=`role`, `i`=`instance`, `c`=`config`, `ls`=`list`, `r new`=`role create`, `c sy`=`config sync`, `i rs`=`instance restart`), and long flags have short forms (`-R`=`--root`, `-p`=`--port`/`--preset`, `-s`=`--store`). Run `v2vctl <command> --help` for the full set.
+- **Configuration:** `template/server/instances/default/.env` holds every variable with comments.
+- **Management tool:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`, `config sync/diff/check/manifest/take`, `instance init/list/status/up/down/restart/logs`). Run `v2vctl <command> --help` for the full set.
 
 Issues and PRs are welcome.

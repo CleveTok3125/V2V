@@ -1,4 +1,4 @@
-# History Sync Protocol
+# History sync protocol
 
 Status: implemented. The initial load, refills and seq paging below are
 in use. `/older` still pages older segments by the `before` height
@@ -289,5 +289,5 @@ Server:
 
 This replaces the connect-time push replay and the `after` height
 cursor; there is no backward-compatibility requirement. A peer that does
-not implement `history_info` simply receives no history until it asks.
+not implement `history_info` receives no history until it asks.
 Legacy stored records are migrated in place by the `seq` backfill.
