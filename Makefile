@@ -26,7 +26,7 @@ PLATFORMS := windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 da
 HOST_GOOS ?= $(shell go env GOOS)
 HOST_GOARCH ?= $(shell go env GOARCH)
 
-.PHONY: all server web web-wasm web-compress web-ts check-web-ts test-web client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test test-race test-sh test-wasm clean help
+.PHONY: all server web web-wasm web-compress web-ts check-web-ts test-web client v2vctl dev dev-server dev-client dev-v2vctl dev-web dev-web-wasm vet test test-race test-sh test-wasm check-wasm clean help
 
 all: server web client v2vctl
 
@@ -152,6 +152,12 @@ test-wasm: $(WASM_OVERLAY)
 	@if ! command -v node >/dev/null 2>&1; then echo "SKIP: node required for wasm tests"; exit 0; fi
 	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go test -mod=vendor -overlay="$(WASM_OVERLAY)" -exec "node $(CURDIR)/scripts/wasm_exec_runner.js" ./client/ -run 'TestWasm' -count=1 -timeout 120s
 
+# check-wasm verifies the client compiles for js/wasm (output
+# discarded). The stub overlay fills the missing js backends
+# (Bubble Tea v2, atotto/clipboard).
+check-wasm: $(WASM_OVERLAY)
+	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go build -mod=vendor -overlay="$(WASM_OVERLAY)" -o /dev/null ./client/
+
 # web-ts compiles the TypeScript front-end sources in web/ into the
 # committed JS bundle in webterm/. The Docker build consumes the
 # committed JS (T3), so it never needs node/tsc; CI runs check-web-ts
@@ -197,6 +203,7 @@ help:
 	@echo "  make test-race - go test under the race detector (needs cgo)"
 	@echo "  make test-sh  - entrypoint shell tests (skip without root)"
 	@echo "  make test-wasm - js-tagged client tests under node (skip without node)"
+	@echo "  make check-wasm - verify the client compiles for js/wasm (no output)"
 	@echo "  make web-ts   - compile web/ TypeScript sources into webterm/*.js (needs tsc)"
 	@echo "  make check-web-ts - fail if committed webterm JS is stale"
 	@echo "  make test-web - Go/JS cross vectors (argon2 + PoW) under node"
