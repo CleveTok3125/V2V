@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,9 @@ const (
 	tabIndexChat = iota
 	tabIndexSystem
 )
+
+// chatTop is the screen row the chat starts on: the tab bar takes row 0.
+const chatTop = 1
 
 // inputPlaceholder is the idle draft hint; it is blanked in command mode so a
 // bare "/" prompt reads as a command prompt instead of an empty draft.
@@ -168,6 +172,7 @@ type tuiStyles struct {
 	boxQuote    lipgloss.Style
 	reply       lipgloss.Style
 	sel         lipgloss.Style
+	hover       lipgloss.Style
 }
 
 // newTUIStyles resolves the chrome styles, falling back to the built-in
@@ -198,6 +203,7 @@ func newTUIStyles() tuiStyles {
 		boxQuote:    lipgloss.NewStyle().Foreground(dim),
 		reply:       lipgloss.NewStyle().Foreground(dim),
 		sel:         lipgloss.NewStyle().Background(lipgloss.Color("238")),
+		hover:       lipgloss.NewStyle().Underline(true),
 	}
 }
 
@@ -247,6 +253,18 @@ type app struct {
 	atTopArmed   bool
 	pendingOlder bool
 	status       string
+
+	// Hover state for the expand trailers. The pointer position is kept so a
+	// scroll or a redraw can re-resolve it, trailers holds the spans drawn on
+	// screen and chatText the rows they were read from.
+	mouseIn    bool
+	mouseX     int
+	mouseY     int
+	hoverRow   int
+	hoverStart int
+	hoverEnd   int
+	trailers   []trailerSpan
+	chatText   string
 }
 
 func newApp(sess *Session) *app {
@@ -258,6 +276,7 @@ func newApp(sess *Session) *app {
 		lines:    lines,
 		active:   tabIndexChat,
 		dirty:    true,
+		hoverRow: -1,
 		styles:   newTUIStyles(),
 		viewport: viewport.New(viewport.WithWidth(80), viewport.WithHeight(10)),
 	}
@@ -371,12 +390,19 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if msg.Button == tea.MouseLeft {
+			if span, ok := a.trailerAt(msg.X, msg.Y); ok {
+				return a, a.expandCmd(span.height)
+			}
 			if p, ok := a.contentPos(msg.X, msg.Y); ok {
 				a.selActive, a.selAnchor, a.selCursor = true, p, p
 			}
 		}
 		return a, nil
 	case tea.MouseMotionMsg:
+		a.mouseIn, a.mouseX, a.mouseY = true, msg.X, msg.Y
+		if a.refreshHover() {
+			a.dirty = true
+		}
 		if a.selActive {
 			if p, ok := a.contentPos(msg.X, msg.Y); ok {
 				a.selCursor = p
@@ -393,6 +419,11 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.viewport, cmd = a.viewport.Update(msg)
 		a.maybeLoadOlder()
+		// The rows moved under a pointer that did not.
+		a.scanTrailers()
+		if a.refreshHover() {
+			a.dirty = true
+		}
 		return a, cmd
 	case tea.KeyPressMsg:
 		if handled, cmd := a.handleKey(msg); handled {
@@ -748,17 +779,21 @@ func (a *app) chatContent(lines []entry, skipMuted bool) string {
 	return sb.String()
 }
 
-// highlightSelection styles the selected cells of the rows on screen. Only
-// those rows are touched, so a drag never rebuilds the whole content.
-func (a *app) highlightSelection(chat string) string {
-	if !a.selActive {
+// decorateChat styles the rows on screen: the drag selection and the expand
+// trailer under the pointer. Only those rows are touched, so a drag never
+// rebuilds the whole content.
+func (a *app) decorateChat(chat string) string {
+	if !a.selActive && a.hoverRow < 0 {
 		return chat
 	}
 	lines := strings.Split(chat, "\n")
 	top := a.viewport.YOffset()
 	for i := range lines {
 		row := top + i
-		if row < 0 || row >= len(a.rows) {
+		if row == a.hoverRow {
+			lines[i] = lipgloss.StyleRanges(lines[i], lipgloss.NewRange(a.hoverStart, a.hoverEnd, a.styles.hover))
+		}
+		if !a.selActive || row < 0 || row >= len(a.rows) {
 			continue
 		}
 		span := a.rows[row]
@@ -837,7 +872,6 @@ func (a *app) selRangeFor(row int, span rowSpan) (int, int) {
 // contentPos maps a screen point to a chat-content point. Only the viewport
 // area counts; the tab bar, the input and the footer are ignored.
 func (a *app) contentPos(x, y int) (selPos, bool) {
-	const chatTop = 1 // the tab bar
 	if y < chatTop || y >= chatTop+a.viewport.Height() {
 		return selPos{}, false
 	}
@@ -1127,6 +1161,9 @@ func (a *app) refreshContent() {
 		a.viewport.SetYOffset(oldOffset)
 	}
 	a.status = a.sess.uiStatus()
+	a.chatText = content
+	a.scanTrailers()
+	a.refreshHover()
 	a.dirty = false
 }
 
@@ -1265,16 +1302,105 @@ func (a *app) View() tea.View {
 	}
 	a.syncReplyLine()
 	a.refreshContent()
-	chat := a.highlightSelection(a.withScrollbar(a.viewport.View()))
+	chat := a.decorateChat(a.withScrollbar(a.viewport.View()))
 	if a.showHelp {
 		chat = a.helpView()
 	}
 	parts := []string{a.renderTabs(), chat}
 	parts = append(parts, a.renderInputArea(), a.renderFooter())
 	v := tea.NewView(strings.Join(parts, "\n"))
-	// Capture the mouse so the wheel scrolls the chat; clicks are ignored.
-	v.MouseMode = tea.MouseModeCellMotion
+	// Capture the mouse so the wheel scrolls the chat and a pointer move can
+	// highlight the expand trailers.
+	v.MouseMode = tea.MouseModeAllMotion
 	return v
+}
+
+// trailerSpan is the geometry of one expand trailer on screen: the content row
+// it sits on and the columns its command bracket covers.
+type trailerSpan struct {
+	row    int
+	start  int
+	end    int
+	height uint64
+}
+
+// trailerOnLine locates the expand trailer drawn on one rendered row. Columns
+// are measured in cells, the same unit the pointer arrives in.
+func trailerOnLine(line string) (height uint64, start, end int, ok bool) {
+	plain := ansi.Strip(line)
+	at := strings.Index(plain, expandMarker)
+	if at < 0 {
+		return 0, 0, 0, false
+	}
+	digits := plain[at+len(expandMarker):]
+	stop := strings.IndexByte(digits, ']')
+	if stop < 0 {
+		return 0, 0, 0, false
+	}
+	parsed, err := strconv.ParseUint(digits[:stop], 10, 64)
+	if err != nil || parsed == 0 {
+		return 0, 0, 0, false
+	}
+	start = ansi.StringWidth(plain[:at])
+	end = start + ansi.StringWidth(plain[at:at+len(expandMarker)+stop+1])
+	return parsed, start, end, true
+}
+
+// scanTrailers records the trailers among the rows on screen, so a pointer
+// move only has to look up a span. Only the visible range is read: the rows
+// above and below cannot be hovered.
+func (a *app) scanTrailers() {
+	a.trailers = a.trailers[:0]
+	if a.chatText == "" {
+		return
+	}
+	lines := strings.Split(a.chatText, "\n")
+	top := a.viewport.YOffset()
+	for i := 0; i < a.viewport.Height(); i++ {
+		row := top + i
+		if row < 0 || row >= len(lines) {
+			break
+		}
+		if height, start, end, ok := trailerOnLine(lines[row]); ok {
+			a.trailers = append(a.trailers, trailerSpan{row: row, start: start, end: end, height: height})
+		}
+	}
+}
+
+// trailerAt maps a screen cell to the trailer drawn there.
+func (a *app) trailerAt(x, y int) (trailerSpan, bool) {
+	if a.showHelp {
+		return trailerSpan{}, false
+	}
+	row := a.viewport.YOffset() + (y - chatTop)
+	for _, span := range a.trailers {
+		if span.row == row && x >= span.start && x < span.end {
+			return span, true
+		}
+	}
+	return trailerSpan{}, false
+}
+
+// refreshHover re-resolves the trailer under the pointer, which a scroll or a
+// redraw can move without the pointer moving. Reports whether it changed.
+func (a *app) refreshHover() bool {
+	row, start := a.hoverRow, a.hoverStart
+	a.hoverRow, a.hoverStart, a.hoverEnd = -1, 0, 0
+	if a.mouseIn {
+		if span, ok := a.trailerAt(a.mouseX, a.mouseY); ok {
+			a.hoverRow, a.hoverStart, a.hoverEnd = span.row, span.start, span.end
+		}
+	}
+	return a.hoverRow != row || a.hoverStart != start
+}
+
+// expandCmd runs the expand off the UI thread: the block render and the
+// display lock belong to the session.
+func (a *app) expandCmd(height uint64) tea.Cmd {
+	return func() tea.Msg {
+		a.sess.expandInPlace(height)
+		return nil
+	}
 }
 
 // jumpToLatest scrolls the chat back to the newest line.

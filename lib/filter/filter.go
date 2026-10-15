@@ -281,9 +281,8 @@ func SanitizeForDisplay(s string) string {
 
 // osc8TargetAllowed reports whether an OSC payload is an OSC8 hyperlink
 // whose target (if any) uses an allowed scheme. The payload layout is
-// "8;params;uri", with an empty uri closing the link. Allowed schemes
-// are http(s) plus the client-generated in-app v2v://expand/ command.
-// Any control byte (C0 or DEL) inside the payload rejects it: the
+// "8;params;uri", with an empty uri closing the link. Only http(s) is
+// allowed. Any control byte (C0 or DEL) inside the payload rejects it: the
 // sequence is emitted verbatim, so a byte like BEL or a nested ESC would
 // end it early and let the rest run as a fresh escape sequence.
 func osc8TargetAllowed(payload string) bool {
@@ -306,8 +305,7 @@ func osc8TargetAllowed(payload string) bool {
 	}
 	lower := strings.ToLower(uri)
 	return strings.HasPrefix(lower, "http://") ||
-		strings.HasPrefix(lower, "https://") ||
-		strings.HasPrefix(lower, "v2v://expand/")
+		strings.HasPrefix(lower, "https://")
 }
 
 // SanitizeSingleLine is SanitizeForDisplay for one-line fields (time,
