@@ -142,6 +142,8 @@ type tuiStyles struct {
 	footer      lipgloss.Style
 	help        lipgloss.Style
 	helpTitle   lipgloss.Style
+	scrollTrack lipgloss.Style
+	scrollThumb lipgloss.Style
 }
 
 // newTUIStyles resolves the chrome styles, falling back to the built-in
@@ -164,6 +166,8 @@ func newTUIStyles() tuiStyles {
 		footer:      lipgloss.NewStyle().Foreground(dim),
 		help:        lipgloss.NewStyle().Border(rounded).BorderForeground(accent).Padding(1, 2),
 		helpTitle:   lipgloss.NewStyle().Bold(true),
+		scrollTrack: lipgloss.NewStyle().Foreground(dim),
+		scrollThumb: lipgloss.NewStyle().Foreground(accent),
 	}
 }
 
@@ -215,6 +219,9 @@ func newApp(sess *Session) *app {
 		styles:   newTUIStyles(),
 		viewport: viewport.New(viewport.WithWidth(80), viewport.WithHeight(10)),
 	}
+	// FillHeight keeps the viewport exactly viewport.Height() rows, so the
+	// scrollbar column always lines up with the chat rows.
+	a.viewport.FillHeight = true
 	a.term = &tuiTerm{lines: lines, sink: sink, closed: make(chan struct{})}
 
 	ti := textarea.New()
@@ -506,9 +513,70 @@ func (a *app) layout() {
 	if vpH < 1 {
 		vpH = 1
 	}
-	a.viewport.SetWidth(a.width)
+	a.viewport.SetWidth(a.chatWidth())
 	a.viewport.SetHeight(vpH)
 	a.input.SetWidth(a.width - 2)
+}
+
+// chatWidth is the viewport width: the terminal minus the scrollbar column.
+func (a *app) chatWidth() int {
+	if a.width <= 1 {
+		return 1
+	}
+	return a.width - 1
+}
+
+// scrollbarColumn renders the chat scrollbar as one column: a dim track with
+// an accent thumb. Blank while everything fits.
+func (a *app) scrollbarColumn() string {
+	h := a.viewport.Height()
+	if h <= 0 {
+		return ""
+	}
+	rows := make([]string, h)
+	total := a.viewport.TotalLineCount()
+	if total <= h {
+		for i := range rows {
+			rows[i] = " "
+		}
+		return strings.Join(rows, "\n")
+	}
+	thumb := h * h / total
+	if thumb < 1 {
+		thumb = 1
+	}
+	if thumb > h {
+		thumb = h
+	}
+	top := 0
+	if span := total - h; span > 0 {
+		top = a.viewport.YOffset() * (h - thumb) / span
+	}
+	for i := range rows {
+		if i >= top && i < top+thumb {
+			rows[i] = a.styles.scrollThumb.Render("┃")
+			continue
+		}
+		rows[i] = a.styles.scrollTrack.Render("│")
+	}
+	return strings.Join(rows, "\n")
+}
+
+// withScrollbar pads each chat row to the viewport width and appends the
+// scrollbar column, so the bar rides the right edge.
+func (a *app) withScrollbar(content string) string {
+	w := a.chatWidth()
+	bar := strings.Split(a.scrollbarColumn(), "\n")
+	lines := strings.Split(content, "\n")
+	for i := range lines {
+		if d := w - ansi.StringWidth(lines[i]); d > 0 {
+			lines[i] += strings.Repeat(" ", d)
+		}
+		if i < len(bar) {
+			lines[i] += bar[i]
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // refreshContent pulls the active tab and repaints the viewport. The
@@ -516,6 +584,24 @@ func (a *app) layout() {
 // under that lock and rendered outside it. The scroll position is kept
 // when the user is reading history; it only follows the bottom when the
 // viewport was already there.
+// chatContent renders the active buffer for the viewport. A date banner is
+// dropped when its day was already shown: the server sends one banner per
+// window, so paging older history can repeat a day.
+func chatContent(lines []entry) string {
+	var sb strings.Builder
+	seen := make(map[string]bool, 4)
+	for _, e := range lines {
+		if e.banner && e.day != "" {
+			if seen[e.day] {
+				continue
+			}
+			seen[e.day] = true
+		}
+		sb.WriteString(e.text())
+	}
+	return sb.String()
+}
+
 func (a *app) refreshContent() {
 	if !a.dirty {
 		return
@@ -533,16 +619,12 @@ func (a *app) refreshContent() {
 	}
 	a.sess.Display.DisplayMu.Unlock()
 
-	var sb strings.Builder
-	for _, e := range lines {
-		sb.WriteString(e.text())
-	}
 	prevLines := a.viewport.TotalLineCount()
 	// Wrap at word boundaries (ANSI-aware) before handing the text to the
 	// viewport, whose own SoftWrap would break mid-word.
-	content := sb.String()
-	if a.width > 0 {
-		content = ansi.Wrap(content, a.width, " ")
+	content := chatContent(lines)
+	if w := a.chatWidth(); w > 0 {
+		content = ansi.Wrap(content, w, " ")
 	}
 	a.viewport.SetContent(content)
 	newLines := a.viewport.TotalLineCount()
@@ -639,7 +721,7 @@ func (a *app) View() tea.View {
 		return tea.NewView("")
 	}
 	a.refreshContent()
-	chat := a.viewport.View()
+	chat := a.withScrollbar(a.viewport.View())
 	if a.showHelp {
 		chat = a.helpView()
 	}

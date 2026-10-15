@@ -15,6 +15,8 @@ type entry struct {
 	height    uint64 // chain height this entry reports; 0 when it has none
 	hashHex   string // short hash as printed, "" when none
 	collapsed bool   // body was folded, so /expand targets this entry
+	banner    bool   // a date banner row, so it can anchor older windows
+	day       string // sys_date of a banner, "" otherwise
 }
 
 // entryGapRow is the blank row that separates one entry from the next. It

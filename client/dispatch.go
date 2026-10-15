@@ -729,7 +729,7 @@ func (s *Session) olderAvailable() bool {
 	s.Display.DisplayMu.Lock()
 	defer s.Display.DisplayMu.Unlock()
 	oldest, ok := s.Chain.WireIdx.oldest()
-	return ok && oldest > 1 && !s.Chain.InOlder
+	return ok && oldest > 1 && !s.Chain.InOlder && !s.Chain.OlderExhausted
 }
 
 // uiStatus is a short footer status for in-flight background loads.

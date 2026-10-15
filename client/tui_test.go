@@ -7,6 +7,8 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 func newTestApp() (*app, *Session) {
@@ -295,6 +297,91 @@ func TestAppHelpToggleAndModal(t *testing.T) {
 	}
 }
 
+func TestAppOlderExhaustedStopsPaging(t *testing.T) {
+	a, sess := newTestApp()
+	sess.Conn = &stubConn{}
+	sess.Chain.WireIdx = newWireIndex(16)
+	sess.Chain.WireIdx.put(WireMessage{ChainHeight: 7})
+	sess.Display.DisplayMu.Lock()
+	sess.trackReplayWindow([]string{wire.TagHistory, wire.TagHistoryOlder}, true)
+	if !sess.Chain.InOlder {
+		sess.Display.DisplayMu.Unlock()
+		t.Fatal("an older header must mark the window in flight")
+	}
+	sess.trackReplayWindow([]string{wire.TagHistory, wire.TagHistoryOlder, wire.TagHistoryExhausted}, false)
+	sess.Display.DisplayMu.Unlock()
+	if sess.Chain.InOlder || !sess.Chain.OlderExhausted {
+		t.Fatalf("exhausted footer: InOlder=%v OlderExhausted=%v", sess.Chain.InOlder, sess.Chain.OlderExhausted)
+	}
+	if sess.olderAvailable() {
+		t.Fatal("older must not be available once exhausted")
+	}
+	a.atTopArmed = true
+	a.maybeLoadOlder()
+	if a.pendingOlder {
+		t.Fatal("must not request older after exhaustion")
+	}
+}
+
+func TestOlderWindowPrepends(t *testing.T) {
+	_, sess := newTestApp()
+	sess.Display.DisplayMu.Lock()
+	sess.emitTabLive(true, TabChat, noticeEntry("| load notice"))
+	sess.emitTabLive(true, TabChat, entry{header: "| 10:00 A", height: 5})
+	sess.trackReplayWindow([]string{wire.TagHistory, wire.TagHistoryOlder}, true)
+	sess.emitTabLive(true, TabChat, noticeEntry("| --- Lịch sử cũ ---"))
+	sess.emitTabLive(true, TabChat, entry{header: "| 09:00 B", height: 3})
+	sess.trackReplayWindow([]string{wire.TagHistory, wire.TagHistoryOlder, wire.TagHistoryEnd}, false)
+	lines := append([]entry{}, sess.Display.TabChat.lines...)
+	sess.Display.DisplayMu.Unlock()
+	got := make([]string, len(lines))
+	for i, e := range lines {
+		got[i] = e.header
+	}
+	want := []string{"| load notice", "| --- Lịch sử cũ ---", "| 09:00 B", "| 10:00 A"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("order = %q, want %q", got, want)
+	}
+}
+
+func TestOlderWindowAnchorsAboveBanner(t *testing.T) {
+	_, sess := newTestApp()
+	sess.Display.DisplayMu.Lock()
+	sess.emitTabLive(true, TabChat, noticeEntry("| load notice"))
+	sess.emitTabLive(true, TabChat, entry{header: "| --- Ngày 11/10/2026 ---", banner: true, day: "2026-10-11"})
+	sess.emitTabLive(true, TabChat, entry{header: "| 10:00 A", height: 5})
+	sess.trackReplayWindow([]string{wire.TagHistory, wire.TagHistoryOlder}, true)
+	sess.emitTabLive(true, TabChat, entry{header: "| 09:00 B", height: 3})
+	sess.trackReplayWindow([]string{wire.TagHistory, wire.TagHistoryOlder, wire.TagHistoryEnd}, false)
+	lines := append([]entry{}, sess.Display.TabChat.lines...)
+	sess.Display.DisplayMu.Unlock()
+	got := make([]string, len(lines))
+	for i, e := range lines {
+		got[i] = e.header
+	}
+	want := []string{"| load notice", "| 09:00 B", "| --- Ngày 11/10/2026 ---", "| 10:00 A"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("order = %q, want %q", got, want)
+	}
+}
+
+func TestChatContentDedupesDateBanners(t *testing.T) {
+	lines := []entry{
+		{header: "| --- Ngày 11/10/2026 ---", banner: true, day: "2026-10-11"},
+		{header: "| 09:00 B", height: 3},
+		{header: "| --- Ngày 11/10/2026 ---", banner: true, day: "2026-10-11"},
+		{header: "| 10:00 A", height: 5},
+		{header: "| --- Ngày 12/10/2026 ---", banner: true, day: "2026-10-12"},
+	}
+	got := stripANSIForFind(chatContent(lines))
+	if n := strings.Count(got, "Ngày 11/10/2026"); n != 1 {
+		t.Fatalf("a repeated day must keep one banner, got %d: %q", n, got)
+	}
+	if n := strings.Count(got, "Ngày 12/10/2026"); n != 1 {
+		t.Fatalf("a new day must keep its banner, got %d: %q", n, got)
+	}
+}
+
 func TestAppMaybeLoadOlderGuards(t *testing.T) {
 	a, sess := newTestApp()
 	sess.Chain.WireIdx = newWireIndex(16)
@@ -541,6 +628,35 @@ func TestAppMouseWheelScrolls(t *testing.T) {
 	a.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	if a.viewport.YOffset() >= before {
 		t.Fatalf("wheel up must scroll up: before=%d after=%d", before, a.viewport.YOffset())
+	}
+}
+
+func TestAppScrollbar(t *testing.T) {
+	a, sess := newTestApp()
+	a.dirty = true
+	a.refreshContent()
+	if col := strings.TrimSpace(stripANSIForFind(a.scrollbarColumn())); col != "" {
+		t.Fatalf("scrollbar must be blank when the chat fits: %q", col)
+	}
+	for i := 0; i < 200; i++ {
+		sess.Display.TabChat.append(noticeEntry("line"))
+	}
+	a.dirty = true
+	a.refreshContent()
+	col := stripANSIForFind(a.scrollbarColumn())
+	if !strings.Contains(col, "┃") || !strings.Contains(col, "│") {
+		t.Fatalf("scrollbar must have a track and a thumb: %q", col)
+	}
+	if got := len(strings.Split(col, "\n")); got != a.viewport.Height() {
+		t.Fatalf("scrollbar rows = %d, want %d", got, a.viewport.Height())
+	}
+	a.viewport.GotoBottom()
+	if bottom := stripANSIForFind(a.scrollbarColumn()); !strings.HasSuffix(bottom, "┃") {
+		t.Fatalf("thumb must reach the bottom: %q", bottom)
+	}
+	a.viewport.GotoTop()
+	if top := stripANSIForFind(a.scrollbarColumn()); !strings.HasPrefix(top, "┃") {
+		t.Fatalf("thumb must reach the top: %q", top)
 	}
 }
 

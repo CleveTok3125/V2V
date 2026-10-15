@@ -356,6 +356,10 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (e entry, t
 	tab = TabChat
 	if msg.Type == "system" {
 		e.header = fmt.Sprintf("| %s", filter.SanitizeForDisplay(msg.Text))
+		// sys_date marks a date banner: it anchors older windows and is
+		// deduped when paging repeats a day.
+		e.banner = msg.SysDate != ""
+		e.day = msg.SysDate
 		return e, tabForWire(msg)
 	}
 	// Author and chain position share one header row; the text hangs below
