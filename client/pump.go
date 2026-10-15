@@ -76,6 +76,8 @@ func (s *Session) trackReplayWindow(tags []string, start bool) {
 		switch {
 		case wire.HasTag(tags, wire.TagHistoryOlder):
 			s.Chain.InOlder = true
+			s.Chain.OlderInsert = olderAnchor(s.Display.TabChat)
+			s.Chain.OlderInsertSys = olderAnchor(s.Display.TabSys)
 		case wire.HasTag(tags, wire.TagHistoryRecover):
 			s.Chain.InRecover = true
 		default:
@@ -84,6 +86,10 @@ func (s *Session) trackReplayWindow(tags []string, start bool) {
 		return
 	}
 	s.flushDateBannerLocked()
+	if wire.HasTag(tags, wire.TagHistoryOlder) && wire.HasTag(tags, wire.TagHistoryExhausted) {
+		// Nothing below the oldest known height: stop asking.
+		s.Chain.OlderExhausted = true
+	}
 	s.Chain.InOlder = false
 	s.Chain.InRecover = false
 	s.Pending.PendingDateBannerWire = nil

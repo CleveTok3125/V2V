@@ -177,6 +177,16 @@ type ChainState struct {
 	// without link verification or echo matching. Set and cleared
 	// under DisplayMu like InSync.
 	InOlder bool
+	// OlderExhausted records that the server answered the last older
+	// request with an exhausted window (nothing below the oldest known
+	// height), so page-up stops asking for more.
+	OlderExhausted bool
+	// OlderInsert/OlderInsertSys are where the next entry of the in-flight
+	// older window is spliced into its buffer. Its wires predate everything
+	// buffered, so they go before it, in arrival order. Reset on the window
+	// header and advanced as entries land.
+	OlderInsert    int
+	OlderInsertSys int
 	// InRecover marks a recovery window in flight: the server is
 	// refilling missed heights at or above the running tip's past.
 	// Recovery wires verify against their own anchor (the tip at

@@ -205,6 +205,44 @@ func (s *Session) emitTab(tab int, e entry) {
 	s.emitTabLive(true, tab, e)
 }
 
+// olderAnchor is where an older window splices into a buffer: just above the
+// oldest buffered message, so the startup notices stay at the top instead of
+// being pushed under the older history. Falls back to the front when the
+// buffer holds no chained message yet.
+func olderAnchor(buf *tabBuffer) int {
+	if buf == nil {
+		return 0
+	}
+	for i, e := range buf.lines {
+		if e.height > 0 || e.banner {
+			return i
+		}
+	}
+	return 0
+}
+
+// placeEntry writes e into its tab buffer. During an on-demand older window
+// its wires predate everything buffered, so they are spliced in at the anchor
+// (in arrival order) instead of appended; every other line appends. Caller
+// must hold DisplayMu.
+func (s *Session) placeEntry(tab int, e entry) {
+	if tab == TabSystem {
+		if s.Chain.InOlder {
+			s.Display.TabSys.insertAt(s.Chain.OlderInsertSys, []entry{e})
+			s.Chain.OlderInsertSys++
+			return
+		}
+		s.Display.TabSys.append(e)
+		return
+	}
+	if s.Chain.InOlder {
+		s.Display.TabChat.insertAt(s.Chain.OlderInsert, []entry{e})
+		s.Chain.OlderInsert++
+		return
+	}
+	s.Display.TabChat.append(e)
+}
+
 // emitTabLive appends a line to its tab buffer and prints it live only
 // when live is true. A muted line still lands in the buffer, so it
 // stays reviewable in the system tab and on tab switches. Caller must
@@ -213,18 +251,14 @@ func (s *Session) emitTabLive(live bool, tab int, e entry) {
 	if s.Display.Sink != nil {
 		// Tab 1 is the full stream (chat plus local and system lines, in
 		// arrival order); tab 2 is system-only.
-		s.Display.TabChat.append(e)
+		s.placeEntry(TabChat, e)
 		if tab == TabSystem {
-			s.Display.TabSys.append(e)
+			s.placeEntry(TabSystem, e)
 		}
 		s.Display.Sink.Notify()
 		return
 	}
-	if tab == TabChat {
-		s.Display.TabChat.append(e)
-	} else {
-		s.Display.TabSys.append(e)
-	}
+	s.placeEntry(tab, e)
 	if !live {
 		return
 	}
