@@ -373,28 +373,53 @@ import { gateFetch } from "./pow_bridge.js";
     // Monospace advance width ~= 0.6em, used for the initial font-size guess.
     var CHAR_ASPECT = 0.6;
     var resizeTimer = null;
-    // measureCell returns the rendered size of one character cell for the
-    // terminal font at the given px size, measured with a detached probe span.
+    // measureCell mirrors the xterm cell metrics.
+    // Canvas measureText("W") with device-pixel rounding; DOM probe fallback.
     function measureCell(fontSize) {
-        var probe = document.createElement("span");
-        probe.style.cssText =
-            "position:absolute;top:-9999px;left:0;visibility:hidden;white-space:pre;" +
-                "font-family:" + FONT_FAMILY + ";" +
-                "font-size:" + fontSize + "px;line-height:normal;";
-        probe.textContent = "MMMMMMMMMM";
-        document.body.appendChild(probe);
-        var rect = probe.getBoundingClientRect();
-        var cell = { w: rect.width / 10, h: rect.height };
-        document.body.removeChild(probe);
-        return cell;
+        var dpr = window.devicePixelRatio || 1;
+        var letterSpacing = (term && term.options && term.options.letterSpacing) || 0;
+        var lineHeight = (term && term.options && term.options.lineHeight) || 1;
+        var charW = 0;
+        var charH = 0;
+        try {
+            var canvas = document.createElement("canvas");
+            var ctx = canvas.getContext("2d");
+            if (ctx) {
+                ctx.font = fontSize + "px " + FONT_FAMILY;
+                var m = ctx.measureText("W");
+                if (m && "width" in m && "fontBoundingBoxAscent" in m && "fontBoundingBoxDescent" in m) {
+                    charW = m.width;
+                    charH = m.fontBoundingBoxAscent + m.fontBoundingBoxDescent;
+                }
+            }
+        }
+        catch (e) { /* fall through to DOM probe */ }
+        if (!(charW > 0 && charH > 0)) {
+            var probe = document.createElement("span");
+            probe.textContent = "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW";
+            probe.style.cssText =
+                "display:inline-block;visibility:hidden;position:absolute;top:0;left:-9999em;" +
+                    "white-space:pre;font-kerning:none;line-height:normal;" +
+                    "font-family:" + FONT_FAMILY + ";" +
+                    "font-size:" + fontSize + "px;";
+            document.body.appendChild(probe);
+            charW = probe.offsetWidth / 32;
+            charH = probe.offsetHeight;
+            document.body.removeChild(probe);
+        }
+        if (!(charW > 0 && charH > 0)) {
+            return { w: CHAR_ASPECT * fontSize, h: fontSize };
+        }
+        var deviceCellW = charW * dpr + Math.round(letterSpacing);
+        var deviceCellH = Math.floor(Math.ceil(charH * dpr) * lineHeight);
+        return { w: deviceCellW / dpr, h: deviceCellH / dpr };
     }
     // resizeTerminal implements dynamic scale + fit: the font size is derived
     // from the container so the grid fills the available space, with signals
     // from devicePixelRatio (crispness floor, browser-zoom aware) and pointer
     // coarseness (mobile gets fewer, larger columns). It runs before any wasm
     // output so long messages wrap correctly from the first line, and again on
-    // every resize/orientation change (debounced); xterm reflows the buffer,
-    // and v2vRefresh lets the Go side redraw prompt + draft afterwards.
+    // every resize/orientation change (debounced).
     function resizeTerminal() {
         if (!term)
             return;
@@ -424,15 +449,16 @@ import { gateFetch } from "./pow_bridge.js";
         var rows = Math.max(8, Math.floor(H / cell.h));
         if (term.cols !== cols || term.rows !== rows) {
             term.resize(cols, rows);
+            // Resize reflow desyncs the relative-cursor renderer.
+            // Blank the grid so the repaint starts from a known state.
+            term.clear();
         }
         term.scrollToBottom();
-        // Tell the Go editor the new grid width (it wraps multi-row drafts on
-        // it), then let it repaint prompt + draft at the new geometry.
+        // One ordered size message is enough.
+        // WindowSizeMsg resizes the renderer, refits layout, marks dirty.
+        // A second refresh would race it and paint a stale-size frame first.
         if (typeof window.v2vSetSize === "function") {
             window.v2vSetSize(term.cols, term.rows);
-        }
-        if (typeof window.v2vRefresh === "function") {
-            window.v2vRefresh();
         }
     }
     function scheduleResize() {
@@ -751,7 +777,10 @@ import { gateFetch } from "./pow_bridge.js";
             fontSize: 14,
             fontFamily: FONT_FAMILY,
             convertEol: true,
-            scrollback: 10000,
+            // The app paints a full screen and scrolls its own chat viewport with
+            // its own bar, so a terminal scrollback would only add a second
+            // scrollbar next to it.
+            scrollback: 0,
             theme: { background: "#101014" },
         });
         term.open(host);
