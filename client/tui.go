@@ -126,13 +126,18 @@ func (t *tuiTerm) Refresh()           {}
 func (t *tuiTerm) Close()             { t.once.Do(func() { close(t.closed) }) }
 func (t *tuiTerm) Writer() io.Writer  { return io.Discard }
 
+// commandBorderColor is the input border in slash command mode: ANSI 256
+// index 198 (#ff0087), the closest match to #ff2776.
+const commandBorderColor = "198"
+
 // tuiStyles holds the chrome styles. Colours come from the client config
 // theme (ui.theme.accent) instead of being hardcoded, so a themed config is
 // honoured; the idle input border and the footer use a neutral grey.
 type tuiStyles struct {
 	tabActive   lipgloss.Style
 	tabInactive lipgloss.Style
-	inputChat   lipgloss.Style
+	inputEmpty  lipgloss.Style
+	inputText   lipgloss.Style
 	inputCmd    lipgloss.Style
 	footer      lipgloss.Style
 	help        lipgloss.Style
@@ -153,13 +158,22 @@ func newTUIStyles() tuiStyles {
 	return tuiStyles{
 		tabActive:   lipgloss.NewStyle().Bold(true).Foreground(accent).Padding(0, 1),
 		tabInactive: lipgloss.NewStyle().Foreground(dim).Padding(0, 1),
-		inputChat:   lipgloss.NewStyle().Border(rounded).BorderForeground(dim),
-		inputCmd:    lipgloss.NewStyle().Border(rounded).BorderForeground(accent),
+		inputEmpty:  lipgloss.NewStyle().Border(rounded).BorderForeground(dim),
+		inputText:   lipgloss.NewStyle().Border(rounded).BorderForeground(accent),
+		inputCmd:    lipgloss.NewStyle().Border(rounded).BorderForeground(lipgloss.Color(commandBorderColor)),
 		footer:      lipgloss.NewStyle().Foreground(dim),
 		help:        lipgloss.NewStyle().Border(rounded).BorderForeground(accent).Padding(1, 2),
 		helpTitle:   lipgloss.NewStyle().Bold(true),
 	}
 }
+
+// Input border modes: grey when the draft is empty, accent blue when it has
+// text, and the command colour in slash command mode.
+const (
+	inputModeEmpty = iota
+	inputModeText
+	inputModeCommand
+)
 
 // app is the Bubble Tea model: a tab bar, the chat viewport and the input
 // box. It reads the session buffers on demand and never touches the
@@ -561,11 +575,27 @@ func (a *app) renderTabs() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
-func (a *app) renderInput() string {
-	if a.cmdMode {
-		return a.styles.inputCmd.Render(a.input.View())
+// inputMode picks the input border colour from the draft state.
+func (a *app) inputMode() int {
+	switch {
+	case a.cmdMode:
+		return inputModeCommand
+	case a.input.Value() != "":
+		return inputModeText
+	default:
+		return inputModeEmpty
 	}
-	return a.styles.inputChat.Render(a.input.View())
+}
+
+func (a *app) renderInput() string {
+	switch a.inputMode() {
+	case inputModeCommand:
+		return a.styles.inputCmd.Render(a.input.View())
+	case inputModeText:
+		return a.styles.inputText.Render(a.input.View())
+	default:
+		return a.styles.inputEmpty.Render(a.input.View())
+	}
 }
 
 // renderFooter shows transient state: a background-load status, or the reply
