@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 
@@ -91,8 +92,8 @@ func clientReadLimit() int64 {
 }
 
 // inputTerminal abstracts the interactive input/output the chat loop uses.
-// The desktop build wraps chzyer/readline (full line editing); the wasm build
-// pipes bytes/lines to and from the browser terminal emulator.
+// The real terminal is the Bubble Tea app (see tui.go and tui_other.go /
+// tui_wasm.go); tests use a scripted fake.
 type inputTerminal interface {
 	ReadLine() (string, error)
 	SetPrompt(p string)
@@ -104,8 +105,8 @@ type inputTerminal interface {
 // dialWS opens the WebSocket connection (platform-specific, see ws_other.go /
 // ws_wasm.go).
 //
-// newInputTerminal creates the interactive terminal (platform-specific, see
-// input_other.go / input_wasm.go).
+// runTUI runs the Bubble Tea app (platform-specific, see tui_other.go /
+// tui_wasm.go).
 //
 // parseFlags resolves CLI arguments / web config (platform-specific, see
 // config_other.go / config_wasm.go).
@@ -154,29 +155,46 @@ func main() {
 		return
 	}
 	defer sess.Conn.Close()
+
+	// The app owns the screen and the input box; the session keeps the
+	// state machine and the tab buffers. Wire it before initUI so every
+	// buffer change reaches the app.
+	tui := newApp(sess)
+	sess.Display.Term = tui.term
+	sess.Display.Sink = tui.sink
+
 	if !sess.initUI() {
 		return
 	}
 	defer sess.Display.Term.Close()
 	defer ClearLoadedPassphrase()
 
-	// The welcome line is held, not printed yet: it is released after
-	// the join replay so it lands at the bottom of the loaded history
+	// The welcome line is held, not shown yet: it is released after the
+	// join replay so it lands at the bottom of the loaded history
 	// instead of above it. A short timer in the pump releases it when
 	// no replay arrives.
 	sess.Display.PendingGreeting = "\nĐã kết nối với username: " + serverField(sess.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n"
 
 	go sess.runPump()
+	go sess.runInputLoop()
 
+	if err := runTUI(tui); err != nil {
+		fmt.Fprintln(os.Stderr, "❌ Lỗi TUI:", err)
+	}
+	sess.gracefulQuit()
+	notifyQuit()
+}
+
+// runInputLoop is the session's input half: it reads submitted lines from
+// the terminal (the TUI app on a real run) and drives dispatch and send.
+// The app owns the draft, so a submitted line already carries every
+// newline the user typed.
+func (s *Session) runInputLoop() {
 	for {
-		// Everything queued by the last command must be on screen before
-		// readline draws its prompt, or the tail of it lands after the
-		// prompt and reads as part of the input line.
-		sess.flushOutputNow()
-		text, err := sess.Display.Term.ReadLine()
+		text, err := s.Display.Term.ReadLine()
 		if err != nil {
-			if sess.handleReadErr(err) == cmdQuit {
-				break
+			if s.handleReadErr(err) == cmdQuit {
+				return
 			}
 			continue
 		}
@@ -188,34 +206,33 @@ func main() {
 		// The submitted line becomes a buffer entry the session owns: the
 		// pending block and then the server echo replace it in place, so the
 		// message never occupies two rows.
-		slot := sess.echoInputLine(text)
-		sess.handleDraftGate(text)
-		text, act := sess.dispatch(text)
+		slot := s.echoInputLine(text)
+		s.handleDraftGate(text)
+		text, act := s.dispatch(text)
 		if act == cmdQuit {
-			break
+			return
 		}
 		if act == cmdDone {
 			continue
 		}
 
-		body, slot, ok := sess.collectBody(text, slot)
+		body, slot, ok := s.collectBody(text, slot)
 		if !ok {
 			// Codeblock canceled: no send happens, so drop the
 			// one-shot reply target (inline /reply or draft).
-			sess.Pending.PendingReplyTo = 0
+			s.Pending.PendingReplyTo = 0
 			continue
 		}
-		if !sess.checkSendGuards(body) {
+		if !s.checkSendGuards(body) {
 			// Guard rejected the message: same one-shot cleanup; only
 			// sendMessage may consume PendingReplyTo. The echo entry stays,
 			// so the rejected line is still on the record.
-			sess.Pending.PendingReplyTo = 0
+			s.Pending.PendingReplyTo = 0
 			continue
 		}
-		placeholder, slot, phShown := sess.renderPlaceholder(body, slot)
-		if serr := sess.sendMessage(body, placeholder, slot, phShown); serr != nil {
-			break
+		placeholder, slot, phShown := s.renderPlaceholder(body, slot)
+		if serr := s.sendMessage(body, placeholder, slot, phShown); serr != nil {
+			return
 		}
-
 	}
 }

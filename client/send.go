@@ -65,6 +65,11 @@ func (s *Session) extendInputEcho(slot slotRef, lines []string) slotRef {
 // collectBody gathers a multi-line codeblock when fenced, extending the input
 // echo's entry as it goes.
 func (s *Session) collectBody(text string, slot slotRef) (string, slotRef, bool) {
+	if s.Display.Sink != nil {
+		// The TUI textarea already holds the whole message, newlines and
+		// all, so there is no continuation to read.
+		return text, slot, true
+	}
 	if !strings.HasPrefix(text, "```") || !markup.NeedsContinuation(text) {
 		// Single-line fence (```code```) or plain text: complete already.
 		return text, slot, true

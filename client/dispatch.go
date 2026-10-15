@@ -125,33 +125,42 @@ func (s *Session) handleDraftGate(text string) {
 // gracefulQuit closes the connection cleanly like /quit does, so both
 // an explicit quit command and an EOF (Ctrl+D) leave no dangling state.
 func (s *Session) gracefulQuit() {
-	s.Quitting <- true
-	s.flushChainTip()
-	s.SendMu.Lock()
-	s.Conn.WriteMessage(wsCloseMessage, []byte{})
-	s.SendMu.Unlock()
-	if s.TripPriv != nil {
-		for i := range s.TripPriv {
-			s.TripPriv[i] = 0
+	s.quitOnce.Do(func() {
+		s.Quitting <- true
+		s.flushChainTip()
+		s.SendMu.Lock()
+		s.Conn.WriteMessage(wsCloseMessage, []byte{})
+		s.SendMu.Unlock()
+		if s.TripPriv != nil {
+			for i := range s.TripPriv {
+				s.TripPriv[i] = 0
+			}
 		}
-	}
-	s.Display.DisplayMu.Lock()
-	s.releaseCatchupLocked()
-	s.flushPendingGreetingLocked()
-	s.Display.DisplayMu.Unlock()
-	s.enqueueOutput("| [Local]: 👋 Đang ngắt kết nối... Tạm biệt!\n")
-	// Let the goodbye flush and the pump tear down instead of racing
-	// them: return as soon as the pump exits, same 500ms cap as the
-	// old fixed sleep when it never does.
-	if s.PumpDone != nil {
-		select {
-		case <-s.PumpDone:
-		case <-time.After(500 * time.Millisecond):
+		s.Display.DisplayMu.Lock()
+		s.releaseCatchupLocked()
+		s.flushPendingGreetingLocked()
+		s.Display.DisplayMu.Unlock()
+		if s.Display.Sink == nil {
+			s.enqueueOutput("| [Local]: 👋 Đang ngắt kết nối... Tạm biệt!\n")
 		}
-	}
-	// Drain the terminal queue so no queued line is lost on exit.
-	s.flushOutputNow()
-	notifyQuit()
+		// Let the goodbye flush and the pump tear down instead of racing
+		// them: return as soon as the pump exits, same 500ms cap as the
+		// old fixed sleep when it never does.
+		if s.PumpDone != nil {
+			select {
+			case <-s.PumpDone:
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
+		// Drain the terminal queue so no queued line is lost on exit.
+		s.flushOutputNow()
+		if s.Display.Sink != nil {
+			// The app stops the run loop; main restores the terminal.
+			s.Display.Sink.Quit()
+			return
+		}
+		notifyQuit()
+	})
 }
 
 func (s *Session) cmdWhoami(text string) bool {
@@ -405,6 +414,14 @@ func (s *Session) cmdClear(text string) bool {
 	s.Display.DisplayMu.Lock()
 	s.releaseCatchupLocked()
 	s.Display.PendingGreeting = ""
+	if s.Display.Sink != nil {
+		s.Display.TabChat.reset()
+		banner := "Đã kết nối với username: " + serverField(s.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n"
+		s.Display.TabChat.append(noticeEntry(strings.TrimSuffix(banner, "\n")))
+		s.Display.Sink.Notify()
+		s.Display.DisplayMu.Unlock()
+		return true
+	}
 	s.Display.DisplayMu.Unlock()
 	s.enqueueOutput("\033[H\033[2J")
 	s.enqueueOutput("Đã kết nối với username: " + serverField(s.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n")

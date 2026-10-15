@@ -1050,6 +1050,9 @@ func (s *Session) renderRecoveredInPlace(msg WireMessage) {
 		chatIdx = len(s.Display.TabChat.lines)
 	}
 	s.Display.TabChat.insertAt(chatIdx, blockChat)
+	if s.Display.Sink != nil {
+		s.Display.Sink.Notify()
+	}
 }
 
 // finishRecovery settles the pending refill at its trailer: a fully
@@ -1124,6 +1127,9 @@ func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
 		pm.epoch == s.Display.LayoutEpoch
 	tail := append([]entry{}, lines[pm.slot.index+1:]...)
 	s.Display.TabChat.spliceOut(pm.slot.index, pm.slot.index+1)
+	if s.Display.Sink != nil {
+		s.Display.Sink.Notify()
+	}
 	if !onScreen {
 		return
 	}

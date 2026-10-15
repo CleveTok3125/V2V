@@ -65,6 +65,12 @@ func (b *tabBuffer) append(e entry) {
 	b.evict()
 }
 
+// reset drops every entry, keeping the configured caps.
+func (b *tabBuffer) reset() {
+	b.lines = nil
+	b.size = 0
+}
+
 func (b *tabBuffer) evict() {
 	for (len(b.lines) > b.maxLines || b.size > b.maxBytes) && len(b.lines) > 0 {
 		b.size -= len(b.lines[0].text())

@@ -57,6 +57,9 @@ type Session struct {
 	// instead of racing a fixed sleep. Nil for test-built sessions
 	// that never start a pump: gracefulQuit skips the wait then.
 	PumpDone chan struct{}
+	// quitOnce makes gracefulQuit idempotent: /quit, Ctrl+D and a read
+	// failure can all reach it, and the socket teardown must run once.
+	quitOnce sync.Once
 	// SendMu serializes socket writes: the input loop owns them, and
 	// the background PoW solver must not interleave frames.
 	SendMu sync.Mutex
@@ -96,8 +99,11 @@ type DisplayState struct {
 	// one row past the block and moving up over it lands on its first row.
 	LayoutEpoch uint64
 
-	// Terminal and output funnel.
+	// Terminal and output funnel. When Sink is set the client runs the
+	// Bubble Tea app: the session keeps its tab buffers and wakes the app,
+	// which pulls the active tab and paints it.
 	Term inputTerminal
+	Sink uiSink
 	Out  io.Writer
 
 	// Async terminal queue. Producers (the socket read loop, the input
@@ -532,10 +538,10 @@ func (s *Session) connect() bool {
 
 // initUI opens the terminal, tabs, toggles and chain state.
 func (s *Session) initUI() bool {
-	var err error
-	s.Display.Term, err = newInputTerminal()
-	if err != nil {
-		fmt.Println("❌ Lỗi khởi tạo terminal:", err)
+	// The TUI app supplies the terminal: it owns the screen and hands the
+	// session loop the lines the user submits.
+	if s.Display.Term == nil {
+		fmt.Println("❌ Lỗi: terminal chưa được khởi tạo")
 		return false
 	}
 	s.Display.Out = s.Display.Term.Writer()
