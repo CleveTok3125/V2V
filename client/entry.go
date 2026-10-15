@@ -18,7 +18,11 @@ type entry struct {
 	banner    bool   // a date banner row, so it can anchor older windows
 	day       string // sys_date of a banner, "" otherwise
 	kind      int    // box border colour: kindChat, kindLocal, kindSystem
-	muted     bool   // muted notice: buffered for the system tab, hidden in chat
+	quoteKind int    // border colour of the nested quote block, same scale
+	// quoteEntry, when set, is the block nested inside this one: it renders
+	// with its own frame, structure and style instead of a plain quote row.
+	quoteEntry *entry
+	muted      bool // muted notice: buffered for the system tab, hidden in chat
 }
 
 // Entry box kinds pick the border colour and the side of the viewport.
@@ -47,6 +51,10 @@ const entryGapRow = "\n"
 // so it never leaves a stray blank behind.
 func (e entry) text() string {
 	var sb strings.Builder
+	if e.quoteEntry != nil {
+		sb.WriteString(strings.TrimRight(e.quoteEntry.text(), "\n"))
+		sb.WriteString("\n")
+	}
 	for _, part := range [...]string{e.quote, e.header, e.body} {
 		if part == "" {
 			continue

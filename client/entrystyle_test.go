@@ -19,7 +19,4 @@ func TestEntryChromeStyles(t *testing.T) {
 	if got := linkText("https://example.com/x", "y"); got != "\x1b]8;;https://example.com/x\x1b\\y\x1b]8;;\x1b\\" {
 		t.Fatalf("link = %q", got)
 	}
-	if got := heredocMarker("<<<<<<<", 12); got != "\x1b[90m<<<<<<< #12\x1b[m" {
-		t.Fatalf("marker = %q", got)
-	}
 }

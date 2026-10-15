@@ -680,8 +680,27 @@ func (a *app) chatContent(lines []entry, skipMuted bool) string {
 // The border colour follows the entry kind. The frame, the divider and the
 // nested quote block are drawn here because lipgloss has no border label, mid
 // divider, or nested block.
+// boxStyle picks the border colour of a block from its kind, so a nested
+// quote keeps the real style of the block it shows.
+func (a *app) boxStyle(kind int) lipgloss.Style {
+	switch kind {
+	case kindLocal, kindNotice:
+		return a.styles.boxLocal
+	case kindSystem:
+		return a.styles.boxSystem
+	default:
+		return a.styles.boxChat
+	}
+}
+
 func (a *app) renderEntryBox(e entry) string {
-	maxW := a.chatWidth()
+	return a.renderEntryBoxMax(e, a.chatWidth(), true)
+}
+
+// renderEntryBoxMax draws the block inside maxW columns. A nested block is
+// given maxW minus this box's frame, so an outer box never overflows the
+// viewport however wide the block it holds is.
+func (a *app) renderEntryBoxMax(e entry, maxW int, align bool) string {
 	if maxW < 12 {
 		maxW = 12
 	}
@@ -689,9 +708,19 @@ func (a *app) renderEntryBox(e entry) string {
 	bodyText := e.body
 	quoteText := e.quote
 
-	// Width: the block hugs the widest row, capped at the viewport.
+	// Width: the block hugs the widest row, capped at the viewport. A nested
+	// block brings its own frame, so its width counts too.
 	natural := maxLineWidth(headerText, bodyText)
-	if quoteText != "" {
+	var nestedBlock []string
+	if e.quoteEntry != nil {
+		// A nested block sits where the outer block does: its own side
+		// (our message right, everyone else left) belongs to the top level.
+		nested := a.renderEntryBoxMax(*e.quoteEntry, maxW-4, false)
+		nestedBlock = strings.Split(nested, "\n")
+		if nw := maxLineWidth(nested); nw > natural {
+			natural = nw
+		}
+	} else if quoteText != "" {
 		if qn := maxLineWidth(quoteText) + 4; qn > natural {
 			natural = qn
 		}
@@ -707,26 +736,23 @@ func (a *app) renderEntryBox(e entry) string {
 
 	headerRows := wrapText(headerText, inner)
 	bodyRows := wrapText(bodyText, inner)
-	if quoteText != "" {
+	if e.quoteEntry != nil {
+		// The nested block keeps its own frame and structure: place its rows
+		// as they are.
+		bodyRows = append(nestedBlock, bodyRows...)
+	} else if quoteText != "" {
 		quoteW := maxLineWidth(quoteText) + 4
 		if quoteW > inner {
 			quoteW = inner
 		}
-		quote := drawBox(nil, wrapText(quoteText, quoteW-4), quoteW, a.styles.boxQuote)
+		quote := drawBox(nil, wrapText(quoteText, quoteW-4), quoteW, a.boxStyle(e.quoteKind))
 		bodyRows = append(strings.Split(quote, "\n"), bodyRows...)
 	}
 	if len(headerRows) == 0 && len(bodyRows) == 0 {
 		return ""
 	}
-	border := a.styles.boxChat
-	switch e.kind {
-	case kindLocal, kindNotice:
-		border = a.styles.boxLocal
-	case kindSystem:
-		border = a.styles.boxSystem
-	}
-	box := drawBox(headerRows, bodyRows, w, border)
-	if e.rightAligned() && maxW > w {
+	box := drawBox(headerRows, bodyRows, w, a.boxStyle(e.kind))
+	if align && e.rightAligned() && maxW > w {
 		box = padLeftLines(box, maxW-w)
 	}
 	return box

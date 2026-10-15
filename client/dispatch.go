@@ -534,37 +534,33 @@ func (s *Session) cmdFind(text string) bool {
 		return true
 	}
 	s.Display.DisplayMu.Lock()
-	shown := 0
-	header := fmt.Sprintf("| [Local]: Tìm #%d", height)
-	if suffix != "" {
-		header += ":" + suffix
-	}
-	rows := []string{header + " trong bộ nhớ:"}
-	// Snapshot matches before emitting: emitting appends to
-	// sess.Display.TabSys, whose eviction could shift indices mid-scan.
-	var hits []string
+	// Snapshot the matches as whole entries: the found block is emitted as
+	// it stands, so it reads as the message it is instead of a wrapped dump.
+	var found []entry
+	seen := map[entry]bool{}
 	for _, buf := range []*tabBuffer{s.Display.TabChat, s.Display.TabSys} {
 		if idx := entryIndexByHeight(buf.lines, height, suffix); idx >= 0 {
-			// One entry holds the whole message, so there is no second row
-			// to pair it with. Its rendered text ends with the gap row, which
-			// the join would double.
-			hits = append(hits, strings.TrimRight(buf.lines[idx].text(), "\n"))
-			shown++
+			// A line buffered in both tabs is one hit, not two.
+			if e := buf.lines[idx]; !seen[e] {
+				seen[e] = true
+				found = append(found, e)
+			}
 		}
 	}
-	// Replay inside the same dim heredoc frame as /expand so replayed
-	// lines never read as live chat. No buffer surgery: markers only.
-	if shown > 0 {
-		rows = append(rows, fmt.Sprintf("| [Local]: %s", heredocMarker("<<<<<<<", height)))
-	}
-	rows = append(rows, hits...)
-	if shown == 0 {
-		rows = append(rows, "| [Local]: Không thấy (tin cũ đã bị evict khỏi bộ nhớ hoặc chưa sync).")
+	if len(found) == 0 {
+		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Không thấy #%d trong bộ nhớ (tin cũ đã bị evict hoặc chưa sync).\n", height))
 	} else {
-		rows = append(rows, fmt.Sprintf("| [Local]: %s", heredocMarker(">>>>>>>", height)))
+		for _, e := range found {
+			// The hit rides inside the local block as a nested block that
+			// keeps its own frame, structure and style.
+			inner := e
+			s.emitTabLive(true, TabChat, entry{
+				header:     fmt.Sprintf("Tìm #%d trong bộ nhớ:", height),
+				kind:       kindNotice,
+				quoteEntry: &inner,
+			})
+		}
 	}
-	// One entry, so the frame and the lines it wraps stay together.
-	s.emitLocalFeedback(strings.Join(rows, "\n"))
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
 	return true
@@ -597,9 +593,8 @@ func (s *Session) cmdExpand(text string) bool {
 		s.refreshTerminal()
 		return true
 	}
-	// Re-render full and replay it inside a dim heredoc frame
-	// (like shell <<EOF): the delimiters mark history replay
-	// without touching the verbatim content. No buffer surgery.
+	// Re-render the full block and nest it in a local block, keeping its
+	// own style so the expanded message reads as itself.
 	s.Verify.AutoVerifyMu.RLock()
 	av := s.Verify.AutoVerify
 	s.Verify.AutoVerifyMu.RUnlock()
@@ -607,12 +602,11 @@ func (s *Session) cmdExpand(text string) bool {
 	withMeta := s.Display.ShowMeta
 	s.Display.ShowMetaMu.RUnlock()
 	full, _ := s.buildChatBlock(wire, av, withMeta)
-	// One entry, so the frame and the block it wraps stay together.
-	s.emitLocalFeedback(strings.Join([]string{
-		fmt.Sprintf("| [Local]: %s", heredocMarker("<<<<<<<", height)),
-		strings.TrimRight(full.text(), "\n"),
-		fmt.Sprintf("| [Local]: %s", heredocMarker(">>>>>>>", height)),
-	}, "\n"))
+	s.emitTabLive(true, TabChat, entry{
+		header:     fmt.Sprintf("Mở rộng #%d:", height),
+		kind:       kindNotice,
+		quoteEntry: &full,
+	})
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
 	return true
