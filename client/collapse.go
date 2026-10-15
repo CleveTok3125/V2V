@@ -62,9 +62,9 @@ func cutCells(s string, budget int) string {
 // so the ellipsis and the space stay outside the clickable region).
 func expandTrailer(height uint64) string {
 	cmd := fmt.Sprintf("[Xem thêm: /expand #%d]", height)
-	tail := "\x1b[90m...\x1b[0m " + cmd
+	tail := dimStyle.Render("...") + " " + cmd
 	if runtime.GOOS == "js" {
-		tail = "\x1b[90m...\x1b[0m " + fmt.Sprintf("\x1b]8;;v2v://expand/%d\x1b\\%s\x1b]8;;\x1b\\", height, cmd)
+		tail = dimStyle.Render("...") + " " + linkText(fmt.Sprintf("v2v://expand/%d", height), cmd)
 	}
 	return tail
 }

@@ -170,7 +170,7 @@ func (s *Session) renderPlaceholder(text string, slot slotRef) (e entry, out slo
 			badgePlaceholder = hex.EncodeToString(h[:])[:8]
 		}
 	}
-	header := "\x1b[90m| Bạn"
+	header := "| Bạn"
 	// One separator, between the author and the meta strip, and only when
 	// the echo will draw that strip: /meta off shows neither the number nor
 	// the badge. The number is unknown until the server assigns it, so the
@@ -181,8 +181,8 @@ func (s *Session) renderPlaceholder(text string, slot slotRef) (e entry, out slo
 			header += " ✍️ ◆ " + badgePlaceholder
 		}
 	}
-	header += " ⏳\x1b[0m"
-	e.header = header
+	header += " ⏳"
+	e.header = dimStyle.Render(header)
 
 	// The text hangs under the header, one indented row per rendered line,
 	// matching the layout the echo uses.
@@ -191,7 +191,7 @@ func (s *Session) renderPlaceholder(text string, slot slotRef) (e entry, out slo
 		if i > 0 {
 			body.WriteString("\n")
 		}
-		fmt.Fprintf(&body, "\x1b[90m%s%s\x1b[0m", chatBodyPrefix, markup.Linkify(line))
+		body.WriteString(dimStyle.Render(chatBodyPrefix + markup.Linkify(line)))
 	}
 	e.body = body.String()
 

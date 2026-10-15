@@ -160,7 +160,7 @@ func TestCollapsedIndex(t *testing.T) {
 }
 
 func TestExpandTrailer(t *testing.T) {
-	if got := expandTrailer(1234); got != "\x1b[90m...\x1b[0m [Xem thêm: /expand #1234]" {
+	if got := expandTrailer(1234); got != "\x1b[90m...\x1b[m [Xem thêm: /expand #1234]" {
 		t.Fatalf("trailer = %q", got)
 	}
 }

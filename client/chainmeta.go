@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"charm.land/lipgloss/v2"
 	"github.com/CleveTok3125/V2V/lib/chain"
 	"github.com/CleveTok3125/V2V/lib/clientcore"
 	"github.com/CleveTok3125/V2V/lib/filter"
@@ -264,13 +266,6 @@ func (c *renderCache) put(key string, b renderedBlock) {
 // display names, which never open with "@#".
 var mentionRe = regexp.MustCompile(`@#(\d+)(?::([0-9a-fA-F]{1,16}))?`)
 
-// sgrMention wraps a resolved mention; the closer resets bold + foreground
-// so surrounding colors resume. Mentions only render in incoming/history
-// content (default foreground), never in placeholders or meta lines.
-const (
-	sgrMentionClose = "\x1b[22;39m"
-)
-
 // mention is one @#height reference with byte offsets into its source.
 type mention struct {
 	start, end int
@@ -329,22 +324,22 @@ var ansiSpanRe = regexp.MustCompile("\x1b\\[[0-9;]*m[\\s\\S]*?\x1b\\[[0-9;]*m|\x
 // renderMentions highlights @#height references whose target resolves via
 // resolve (height in buffer, suffix matching). Unresolved mentions stay
 // plain text so evicted targets never mislead. Disabled renders plain.
-func renderMentions(s string, resolve func(height uint64, suffix string) bool, enabled bool, open, close string) string {
+func renderMentions(s string, resolve func(height uint64, suffix string) bool, enabled bool, style lipgloss.Style) string {
 	if !enabled || !strings.Contains(s, "@#") {
 		return s
 	}
 	var sb strings.Builder
 	pos := 0
 	for _, loc := range ansiSpanRe.FindAllStringIndex(s, -1) {
-		sb.WriteString(renderMentionsPlain(s[pos:loc[0]], resolve, open, close))
+		sb.WriteString(renderMentionsPlain(s[pos:loc[0]], resolve, style))
 		sb.WriteString(s[loc[0]:loc[1]])
 		pos = loc[1]
 	}
-	sb.WriteString(renderMentionsPlain(s[pos:], resolve, open, close))
+	sb.WriteString(renderMentionsPlain(s[pos:], resolve, style))
 	return sb.String()
 }
 
-func renderMentionsPlain(s string, resolve func(height uint64, suffix string) bool, open, close string) string {
+func renderMentionsPlain(s string, resolve func(height uint64, suffix string) bool, style lipgloss.Style) string {
 	ms := findMentions(s)
 	if len(ms) == 0 {
 		return s
@@ -356,25 +351,24 @@ func renderMentionsPlain(s string, resolve func(height uint64, suffix string) bo
 			continue
 		}
 		sb.WriteString(s[pos:m.start])
-		sb.WriteString(open)
-		sb.WriteString(s[m.start:m.end])
-		sb.WriteString(close)
+		sb.WriteString(style.Render(s[m.start:m.end]))
 		pos = m.end
 	}
 	sb.WriteString(s[pos:])
 	return sb.String()
 }
 
-// mentionSGR builds the highlight pair from a clamped [r,g,b] triple with
-// the bold attribute the default look carries. The default cyan emits the
-// legacy 16-color sequence, which every terminal renders; custom colors
-// use truecolor (needs truecolor support). The closer resets bold +
-// foreground so surrounding colors resume.
-func mentionSGR(c [3]int) (open, close string) {
+// mentionStyle builds the highlight for a resolved mention from a clamped
+// [r,g,b] triple with the bold attribute the default look carries. The default
+// cyan emits the legacy 16-color sequence, which every terminal renders;
+// custom colors use truecolor (needs truecolor support). Mentions only land in
+// plain runs, so lipgloss's reset does not cut a surrounding style short.
+func mentionStyle(c [3]int) lipgloss.Style {
+	st := lipgloss.NewStyle().Bold(true)
 	if c == ([3]int{0, 255, 255}) {
-		return "\x1b[1;96m", sgrMentionClose
+		return st.Foreground(lipgloss.Color("14"))
 	}
-	return fmt.Sprintf("\x1b[1;38;2;%d;%d;%dm", c[0], c[1], c[2]), sgrMentionClose
+	return st.Foreground(color.RGBA{R: uint8(c[0]), G: uint8(c[1]), B: uint8(c[2]), A: 0xff})
 }
 
 // stripANSIForFind removes SGR/OSC8 sequences for text matching via
@@ -421,7 +415,7 @@ func wrapPendingQuote(line string, pending bool) string {
 	if !pending {
 		return line
 	}
-	return "\x1b[90m" + line + "\x1b[0m"
+	return dimStyle.Render(line)
 }
 
 // formatQuote renders one quote preview line from a resolved head entry:
@@ -443,7 +437,7 @@ func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) st
 func formatQuoteRich(msg WireMessage, pending bool, maxRunes int) string {
 	mark := ""
 	if err := clientcore.VerifyWireContent(msg); err != nil {
-		mark = " \x1b[91m✗\x1b[39m"
+		mark = " " + warnStyle.Render("✗")
 	}
 	line := fmt.Sprintf("|   ┌─  ↩ #%d • %s %s: %s%s",
 		msg.ChainHeight, filter.SanitizeSingleLine(msg.Time), authorField(msg.DisplayName),

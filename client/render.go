@@ -276,9 +276,9 @@ func (s *Session) badgeForWire(msg WireMessage, av bool) (colored, urlStr string
 			ReplyTo:     msg.Trip.ReplyTo,
 		})
 		if err == nil && res != nil {
-			colored = badgeColor(res.Badge) + res.Badge + "\x1b[0m"
+			colored = badgeStyle(res.Badge).Render(res.Badge)
 		} else {
-			colored = "\x1b[91m" + plain + " ✗\x1b[0m"
+			colored = warnStyle.Render(plain + " ✗")
 		}
 	} else {
 		colored = plain
@@ -370,13 +370,12 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (e entry, t
 			colored, urlStr := s.badgeForWire(msg, av)
 			badge = colored
 			if urlStr != "" {
-				badge = fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", urlStr, colored)
+				badge = linkText(urlStr, colored)
 			}
 		}
 		header += " • " + metaLineFor(msg.ChainHeight, msg.ChainHash, badge)
 	}
-	mentionOpen, mentionClose := mentionSGR(ClientCfg.MentionColor())
-	body := renderMentions(renderChatText(msg.Text), s.resolveMentionLocked, ClientCfg.MentionEnabled(), mentionOpen, mentionClose)
+	body := renderMentions(renderChatText(msg.Text), s.resolveMentionLocked, ClientCfg.MentionEnabled(), mentionStyle(ClientCfg.MentionColor()))
 	// A quote rides in the same entry as the message it answers: a message is
 	// one entry whatever it carries, so nothing can land between its parts and
 	// every consumer — the erase math, the catch-up merge, the quote lookup —

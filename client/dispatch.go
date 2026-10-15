@@ -565,13 +565,13 @@ func (s *Session) cmdFind(text string) bool {
 	// Replay inside the same dim heredoc frame as /expand so replayed
 	// lines never read as live chat. No buffer surgery: markers only.
 	if shown > 0 {
-		rows = append(rows, fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m", height))
+		rows = append(rows, fmt.Sprintf("| [Local]: %s", heredocMarker("<<<<<<<", height)))
 	}
 	rows = append(rows, hits...)
 	if shown == 0 {
 		rows = append(rows, "| [Local]: Không thấy (tin cũ đã bị evict khỏi bộ nhớ hoặc chưa sync).")
 	} else {
-		rows = append(rows, fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m", height))
+		rows = append(rows, fmt.Sprintf("| [Local]: %s", heredocMarker(">>>>>>>", height)))
 	}
 	// One entry, so the frame and the lines it wraps stay together.
 	s.emitLocalFeedback(strings.Join(rows, "\n"))
@@ -619,9 +619,9 @@ func (s *Session) cmdExpand(text string) bool {
 	full, _ := s.buildChatBlock(wire, av, withMeta)
 	// One entry, so the frame and the block it wraps stay together.
 	s.emitLocalFeedback(strings.Join([]string{
-		fmt.Sprintf("| [Local]: \x1b[90m<<<<<<< #%d\x1b[0m", height),
+		fmt.Sprintf("| [Local]: %s", heredocMarker("<<<<<<<", height)),
 		strings.TrimRight(full.text(), "\n"),
-		fmt.Sprintf("| [Local]: \x1b[90m>>>>>>> #%d\x1b[0m", height),
+		fmt.Sprintf("| [Local]: %s", heredocMarker(">>>>>>>", height)),
 	}, "\n"))
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
