@@ -1,4 +1,4 @@
-# Installing and Deploying V2V
+# Installing and deploying V2V
 
 This document covers deploying the V2V server. Clients (`V2V-*`) and the
 admin tool (`V2Vctl-*`) are plain executables; download the file for your

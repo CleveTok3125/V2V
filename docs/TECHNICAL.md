@@ -1,30 +1,30 @@
-# V2V Technical Documentation
+# V2V technical documentation
 
 This document covers the internal architecture, protocols, and algorithms of V2V.
 For a friendly getting-started guide, see [README.md](../README.md).
 
-## Table of Contents
-- [Project Structure](#project-structure)
-- [Build System](#build-system)
-- [Configuration Sync](#configuration-sync)
+## Table of contents
+- [Project structure](#project-structure)
+- [Build system](#build-system)
+- [Configuration sync](#configuration-sync)
 - [Instances (multiple environments)](#instances-multiple-environments)
-- [Client Configuration](#client-configuration)
-- [Client Tabs](#client-tabs)
-- [Placeholders and Server Echo](#placeholders-and-server-echo)
-- [Slash Commands](#slash-commands)
-- [Wire Protocol & History](#wire-protocol--history)
-- [History Sync Protocol](HISTORY_SYNC.md)
-- [Notice Tags](NOTICE_TAGS.md)
-- [Message Chain](#message-chain)
+- [Client configuration](#client-configuration)
+- [Client tabs](#client-tabs)
+- [Placeholders and server echo](#placeholders-and-server-echo)
+- [Slash commands](#slash-commands)
+- [Wire protocol & history](#wire-protocol--history)
+- [History sync protocol](HISTORY_SYNC.md)
+- [Notice tags](NOTICE_TAGS.md)
+- [Message chain](#message-chain)
 - [Authentication](#authentication)
 - [Tripcode](#tripcode)
-- [Storage & Persistence](#storage--persistence)
-- [Security Model](#security-model)
-- [Abuse & Proof-of-Work](#abuse--proof-of-work)
-- [Error Handling](#error-handling)
+- [Storage & persistence](#storage--persistence)
+- [Security model](#security-model)
+- [Abuse & proof-of-work](#abuse--proof-of-work)
+- [Error handling](#error-handling)
 - [Roadmap](#roadmap)
 
-## Project Structure
+## Project structure
 
 ```
 .
@@ -62,7 +62,7 @@ For a friendly getting-started guide, see [README.md](../README.md).
 └── docs/             # This file
 ```
 
-## Build System
+## Build system
 
 All builds are driven by `Makefile`:
 
@@ -96,7 +96,7 @@ make clean
 - The panel applies on connect, so a live session keeps owning these through `/meta`, `/showjoin`, `/autoverify` and `/notify`. The `system.join` and `system.leave` rows are dimmed while join/leave notices are off: the client drops join/leave wires outright when it is off (`client/pump.go`), so the gate would have nothing to decide. The panel's join switch maps onto the `-j` flag (`CLI.ShowJoin`) rather than onto `defaults.showJoin`, which the web build never writes; the two agree today only because the compiled default of both is off.
 - Options are deliberately limited to the toggles: `ui.codeStyle`, `ui.mention`, `ui.reply` and `ui.collapse` are read straight from `ClientCfg` on the render path without a lock, so a web page changing them would race the pump. `ui.theme`, `ui.web.charAspect`, `ui.prompts`, `ui.linkify.trailingPunct`, `ui.clipboard.clearAfterSec` and `ui.versionCheck` have no effect on the web build (dead, hardcoded in TS/CSS, stubbed, or skipped), so exposing them would be a switch that does nothing.
 
-## Configuration Sync
+## Configuration sync
 
 `v2vctl config sync` migrates the template into a live config, preserving operator-set values. The merge is template-first: the template wins structure, order and comments; the live config wins values per key.
 
@@ -120,7 +120,7 @@ One binary serves many instances: an instance is a directory holding `.env`, `co
 - Migration from the old root layout: `mkdir -p instances/default && mv .env instances/default/.env && mv config instances/default/config && mv data instances/default/data`.
 - **Upgrade note (layout):** `config sync` now defaults `--to` to the instance root (`instances/default`) and the server reads `<V2V_ROOT>/.env` with no root-layout fallback, so old root-layout deployments must migrate (or keep working in place with `V2V_ROOT=.` and `config sync --dir . --to .`).
 
-## Client Configuration
+## Client configuration
 
 - Locations follow the OS (`lib/configdir`): config dir holds `key.json` + read-only `config.jsonc` (`~/.config/V2V/` Linux, `%AppData%\V2V` Windows, `~/Library/Application Support/V2V` macOS); cache dir holds `history.tmp`. Config is JSONC (`//` and `/* */` comments allowed, no trailing commas), never written by the app (missing file means in-memory defaults), and optionally passphrase-sealed with the identity envelope (`v2v --encrypt-config`, `V2V_PASSPHRASE` or TTY prompt to unlock).
 - Override with `-c/--config-dir` (`V2V_CONFIG_DIR`) and `-C/--cache-dir` (`V2V_CACHE_DIR`).
@@ -135,24 +135,27 @@ One binary serves many instances: an instance is a directory holding `.env`, `co
 - The verified chain tip persists in `<cache>/chain_tip.json` namespaced by server identity (foreign tips are ignored, never a fork).
 - Tab buffer caps come from config, never hardcoded: chat line cap derives from `ui.web.scrollback` (10000), `tabs.chatMaxBytes` (2MiB), `tabs.systemMaxLines` (2000), `tabs.systemMaxBytes` (400KB).
 
-## Client Tabs
+## Client tabs
 
 Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system, date, history). `client/render.go:tabForWire` routes each wire by its type: a system wire to Tab 2, every other wire to Tab 1. Nothing routes on message text.
 
 - Chat lines always land in Tab 1's buffer, whichever tab is active; the app paints the active tab and nothing else.
 - Tab 2 is purely additive: system, local, date and history lines are buffered there whether or not it is on screen, so switching to it loses nothing.
 - Buffers (`tabBuffer`) are FIFO rings with dual-limit eviction (lines + bytes), mirroring server `ChatHistory`; `spliceOut` removes resolved placeholders and `insertAt` splices older windows and recovered wires at their chain position.
-- Tab switching: `Tab` / `Shift+Tab` cycle, a click on a label selects that tab, and `/tab`, `/tab 1|2`, `/t` do it from the command line. The bar draws the `1:chat` / `2:system` labels, the active one bold in the accent colour.
+- Tab switching: `Tab` / `Shift+Tab` cycle, a click on a label selects that tab, and `/tab`, `/tab 1|2`, `/t` do it from the command line. The bar draws the `1:chat` / `2:system` labels, the active one bold in the accent color.
 - Local command responses (`/help`, `/status`, …) go to Tab 1 through `emitLocalFeedback` and are mirrored into Tab 2 for review.
+- Scrolling: the mouse wheel scrolls the chat; paging to the top fetches the previous segment automatically (`maybeLoadOlder` requests 50 lines while older history remains).
+- While scrolled up, the footer shows `▼ Ctrl+End: về mới nhất`, plus a `N tin mới` count of entries that arrived since leaving the bottom. Prepended older history does not add to the count; switching tabs or returning to the bottom resets it. A left click on the scrollbar column jumps to the newest line, and sending a line returns the view to the bottom.
+- Dragging with the mouse selects chat content without the frame; releasing the button copies the selection.
 
-## Placeholders and Server Echo
+## Placeholders and server echo
 
 - Outgoing text is not echoed optimistically: it prints grey with `⏳` (`| Bạn: … ⏳`), then `BroadcastWire` unicasts the same `WireMessage` back to the sender as delivery confirmation.
 - The client tracks a pending placeholder (`text/slot/seq/pub`) and on matching echo (same `DisplayName` + `Text`, plus `Pub/Seq` for trip) replaces that buffer entry in place, so one message never occupies two rows.
 - The echo then renders through the normal path (badge color + verify link).
 - The replace is keyed on the entry itself: a slot that no longer holds the placeholder — the buffer shifted under it, or a tab switch repainted since — is left alone, so the wrong row is never rewritten.
 
-## Slash Commands
+## Slash commands
 
 - Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, `/meta`/`/m` with optional `on|off`, `/find`/`/f` with `<height>[:hash]`, `/info` with `<height>[:hash]` and `/expand`/`/xpan` with `<height>`.
 - Session commands: `/whoami`/`/w`, `/status`, `/showjoin`/`/sj`, `/autoverify`/`/av`, `/notify`/`/nt`, `/clear`/`/c`, `/clearhistory`/`/ch` (deletes the keystroke history file), `/copy <height>[:hash]` (clipboard, auto-cleared).
@@ -170,7 +173,7 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 - `Ctrl+C` aborts collection via `ErrInputCancel` (empty line cancels on WASM, any interrupt cancels on desktop) and discards everything silently, while `Ctrl+D` (`io.EOF`) keeps quitting.
 - `Ctrl+C` on the main prompt prints `| [Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.` instead of quitting.
 
-## Wire Protocol & History
+## Wire protocol & history
 
 ### Live messages
 Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `lib/wire` alone; client and server alias it, and `wire_test` pins the exact key set so drift fails loudly instead of dropping fields silently:
@@ -206,7 +209,7 @@ Chat messages are `WireMessage` JSON, not raw ANSI. The schema lives in `lib/wir
 - System broadcasts (`join/leave/date`) retry once after `20ms` before dropping (`sendWithRetry`), so a chat burst filling the per-client `Send` queue (256) does not silently swallow system lines; chat itself stays best-effort.
 - History paging, refill and the initial load all use the seq-cursor protocol specified in [History Sync Protocol](HISTORY_SYNC.md); `/older` still pages older segments by the `before` height cursor (RAM plus disk tiers).
 
-## Message Chain
+## Message chain
 
 Every chat and audit message links to the previous one (`lib/chain`, `server/chain.go`) — altering any byte of a linked message breaks the link and every link after it, with no per-user signing required. Join/leave/date notifications never link: they carry no authorship or ordering evidence.
 
@@ -252,7 +255,7 @@ A desktop client cannot run a WebAuthn ceremony: the private key is inside an au
 
 - The wait does **not** happen on a socket, and the ask does not either. A ceremony takes minutes, and a socket held that long costs a connection slot, competes with chat at the global cap, and can be cut by anything idle on the path. The desktop therefore makes exactly **one** dial in the whole flow: the one that spends the ticket. Asking is `POST /pair/request` and waiting is `GET /pair/status?ticket=` every `pairPollInterval` (2s), holding nothing between asks. Timing is clock-based, so a caller that walks away releases by expiry rather than by liveness detection.
 - Two challenges, deliberately separate. The handshake nonce is the anti-replay and IP-binding token with a 10s TTL; the **pair ticket** is what the authenticator signs (`challenge = SHA-256(ticket)`) and it lives `pairTicketTTL` (5 min).
-- Why the ask is HTTP: `CheckConnectionRate` stamps `LastConnectTime` on every dial, so a desktop that dialled once to ask and once to spend would have its second dial refused as churn inside `CONNECTION_COOLDOWN` — a person who had just proved a passkey being told they were connecting too fast. Keeping the ask off the socket leaves the cooldown measuring sessions, which is what it is for.
+- Why the ask is HTTP: `CheckConnectionRate` stamps `LastConnectTime` on every dial, so a desktop that dialled once to ask and once to spend would have its second dial refused as churn inside `CONNECTION_COOLDOWN` — a person who had just proved a passkey being told they were connecting too fast. Keeping the ask off the socket leaves the cooldown measuring sessions.
 - The ticket rides in the URL **fragment**, which browsers never place in a request line, so it stays out of server and proxy logs.
 - `POST /pair/submit` verifies the assertion against the role the **desktop** named at mint time. The submission carries no role: the role is a property of the ticket, and a value the page can edit is a second, weaker way to say it.
 - `/pair/submit` is **not** IP-bound, because the browser may be a phone on another network. It is safe because a submission can only ever be verified, never trusted. It is metered per IP before any store read. `/pair/status` and the final handshake **are** bound to the address that asked.
@@ -266,12 +269,12 @@ A desktop client cannot run a WebAuthn ceremony: the private key is inside an au
 - The link is also drawn as a QR code for the case the opener cannot serve: over SSH the opener runs on the remote host, where there is usually no display, so it is skipped entirely when `DISPLAY` and `WAYLAND_DISPLAY` are both unset and the message says so instead of implying a window appeared. The code is drawn only when the window holds it — measured at error-correction level M, 25 rows by 49 columns for a clearnet link with a 32-byte ticket and 29 rows by 57 columns for a v3 onion link — because a code that scrolls or wraps cannot be scanned; otherwise one line explains why, and the printed link remains either way. The drawing is the client's own rather than the library's: half-block cells would otherwise take the terminal's own palette, and some scanners refuse an inverted code.
 - The web build has no pairing: its page already runs the ceremony against the same nonce, so `-P` there reports that the 🔑 Passkey button is the path.
 - The ask is metered per IP after the cheap checks, not before: a mistyped role must come back as `unknown role`, not as `too many attempts` that leaves the person waiting out a window for a request that never reached the store. The unknown-role path is not logged, because skipping the meter for it would otherwise let one caller flood the log.
-- Known limitation: reopening a link whose ticket is already spent asks for the passkey before saying so. The page cannot check first, because the only state read it has (`GET /pair/status`) is bound to the address that asked for the ticket, while the browser may be a phone on another network. The ceremony of a spent link is refused with 410 and the page then says the link is used, so the cost is one pointless prompt on a mistaken action. Lifting the address binding on `/pair/status` would let the page preflight, and is the way to fix it if it ever matters.
+- Known limitation: reopening a link whose ticket is already spent asks for the passkey before saying so. The page cannot check first, because the only state read it has (`GET /pair/status`) is bound to the address that asked for the ticket, while the browser may be a phone on another network. The ceremony of a spent link is refused with 410 and the page then says the link is used, so the cost is one pointless prompt on a mistaken action. Lifting the address binding on `/pair/status` would let the page preflight.
 
 #### Which auth failures are remembered
-`authErrIsProbe` is the single classification both the behaviour score and the ban read, so the two cannot drift apart. The axis is direction, not blame:
+`authErrIsProbe` is the single classification both the behavior score and the ban read, so the two cannot drift apart. The axis is direction, not blame:
 
-- **Not remembered:** the client gave up, disconnected, ran out of time, or the server itself failed (entropy, passkey disabled). An event that returns resources is the outcome the server wants, so recording it would punish the behaviour the server asks for. A network read error is read as "went away"; a parse error is not.
+- **Not remembered:** the client gave up, disconnected, ran out of time, or the server itself failed (entropy, passkey disabled). An event that returns resources is the outcome the server wants, so recording it would punish the behavior the server asks for. A network read error is read as "went away"; a parse error is not.
 - **Remembered:** asking past a budget, asking with proof that does not verify, or asking with a payload that cannot be trusted.
 
 ### Display name — uniform hash, serial, dynamic length, per-session salt
@@ -354,7 +357,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - `serverPub` is enforced to be the server's own key to prevent cross-server reuse.
 - `linkify` (server) and `webterm/app.js` (browser) handle `https` links; `v2v://` legacy is removed.
 - Browser navigation (`Accept: text/html`) gets the self-contained `webterm/verify.html` page instead of JSON: verdict pill, a paste-to-verify content section (SHA-256 recomputed locally against `msg_hash`), per-field rows with copy buttons, an API-link section, and collapsible raw JSON.
-- Verify page rows follow the `/info` field order and keep the original key in the label, so the two views read side by side: `Chiều cao (height)`, `ID phiên (tmp_id)`, `Trích dẫn (reply_to)`, `Thời gian gửi (sent_at)`, `Tên (from)`, `Chữ ký trip (trip)`, `trip.seq`, `trip.pub`, `trip.prev`, `trip.sig`, `trip.hash`, `trip.srv`. Every row is always present so the block has one fixed shape: a field the link did not carry shows a dim `—` and no copy button, and the list is built independently of the verdict, which the pill carries on its own — a rejected link still lists what it contained, which is what you need to read to work out why. The server answers some rejections before computing anything, so `undefined`, `null` and `""` all count as missing.
+- Verify page rows follow the `/info` field order and keep the original key in the label, so the two views read side by side: `Chiều cao (height)`, `ID phiên (tmp_id)`, `Trích dẫn (reply_to)`, `Thời gian gửi (sent_at)`, `Tên (from)`, `Chữ ký trip (trip)`, `trip.seq`, `trip.pub`, `trip.prev`, `trip.sig`, `trip.hash`, `trip.srv`. Every row is always present so the block has one fixed shape: a field the link did not carry shows a dim `—` and no copy button, and the list is built independently of the verdict, which the pill carries on its own — a rejected link still lists what it contained. The server answers some rejections before computing anything, so `undefined`, `null` and `""` all count as missing.
 - Chain-level evidence (`hash`/`prev`/chain verdict) is deliberately absent from the page: the endpoint is stateless and carries no `text`, so it cannot recompute a link, and `raw` is left out because the page never inlines message content.
 - `height` and `sent_at` reach the page as query parameters and are covered by neither the trip signature nor the chain hash, so editing them in the URL cannot change the verdict. Their labels carry `không xác minh` to keep them from reading as evidence, unlike every other row.
 - Clicking the badge in the web terminal copies the verify URL and asks with a native `window.confirm` whether to open the verify page in a new tab; a blocked popup leaves the copied link as the fallback.
@@ -364,7 +367,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - Verify pages require HTTPS/localhost, and plain-HTTP shows a warning banner since pasted text could be intercepted in transit.
 - `display_name` stays in badge URLs because the signature binds it, and it is only a pseudonym.
 
-## Message Rendering
+## Message rendering
 
 - `markup.Span` renders forum markdown client-side: `**bold**` (`1m`), `*italic*` (`3m`), `~~strike~~` (`9m`), `[text](url)` (linkify-styled OSC 8 hyperlink, http(s) only), and `> quote` (grey `│ ` bar), parsed by goldmark with a custom SGR renderer.
 - Code spans and fenced blocks delegate to `codebg`, so code styling has a single source; headings, lists, HTML and images degrade to raw source text, never lost.
@@ -388,7 +391,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - Applied client-side after `SanitizeForDisplay` on incoming chat text; the sender placeholder echo keeps plain `Render` so highlight resets don't cancel its grey wrapper (line counts match either way).
 - Applied client-side after `SanitizeForDisplay` on incoming chat text and after `Linkify` on the sender placeholder echo (whole text rendered before splitting, so fence state survives across lines).
 
-## Storage & Persistence
+## Storage & persistence
 
 Paths below are relative to the instance root (`V2V_ROOT`, default `instances/default`); absolute per-artifact env overrides still win.
 
@@ -401,7 +404,7 @@ Paths below are relative to the instance root (`V2V_ROOT`, default `instances/de
 - File-supplied argon2 costs are clamped (t 1-10, m 8-256MiB, p 1-8) and the envelope identity (v3/argon2id/xchacha20poly1305) verified, so crafted files fail closed instead of exhausting RAM.
 - **No-content-logs mode (`NO_CONTENT_LOGS=true`):** content-privacy, not "zero logs". Chat history stays in RAM only (`Chain.Store` is nil, `HISTORY_FILE_PATH`/`LOG_FILE_PATH` are ignored, no rotation and no disk lookup), and message content is never logged: the per-message line is dropped and rejected payloads are recorded by error type only. Operational metadata still goes to stdout/stderr — client IP, auth/identity events, admin and error lines — and identity/auth files (`server_identity.json`, `webauthn.json`, `config/roles.json`) are still written. Pre-existing history/log files are left untouched and only warned about; full no-content-retention also requires disabling OS-level log persistence (e.g. journald).
 
-## Security Model
+## Security model
 
 - **Injection:** All inbound `text` and `username` go through `lib/filter`.
 - `ValidateMessage` rejects `Cf/Mn/Me/Zl/Zp/0xFFFD/non-graphic`, `SanitizeForDisplay` keeps only whitelisted `SGR \x1b[...m` and OSC8 links (`\x1b]8;...;uri\x1b\\`) whose target is `http(s)`; every other OSC (clipboard write, palette/color, kitty) is dropped, and an unterminated OSC drops the tail instead of leaking the link target.
@@ -435,7 +438,7 @@ Paths below are relative to the instance root (`V2V_ROOT`, default `instances/de
 - Trust files refuse to load when world-writable; templates ship no secrets (placeholders only).
 - **Container:** the image builds with live `data/`/`config/`/`.env`/`instances/` excluded (`.dockerignore`), runs the server as a non-root `app` user via `docker/entrypoint.sh` (root prepares `$V2V_ROOT/data` idempotently, preflights the read-only mounts with actionable errors, then `exec su-exec`), drops all capabilities except `CHOWN`/`SETUID`/`SETGID` (needed by that root phase), blocks privilege escalation and mounts the rootfs read-only (`/tmp` tmpfs). No `user:` is set on purpose — the entrypoint adapts, rollback is commenting out `read_only`. Compose mounts one instance (`ENV_ROOT`) into `/app` and sets `V2V_ROOT=/app`.
 
-## Abuse & Proof-of-Work
+## Abuse & proof-of-work
 
 Self-contained mass-impact defense (works with `PROXY_PROVIDER=none`, no
 external services): global connection cap, operator blocklist, optional
@@ -532,7 +535,7 @@ background and answer over the socket (writes serialized).
 and `STOPSIGNAL`. The app cap sheds load first; these keep a flood from
 exhausting host fds, threads, RAM or disk.
 
-## Error Handling
+## Error handling
 
 - Return paths wrap with `%w` so callers can `errors.Is`/`errors.As`: sentinel auth errors (`server/auth_errors.go`, byte-identical legacy text), `config.ErrEncrypted`, env parse errors up to the boot fatal.
 - Terminal sinks use `%v`: `logInfof`/`logWarnf`/`logErrorf` and test failures never unwrap further, so `%w` there would only mislead.

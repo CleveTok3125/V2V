@@ -73,7 +73,7 @@ Chat và system nằm ở 2 tab riêng: `/tab` chuyển giữa Tab 1 (chat) và 
 
 Key và cấu hình nằm trong thư mục config của hệ điều hành (`~/.config/V2V/` trên Linux, `%AppData%\V2V` trên Windows, `~/Library/Application Support/V2V` trên macOS): `key.json` cho danh tính, `config.jsonc` chỉ đọc cho cài đặt (cho comment JSONC, copy `template/client/config.jsonc` để tùy biến, `v2v --encrypt-config` để mã hóa). Ghi đè bằng `-c/--config-dir` (`V2V_CONFIG_DIR`) và `-C/--cache-dir` (`V2V_CACHE_DIR`). Flag phụ: `-v` phiên bản, `-a` user-agent, `-i` thông tin server, `-j` hiện ra/vào (cả trực tiếp lẫn lịch sử catch-up; replay mặc định lọc join).
 
-## Dành cho Admin
+## Dành cho admin
 
 Tạo danh tính bằng `v2vctl` (`make v2vctl` / `make v2vctl ALL=1` cho full matrix):
 
@@ -100,9 +100,9 @@ Cấp passkey web (link dùng 1 lần, 10 phút):
 
 Xem `template/server/instances/default/config/roles.json` và `template/server/instances/default/.env` để cấu hình server. Lệnh quản lý mặc định ở root `instances/default`; truyền `--root instances/<name>` (hoặc đặt `V2V_ROOT`) để nhắm instance khác.
 
-Chống abuse tự thân: trần kết nối toàn cục, blocklist, under-attack với cửa PoW, và chấm điểm hành vi kèm PoW trong chat — mọi knob bắt buộc trong `.env` (xem [Abuse & Proof-of-Work](docs/TECHNICAL.md#abuse--proof-of-work)).
+Chống abuse tự thân: trần kết nối toàn cục, blocklist, under-attack với cửa PoW, và chấm điểm hành vi kèm PoW trong chat — mọi knob bắt buộc trong `.env` (xem [Abuse & proof-of-work](docs/TECHNICAL.md#abuse--proof-of-work)).
 
-## Chạy Server
+## Chạy server
 
 Mỗi bản release phát hành kèm bundle server dựng sẵn và image container
 đa nền tảng; [INSTALL.md](INSTALL.md) là hướng dẫn triển khai đầy đủ.
@@ -136,6 +136,6 @@ Mở `http://localhost:10000/web/` cho bản web.
 
 - **Chi tiết kỹ thuật:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — kiến trúc, giao thức wire, tripcode, lưu trữ, bảo mật.
 - **Cấu hình:** `template/server/instances/default/.env` có đủ biến môi trường với comment.
-- **Công cụ quản trị:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`, `config sync/diff/check/manifest/take`, `instance init/list/status/up/down/restart/logs`). Lệnh dài hơn ba ký tự có alias ngắn (`r`=`role`, `i`=`instance`, `c`=`config`, `ls`=`list`, `r new`=`role create`, `c sy`=`config sync`, `i rs`=`instance restart`), flag dài có dạng ngắn (`-R`=`--root`, `-p`=`--port`/`--preset`, `-s`=`--store`). Chạy `v2vctl <command> --help` để xem đầy đủ.
+- **Công cụ quản trị:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`, `config sync/diff/check/manifest/take`, `instance init/list/status/up/down/restart/logs`). Chạy `v2vctl <command> --help` để xem đầy đủ.
 
 Báo lỗi và PR luôn được chào đón.

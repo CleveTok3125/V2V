@@ -1,4 +1,4 @@
-# Log Standard
+# Log standard
 
 Status: implemented. Every server log line opens with its level, an emoji and
 its tags, so a line reads the same however its wording is edited and a grep
