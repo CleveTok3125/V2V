@@ -232,7 +232,10 @@ type ChainState struct {
 // VerifyState carries the autoverify toggle: whether a received badge is
 // checked against the trip signature as it is rendered.
 type VerifyState struct {
-	AutoVerify   bool
+	AutoVerify bool
+	// PowTier is the tier of the screen being solved, 0 when idle. It feeds
+	// the status line so the footer shows the wait instead of a chat notice.
+	PowTier      int
 	AutoVerifyMu sync.RWMutex
 }
 

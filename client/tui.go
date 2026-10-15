@@ -358,6 +358,18 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case tea.MouseClickMsg:
+		// The tab bar row switches tabs; the scrollbar column is the
+		// jump-to-latest button while scrolled up.
+		if msg.Button == tea.MouseLeft && msg.Y == 0 {
+			if i, ok := a.tabAt(msg.X); ok {
+				a.switchTab(i)
+			}
+			return a, nil
+		}
+		if msg.Button == tea.MouseLeft && msg.X >= a.chatWidth() && !a.viewport.AtBottom() {
+			a.jumpToLatest()
+			return a, nil
+		}
 		if msg.Button == tea.MouseLeft {
 			if p, ok := a.contentPos(msg.X, msg.Y); ok {
 				a.selActive, a.selAnchor, a.selCursor = true, p, p
@@ -451,6 +463,9 @@ func (a *app) handleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			a.showHelp = true
 			return true, nil
 		}
+	case "ctrl+end":
+		a.jumpToLatest()
+		return true, nil
 	case "pgup", "pgdown":
 		var cmd tea.Cmd
 		a.viewport, cmd = a.viewport.Update(msg)
@@ -564,6 +579,9 @@ func (a *app) submit() tea.Cmd {
 	if strings.TrimSpace(text) == "" || text == "/" {
 		return nil
 	}
+	// Sending pulls the view to the newest line, so the echo and the answer
+	// land in sight instead of staying behind the history being read.
+	a.jumpToLatest()
 	select {
 	case a.lines <- text:
 	default:
@@ -747,11 +765,51 @@ func (a *app) highlightSelection(chat string) string {
 		if span.lo < 0 {
 			continue
 		}
-		if lo, hi := a.selRangeFor(row, span); lo < hi {
-			lines[i] = lipgloss.StyleRanges(lines[i], lipgloss.NewRange(lo, hi, a.styles.sel))
+		if ranges := a.selRanges(row, span, lines[i]); len(ranges) > 0 {
+			lines[i] = lipgloss.StyleRanges(lines[i], ranges...)
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// isFrameRune reports whether r is part of a block frame, nested ones included.
+func isFrameRune(r rune) bool {
+	return strings.ContainsRune("│╭╮╰╯├┤─", r)
+}
+
+// selRanges splits one row's selection into the ranges worth highlighting: the
+// text inside the frame, with the frame runs (outer or nested) and the blank
+// padding around them left out.
+func (a *app) selRanges(row int, span rowSpan, line string) []lipgloss.Range {
+	lo, hi := a.selRangeFor(row, span)
+	runes := []rune(stripANSIForFind(line))
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > len(runes) {
+		hi = len(runes)
+	}
+	for lo < hi && (runes[lo] == ' ' || isFrameRune(runes[lo])) {
+		lo++
+	}
+	for hi > lo && (runes[hi-1] == ' ' || isFrameRune(runes[hi-1])) {
+		hi--
+	}
+	var out []lipgloss.Range
+	for start := lo; start < hi; {
+		end := start
+		for end < hi && !isFrameRune(runes[end]) {
+			end++
+		}
+		if end > start {
+			out = append(out, lipgloss.NewRange(start, end, a.styles.sel))
+		}
+		start = end
+		for start < hi && isFrameRune(runes[start]) {
+			start++
+		}
+	}
+	return out
 }
 
 // selRangeFor clamps the active selection to one row's text range.
@@ -1073,16 +1131,38 @@ func (a *app) refreshContent() {
 }
 
 func (a *app) renderTabs() string {
-	labels := []string{"1:chat", "2:system"}
-	parts := make([]string, 0, len(labels))
-	for i, l := range labels {
-		if i == a.active {
-			parts = append(parts, a.styles.tabActive.Render(l))
-			continue
-		}
-		parts = append(parts, a.styles.tabInactive.Render(l))
-	}
+	parts, _ := a.tabParts()
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+}
+
+// tabParts renders the tab labels and reports the column each one starts at,
+// so a click on the bar can be mapped back to a tab.
+func (a *app) tabParts() ([]string, []int) {
+	parts := make([]string, 0, len(tabLabels))
+	offsets := make([]int, 0, len(tabLabels))
+	x := 0
+	for i, label := range tabLabels {
+		style := a.styles.tabInactive
+		if i == a.active {
+			style = a.styles.tabActive
+		}
+		rendered := style.Render(label)
+		parts = append(parts, rendered)
+		offsets = append(offsets, x)
+		x += ansi.StringWidth(rendered)
+	}
+	return parts, offsets
+}
+
+// tabAt maps a click on the tab bar to a tab index.
+func (a *app) tabAt(x int) (int, bool) {
+	parts, offsets := a.tabParts()
+	for i, offset := range offsets {
+		if x >= offset && x < offset+ansi.StringWidth(parts[i]) {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // inputMode picks the input border colour from the draft state.
@@ -1149,6 +1229,9 @@ func (a *app) renderFooter() string {
 	} else {
 		line = line + " • " + mode
 	}
+	if !a.viewport.AtBottom() {
+		line = "▼ Ctrl+End: về mới nhất • " + line
+	}
 	return a.styles.footer.MaxWidth(a.width).Render(line)
 }
 
@@ -1164,7 +1247,9 @@ func (a *app) helpView() string {
 		"↑ / ↓               lịch sử nhập (khi nháp một dòng)",
 		"PgUp / PgDn         cuộn chat; tới đỉnh để tải thêm",
 		"Lăn chuột           cuộn chat",
-		"Shift + kéo chuột   chọn (bôi đen) văn bản",
+		"Kéo chuột           chọn & copy nội dung tin (không dính khung)",
+		"Shift + kéo chuột   chọn native của terminal (kèm cả khung)",
+		"Ctrl+End            về tin mới nhất",
 		"Ctrl+C              xóa nháp",
 		"Ctrl+D              thoát",
 		"? / F1              đóng trợ giúp",
@@ -1190,6 +1275,14 @@ func (a *app) View() tea.View {
 	// Capture the mouse so the wheel scrolls the chat; clicks are ignored.
 	v.MouseMode = tea.MouseModeCellMotion
 	return v
+}
+
+// jumpToLatest scrolls the chat back to the newest line.
+func (a *app) jumpToLatest() {
+	a.viewport.GotoBottom()
+	a.atTopArmed = false
+	a.pendingOlder = false
+	a.dirty = true
 }
 
 // syncReplyLine refreshes the reply preview shown above the input box and
