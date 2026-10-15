@@ -10,11 +10,10 @@ import (
 	"github.com/CleveTok3125/V2V/lib/identity"
 )
 
-// ErrEncrypted signals a passphrase-sealed config. Callers obtain the
-// passphrase (env or prompt) and retry with LoadEncrypted.
+// ErrEncrypted signals a passphrase-sealed config. Retry with LoadEncrypted.
 var ErrEncrypted = errors.New("config file is encrypted")
 
-// DynamicConfig mirrors server DynamicConfig for reuse on client.
+// DynamicConfig mirrors the server limits for client reuse.
 type DynamicConfig struct {
 	StatusURL   string `json:"statusUrl"`
 	DownloadURL string `json:"downloadUrl"`
@@ -27,29 +26,24 @@ type DynamicConfig struct {
 	IdleChatTimeout     time.Duration `json:"idleChatTimeout"`
 	MaxHistoryBytes     int           `json:"maxHistoryBytes"`
 	MaxHistorySend      int           `json:"maxHistorySend"`
-	// History requests draw on a per-IP cost budget (token bucket):
-	// each request spends the number of lines it may return, refilled
-	// at HistoryBudgetPerSec up to HistoryBudgetBurst. Replaces a fixed
-	// time cooldown so a bounded initial load proceeds while sustained
-	// abuse drains the budget.
+	// HistoryBudgetBurst/PerSec bound history cost as a token bucket:
+	// each request spends its line count, refilled at PerSec up to Burst.
 	HistoryBudgetBurst     int `json:"historyBudgetBurst"`
 	HistoryBudgetPerSec    int `json:"historyBudgetPerSec"`
 	HistoryRefillMaxRanges int `json:"historyRefillMaxRanges"`
-	// HistoryReplayBatchLines/Bytes coalesce a replay response into
-	// multi-line frames so a bounded window fits the per-session send
-	// queue instead of being dropped frame by frame.
+	// HistoryReplayBatchLines/Bytes coalesce a replay into multi-line
+	// frames so a bounded window fits the per-session send queue.
 	HistoryReplayBatchLines int `json:"historyReplayBatchLines"`
 	HistoryReplayBatchBytes int `json:"historyReplayBatchBytes"`
-	// HistoryDiskLookup tiers on-demand older-segment reads beyond
-	// RAM: 0 RAM-only, 1 +active history.jsonl, 2 +.old raw,
-	// 3 +.old.zst archive (full). Higher tiers cost more per request.
+	// HistoryDiskLookup tiers on-demand older-segment reads: 0 RAM-only,
+	// 1 +active history.jsonl, 2 +.old raw, 3 +.old.zst archive.
 	HistoryDiskLookup  int           `json:"historyDiskLookup"`
 	MaxUsernameLength  int           `json:"maxUsernameLength"`
 	MaxTripcodeLength  int           `json:"maxTripcodeLength"`
 	ConnectionCooldown time.Duration `json:"connectionCooldown"`
 }
 
-// DefaultDynamic returns defaults matching the server instance template .env.
+// DefaultDynamic returns defaults matching the server instance template.
 func DefaultDynamic() *DynamicConfig {
 	return &DynamicConfig{
 		StatusURL:               "https://example.com/status",
@@ -80,9 +74,7 @@ type ClientConfig struct {
 		Username  string `json:"username"`
 		UserAgent string `json:"userAgent"`
 		ShowJoin  bool   `json:"showJoin"`
-		// AutoVerify is a pointer so a partial config that omits it
-		// backfills to enabled instead of silently disabling the
-		// trip verification.
+		// AutoVerify is a pointer so an omitted value backfills to enabled.
 		AutoVerify *bool `json:"autoVerify"`
 	} `json:"defaults"`
 	Network struct {
@@ -96,15 +88,20 @@ type ClientConfig struct {
 	} `json:"network"`
 	Limits DynamicConfig `json:"limits"`
 	Guard  struct {
-		VerifyCooldown string `json:"verifyCooldown"`
-		MaxQueryBytes  int    `json:"maxQueryBytes"`
-		VerifyMapCap   int    `json:"verifyMapCap"`
-		VerifyEntryTTL string `json:"verifyEntryTTL"`
-		AuthReadLimit  int    `json:"authReadLimit"`
-		MaxRoleLength  int    `json:"maxRoleLength"`
-		MaxFails       int    `json:"maxFails"`
-		BanDuration    string `json:"banDuration"`
-		NonceTTL       string `json:"nonceTTL"`
+		MessageCooldown     string `json:"messageCooldown"`
+		ConnectionCooldown  string `json:"connectionCooldown"`
+		IdleTimeout         string `json:"idleTimeout"`
+		AuthResponseTimeout string `json:"authResponseTimeout"`
+		VerifyCooldown      string `json:"tripVerifyCooldown"`
+		MaxQueryBytes       int    `json:"maxQueryBytes"`
+		VerifyMapCap        int    `json:"verifyMapCap"`
+		VerifyEntryTTL      string `json:"verifyEntryTTL"`
+		AuthReadLimit       int    `json:"authReadLimit"`
+		MaxRoleLength       int    `json:"maxRoleLength"`
+		MaxFails            int    `json:"maxFails"`
+		BanDuration         string `json:"banDuration"`
+		NonceTTL            string `json:"nonceTTL"`
+		MaxConnectionsPerIP int    `json:"maxConnectionsPerIP"`
 	} `json:"guard"`
 	Channels struct {
 		VerifyQueue int `json:"verifyQueue"`
@@ -136,29 +133,24 @@ type ClientConfig struct {
 			EOF       string `json:"eof"`
 		} `json:"prompts"`
 		TripPalette [][3]int `json:"tripPalette"`
-		// Meta controls the trailing "#height:hash" line. Show is a
-		// pointer so an absent section (old config files) backfills to
-		// the default instead of silently disabling the line.
+		// Meta Show is a pointer so old files without this section
+		// backfill to shown.
 		Meta struct {
 			Show *bool `json:"show"`
 		} `json:"meta"`
-		// Mention controls @#height highlights. Color follows the
-		// [0,0,0]-means-default convention ([0,0,0] is unreadable on a
-		// dark background anyway).
+		// Mention Color uses the [0,0,0]-means-default convention.
 		Mention struct {
 			Enabled *bool  `json:"enabled"`
 			Color   [3]int `json:"color"`
 		} `json:"mention"`
-		// Reply controls /reply quotes. QuoteMaxRunes bounds the preview
-		// so quotes never wrap and break row math.
+		// Reply QuoteMaxRunes bounds the preview so quotes never wrap
+		// and break row math.
 		Reply struct {
 			Enabled       *bool `json:"enabled"`
 			QuoteMaxRunes int   `json:"quoteMaxRunes"`
 		} `json:"reply"`
-		// Clipboard controls /copy hygiene. ClearAfterSec auto-clears the
-		// clipboard N seconds after a copy (0 disables). A pointer so an
-		// absent section (old config files) backfills to the default
-		// instead of silently disabling clearing.
+		// Clipboard ClearAfterSec is a pointer so old files without this
+		// section backfill to the default instead of disabling clearing.
 		Clipboard struct {
 			ClearAfterSec *int `json:"clearAfterSec"`
 		} `json:"clipboard"`
@@ -183,44 +175,42 @@ type ClientConfig struct {
 		} `json:"theme"`
 		Web struct {
 			CharAspect float64 `json:"charAspect"`
-			Scrollback int     `json:"scrollback"`
+			TargetCols struct {
+				Coarse  int `json:"coarse"`
+				Desktop int `json:"desktop"`
+				Narrow  int `json:"narrow"`
+			} `json:"targetCols"`
+			Scrollback     int    `json:"scrollback"`
+			ResizeDebounce string `json:"resizeDebounce"`
 		} `json:"web"`
-		// History controls the input history file. SaveMessages is a
-		// pointer so an absent section keeps the default (off): only
-		// slash commands are persisted, never chat text.
+		// History SaveMessages is a pointer so old files without this
+		// section keep the default (off): slash commands persist, chat
+		// text never lands on disk.
 		History struct {
 			SaveMessages *bool `json:"saveMessages"`
 		} `json:"history"`
-		// Collapse folds long blocks (head rows + expand trailer).
-		// Rows is the collapse threshold in screen rows, PreviewRows
-		// how many head rows survive. Enabled is a pointer so absent
-		// sections backfill to enabled instead of silently disabling.
+		// Collapse Rows is the fold threshold in screen rows, PreviewRows
+		// the surviving head rows. Enabled is a pointer so old files
+		// backfill to enabled.
 		Collapse struct {
 			Enabled     *bool `json:"enabled"`
 			Rows        int   `json:"rows"`
 			PreviewRows int   `json:"previewRows"`
 		} `json:"collapse"`
-		// VersionCheck controls the pre-dial server version check.
-		// Mode is disabled|warn|enforce (default warn); Expect pins a
-		// fork version, empty compares against this client's own stamp.
+		// VersionCheck Mode is disabled|warn|enforce (default warn);
+		// empty Expect compares against this client's own stamp.
 		VersionCheck struct {
 			Enabled *bool  `json:"enabled"`
 			Mode    string `json:"mode"`
 			Expect  string `json:"expect"`
 		} `json:"versionCheck"`
-		// Notify gates informational notices by tag: a false value mutes
-		// the line on screen while it still lands in the system tab, so
-		// nothing is lost. Critical warnings (chain integrity, send
-		// guards, connection loss, command output) are never gated.
-		//
-		// Keys are the tag paths the server publishes — "system",
-		// "system.pow", "system.join" and so on — so a new notice kind
-		// needs no new switch here. Muting a node hides its whole
-		// subtree. An absent key means shown, so a notice kind this
-		// build does not know about is not silenced by omission.
+		// Notify gates notices by tag: false mutes the live line while
+		// it still lands in the system tab. Critical warnings (chain
+		// integrity, send guards, connection loss, command output) are
+		// never gated. Keys are the tag paths the server publishes;
+		// muting a node hides its subtree. An absent key means shown.
 		Notify NotifyGates `json:"notify"`
-		// PowMinTier hides the "solving PoW" notice for tiers below it
-		// (default 1).
+		// PowMinTier hides the "solving PoW" notice below it (default 1).
 		PowMinTier *int `json:"powMinTier"`
 	} `json:"ui"`
 	Commands map[string][]string `json:"commands"`
@@ -237,20 +227,17 @@ type ClientConfig struct {
 		WsWrite            string `json:"wsWrite"`
 		ReadHeader         string `json:"readHeader"`
 		HistoryFlush       string `json:"historyFlush"`
-		WsHandshake        string `json:"wsHandshakeTimeout"`
+		WsHandshake        string `json:"wsHandshake"`
 		EnrollChallengeTTL string `json:"enrollChallengeTTL"`
 	} `json:"timeouts"`
-	// Pow bounds proof-of-work the client will perform: offers above
-	// MaxTier or past MaxCostMs are declined instead of solved, so a
-	// malicious server cannot burn the machine.
+	// Pow MaxTier/MaxCostMs bound client work: offers above either are
+	// declined, so a malicious server cannot burn the machine.
 	Pow struct {
 		MaxTier   int   `json:"maxTier"`
 		MaxCostMs int64 `json:"maxCostMs"`
 	} `json:"pow"`
-	// History controls recovery of missed lines. RecoverRetries bounds
-	// how many times a refill is retried when the server answers
-	// incomplete; RecoverRetryDelay waits between attempts (must cover
-	// the server's history budget refill). LiveRecoverCap bounds the
+	// History bounds recovery of missed lines. RecoverRetryDelay must
+	// cover the server history budget refill. LiveRecoverCap bounds
 	// lines auto-refilled from live gaps per session (0 = unlimited).
 	History struct {
 		InitialLines      *int    `json:"initialLines"`
@@ -261,7 +248,7 @@ type ClientConfig struct {
 	} `json:"history"`
 }
 
-// History recovery defaults when the history section is absent.
+// History recovery defaults for an absent history section.
 const (
 	DefaultHistoryInitialLines      = 500
 	DefaultHistoryBatchLines        = 100
@@ -285,6 +272,10 @@ func DefaultClientConfig() *ClientConfig {
 	c.Network.WasmWsOpen = "20s"
 	c.Network.WasmPasskey = "70s"
 	c.Network.ServerInfo = "5s"
+	c.Guard.MessageCooldown = "1000ms"
+	c.Guard.ConnectionCooldown = "5s"
+	c.Guard.IdleTimeout = "30m"
+	c.Guard.AuthResponseTimeout = "12s"
 	c.Guard.VerifyCooldown = "200ms"
 	c.Guard.MaxQueryBytes = 2048
 	c.Guard.VerifyMapCap = 1000
@@ -294,6 +285,7 @@ func DefaultClientConfig() *ClientConfig {
 	c.Guard.MaxFails = 5
 	c.Guard.BanDuration = "5m"
 	c.Guard.NonceTTL = "10s"
+	c.Guard.MaxConnectionsPerIP = 2
 	c.Channels.VerifyQueue = 128
 	c.Channels.WasmRecv = 64
 	c.Channels.WasmKeys = 64
@@ -338,10 +330,11 @@ func DefaultClientConfig() *ClientConfig {
 	c.UI.Theme.Accent = "#4f7dff"
 	c.UI.Theme.Error = "#ff6b6b"
 	c.UI.Web.CharAspect = 0.6
+	c.UI.Web.TargetCols.Coarse = 42
+	c.UI.Web.TargetCols.Desktop = 105
+	c.UI.Web.TargetCols.Narrow = 90
 	c.UI.Web.Scrollback = 10000
-	c.UI.Collapse.Enabled = boolPtr(true)
-	c.UI.Collapse.Rows = 10
-	c.UI.Collapse.PreviewRows = 5
+	c.UI.Web.ResizeDebounce = "150ms"
 	c.UI.Collapse.Enabled = boolPtr(true)
 	c.UI.Collapse.Rows = 10
 	c.UI.Collapse.PreviewRows = 5
@@ -384,14 +377,12 @@ func DefaultClientConfig() *ClientConfig {
 	return c
 }
 
-// boolPtr allocates a bool for default config values that must tell
-// "absent" apart from "false" after JSON round-trips.
+// boolPtr boxes a bool default so JSON round-trips tell "absent" from "false".
 func boolPtr(v bool) *bool    { return &v }
 func intPtr(v int) *int       { return &v }
 func strPtr(v string) *string { return &v }
 
-// ShowMeta reports whether message meta lines render. A nil pointer
-// (hand-edited or ancient config) means the default: shown.
+// ShowMeta reports whether meta lines render. Nil means shown.
 func (c *ClientConfig) ShowMeta() bool {
 	if c == nil || c.UI.Meta.Show == nil {
 		return true
@@ -399,8 +390,7 @@ func (c *ClientConfig) ShowMeta() bool {
 	return *c.UI.Meta.Show
 }
 
-// DefaultAutoVerify reports the startup value of trip auto-verify. A nil
-// pointer (absent section) means the default: enabled.
+// DefaultAutoVerify reports the startup trip auto-verify value. Nil means enabled.
 func (c *ClientConfig) DefaultAutoVerify() bool {
 	if c == nil || c.Defaults.AutoVerify == nil {
 		return true
@@ -408,8 +398,7 @@ func (c *ClientConfig) DefaultAutoVerify() bool {
 	return *c.Defaults.AutoVerify
 }
 
-// VersionCheckEnabled reports whether the pre-dial server version
-// check runs at all.
+// VersionCheckEnabled reports whether the pre-dial version check runs.
 func (c *ClientConfig) VersionCheckEnabled() bool {
 	if c == nil || c.UI.VersionCheck.Enabled == nil {
 		return true
@@ -417,8 +406,8 @@ func (c *ClientConfig) VersionCheckEnabled() bool {
 	return *c.UI.VersionCheck.Enabled
 }
 
-// VersionCheckMode returns the normalized mode: disabled, warn or
-// enforce. Unknown values fail toward warn (noisy, never silent).
+// VersionCheckMode returns disabled, warn or enforce. Unknown values
+// fall back to warn (noisy, never silent).
 func (c *ClientConfig) VersionCheckMode() string {
 	m := ""
 	if c != nil {
@@ -441,26 +430,18 @@ func (c *ClientConfig) VersionCheckExpect() string {
 	return c.UI.VersionCheck.Expect
 }
 
-// NotifyGates is the set of muted tag paths from a config. It decodes
-// leniently, because the alternative is worse than losing one setting: a
-// value the strict decoder rejects makes the whole file unparseable, and the
-// caller then falls back to the defaults, losing the username, the server and
-// every other setting with no message.
-//
-// So a value that is not a boolean is dropped rather than rejected, and the
-// short kind names a config written before the tag change used ("pow",
-// "history", "join", "date") are read as the tag they correspond to. That
-// keeps an existing config's gates meaning what its author intended instead
-// of quietly muting more or less than they asked for.
+// NotifyGates holds muted tag paths. It decodes leniently: a non-boolean
+// value is dropped, never fatal, because a strict failure discards the
+// whole file and with it the username, server and every other setting.
+// Pre-tag kind names ("pow", "history", "join", "date") map to the tags
+// they used to drive, so an old config keeps meaning what its author set.
 type NotifyGates map[string]bool
 
-// legacyNotifyTags maps the pre-tag kind names onto the tag paths each one
-// drove. More than one path is normal: "join" covered join and leave through
-// a single switch, and system.join is a leaf, not their parent, so mapping it
-// to one tag would quietly un-mute half of what the author asked for.
-// "system" is absent on purpose: that name is also a tag, but it meant "the
-// catch-all kind" before and means "everything" now, and widening a user's
-// mute is not a safe guess.
+// legacyNotifyTags maps pre-tag kind names to current tag paths. "join"
+// covered join and leave through one switch, so it maps to both tags:
+// mapping one would un-mute half of what the author asked for. "system"
+// is absent on purpose: it meant "the catch-all kind" before and means
+// "everything" now, and widening a mute is not a safe guess.
 var legacyNotifyTags = map[string][]string{
 	"pow":     {"system.pow"},
 	"history": {"system.history"},
@@ -469,8 +450,7 @@ var legacyNotifyTags = map[string][]string{
 	"date":    {"system.date"},
 }
 
-// UnmarshalJSON reads a gate per entry, skipping any value that is not a
-// boolean.
+// UnmarshalJSON reads one gate per entry, skipping non-boolean values.
 func (g *NotifyGates) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -483,11 +463,8 @@ func (g *NotifyGates) UnmarshalJSON(data []byte) error {
 			return
 		}
 		if tags, legacy := legacyNotifyTags[key]; legacy {
-			// Only where nothing already spoke for that tag. A config can
-			// carry both a legacy name and the tag it maps to, and map
-			// iteration order is random, so the winner cannot depend on
-			// which key is visited last. The explicit tag wins: it is the
-			// current form and the more specific statement.
+			// Map order is random, so an explicit tag always wins over a
+			// legacy name mapping to the same tag.
 			for _, tag := range tags {
 				if _, taken := gates[tag]; !taken {
 					gates[tag] = on
@@ -511,9 +488,8 @@ func (g *NotifyGates) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// NotifyTag reports whether notices carrying tag print live. An absent key
-// means shown, so a notice kind this build does not know is not silenced by
-// omission. Muting is decided per tag, and a muted node covers its subtree.
+// NotifyTag reports whether notices with tag print live. An absent key
+// means shown; a muted node covers its subtree.
 func (c *ClientConfig) NotifyTag(tag string) bool {
 	if c == nil {
 		return true
@@ -522,8 +498,8 @@ func (c *ClientConfig) NotifyTag(tag string) bool {
 	return !ok || enabled
 }
 
-// NotifyPowMinTier returns the lowest PoW tier whose "solving" notice
-// prints (default 1: every tier).
+// NotifyPowMinTier returns the lowest PoW tier with a "solving" notice
+// (default 1).
 func (c *ClientConfig) NotifyPowMinTier() int {
 	if c == nil || c.UI.PowMinTier == nil {
 		return 1
@@ -539,7 +515,8 @@ func (c *ClientConfig) CollapseEnabled() bool {
 	return *c.UI.Collapse.Enabled
 }
 
-// CollapseRows returns the collapse threshold in screen rows (>= 3).
+// CollapseRows returns the fold threshold in screen rows (floor 3,
+// default 10).
 func (c *ClientConfig) CollapseRows() int {
 	if c == nil || c.UI.Collapse.Rows < 3 {
 		return 10
@@ -567,8 +544,8 @@ func (c *ClientConfig) MentionEnabled() bool {
 	return *c.UI.Mention.Enabled
 }
 
-// MentionColor returns the clamped highlight triple, defaulting bright
-// cyan for absent ([0,0,0]) or out-of-range channels.
+// MentionColor returns the clamped highlight triple. Absent ([0,0,0])
+// or out-of-range channels fall back to bright cyan.
 func (c *ClientConfig) MentionColor() [3]int {
 	def := [3]int{0, 255, 255}
 	if c == nil {
@@ -596,9 +573,9 @@ func (c *ClientConfig) ReplyEnabled() bool {
 	return *c.UI.Reply.Enabled
 }
 
-// SaveMessageHistory reports whether chat messages are kept in the input
-// history file. Default off: only slash commands are persisted, so a message
-// never lands on disk.
+// SaveMessageHistory reports whether chat messages persist in the input
+// history file. Default off: slash commands persist, messages never
+// touch disk.
 func (c *ClientConfig) SaveMessageHistory() bool {
 	if c == nil || c.UI.History.SaveMessages == nil {
 		return false
@@ -606,8 +583,8 @@ func (c *ClientConfig) SaveMessageHistory() bool {
 	return *c.UI.History.SaveMessages
 }
 
-// QuoteMaxRunes bounds reply preview length (clamped 20-200, default 80)
-// so quotes stay single-line on narrow screens.
+// QuoteMaxRunes bounds reply preview length (20-200, default 80) so
+// quotes stay single-line on narrow screens.
 func (c *ClientConfig) QuoteMaxRunes() int {
 	if c == nil || c.UI.Reply.QuoteMaxRunes <= 0 {
 		return 80
@@ -621,9 +598,8 @@ func (c *ClientConfig) QuoteMaxRunes() int {
 	return c.UI.Reply.QuoteMaxRunes
 }
 
-// ClipboardClearAfterSec seconds until /copy auto-clears the clipboard
-// (default 30, explicit 0 disables). A nil pointer (hand-edited or
-// ancient config) means the default.
+// ClipboardClearAfterSec seconds until /copy auto-clears (default 30,
+// explicit 0 disables). Nil means the default.
 func (c *ClientConfig) ClipboardClearAfterSec() int {
 	if c == nil || c.UI.Clipboard.ClearAfterSec == nil {
 		return 30
@@ -634,8 +610,8 @@ func (c *ClientConfig) ClipboardClearAfterSec() int {
 	return *c.UI.Clipboard.ClearAfterSec
 }
 
-// HistoryInitialLines returns how much recent history the initial load
-// covers (default 500; absent or non-positive means the default).
+// HistoryInitialLines lines of recent history covered by the initial load
+// (default 500; absent or non-positive means the default).
 func (c *ClientConfig) HistoryInitialLines() int {
 	if c == nil || c.History.InitialLines == nil || *c.History.InitialLines <= 0 {
 		return DefaultHistoryInitialLines
@@ -643,8 +619,8 @@ func (c *ClientConfig) HistoryInitialLines() int {
 	return *c.History.InitialLines
 }
 
-// HistoryBatchLines returns the lines requested per paging round
-// (default 100; absent or non-positive means the default).
+// HistoryBatchLines lines requested per paging round (default 100;
+// absent or non-positive means the default).
 func (c *ClientConfig) HistoryBatchLines() int {
 	if c == nil || c.History.BatchLines == nil || *c.History.BatchLines <= 0 {
 		return DefaultHistoryBatchLines
@@ -652,8 +628,8 @@ func (c *ClientConfig) HistoryBatchLines() int {
 	return *c.History.BatchLines
 }
 
-// HistoryRecoverRetries returns the max refill retry rounds (default 2;
-// absent or negative means the default, explicit 0 disables retries).
+// HistoryRecoverRetries max refill retry rounds (default 2; absent or
+// negative means the default, explicit 0 disables retries).
 func (c *ClientConfig) HistoryRecoverRetries() int {
 	if c == nil || c.History.RecoverRetries == nil || *c.History.RecoverRetries < 0 {
 		return DefaultHistoryRecoverRetries
@@ -661,8 +637,8 @@ func (c *ClientConfig) HistoryRecoverRetries() int {
 	return *c.History.RecoverRetries
 }
 
-// HistoryRecoverRetryDelay returns the wait between refill retries
-// (default 2s; absent or unparsable means the default).
+// HistoryRecoverRetryDelay wait between refill retries (default 2s;
+// absent or unparsable means the default).
 func (c *ClientConfig) HistoryRecoverRetryDelay() time.Duration {
 	if c == nil || c.History.RecoverRetryDelay == nil {
 		return DefaultHistoryRecoverRetryDelay
@@ -674,9 +650,9 @@ func (c *ClientConfig) HistoryRecoverRetryDelay() time.Duration {
 	return d
 }
 
-// HistoryLiveRecoverCap returns the per-session live-gap refill budget
-// in lines (default 1000; explicit 0 means unlimited; absent or negative
-// means the default).
+// HistoryLiveRecoverCap per-session live-gap refill budget in lines
+// (default 1000; explicit 0 means unlimited; absent or negative means
+// the default).
 func (c *ClientConfig) HistoryLiveRecoverCap() int {
 	if c == nil || c.History.LiveRecoverCap == nil || *c.History.LiveRecoverCap < 0 {
 		return DefaultHistoryLiveRecoverCap
@@ -684,9 +660,9 @@ func (c *ClientConfig) HistoryLiveRecoverCap() int {
 	return *c.History.LiveRecoverCap
 }
 
-// Load reads a client config file. The config is read-only input: a
-// missing file yields in-memory defaults and nothing is ever written
-// back. Mutable state lives in separate cache files.
+// Load reads a client config file. A missing file yields in-memory
+// defaults; nothing is ever written back. Mutable state lives in
+// separate cache files.
 func Load(path string) (*ClientConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -701,8 +677,8 @@ func Load(path string) (*ClientConfig, error) {
 	return parse(data)
 }
 
-// LoadEncrypted opens a passphrase-sealed config file. Wrong passphrase
-// and corrupt files both fail closed.
+// LoadEncrypted opens a passphrase-sealed config file. A wrong passphrase
+// and a corrupt file both fail closed.
 func LoadEncrypted(path string, passphrase []byte) (*ClientConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -716,10 +692,9 @@ func LoadEncrypted(path string, passphrase []byte) (*ClientConfig, error) {
 	return parse(plain)
 }
 
-// ReplaceFile atomically swaps the whole file at path with data. Config
-// is immutable state: readers never mutate it in place, explicit
-// replacements like this are the only write path. Owner-only
-// permissions, like every other secret-adjacent file.
+// ReplaceFile atomically swaps the file at path with data. Explicit
+// replacements are the only write path; readers never mutate in place.
+// Owner-only permissions, like every other secret-adjacent file.
 func ReplaceFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if dir != "." && dir != "" {
@@ -743,10 +718,10 @@ func parse(data []byte) (*ClientConfig, error) {
 	if err := json.Unmarshal(stripped, &c); err != nil {
 		return nil, err
 	}
-	// Backfill tab caps for config files written before the tabs section existed.
+	// Backfill tab caps for files written before the tabs section existed.
 	def := DefaultClientConfig()
-	// Backfill numeric limits: a partial config must never zero out the
-	// send guards (a zero MaxMessageLength would reject every message).
+	// A partial config must never zero out the send guards (a zero
+	// MaxMessageLength would reject every message).
 	if c.Limits.MaxConnectionsPerIP <= 0 {
 		c.Limits.MaxConnectionsPerIP = def.Limits.MaxConnectionsPerIP
 	}
@@ -777,15 +752,29 @@ func parse(data []byte) (*ClientConfig, error) {
 	if c.Limits.ConnectionCooldown <= 0 {
 		c.Limits.ConnectionCooldown = def.Limits.ConnectionCooldown
 	}
-	// Backfill meta visibility (absent section means default: shown).
+	// Guard carries the template duration strings; explicit values win
+	// over the Limits defaults, unparsable or empty keeps the default.
+	if d, err := time.ParseDuration(c.Guard.MessageCooldown); err == nil && d > 0 {
+		c.Limits.MessageCooldown = d
+	}
+	if d, err := time.ParseDuration(c.Guard.ConnectionCooldown); err == nil && d > 0 {
+		c.Limits.ConnectionCooldown = d
+	}
+	if d, err := time.ParseDuration(c.Guard.IdleTimeout); err == nil && d > 0 {
+		c.Limits.IdleChatTimeout = d
+	}
+	if c.Guard.MaxConnectionsPerIP > 0 {
+		c.Limits.MaxConnectionsPerIP = c.Guard.MaxConnectionsPerIP
+	}
+	// Absent meta section means shown.
 	if c.UI.Meta.Show == nil {
 		c.UI.Meta.Show = def.UI.Meta.Show
 	}
-	// Backfill auto-verify (absent means default: enabled).
+	// Absent auto-verify means enabled.
 	if c.Defaults.AutoVerify == nil {
 		c.Defaults.AutoVerify = def.Defaults.AutoVerify
 	}
-	// Backfill recovery cap (absent means default: 200 auto lines).
+	// Absent recovery fields mean their defaults.
 	if c.History.InitialLines == nil {
 		c.History.InitialLines = def.History.InitialLines
 	}
@@ -801,7 +790,7 @@ func parse(data []byte) (*ClientConfig, error) {
 	if c.History.LiveRecoverCap == nil {
 		c.History.LiveRecoverCap = def.History.LiveRecoverCap
 	}
-	// Backfill version-check knobs (absent means default: enabled warn).
+	// Absent version-check knobs mean enabled warn.
 	if c.UI.VersionCheck.Enabled == nil {
 		c.UI.VersionCheck.Enabled = def.UI.VersionCheck.Enabled
 	}
@@ -815,7 +804,7 @@ func parse(data []byte) (*ClientConfig, error) {
 	if c.UI.PowMinTier == nil {
 		c.UI.PowMinTier = def.UI.PowMinTier
 	}
-	// Backfill collapse knobs (absent means default: enabled 10/5).
+	// Absent collapse knobs mean enabled 10/5.
 	if c.UI.Collapse.Enabled == nil {
 		c.UI.Collapse.Enabled = def.UI.Collapse.Enabled
 	}
@@ -825,7 +814,7 @@ func parse(data []byte) (*ClientConfig, error) {
 	if c.UI.Collapse.PreviewRows <= 0 {
 		c.UI.Collapse.PreviewRows = def.UI.Collapse.PreviewRows
 	}
-	// Backfill mention/reply knobs the same way.
+	// Same backfill for mention/reply knobs.
 	if c.UI.Mention.Enabled == nil {
 		c.UI.Mention.Enabled = def.UI.Mention.Enabled
 	}
@@ -838,8 +827,7 @@ func parse(data []byte) (*ClientConfig, error) {
 	if c.UI.Reply.QuoteMaxRunes <= 0 {
 		c.UI.Reply.QuoteMaxRunes = def.UI.Reply.QuoteMaxRunes
 	}
-	// Backfill clipboard autoclear (absent means default 30; explicit 0
-	// stays 0 to disable).
+	// Absent autoclear means default 30; explicit 0 stays 0 to disable.
 	if c.UI.Clipboard.ClearAfterSec == nil {
 		c.UI.Clipboard.ClearAfterSec = def.UI.Clipboard.ClearAfterSec
 	}
@@ -852,7 +840,7 @@ func parse(data []byte) (*ClientConfig, error) {
 	if c.Tabs.SystemMaxBytes <= 0 {
 		c.Tabs.SystemMaxBytes = def.Tabs.SystemMaxBytes
 	}
-	// Backfill code highlight palette ([0,0,0] means "use default").
+	// [0,0,0] means "use default".
 	if c.UI.CodeStyle.Background == ([3]int{}) {
 		c.UI.CodeStyle.Background = def.UI.CodeStyle.Background
 	}
@@ -880,8 +868,8 @@ func parse(data []byte) (*ClientConfig, error) {
 	if c.UI.CodeStyle.Operator == ([3]int{}) {
 		c.UI.CodeStyle.Operator = def.UI.CodeStyle.Operator
 	}
-	// Backfill PoW bounds: absent section must not zero out the
-	// decline guards (MaxTier 0 would decline everything).
+	// Absent PoW bounds must not zero the decline guards (MaxTier 0
+	// would decline everything).
 	if c.Pow.MaxTier <= 0 {
 		c.Pow.MaxTier = def.Pow.MaxTier
 	}

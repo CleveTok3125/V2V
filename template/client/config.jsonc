@@ -25,7 +25,6 @@
     "maxMessageLine": 50,
     "maxUsernameLength": 12,
     "maxTripcodeLength": 64,
-    "maxRoleLength": 64,
     "maxHistorySend": 500,
     "maxHistoryBytes": 10485760
   },
@@ -37,6 +36,7 @@
     "authResponseTimeout": "12s",
     "nonceTTL": "10s",
     "authReadLimit": 65536,
+    "maxRoleLength": 64,
     "maxFails": 5,
     "banDuration": "5m",
     "maxConnectionsPerIP": 2,
@@ -74,23 +74,13 @@
     "theme": {"background": "#101014", "accent": "#4f7dff", "error": "#ff6b6b"},
     "web": {"charAspect": 0.6, "targetCols": {"coarse":42,"desktop":105,"narrow":90}, "scrollback": 10000, "resizeDebounce": "150ms"},
     "history": {"saveMessages": false},
-    // Long-message folding: blocks over collapseRows screen rows render as
-    // previewRows with dim "..." plus "[Xem thêm: /expand #height]" on the
-    // last preview line. /expand re-renders full from the local wire
-    // index (lost after eviction).
+    // Collapse folds long blocks: rows past Rows show PreviewRows plus an expand trailer.
     "collapse": {"enabled": true, "rows": 10, "previewRows": 5},
-    // Pre-dial server version check: mode disabled|warn|enforce (default warn);
-    // expect pins a fork version, "" compares against this client's own stamp.
+    // Pre-dial version check: mode disabled|warn|enforce; empty expect uses this client stamp.
     "versionCheck": {"enabled": true, "mode": "warn", "expect": ""},
-    // Informational notice gates, keyed by the tag the server publishes.
-    // false mutes the line on screen but it still lands in the system tab.
-    // Muting a node hides its whole subtree, so "system": false silences
-    // everything, "system.pow": false only the proof-of-work flow. An absent
-    // key means shown, so a notice kind you have not heard of stays visible.
-    // Critical warnings (chain/fork, send guards, connection loss) always show.
-    // /notify toggles these at runtime; /notify with no argument prints this
-    // same tree with each row's effective state. Every tag is listed in
-    // docs/NOTICE_TAGS.md.
+    // Notice gates by server tag: false mutes the live line, never the
+    // system tab copy. Muting a node hides its subtree; absent means
+    // shown. Critical warnings always show. /notify toggles at runtime.
     "notify": {},
     // Hides the "solving PoW" notice for tiers below this.
     "powMinTier": 1
@@ -131,17 +121,15 @@
     "wsHandshake": "45s",
     "enrollChallengeTTL": "5m"
   },
-  // Proof-of-work bounds: offers above maxTier or past maxCostMs are
-  // declined instead of solved, so a malicious server cannot burn the
-  // machine. maxCostMs bounds one solve in milliseconds.
+  // Proof-of-work bounds in milliseconds: offers above maxTier or past
+  // maxCostMs are declined, so a malicious server cannot burn the machine.
   "pow": {
     "maxTier": 3,
     "maxCostMs": 120000
   },
-  // History load and recovery. initialLines is how much recent history
-  // the client requests on connect; batchLines is the page size.
-  // recoverRetries/recoverRetryDelay govern refill retries;
-  // liveRecoverCap bounds live-gap refills per session (0 = unlimited).
+  // History load and recovery: initialLines on connect, batchLines per
+  // page, recoverRetries/Delay for refills, liveRecoverCap per session
+  // (0 = unlimited).
   "history": {
     "initialLines": 500,
     "batchLines": 100,
