@@ -484,6 +484,22 @@ func TestAppEscExitsCommandMode(t *testing.T) {
 	}
 }
 
+func TestAppInputBorderModes(t *testing.T) {
+	a, _ := newTestApp()
+	if got := a.inputMode(); got != inputModeEmpty {
+		t.Fatalf("empty draft mode = %d, want %d", got, inputModeEmpty)
+	}
+	a.Update(key("h"))
+	if got := a.inputMode(); got != inputModeText {
+		t.Fatalf("text draft mode = %d, want %d", got, inputModeText)
+	}
+	a.input.SetValue("")
+	a.Update(key("/"))
+	if got := a.inputMode(); got != inputModeCommand {
+		t.Fatalf("command mode = %d, want %d", got, inputModeCommand)
+	}
+}
+
 func TestAppPromptMarkers(t *testing.T) {
 	a, _ := newTestApp()
 	if got := a.promptFor(textarea.PromptInfo{LineNumber: 0}); got != "> " {
