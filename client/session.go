@@ -89,7 +89,6 @@ type DisplayState struct {
 	ActiveTab int
 	TabChat   *tabBuffer
 	TabSys    *tabBuffer
-	PrintGen  uint64
 
 	// LayoutEpoch counts the writes that move the cursor away from where the
 	// last buffer entry ended. Only a tab switch does: it repaints the whole
@@ -128,7 +127,6 @@ type DisplayState struct {
 	// keeps a gapped replay from reaching scrollback, where it could
 	// not be merged afterwards. Under DisplayMu.
 	CatchupHold bool
-	HoldLines   []heldChunk
 	// HoldGen invalidates the release timer of a superseded hold.
 	HoldGen uint64
 	// HoldTimer is the release timer for the current hold; stopped when
@@ -554,7 +552,6 @@ func (s *Session) initUI() bool {
 		fmt.Println("❌ Lỗi: terminal chưa được khởi tạo")
 		return false
 	}
-	s.Display.Out = s.Display.Term.Writer()
 
 	s.Display.ShowJoinLeave = CLI.ShowJoin
 	if !s.Display.ShowJoinLeave && ClientCfg != nil {

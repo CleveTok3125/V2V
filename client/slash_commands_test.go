@@ -83,7 +83,7 @@ func TestCmdWhoamiLines(t *testing.T) {
 	if len(sess.Display.TabSys.lines) != 1 {
 		t.Fatalf("key whoami must emit 1 entry, got %d", len(sess.Display.TabSys.lines))
 	}
-	if got := out.String(); !strings.Contains(got, "Bob") || !strings.Contains(got, "\n|   Role:") {
+	if got := out.String(); !strings.Contains(got, "Bob") || !strings.Contains(got, "\nRole:") {
 		t.Fatalf("key whoami rows must be adjacent: %q", got)
 	}
 }
@@ -157,19 +157,19 @@ func TestCmdHelpRowsShareOneEntry(t *testing.T) {
 		t.Fatalf("the table must be one entry, got %d", n)
 	}
 	got := out.String()
-	if !strings.Contains(got, "| [Local]: Trợ giúp — danh sách lệnh:\n|   - /help, /h") {
+	if !strings.Contains(got, "Trợ giúp — danh sách lệnh:\n- /help, /h") {
 		t.Fatalf("the header must carry the first row: %q", got)
 	}
-	if strings.Contains(got, "\n\n|   - ") {
+	if strings.Contains(got, "\n\n- ") {
 		t.Fatalf("table rows must not be separated: %q", got)
 	}
 	col := -1
 	for _, line := range strings.Split(got, "\n") {
-		if !strings.HasPrefix(line, "|   - ") {
+		if !strings.HasPrefix(line, "- ") {
 			continue
 		}
 		at := strings.Index(line, ": ")
-		if at < 0 || at > len("|   - ")+helpUsageCap {
+		if at < 0 || at > len("- ")+helpUsageCap {
 			continue // the row that breaks out of the column
 		}
 		if col < 0 {
@@ -197,7 +197,7 @@ func TestCmdNotifyListingIsOneAlignedEntry(t *testing.T) {
 		t.Fatalf("the listing must be one entry, got %d", n)
 	}
 	got := out.String()
-	if !strings.Contains(got, "| [Local]: Thông báo (tag → trạng thái):\n|   system") {
+	if !strings.Contains(got, "Thông báo (tag → trạng thái):\nsystem") {
 		t.Fatalf("the header must carry the tree: %q", got)
 	}
 	col := -1
@@ -233,25 +233,21 @@ func TestCmdInfoBlockIsOneEntry(t *testing.T) {
 	if n := len(sess.Display.TabSys.lines); n != 1 {
 		t.Fatalf("the metadata block must be one entry, got %d", n)
 	}
-	if got := out.String(); !strings.Contains(got, "| [Local]: #42 — chi tiết metadata:") {
+	if got := out.String(); !strings.Contains(got, "[Local]: #42 — chi tiết metadata:") {
 		t.Fatalf("the block must open with its header: %q", got)
 	}
-	if got := out.String(); strings.Contains(got, "\n\n|   ") {
+	if got := out.String(); strings.Contains(got, "\n\nheight:") {
 		t.Fatalf("block rows must not be separated: %q", got)
 	}
 }
 
 func TestCmdClearRepaintsGreeting(t *testing.T) {
-	sess, out := behaviorSession(t)
+	sess, _ := behaviorSession(t)
 	sess.Username = "Tester"
 	if !sess.cmdClear("/clear") {
 		t.Fatal("/clear must match")
 	}
-	got := out.String()
-	if !strings.Contains(got, "\033[H\033[2J") {
-		t.Fatalf("clear must wipe screen: %q", got)
-	}
-	if !strings.Contains(got, "Tester") {
+	if got := entriesText(sess.Display.TabChat.lines); !strings.Contains(got, "Tester") {
 		t.Fatalf("clear must greet username: %q", got)
 	}
 }

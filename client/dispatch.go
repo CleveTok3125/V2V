@@ -78,12 +78,6 @@ func (s *Session) handleReadErr(err error) cmdAction {
 		s.gracefulQuit()
 		return cmdQuit
 	}
-	// UniqueEditLine makes readline erase the draft when a line is submitted,
-	// but the interrupt path only moves to the end of the line and resets:
-	// the half-typed row is still on screen with the cursor at its end, so
-	// the notice below would join it. The input row is never a buffer entry,
-	// so nothing else can account for it.
-	s.clearInputRow()
 	// Reply targets attach to the next send only; reset first so a
 	// rejected message never leaks its quote into a later one. The
 	// draft/inline /reply handlers below re-arm it when due.
@@ -153,20 +147,12 @@ func (s *Session) gracefulQuit() {
 		s.releaseCatchupLocked()
 		s.flushPendingGreetingLocked()
 		s.Display.DisplayMu.Unlock()
-		if s.Display.Sink == nil {
-			s.enqueueOutput("| [Local]: 👋 Đang ngắt kết nối... Tạm biệt!\n")
-		}
-		// Let the goodbye flush and the pump tear down instead of racing
-		// them: return as soon as the pump exits, same 500ms cap as the
-		// old fixed sleep when it never does.
 		if s.PumpDone != nil {
 			select {
 			case <-s.PumpDone:
 			case <-time.After(500 * time.Millisecond):
 			}
 		}
-		// Drain the terminal queue so no queued line is lost on exit.
-		s.flushOutputNow()
 		if s.Display.Sink != nil {
 			// The app stops the run loop; main restores the terminal.
 			s.Display.Sink.Quit()
@@ -427,17 +413,13 @@ func (s *Session) cmdClear(text string) bool {
 	s.Display.DisplayMu.Lock()
 	s.releaseCatchupLocked()
 	s.Display.PendingGreeting = ""
+	s.Display.TabChat.reset()
+	banner := "Đã kết nối với username: " + serverField(s.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n"
+	s.Display.TabChat.append(noticeEntry(strings.TrimSuffix(banner, "\n")))
 	if s.Display.Sink != nil {
-		s.Display.TabChat.reset()
-		banner := "Đã kết nối với username: " + serverField(s.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n"
-		s.Display.TabChat.append(noticeEntry(strings.TrimSuffix(banner, "\n")))
 		s.Display.Sink.Notify()
-		s.Display.DisplayMu.Unlock()
-		return true
 	}
 	s.Display.DisplayMu.Unlock()
-	s.enqueueOutput("\033[H\033[2J")
-	s.enqueueOutput("Đã kết nối với username: " + serverField(s.Username) + "\nGõ tin nhắn để chat, /help để hiện trợ giúp\n\n")
 	return true
 }
 
@@ -483,18 +465,6 @@ func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 		// command or empty-line ^C aborts it (see loop top).
 		s.Pending.ReplyDraft = height
 		s.Display.Term.SetPrompt(fmt.Sprintf("↩ #%d > ", height))
-		s.Display.DisplayMu.Lock()
-		if s.Display.Sink == nil {
-			// The legacy printer writes the preview and its hint itself; the
-			// TUI shows the preview above the input box and the hint in the
-			// status line.
-			for _, q := range s.quoteLinesFor(height, false) {
-				fmt.Fprint(s.Display.Out, q+"\n")
-				s.Display.PrintGen++
-			}
-			s.emitLocalFeedback("| [Local]: Gõ nội dung reply (Enter gửi, ^C ở dòng trống hủy, lệnh / khác hủy draft).\n")
-		}
-		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return text, cmdDone, true
 	}

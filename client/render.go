@@ -84,32 +84,6 @@ func parseHistoryBoundary(tags []string) (boundary bool, start bool) {
 // It returns the joined text, or canceled=true when the user aborted with
 // Ctrl+C or the stream ended — in which case the caller must discard
 // everything and send nothing.
-func collectCodeblock(term inputTerminal, firstLine string, onLine func([]string)) (string, bool) {
-	rawLines := []string{firstLine}
-
-	term.SetPrompt("| ... ")
-	defer term.SetPrompt("| > ")
-	// Cap the collection: an unclosed fence on an endless stream must
-	// not grow the buffer without bound.
-	const maxCodeblockLines = 512
-	for len(rawLines) < maxCodeblockLines {
-		nextLine, err := term.ReadLine()
-		if err != nil {
-			return "", true
-		}
-		rawLines = append(rawLines, nextLine)
-		// The term now erases the draft instead of committing it, so the
-		// block only stays visible if the echo entry is rewritten here.
-		onLine(rawLines)
-
-		if strings.HasSuffix(strings.TrimSpace(nextLine), "```") {
-			break
-		}
-	}
-
-	return strings.Join(rawLines, "\n"), false
-}
-
 func normalizeURL(input string) string {
 	input = strings.TrimSpace(input)
 	if !strings.Contains(input, "://") {
@@ -370,7 +344,7 @@ func (s *Session) replyPreviewLine() string {
 func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (e entry, tab int) {
 	tab = TabChat
 	if msg.Type == "system" {
-		e.header = fmt.Sprintf("| %s", filter.SanitizeForDisplay(msg.Text))
+		e.header = filter.SanitizeForDisplay(msg.Text)
 		// sys_date marks a date banner: it anchors older windows and is
 		// deduped when paging repeats a day.
 		e.banner = msg.SysDate != ""
@@ -382,7 +356,7 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (e entry, t
 	// it under a shared indent. One shape for every chat line keeps the
 	// author column stable and stops a wrapped body from reading as a row
 	// of separate messages.
-	header := fmt.Sprintf("| %s %s",
+	header := fmt.Sprintf("%s %s",
 		filter.SanitizeSingleLine(msg.Time), authorField(msg.DisplayName))
 	if wantsMeta(msg, withMeta) {
 		badge := ""
@@ -411,7 +385,7 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (e entry, t
 	}
 	e.quote = quote.String()
 	e.header = header
-	e.body = chatBodyIndent(body)
+	e.body = body
 	if s.isMine(msg) {
 		e.kind = kindMine
 	}
@@ -429,21 +403,6 @@ func (s *Session) isMine(msg WireMessage) bool {
 		return strings.EqualFold(msg.Trip.Pub, hex.EncodeToString(s.TripPub))
 	}
 	return s.Username != "" && msg.DisplayName == s.Username
-}
-
-// chatBodyPrefix is the indent every text row of a message shares. It sits
-// one cell right of the author row's gutter, so the body is inset from the
-// header without competing with it for the left edge.
-const chatBodyPrefix = "|   "
-
-// chatBodyIndent puts that prefix on every line of a rendered body. A blank
-// body line keeps the prefix too, so the block never looks ragged.
-func chatBodyIndent(body string) string {
-	lines := strings.Split(body, "\n")
-	for i, line := range lines {
-		lines[i] = chatBodyPrefix + line
-	}
-	return strings.Join(lines, "\n")
 }
 
 func (s *Session) renderChatBlock(msg WireMessage) {
@@ -468,9 +427,7 @@ func (s *Session) renderChatBlock(msg WireMessage) {
 			s.Pending.EchoSlot = nil
 			s.Pending.Mu.Unlock()
 			if pm != nil {
-				repaint := pm.shown && s.Display.ActiveTab == TabChat &&
-					pm.epoch == s.Display.LayoutEpoch
-				if s.replaceSlot(pm.slot, e, repaint) {
+				if s.replaceSlot(pm.slot, e) {
 					return
 				}
 			}
@@ -515,34 +472,11 @@ func (s *Session) switchTab(n int) {
 	// print first or the switch would hide it.
 	s.releaseCatchupLocked()
 	s.Display.ActiveTab = n
-	s.Display.PrintGen++
 	// The repaint leaves the cursor at the end of the whole buffer, so
 	// nothing drawn earlier can still be erased by moving up.
 	s.Display.LayoutEpoch++
 	if s.Display.Sink != nil {
 		// The app renders whichever tab is active; it just needs to know.
 		s.Display.Sink.Notify()
-		return
 	}
-	// Queued like every other screen write: a full tab dump is large,
-	// and a synchronous write would stall the pump behind a slow
-	// terminal. The dump is one ordered chunk (never dropped by the
-	// queue cap) so a tab switch always replays the buffer faithfully.
-	s.enqueueOutput("\033[H\033[2J")
-	var buf *tabBuffer
-	if n == TabChat {
-		buf = s.Display.TabChat
-	} else {
-		buf = s.Display.TabSys
-	}
-	var sb strings.Builder
-	for _, e := range buf.lines {
-		sb.WriteString(e.text())
-	}
-	// The bar rides in the same ordered chunk as the dump. Emitting it
-	// separately put it on the queue while readline was already drawing the
-	// prompt, which is how it ended up glued to the input line.
-	sb.WriteString(tabBarLine(n))
-	s.enqueueOutputKeep(sb.String(), true)
-	s.refreshTerminal()
 }

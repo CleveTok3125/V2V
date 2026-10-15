@@ -283,20 +283,17 @@ func (s *Session) runPump() {
 			case <-s.Quitting:
 				return
 			default:
-				// A held catch-up must print before the exit path so
-				// its buffered history is not lost with the process.
+				// A held catch-up must land before the exit path so its
+				// buffered history is not lost with the process.
 				s.Display.DisplayMu.Lock()
 				s.releaseCatchupLocked()
 				s.flushPendingGreetingLocked()
+				s.emitLocalFeedbackLive(true, "| [Local]: ❌ Mất kết nối server\n")
 				s.Display.DisplayMu.Unlock()
-				// Lost-connection line rides the same queue so it never
-				// interleaves with (or jumps ahead of) queued chat lines.
-				s.enqueueOutput("\r\033[K\n| [Local]: ❌ Mất kết nối server\n")
-				// Flush before exit: os.Exit skips deferred
-				// s.Display.Term.Close/flushChainTip, losing the newest tip and
-				// leaving the terminal raw.
+				// Give the app a moment to paint the notice before the
+				// process exits (os.Exit skips the app's teardown).
+				time.Sleep(250 * time.Millisecond)
 				s.flushChainTip()
-				s.flushOutputNow()
 				s.Display.Term.Close()
 				ClearLoadedPassphrase()
 				os.Exit(1)
