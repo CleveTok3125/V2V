@@ -376,7 +376,7 @@ func TestFormatQuote(t *testing.T) {
 	}
 	long := "| X: " + strings.Repeat("a", 200)
 	got = formatQuote(3, long, false, 80)
-	if strings.Count(got, "a") > 80 || !strings.HasSuffix(got, "…") {
+	if strings.Count(got, "a") > 80 || !strings.Contains(got, dimStyle.Render("...")) {
 		t.Fatalf("must truncate: %q", got)
 	}
 	got = formatQuote(3, long, false, 30)
@@ -1020,5 +1020,19 @@ func TestRecoveredBlockGoesAfterItsPredecessor(t *testing.T) {
 	if !(first < recovered && recovered < notice) {
 		t.Fatalf("recovered block not spliced after its predecessor\n  first=%d recovered=%d notice=%d\n%s",
 			first, recovered, notice, entriesText(lines))
+	}
+}
+
+func TestQuoteMarksMoreLines(t *testing.T) {
+	multi := formatQuote(3, "| 15:04 Alice: dòng một\ndòng hai", false, 80)
+	if !strings.Contains(multi, dimStyle.Render("...")) {
+		t.Fatalf("a multi-line quote must end with ...: %q", multi)
+	}
+	if !strings.Contains(multi, "dòng một") || strings.Contains(multi, "dòng hai") {
+		t.Fatalf("a quote shows the first line only: %q", multi)
+	}
+	one := formatQuote(3, "| 15:04 Alice: một dòng", false, 80)
+	if strings.Contains(one, dimStyle.Render("...")) {
+		t.Fatalf("a one-line quote must not carry ...: %q", one)
 	}
 }
