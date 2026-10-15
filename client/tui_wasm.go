@@ -63,15 +63,12 @@ func (wasmOutput) Write(p []byte) (int, error) {
 // Go. Colour is forced because the wasm build has no TTY to detect from.
 func runTUI(a *app) error {
 	input := newWasmInput()
-	p := tea.NewProgram(a,
-		tea.WithInput(input),
-		tea.WithOutput(wasmOutput{}),
-		tea.WithColorProfile(colorprofile.TrueColor),
-		tea.WithEnvironment([]string{"TERM=xterm-256color", "COLORTERM=truecolor"}),
-		tea.WithWindowSize(80, 24),
-	)
-	a.sink.attach(p)
 
+	// The grid size arrives from the page. It is tracked even before the
+	// program runs: the page's boot fit lands here, and the first frame must
+	// already be the real grid or the output is laid out for 80x24.
+	var sizeMu sync.Mutex
+	cols, rows := 80, 24
 	js.Global().Set("v2vSendKeys", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		if len(args) > 0 {
 			input.push(args[0].String())
@@ -80,7 +77,11 @@ func runTUI(a *app) error {
 	}))
 	js.Global().Set("v2vSetSize", js.FuncOf(func(_ js.Value, args []js.Value) any {
 		if len(args) >= 2 {
-			a.sink.send(tea.WindowSizeMsg{Width: args[0].Int(), Height: args[1].Int()})
+			c, r := args[0].Int(), args[1].Int()
+			sizeMu.Lock()
+			cols, rows = c, r
+			sizeMu.Unlock()
+			a.sink.send(tea.WindowSizeMsg{Width: c, Height: r})
 		}
 		return nil
 	}))
@@ -88,9 +89,22 @@ func runTUI(a *app) error {
 		a.sink.send(uiRefreshMsg{})
 		return nil
 	}))
+	// Ask the page to fit now, then start with the size it reports.
 	if fn := js.Global().Get("v2vWasmReady"); fn.Truthy() {
 		fn.Invoke()
 	}
+	sizeMu.Lock()
+	width, height := cols, rows
+	sizeMu.Unlock()
+
+	p := tea.NewProgram(a,
+		tea.WithInput(input),
+		tea.WithOutput(wasmOutput{}),
+		tea.WithColorProfile(colorprofile.TrueColor),
+		tea.WithEnvironment([]string{"TERM=xterm-256color", "COLORTERM=truecolor"}),
+		tea.WithWindowSize(width, height),
+	)
+	a.sink.attach(p)
 
 	_, err := p.Run()
 	return err
