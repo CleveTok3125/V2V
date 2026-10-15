@@ -6,7 +6,6 @@ package main
 // basics where the old codes were basics, so the look is unchanged.
 
 import (
-	"fmt"
 	"image/color"
 
 	"charm.land/lipgloss/v2"
@@ -30,9 +29,4 @@ func badgeStyle(badge string) lipgloss.Style {
 // sanitizer and the mention span regex expect the ST form ("\x1b\\").
 func linkText(url, s string) string {
 	return "\x1b]8;;" + url + "\x1b\\" + s + "\x1b]8;;\x1b\\"
-}
-
-// heredocMarker is a dim "<<" / ">>" frame delimiter for replayed output.
-func heredocMarker(arrow string, height uint64) string {
-	return dimStyle.Render(fmt.Sprintf("%s #%d", arrow, height))
 }

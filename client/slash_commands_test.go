@@ -346,16 +346,13 @@ func TestCmdFindSearchesBuffer(t *testing.T) {
 	if !sess.cmdFind("/find 1234") {
 		t.Fatal("/find must match")
 	}
-	if got := out.String(); !strings.Contains(got, "Tìm #1234") {
-		t.Fatalf("find must show header: %q", got)
+	// The hit is nested inside the local block, whole block and all.
+	if got := out.String(); !strings.Contains(got, "Tìm #1234 trong bộ nhớ:") ||
+		!strings.Contains(got, "#1234:abcd") || !strings.Contains(got, "hi") {
+		t.Fatalf("find must nest the hit block: %q", got)
 	}
-	if got := out.String(); !strings.Contains(got, "<<<<<<< #1234") || !strings.Contains(got, ">>>>>>> #1234") {
-		t.Fatalf("find hits must replay inside frame: %q", got)
-	}
-	// The frame and the hit it wraps are one entry, so nothing inside it gets
-	// spaced out (a marker row, a hit row and a closing row would be three).
-	if n := len(sess.Display.TabSys.lines); n != 1 {
-		t.Fatalf("the framed hit must be one entry, got %d", n)
+	if got := out.String(); strings.Contains(got, "<<<<<<<") {
+		t.Fatalf("find must not use the heredoc frame: %q", got)
 	}
 
 	sess, out = behaviorSession(t)
@@ -365,7 +362,7 @@ func TestCmdFindSearchesBuffer(t *testing.T) {
 		t.Fatalf("missing height must report: %q", got)
 	}
 	if got := out.String(); strings.Contains(got, "<<<<<<<") || strings.Contains(got, ">>>>>>>") {
-		t.Fatalf("missing height must not print frame: %q", got)
+		t.Fatalf("missing height must not print a frame: %q", got)
 	}
 
 	sess, out = behaviorSession(t)
@@ -424,16 +421,11 @@ func TestCmdExpandReplaysFull(t *testing.T) {
 		t.Fatal("/expand must match")
 	}
 	got := out.String()
-	if !strings.Contains(got, "<<<<<<< #42") || !strings.Contains(got, ">>>>>>> #42") {
-		t.Fatalf("expand must replay inside frame: %q", got)
+	if strings.Contains(got, "<<<<<<<") || strings.Contains(got, ">>>>>>>") {
+		t.Fatalf("expand must not use the heredoc frame: %q", got)
 	}
-	// The frame and the block it wraps are one entry, so the replayed rows stay
-	// together (one per row would be five entries for a two-row block).
-	if n := len(sess.Display.TabSys.lines); n != 1 {
-		t.Fatalf("the framed block must be one entry, got %d", n)
-	}
-	if !strings.Contains(got, "hello world") {
-		t.Fatalf("expand must show full text: %q", got)
+	if !strings.Contains(got, "Mở rộng #42:") || !strings.Contains(got, "hello world") {
+		t.Fatalf("expand must nest the full block: %q", got)
 	}
 
 	sess, out = behaviorSession(t)
