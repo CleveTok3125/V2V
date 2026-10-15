@@ -105,6 +105,19 @@ func (s *Session) handleReadErr(err error) cmdAction {
 	return cmdDone
 }
 
+// cancelReply drops a pending reply draft or one-shot target. It never touches
+// the sink, so the render loop can call it without deadlocking on a send.
+func (s *Session) cancelReply() bool {
+	s.Display.DisplayMu.Lock()
+	defer s.Display.DisplayMu.Unlock()
+	if s.Pending.ReplyDraft == 0 && s.Pending.PendingReplyTo == 0 {
+		return false
+	}
+	s.Pending.ReplyDraft = 0
+	s.Pending.PendingReplyTo = 0
+	return true
+}
+
 // handleDraftGate routes a line through a pending reply draft:
 // slash input aborts it, anything else becomes the quoted body.
 func (s *Session) handleDraftGate(text string) {
@@ -471,11 +484,16 @@ func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 		s.Pending.ReplyDraft = height
 		s.Display.Term.SetPrompt(fmt.Sprintf("↩ #%d > ", height))
 		s.Display.DisplayMu.Lock()
-		for _, q := range s.quoteLinesFor(height, false) {
-			fmt.Fprint(s.Display.Out, q+"\n")
-			s.Display.PrintGen++
+		if s.Display.Sink == nil {
+			// The legacy printer writes the preview and its hint itself; the
+			// TUI shows the preview above the input box and the hint in the
+			// status line.
+			for _, q := range s.quoteLinesFor(height, false) {
+				fmt.Fprint(s.Display.Out, q+"\n")
+				s.Display.PrintGen++
+			}
+			s.emitLocalFeedback("| [Local]: Gõ nội dung reply (Enter gửi, ^C ở dòng trống hủy, lệnh / khác hủy draft).\n")
 		}
-		s.emitLocalFeedback("| [Local]: Gõ nội dung reply (Enter gửi, ^C ở dòng trống hủy, lệnh / khác hủy draft).\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return text, cmdDone, true
@@ -741,6 +759,8 @@ func (s *Session) uiStatus() string {
 		return "Đang tải lịch sử cũ…"
 	case s.Chain.InRecover:
 		return "Đang khôi phục tin bị thiếu…"
+	case s.Pending.ReplyDraft > 0:
+		return "reply nháp: Enter gửi, ^C hủy"
 	default:
 		return ""
 	}

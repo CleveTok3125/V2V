@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/CleveTok3125/V2V/lib/config"
 	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
@@ -407,6 +408,79 @@ func TestEntryAlignmentAndMine(t *testing.T) {
 	}
 	if sess.isMine(WireMessage{DisplayName: "Other#0002"}) {
 		t.Fatal("another display name must not count as ours")
+	}
+}
+
+func TestReplyCancel(t *testing.T) {
+	oldCfg := ClientCfg
+	ClientCfg = config.DefaultClientConfig()
+	defer func() { ClientCfg = oldCfg }()
+
+	a, sess := newTestApp()
+	sess.Conn = &stubConn{}
+	sess.Chain.WireIdx = newWireIndex(16)
+	sess.Display.TabChat.append(entry{header: "| 10:00 A • #7:abcd", body: "|   gốc", height: 7, hashHex: "abcd"})
+
+	sess.dispatch("/reply 7")
+	if sess.Pending.ReplyDraft != 7 {
+		t.Fatalf("draft not armed: %d", sess.Pending.ReplyDraft)
+	}
+	a.Update(key("backspace"))
+	if sess.Pending.ReplyDraft != 0 {
+		t.Fatal("backspace on an empty draft must cancel the reply")
+	}
+
+	sess.dispatch("/reply 7")
+	a.Update(key("ctrl+c"))
+	if sess.Pending.ReplyDraft != 0 {
+		t.Fatal("ctrl+c must cancel the reply")
+	}
+
+	// A one-shot target is dropped too.
+	sess.Pending.PendingReplyTo = 7
+	a.Update(key("esc"))
+	if sess.Pending.PendingReplyTo != 0 {
+		t.Fatal("esc must drop a pending reply target")
+	}
+}
+
+func TestReplyPreviewLine(t *testing.T) {
+	oldCfg := ClientCfg
+	ClientCfg = config.DefaultClientConfig()
+	defer func() { ClientCfg = oldCfg }()
+
+	a, sess := newTestApp()
+	sess.Conn = &stubConn{}
+	sess.Chain.WireIdx = newWireIndex(16)
+	sess.Display.TabChat.append(entry{header: "| 10:00 A • #7:abcd", body: "|   gốc", height: 7, hashHex: "abcd"})
+	sess.dispatch("/reply 7")
+	if sess.Pending.ReplyDraft != 7 {
+		t.Fatalf("draft not armed: %d", sess.Pending.ReplyDraft)
+	}
+	sess.Display.DisplayMu.Lock()
+	line := sess.replyPreviewLine()
+	sess.Display.DisplayMu.Unlock()
+	status := sess.uiStatus()
+	if !strings.Contains(line, "↩ #7") {
+		t.Fatalf("reply preview line = %q", line)
+	}
+	if !strings.Contains(status, "reply") {
+		t.Fatalf("the hint belongs in the status line, got %q", status)
+	}
+	// The app shows the preview above the input, not as a chat entry.
+	a.dirty = true
+	a.syncReplyLine()
+	if a.replyLine != line {
+		t.Fatalf("app replyLine = %q, want %q", a.replyLine, line)
+	}
+	view := stripANSIForFind(a.View().Content)
+	if !strings.Contains(view, "↩ #7") {
+		t.Fatalf("view must show the reply preview above the input:\n%s", view)
+	}
+	for _, e := range sess.Display.TabChat.lines {
+		if strings.Contains(e.header, "↩ #7") {
+			t.Fatal("the preview must not be a chat entry")
+		}
 	}
 }
 
