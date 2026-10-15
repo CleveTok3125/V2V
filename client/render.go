@@ -370,6 +370,11 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (e entry, t
 		header += " • " + metaLineFor(msg.ChainHeight, msg.ChainHash, badge)
 	}
 	body := renderMentions(renderChatText(msg.Text), s.resolveMentionLocked, ClientCfg.MentionEnabled(), mentionStyle(ClientCfg.MentionColor()))
+	// A parse that swallowed the text (an unclosed fence, say) leaves an
+	// empty body: show the raw message instead of an empty block.
+	if strings.TrimSpace(stripANSIForFind(body)) == "" && strings.TrimSpace(msg.Text) != "" {
+		body = filter.SanitizeForDisplay(msg.Text)
+	}
 	// A quote rides in the same entry as the message it answers: a message is
 	// one entry whatever it carries, so nothing can land between its parts and
 	// every consumer — the erase math, the catch-up merge, the quote lookup —

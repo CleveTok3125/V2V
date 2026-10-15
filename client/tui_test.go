@@ -817,3 +817,15 @@ func TestAppFooterShowsOnlyState(t *testing.T) {
 		t.Fatalf("reply prompt must show in the footer, got %q", got)
 	}
 }
+
+func TestAppPromptOnlyOnFirstRow(t *testing.T) {
+	a, _ := newTestApp()
+	if got := a.promptFor(textarea.PromptInfo{LineNumber: 0}); got != "> " {
+		t.Fatalf("first row prompt = %q", got)
+	}
+	// The textarea asks per display row, so a wrapped long line must not
+	// repeat the prompt.
+	if got := a.promptFor(textarea.PromptInfo{LineNumber: 1}); got != "" {
+		t.Fatalf("a wrapped row must carry no prompt, got %q", got)
+	}
+}

@@ -261,6 +261,20 @@ func (r *sgrRenderer) codeText(source []byte, n ast.Node) string {
 	return s
 }
 
+// hasClosingFence reports whether the source carries a closing fence marker,
+// which is what separates a real (possibly empty) block from a parse error.
+func hasClosingFence(source []byte) bool {
+	markers := 0
+	for _, line := range strings.Split(string(source), "\n") {
+		t := strings.TrimLeft(line, " \t")
+		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			markers++
+		}
+	}
+	// The opening marker alone is not a block: a closing one makes it so.
+	return markers >= 2
+}
+
 // fence replays one fenced block through codebg, so headers, markers and
 // highlighting behave exactly as the code-only path.
 func (r *sgrRenderer) fence(source []byte, n *ast.FencedCodeBlock) string {
@@ -273,6 +287,16 @@ func (r *sgrRenderer) fence(source []byte, n *ast.FencedCodeBlock) string {
 	for i := 0; i < lines.Len(); i++ {
 		seg := lines.At(i)
 		code.Write(seg.Value(source))
+	}
+	// A fence with no content — a lone "```", or one that never closes — is
+	// literal text, not an empty code block.
+	if strings.TrimSpace(code.String()) == "" {
+		// Nothing between the markers. A closed fence is a real (empty)
+		// block; one that never closes is a parse error, so its raw text is
+		// shown instead of an empty block.
+		if !hasClosingFence(source) {
+			return "```" + info
+		}
 	}
 	chunk := "```" + info + "\n" + strings.TrimSuffix(code.String(), "\n") + "\n```"
 	styleMu.Lock()
