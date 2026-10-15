@@ -423,7 +423,7 @@ func wrapPendingQuote(line string, pending bool) string {
 // Pending (placeholder) quotes carry the grey wrapper plus ⏳ so the erase
 // region check keeps passing; confirmed quotes render plain.
 func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) string {
-	line := fmt.Sprintf("|   ┌─  ↩ #%d: %s", height, quoteFirstLine(headEntry, maxRunes))
+	line := fmt.Sprintf("|   > ↩ #%d: %s", height, quoteFirstLine(headEntry, maxRunes))
 	return wrapPendingQuote(line, pending)
 }
 
@@ -439,7 +439,7 @@ func formatQuoteRich(msg WireMessage, pending bool, maxRunes int) string {
 	if err := clientcore.VerifyWireContent(msg); err != nil {
 		mark = " " + warnStyle.Render("✗")
 	}
-	line := fmt.Sprintf("|   ┌─  ↩ #%d • %s %s: %s%s",
+	line := fmt.Sprintf("|   > ↩ #%d • %s %s: %s%s",
 		msg.ChainHeight, filter.SanitizeSingleLine(msg.Time), authorField(msg.DisplayName),
 		quoteFirstLine(msg.Text, maxRunes), mark)
 	return wrapPendingQuote(line, pending)

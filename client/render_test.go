@@ -49,9 +49,10 @@ func TestTabForWire(t *testing.T) {
 		want int
 	}{
 		{"chat", WireMessage{Type: "chat", Text: "hi"}, TabChat},
-		// A marker frames the chat stream, so it belongs beside it.
-		{"history end", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagHistoryEnd), Text: "--- Kết thúc lịch sử ---"}, TabChat},
-		{"history begin", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagHistoryBegin)}, TabChat},
+		// Every system line belongs to TabSystem, markers included, so tab 2
+		// stays a complete system log.
+		{"history end", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagHistoryEnd), Text: "--- Kết thúc lịch sử ---"}, TabSystem},
+		{"history begin", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagHistoryBegin)}, TabSystem},
 		{"date", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagDate)}, TabSystem},
 		{"join", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagJoin)}, TabSystem},
 		{"limit", WireMessage{Type: "system", Tags: wire.WithTags(wire.TagLimit)}, TabSystem},
@@ -375,7 +376,7 @@ func TestOneMessageIsOneEntry(t *testing.T) {
 	// Literal, not the constant: a test that follows the code cannot catch a
 	// change to the marker it is pinning.
 	e := sess.Display.TabChat.lines[1]
-	if !strings.HasPrefix(e.quote, "|   ┌─") {
+	if !strings.HasPrefix(e.quote, "|   > ↩") {
 		t.Fatalf("the quote must ride inside its message entry, got %q", e.quote)
 	}
 	if e.header != "| 12:00 A" {
@@ -387,7 +388,7 @@ func TestOneMessageIsOneEntry(t *testing.T) {
 		t.Fatalf("entry body = %q, want the body alone", e.body)
 	}
 	// And the queue carries the same two units, in order.
-	if got := strings.Count(out.String(), "|   ┌─"); got != 1 {
+	if got := strings.Count(out.String(), "|   > ↩"); got != 1 {
 		t.Fatalf("the quote must be printed once, got %d in %q", got, out.String())
 	}
 }

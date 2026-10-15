@@ -17,6 +17,22 @@ type entry struct {
 	collapsed bool   // body was folded, so /expand targets this entry
 	banner    bool   // a date banner row, so it can anchor older windows
 	day       string // sys_date of a banner, "" otherwise
+	kind      int    // box border colour: kindChat, kindLocal, kindSystem
+}
+
+// Entry box kinds pick the border colour and the side of the viewport.
+const (
+	kindChat   = iota // a chat wire from anyone else: left, blue
+	kindMine          // our own echoed chat wire: right, blue
+	kindLocal         // our pending echo: right, grey
+	kindNotice        // a local feedback line: left, grey
+	kindSystem        // a server system line: left, banana yellow
+)
+
+// rightAligned reports whether the entry sits on the right of the viewport:
+// our own messages, pending or echoed.
+func (e entry) rightAligned() bool {
+	return e.kind == kindMine || e.kind == kindLocal
 }
 
 // entryGapRow is the blank row that separates one entry from the next. It
