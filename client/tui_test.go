@@ -1034,3 +1034,54 @@ func TestAppTrailerHoverUnderlines(t *testing.T) {
 		t.Fatal("the underline must clear when the pointer leaves the bracket")
 	}
 }
+
+func TestAppNewMessageHint(t *testing.T) {
+	a, sess := newTestApp()
+	fill := func(n int) {
+		for i := 0; i < n; i++ {
+			sess.Display.TabChat.append(entry{header: "line", body: "x", height: uint64(i + 1)})
+		}
+	}
+	fill(60)
+	a.dirty = true
+	a.refreshContent()
+	a.viewport.GotoTop()
+	a.dirty = true
+	a.refreshContent()
+	if got := a.renderFooter(); !strings.Contains(got, "về mới nhất") || strings.Contains(got, "tin mới") {
+		t.Fatalf("nothing has arrived yet: %q", got)
+	}
+	// Lines land while the reader sits in history.
+	fill(3)
+	a.dirty = true
+	a.refreshContent()
+	if got := a.renderFooter(); !strings.Contains(got, "3 tin mới") {
+		t.Fatalf("the footer must count what arrived: %q", got)
+	}
+	// Going back to the newest line clears the count.
+	a.jumpToLatest()
+	a.dirty = true
+	a.refreshContent()
+	if got := a.renderFooter(); strings.Contains(got, "tin mới") {
+		t.Fatalf("the count must clear at the newest line: %q", got)
+	}
+	// Older history prepended at the top is not news.
+	fill(1)
+	a.dirty = true
+	a.refreshContent()
+	a.viewport.GotoTop()
+	a.pendingOlder = true
+	fill(2)
+	a.dirty = true
+	a.refreshContent()
+	if got := a.renderFooter(); strings.Contains(got, "tin mới") {
+		t.Fatalf("a prepended older window must not count as news: %q", got)
+	}
+	// The next arrival counts once, not as the prepend plus itself.
+	fill(1)
+	a.dirty = true
+	a.refreshContent()
+	if got := a.renderFooter(); !strings.Contains(got, "1 tin mới") {
+		t.Fatalf("the prepend must not inflate the next count: %q", got)
+	}
+}
