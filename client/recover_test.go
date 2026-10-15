@@ -587,7 +587,7 @@ func TestLoadAnnouncesSync(t *testing.T) {
 	sess.flushOutputNow()
 
 	text := out.String()
-	bi := strings.Index(text, "| [Local]: Đang tải lịch sử")
+	bi := strings.Index(text, "[Local]: Đang tải lịch sử")
 	mi := strings.Index(text, "msg")
 	if bi < 0 || mi < 0 || bi > mi {
 		t.Fatalf("local sync banner must precede the loaded history: %q", text)

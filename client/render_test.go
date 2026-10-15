@@ -301,8 +301,8 @@ func TestHandleReplayMarkerRespectsNotifyGates(t *testing.T) {
 		if strings.Contains(out.String(), "MARKERTEXT") {
 			t.Errorf("muting %q must stop a replay marker printing live", muted)
 		}
-		if !containsLine(sess.Display.TabChat.lines, "MARKERTEXT") {
-			t.Errorf("muting %q must leave the marker in the tab", muted)
+		if !containsLine(sess.Display.TabSys.lines, "MARKERTEXT") {
+			t.Errorf("muting %q must leave the marker reviewable in the system tab", muted)
 		}
 	}
 
@@ -332,16 +332,16 @@ func TestChatBlockShape(t *testing.T) {
 	if !strings.HasSuffix(head, "\n\n") || strings.HasSuffix(head, "\n\n\n") {
 		t.Fatalf("a chat line must end in exactly one blank row, got %q", head)
 	}
-	if !strings.Contains(head, "\n"+chatBodyPrefix) {
-		t.Fatalf("a chat body must be indented, got %q", head)
+	if !strings.Contains(head, "\nhi") {
+		t.Fatalf("a chat body must ride below the header, got %q", head)
 	}
-	if !strings.HasPrefix(head, "| 14:19 Alice#a11c") {
+	if !strings.HasPrefix(head, "14:19 Alice#a11c") {
 		t.Fatalf("the author row must lead, got %q", head)
 	}
 
 	sys := WireMessage{Type: "system", Time: "14:19", Tags: []string{"system", wire.TagJoin}, Text: "ai đó đã tham gia"}
 	e, _ = sess.buildChatBlock(sys, false, false)
-	if head := e.text(); head != "| ai đó đã tham gia\n\n" {
+	if head := e.text(); head != "ai đó đã tham gia\n\n" {
 		t.Fatalf("a notice is one row plus the gap, got %q", head)
 	}
 }
@@ -376,19 +376,19 @@ func TestOneMessageIsOneEntry(t *testing.T) {
 	// Literal, not the constant: a test that follows the code cannot catch a
 	// change to the marker it is pinning.
 	e := sess.Display.TabChat.lines[1]
-	if !strings.HasPrefix(e.quote, "|   > ↩") {
+	if !strings.HasPrefix(e.quote, "↩") {
 		t.Fatalf("the quote must ride inside its message entry, got %q", e.quote)
 	}
-	if e.header != "| 12:00 A" {
+	if e.header != "12:00 A" {
 		t.Fatalf("the header must follow the quote in the same entry, got %q", e.header)
 	}
 	// The quote lookup reads the body field out of that entry, skipping the
 	// quote row and the header.
-	if e.body != "|   trả lời đây" {
+	if e.body != "trả lời đây" {
 		t.Fatalf("entry body = %q, want the body alone", e.body)
 	}
 	// And the queue carries the same two units, in order.
-	if got := strings.Count(out.String(), "|   > ↩"); got != 1 {
+	if got := strings.Count(out.String(), "↩"); got != 1 {
 		t.Fatalf("the quote must be printed once, got %d in %q", got, out.String())
 	}
 }
@@ -397,44 +397,3 @@ func TestOneMessageIsOneEntry(t *testing.T) {
 // queued. The bar used to be emitted on its own, so it sat on the queue while
 // readline was already drawing the prompt and landed on the input line; the
 // clear, the dump and the bar are now one ordered chunk.
-func TestSwitchTabPaintsEverythingBeforeThePrompt(t *testing.T) {
-	sess := chainTestSession(t, 0)
-	sess.Chain.WireIdx = newWireIndex(1000)
-	sess.Chain.RenderCache = newRenderCache(200)
-	// Start on the system tab so the switch has a chat buffer to dump.
-	sess.Display.ActiveTab = TabSystem
-	var out strings.Builder
-	sess.Display.Out = &out
-	sess.Display.Term = &fakeTerm{}
-
-	sess.Display.DisplayMu.Lock()
-	sess.renderChatBlock(chainWireWithText(1, "hello there", 1))
-	sess.Display.DisplayMu.Unlock()
-	sess.flushOutputNow()
-
-	// switchTab takes DisplayMu itself.
-	sess.switchTab(TabChat)
-
-	sess.Display.OutMu.Lock()
-	pending := len(sess.Display.OutBuf)
-	sess.Display.OutMu.Unlock()
-	if pending != 0 {
-		t.Fatalf("%d bytes left queued behind the prompt: %q", pending, sess.Display.OutBuf)
-	}
-
-	got := out.String()
-	clear := strings.Index(got, "\033[H\033[2J")
-	if clear < 0 {
-		t.Fatalf("switch did not clear the screen: %q", got)
-	}
-	// Look only past the clear: the same body was printed before it.
-	after := got[clear:]
-	dump := strings.Index(after, "hello there")
-	bar := strings.Index(after, "[1:chat]")
-	if dump < 0 || bar < 0 {
-		t.Fatalf("switch is missing a part: dump=%d bar=%d in %q", dump, bar, after)
-	}
-	if dump > bar {
-		t.Fatalf("switch order must be dump then bar: dump=%d bar=%d", dump, bar)
-	}
-}

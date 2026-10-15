@@ -632,10 +632,13 @@ func (a *app) withScrollbar(content string) string {
 // chatContent renders the active buffer for the viewport: every entry as a
 // bordered block. A date banner is dropped when its day was already shown (the
 // server sends one per window).
-func (a *app) chatContent(lines []entry) string {
+func (a *app) chatContent(lines []entry, skipMuted bool) string {
 	var sb strings.Builder
 	seen := make(map[string]bool, 4)
 	for _, e := range lines {
+		if skipMuted && e.muted {
+			continue
+		}
 		if e.banner && e.day != "" {
 			if seen[e.day] {
 				continue
@@ -672,9 +675,9 @@ func (a *app) renderEntryBox(e entry) string {
 	if maxW < 12 {
 		maxW = 12
 	}
-	headerText := stripGutter(e.header)
-	bodyText := stripGutter(e.body)
-	quoteText := stripGutter(e.quote)
+	headerText := e.header
+	bodyText := e.body
+	quoteText := e.quote
 
 	// Width: the block hugs the widest row, capped at the viewport.
 	natural := maxLineWidth(headerText, bodyText)
@@ -841,7 +844,7 @@ func (a *app) refreshContent() {
 	a.sess.Display.DisplayMu.Unlock()
 
 	prevLines := a.viewport.TotalLineCount()
-	content := a.chatContent(lines)
+	content := a.chatContent(lines, a.active == tabIndexChat)
 	a.viewport.SetContent(content)
 	newLines := a.viewport.TotalLineCount()
 

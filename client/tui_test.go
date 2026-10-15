@@ -327,11 +327,11 @@ func TestAppOlderExhaustedStopsPaging(t *testing.T) {
 func TestOlderWindowPrepends(t *testing.T) {
 	_, sess := newTestApp()
 	sess.Display.DisplayMu.Lock()
-	sess.emitTabLive(true, TabChat, noticeEntry("| load notice"))
-	sess.emitTabLive(true, TabChat, entry{header: "| 10:00 A", height: 5})
+	sess.emitTabLive(true, TabChat, noticeEntry("load notice"))
+	sess.emitTabLive(true, TabChat, entry{header: "10:00 A", height: 5})
 	sess.trackReplayWindow([]string{wire.TagHistory, wire.TagHistoryOlder}, true)
-	sess.emitTabLive(true, TabChat, noticeEntry("| --- Lịch sử cũ ---"))
-	sess.emitTabLive(true, TabChat, entry{header: "| 09:00 B", height: 3})
+	sess.emitTabLive(true, TabChat, noticeEntry("--- Lịch sử cũ ---"))
+	sess.emitTabLive(true, TabChat, entry{header: "09:00 B", height: 3})
 	sess.trackReplayWindow([]string{wire.TagHistory, wire.TagHistoryOlder, wire.TagHistoryEnd}, false)
 	lines := append([]entry{}, sess.Display.TabChat.lines...)
 	sess.Display.DisplayMu.Unlock()
@@ -339,7 +339,7 @@ func TestOlderWindowPrepends(t *testing.T) {
 	for i, e := range lines {
 		got[i] = e.header
 	}
-	want := []string{"| load notice", "| --- Lịch sử cũ ---", "| 09:00 B", "| 10:00 A"}
+	want := []string{"load notice", "--- Lịch sử cũ ---", "09:00 B", "10:00 A"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("order = %q, want %q", got, want)
 	}
@@ -348,11 +348,11 @@ func TestOlderWindowPrepends(t *testing.T) {
 func TestOlderWindowAnchorsAboveBanner(t *testing.T) {
 	_, sess := newTestApp()
 	sess.Display.DisplayMu.Lock()
-	sess.emitTabLive(true, TabChat, noticeEntry("| load notice"))
-	sess.emitTabLive(true, TabChat, entry{header: "| --- Ngày 11/10/2026 ---", banner: true, day: "2026-10-11"})
-	sess.emitTabLive(true, TabChat, entry{header: "| 10:00 A", height: 5})
+	sess.emitTabLive(true, TabChat, noticeEntry("load notice"))
+	sess.emitTabLive(true, TabChat, entry{header: "--- Ngày 11/10/2026 ---", banner: true, day: "2026-10-11"})
+	sess.emitTabLive(true, TabChat, entry{header: "10:00 A", height: 5})
 	sess.trackReplayWindow([]string{wire.TagHistory, wire.TagHistoryOlder}, true)
-	sess.emitTabLive(true, TabChat, entry{header: "| 09:00 B", height: 3})
+	sess.emitTabLive(true, TabChat, entry{header: "09:00 B", height: 3})
 	sess.trackReplayWindow([]string{wire.TagHistory, wire.TagHistoryOlder, wire.TagHistoryEnd}, false)
 	lines := append([]entry{}, sess.Display.TabChat.lines...)
 	sess.Display.DisplayMu.Unlock()
@@ -360,7 +360,7 @@ func TestOlderWindowAnchorsAboveBanner(t *testing.T) {
 	for i, e := range lines {
 		got[i] = e.header
 	}
-	want := []string{"| load notice", "| 09:00 B", "| --- Ngày 11/10/2026 ---", "| 10:00 A"}
+	want := []string{"load notice", "09:00 B", "--- Ngày 11/10/2026 ---", "10:00 A"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("order = %q, want %q", got, want)
 	}
@@ -375,7 +375,7 @@ func TestChatContentDedupesDateBanners(t *testing.T) {
 		{header: "| 10:00 A", height: 5},
 		{header: "| --- Ngày 12/10/2026 ---", banner: true, day: "2026-10-12"},
 	}
-	got := stripANSIForFind(a.chatContent(lines))
+	got := stripANSIForFind(a.chatContent(lines, true))
 	if n := strings.Count(got, "Ngày 11/10/2026"); n != 1 {
 		t.Fatalf("a repeated day must keep one banner, got %d: %q", n, got)
 	}
@@ -419,7 +419,7 @@ func TestReplyCancel(t *testing.T) {
 	a, sess := newTestApp()
 	sess.Conn = &stubConn{}
 	sess.Chain.WireIdx = newWireIndex(16)
-	sess.Display.TabChat.append(entry{header: "| 10:00 A • #7:abcd", body: "|   gốc", height: 7, hashHex: "abcd"})
+	sess.Display.TabChat.append(entry{header: "10:00 A • #7:abcd", body: "gốc", height: 7, hashHex: "abcd"})
 
 	sess.dispatch("/reply 7")
 	if sess.Pending.ReplyDraft != 7 {
@@ -452,7 +452,7 @@ func TestReplyPreviewLine(t *testing.T) {
 	a, sess := newTestApp()
 	sess.Conn = &stubConn{}
 	sess.Chain.WireIdx = newWireIndex(16)
-	sess.Display.TabChat.append(entry{header: "| 10:00 A • #7:abcd", body: "|   gốc", height: 7, hashHex: "abcd"})
+	sess.Display.TabChat.append(entry{header: "10:00 A • #7:abcd", body: "gốc", height: 7, hashHex: "abcd"})
 	sess.dispatch("/reply 7")
 	if sess.Pending.ReplyDraft != 7 {
 		t.Fatalf("draft not armed: %d", sess.Pending.ReplyDraft)

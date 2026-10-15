@@ -423,7 +423,7 @@ func wrapPendingQuote(line string, pending bool) string {
 // Pending (placeholder) quotes carry the grey wrapper plus ⏳ so the erase
 // region check keeps passing; confirmed quotes render plain.
 func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) string {
-	line := fmt.Sprintf("|   > ↩ #%d: %s", height, quoteFirstLine(headEntry, maxRunes))
+	line := fmt.Sprintf("↩ #%d: %s", height, quoteFirstLine(headEntry, maxRunes))
 	return wrapPendingQuote(line, pending)
 }
 
@@ -439,7 +439,7 @@ func formatQuoteRich(msg WireMessage, pending bool, maxRunes int) string {
 	if err := clientcore.VerifyWireContent(msg); err != nil {
 		mark = " " + warnStyle.Render("✗")
 	}
-	line := fmt.Sprintf("|   > ↩ #%d • %s %s: %s%s",
+	line := fmt.Sprintf("↩ #%d • %s %s: %s%s",
 		msg.ChainHeight, filter.SanitizeSingleLine(msg.Time), authorField(msg.DisplayName),
 		quoteFirstLine(msg.Text, maxRunes), mark)
 	return wrapPendingQuote(line, pending)
@@ -976,36 +976,6 @@ func metaHeightIndex(lines []entry, h uint64) int {
 	return idx + 1
 }
 
-// chunkHeightIndex is metaHeightIndex over the held output, which mixes
-// message chunks with control sequences.
-func chunkHeightIndex(chunks []heldChunk, h uint64) int {
-	idx := -1
-	for i, c := range chunks {
-		if c.height == h {
-			idx = i + 1
-		}
-	}
-	return idx
-}
-
-// insertChunks splices block into chunks at idx.
-func insertChunks(chunks []heldChunk, idx int, block []heldChunk) []heldChunk {
-	if len(block) == 0 {
-		return chunks
-	}
-	if idx < 0 {
-		idx = 0
-	}
-	if idx > len(chunks) {
-		idx = len(chunks)
-	}
-	n := len(block)
-	chunks = append(chunks, make([]heldChunk, n)...)
-	copy(chunks[idx+n:], chunks[idx:])
-	copy(chunks[idx:], block)
-	return chunks
-}
-
 // entryIndexByHeight returns the slot reporting h, or -1. A hash prefix
 // narrows the match, which is what tells two entries at the same height
 // apart. The lookup reads fields, so a body that happens to contain
@@ -1019,25 +989,15 @@ func entryIndexByHeight(lines []entry, h uint64, hashPrefix string) int {
 	return -1
 }
 
-// renderRecoveredInPlace renders one recovered wire and splices its
-// block right after its chain predecessor inside both the held output
-// and the chat buffer, so a merged catch-up prints in height order
-// instead of appending refilled lines at the bottom. Caller must hold
-// DisplayMu.
+// renderRecoveredInPlace renders one recovered wire and splices its block
+// right after its chain predecessor inside the chat buffer, so a merged
+// catch-up reads in height order instead of appending refilled lines at the
+// bottom. Caller must hold DisplayMu.
 func (s *Session) renderRecoveredInPlace(msg WireMessage) {
-	beforeHold := len(s.Display.HoldLines)
 	beforeChat := len(s.Display.TabChat.lines)
 	s.renderChatBlock(msg)
-	blockHold := append([]heldChunk{}, s.Display.HoldLines[beforeHold:]...)
 	blockChat := append([]entry{}, s.Display.TabChat.lines[beforeChat:]...)
-	s.Display.HoldLines = s.Display.HoldLines[:beforeHold]
 	s.Display.TabChat.spliceOut(beforeChat, beforeChat+len(blockChat))
-
-	holdIdx := chunkHeightIndex(s.Display.HoldLines, msg.ChainHeight-1)
-	if holdIdx < 0 {
-		holdIdx = len(s.Display.HoldLines)
-	}
-	s.Display.HoldLines = insertChunks(s.Display.HoldLines, holdIdx, blockHold)
 
 	chatIdx := metaHeightIndex(s.Display.TabChat.lines, msg.ChainHeight-1)
 	if chatIdx < 0 {
@@ -1107,41 +1067,12 @@ func (s *Session) erasePlaceholderLocked(pm pendingMsg) {
 	if pm.slot.index < 0 || pm.slot.index >= len(lines) || lines[pm.slot.index] != pm.slot.entry {
 		return
 	}
-	// The slot is ours, so it leaves the buffer in every case. The screen
-	// erase is the part that depends on where the block was drawn: a send
-	// while tab 2 was open, or a tab switch between send and echo, used to
-	// return before the splice and leave the placeholder in the buffer,
-	// which showed the message twice as soon as the echo rendered.
-	//
-	// Moving up is only safe while the chat tab is the one on screen and
-	// nothing has repainted since the block was drawn: a tab switch leaves
-	// the cursor at the end of the whole buffer, so the rows above belong to
-	// something else.
-	onScreen := pm.shown && s.Display.ActiveTab == TabChat &&
-		pm.epoch == s.Display.LayoutEpoch
-	tail := append([]entry{}, lines[pm.slot.index+1:]...)
+	// The slot is ours, so it leaves the buffer in every case. The app paints
+	// from the buffers, so the splice plus a notify is the whole erase.
 	s.Display.TabChat.spliceOut(pm.slot.index, pm.slot.index+1)
 	if s.Display.Sink != nil {
 		s.Display.Sink.Notify()
 	}
-	if !onScreen {
-		return
-	}
-	// Rows on screen: the block plus the entries printed after it. The count
-	// must be in terminal rows, not buffer entries: a message block is one
-	// entry however many lines it has, so counting entries moves the cursor
-	// up short and leaves the tail of the placeholder on screen.
-	// Enqueued (not written) so a slow terminal never stalls the caller;
-	// the order against previously queued lines keeps the erase math valid.
-	width := termWidth()
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "\x1b[%dA", pm.slot.entry.rows(width)+entriesRows(tail, width))
-	sb.WriteString("\x1b[J")
-	for _, e := range tail {
-		sb.WriteString(e.text())
-	}
-	s.holdOrEnqueue(sb.String())
-	s.Display.PrintGen++
 }
 
 // echoConsume is the queue-only outcome of one echo match: stale

@@ -18,6 +18,7 @@ type entry struct {
 	banner    bool   // a date banner row, so it can anchor older windows
 	day       string // sys_date of a banner, "" otherwise
 	kind      int    // box border colour: kindChat, kindLocal, kindSystem
+	muted     bool   // muted notice: buffered for the system tab, hidden in chat
 }
 
 // Entry box kinds pick the border colour and the side of the viewport.
@@ -60,10 +61,6 @@ func (e entry) text() string {
 }
 
 // rows is how many terminal rows the entry occupies at the given width.
-func (e entry) rows(width int) int {
-	return estimateRows(e.text(), width)
-}
-
 // matchesHeight reports whether this entry is the one that reports h, with an
 // optional hash prefix to tell two entries at the same height apart.
 func (e entry) matchesHeight(h uint64, hashPrefix string) bool {
@@ -76,14 +73,4 @@ func (e entry) matchesHeight(h uint64, hashPrefix string) bool {
 		return true
 	}
 	return strings.HasPrefix(strings.ToLower(e.hashHex), strings.ToLower(hashPrefix))
-}
-
-// heldChunk is one piece of deferred terminal output. Message chunks carry the
-// height they report so a recovered block can be spliced in at its chain
-// position; control sequences and other text leave it zero. The held stream is
-// not a buffer of entries — it mixes both — so it needs its own small record
-// rather than a search over the rendered text.
-type heldChunk struct {
-	text   string
-	height uint64
 }

@@ -101,19 +101,6 @@ func TestInputLoopGuardRejectClearsTarget(t *testing.T) {
 	}
 }
 
-func TestInputLoopCodeblockCancelClearsTarget(t *testing.T) {
-	sess := smokeSession()
-	sess.Pending.PendingReplyTo = 1234
-	sess.Display.Term = &fakeTerm{errs: map[int]error{1: ErrInputCancel}}
-	if _, _, ok := sess.collectBody("```", slotRef{}); ok {
-		t.Fatal("canceled codeblock must return ok=false")
-	}
-	sess.Pending.PendingReplyTo = 0
-	if sess.Pending.PendingReplyTo != 0 {
-		t.Fatal("canceled codeblock must not keep its reply target")
-	}
-}
-
 func TestInputLoopSendConsumesTarget(t *testing.T) {
 	sess := smokeSession()
 	sess.Pending.PendingReplyTo = 9

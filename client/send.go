@@ -18,29 +18,11 @@ import (
 
 const maxPendingPlaceholders = 128
 
-// inputEchoPrefix marks the row the person submitted, which the session now
-// draws itself: readline erases the draft instead of committing it, so the
-// line becomes a buffer entry like any other output and every later write for
-// this message replaces that entry in place.
-const (
-	inputEchoPrefix         = "| > "
-	inputContinuationPrefix = "| ... "
-)
-
 // inputEchoEntry renders submitted lines as one entry. A fenced block is one
 // entry too, however many lines it grows to, because the message it becomes is
-// one entry. Continuation rows reuse the prompt readline showed for them, so
-// the echo reads as the same block the person typed.
+// one entry.
 func inputEchoEntry(lines []string) entry {
-	rows := make([]string, 0, len(lines))
-	for i, line := range lines {
-		if i == 0 {
-			rows = append(rows, inputEchoPrefix+line)
-			continue
-		}
-		rows = append(rows, inputContinuationPrefix+line)
-	}
-	return entry{header: strings.Join(rows, "\n"), kind: kindLocal}
+	return entry{header: strings.Join(lines, "\n"), kind: kindLocal}
 }
 
 // echoInputLine records the submitted line as a buffer entry and prints it.
@@ -52,34 +34,11 @@ func (s *Session) echoInputLine(text string) slotRef {
 
 // extendInputEcho rewrites the input echo as more lines arrive, so a fenced
 // block reads as one growing entry rather than a row that stops changing.
-func (s *Session) extendInputEcho(slot slotRef, lines []string) slotRef {
-	next := inputEchoEntry(lines)
-	s.Display.DisplayMu.Lock()
-	defer s.Display.DisplayMu.Unlock()
-	if !s.replaceSlot(slot, next, true) {
-		return slot
-	}
-	return slotRef{index: slot.index, entry: next}
-}
-
 // collectBody gathers a multi-line codeblock when fenced, extending the input
 // echo's entry as it goes.
 func (s *Session) collectBody(text string, slot slotRef) (string, slotRef, bool) {
-	if s.Display.Sink != nil {
-		// The TUI textarea already holds the whole message, newlines and
-		// all, so there is no continuation to read.
-		return text, slot, true
-	}
-	if !strings.HasPrefix(text, "```") || !markup.NeedsContinuation(text) {
-		// Single-line fence (```code```) or plain text: complete already.
-		return text, slot, true
-	}
-	text, canceled := collectCodeblock(s.Display.Term, text, func(lines []string) {
-		slot = s.extendInputEcho(slot, lines)
-	})
-	if canceled {
-		return text, slot, false
-	}
+	// The TUI textarea already holds the whole message, newlines and all, so
+	// there is no continuation to read.
 	return text, slot, true
 }
 
@@ -171,7 +130,7 @@ func (s *Session) renderPlaceholder(text string, slot slotRef) (e entry, out slo
 			badgePlaceholder = hex.EncodeToString(h[:])[:8]
 		}
 	}
-	header := "| Bạn"
+	header := "Bạn"
 	// One separator, between the author and the meta strip, and only when
 	// the echo will draw that strip: /meta off shows neither the number nor
 	// the badge. The number is unknown until the server assigns it, so the
@@ -192,7 +151,7 @@ func (s *Session) renderPlaceholder(text string, slot slotRef) (e entry, out slo
 		if i > 0 {
 			body.WriteString("\n")
 		}
-		body.WriteString(dimStyle.Render(chatBodyPrefix + markup.Linkify(line)))
+		body.WriteString(dimStyle.Render(markup.Linkify(line)))
 	}
 	e.body = body.String()
 
@@ -204,7 +163,7 @@ func (s *Session) renderPlaceholder(text string, slot slotRef) (e entry, out slo
 	// replace: reporting the echo's entry here would make every later
 	// replace fail its identity check.
 	next := slotRef{index: slot.index, entry: e}
-	if !s.replaceSlot(slot, e, phShown) {
+	if !s.replaceSlot(slot, e) {
 		s.emitTab(TabChat, e)
 		next = slotRef{index: len(s.Display.TabChat.lines) - 1, entry: e}
 	}
