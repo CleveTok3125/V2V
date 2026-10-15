@@ -469,7 +469,7 @@ func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 		// Draft mode: quote now, body on the next line. Any slash
 		// command or empty-line ^C aborts it (see loop top).
 		s.Pending.ReplyDraft = height
-		s.Display.Term.SetPrompt(fmt.Sprintf("| ↩ #%d > ", height))
+		s.Display.Term.SetPrompt(fmt.Sprintf("↩ #%d > ", height))
 		s.Display.DisplayMu.Lock()
 		for _, q := range s.quoteLinesFor(height, false) {
 			fmt.Fprint(s.Display.Out, q+"\n")
