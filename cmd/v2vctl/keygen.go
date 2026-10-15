@@ -9,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"charm.land/huh/v2"
 	"github.com/CleveTok3125/V2V/internal/tui"
 	"github.com/CleveTok3125/V2V/lib/identity"
-	"github.com/charmbracelet/huh"
 )
 
 type Ed25519Keygen struct {

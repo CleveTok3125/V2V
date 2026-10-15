@@ -5,6 +5,17 @@ WEB_LDFLAGS := -s -w -X 'main.Version=$(VERSION)'
 # Cache must live on a writable path: Android/Termux has no usable
 # /tmp, so prefer TMPDIR, then HOME, then /tmp. Override with GOCACHE=...
 GOCACHE ?= $(or $(TMPDIR),$(HOME),/tmp)/gocache
+
+# Bubble Tea v2 ships no js/wasm stubs for its platform functions, so a
+# js/wasm build needs them injected. Go refuses overlays beneath GOMODCACHE,
+# so the stubs are mapped into the vendor copy (built with -mod=vendor). The
+# overlay path is absolute and machine-specific: generated under the build
+# cache, never committed. See _wasm_overlay/gen_overlay.sh.
+WASM_OVERLAY := $(GOCACHE)/v2v-wasm-overlay.json
+
+$(WASM_OVERLAY): _wasm_overlay/gen_overlay.sh _wasm_overlay/tty_js.go _wasm_overlay/signals_js.go _wasm_overlay/clipboard_js.go
+	@mkdir -p "$(GOCACHE)"
+	@_wasm_overlay/gen_overlay.sh > "$(WASM_OVERLAY)"
 # Dev builds reflect the working tree: no stripping (keeps symbols for
 # debugging) and a dev- version stamp derived from git HEAD, never from a
 # possibly stale GIT_HASH env.
@@ -40,11 +51,11 @@ dev-v2vctl:
 
 dev-web: dev-web-wasm web-compress
 
-dev-web-wasm:
+dev-web-wasm: $(WASM_OVERLAY)
 	mkdir -p webterm
 	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" webterm/wasm_exec.js
 	printf 'window.V2V_VERSION = "%s";\n' "$(DEV_VERSION)" > webterm/version.js
-	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go build -trimpath -ldflags "-X 'main.Version=$(DEV_VERSION)'" -o webterm/app.wasm ./client
+	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go build -mod=vendor -overlay="$(WASM_OVERLAY)" -trimpath -ldflags "-X 'main.Version=$(DEV_VERSION)'" -o webterm/app.wasm ./client
 	@echo "webterm raw ready (version $(DEV_VERSION)): start the server now, then run 'make web-compress'"
 
 # web-compress adds the precompressed variants gzip and brotli run in
@@ -65,12 +76,12 @@ server:
 web: web-wasm web-compress
 	@echo "webterm built (version $(VERSION), $$(wc -c < webterm/app.wasm) bytes)"
 
-web-wasm:
+web-wasm: $(WASM_OVERLAY)
 	@if [ -n "$(GIT_HASH)" ] && [ "$$(git rev-parse --short HEAD 2>/dev/null)" != "$(GIT_HASH)" ]; then echo "WARNING: GIT_HASH=$(GIT_HASH) differs from HEAD; browser may cache a stale app.wasm. Unset GIT_HASH or use 'make dev-web-wasm' for dev."; fi
 	mkdir -p webterm
 	cp "$$(go env GOROOT)/lib/wasm/wasm_exec.js" webterm/wasm_exec.js
 	printf 'window.V2V_VERSION = "%s";\n' "$(VERSION)" > webterm/version.js
-	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go build -trimpath -ldflags "$(WEB_LDFLAGS)" -o webterm/app.wasm ./client
+	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go build -mod=vendor -overlay="$(WASM_OVERLAY)" -trimpath -ldflags "$(WEB_LDFLAGS)" -o webterm/app.wasm ./client
 	@echo "webterm raw ready (version $(VERSION)): start the server now, then run 'make web-compress'"
 
 client:
@@ -137,9 +148,9 @@ test-sh:
 # test-wasm runs the js-tagged client tests (wasm terminal emulator,
 # wasm proxy path) under node. Not part of check: it needs node, and
 # CI runs it explicitly.
-test-wasm:
+test-wasm: $(WASM_OVERLAY)
 	@if ! command -v node >/dev/null 2>&1; then echo "SKIP: node required for wasm tests"; exit 0; fi
-	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go test -exec "node $(CURDIR)/scripts/wasm_exec_runner.js" ./client/ -run 'TestWasm' -count=1 -timeout 120s
+	GOCACHE=$(GOCACHE) GOOS=js GOARCH=wasm go test -mod=vendor -overlay="$(WASM_OVERLAY)" -exec "node $(CURDIR)/scripts/wasm_exec_runner.js" ./client/ -run 'TestWasm' -count=1 -timeout 120s
 
 # web-ts compiles the TypeScript front-end sources in web/ into the
 # committed JS bundle in webterm/. The Docker build consumes the

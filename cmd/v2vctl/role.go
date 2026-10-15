@@ -1,16 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
-	"encoding/json"
 
-	"github.com/CleveTok3125/V2V/lib/identity"
+	"charm.land/huh/v2"
 	"github.com/CleveTok3125/V2V/internal/tui"
-	"github.com/charmbracelet/huh"
+	"github.com/CleveTok3125/V2V/lib/identity"
 )
 
 type RoleCmd struct {
@@ -22,7 +22,6 @@ type RoleCmd struct {
 	AddIdentity RoleAddIdentityCmd `cmd:"" name:"add-identity" aliases:"add" help:"Thêm identity ed25519 vào role"`
 	Import      RoleImportCmd      `cmd:"" aliases:"imp" help:"Import roles từ file hoặc paste JSON"`
 }
-
 
 type RoleCreateCmd struct {
 	Role      string `arg:"" optional:"" help:"Tên role"`

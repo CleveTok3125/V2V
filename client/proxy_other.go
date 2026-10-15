@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 	"github.com/gorilla/websocket"
 	"golang.org/x/net/proxy"
 

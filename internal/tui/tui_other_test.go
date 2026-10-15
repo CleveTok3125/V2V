@@ -6,22 +6,22 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 )
 
-func keyRunes(s string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+func keyRunes(s string) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: []rune(s)[0], Text: s}
 }
 
-func keyType(t tea.KeyType) tea.KeyMsg { return tea.KeyMsg{Type: t} }
+func keyType(c rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: c} }
 
 // driveHuh feeds keys through a huh field model. Standalone fields
 // carry a zero keymap (the form injects it at runtime), so attach the
 // default map like a form would; fields only take keys while focused.
-func driveHuh(m huh.Field, keys []tea.KeyMsg) tea.Model {
+func driveHuh(m huh.Field, keys []tea.KeyPressMsg) huh.Model {
 	m.Focus()
-	var model tea.Model = m
+	var model huh.Model = m
 	for _, k := range keys {
 		next, _ := model.Update(k)
 		model = next
@@ -33,24 +33,24 @@ func TestHuhConfirmDefaultNo(t *testing.T) {
 	newConfirm := func(yes *bool) huh.Field {
 		return huh.NewConfirm().Title("Chắc chứ?").Affirmative("Có").Negative("Không").Value(yes).WithKeyMap(huh.NewDefaultKeyMap())
 	}
-	enter := []tea.KeyMsg{keyType(tea.KeyEnter)}
+	enter := []tea.KeyPressMsg{keyType(tea.KeyEnter)}
 	var a bool
 	driveHuh(newConfirm(&a), enter)
 	if a {
 		t.Error("enter alone must keep No")
 	}
 	var b bool
-	driveHuh(newConfirm(&b), []tea.KeyMsg{keyRunes("y")})
+	driveHuh(newConfirm(&b), []tea.KeyPressMsg{keyRunes("y")})
 	if !b {
 		t.Error("y must answer Yes")
 	}
 	var c bool = true
-	driveHuh(newConfirm(&c), []tea.KeyMsg{keyRunes("n")})
+	driveHuh(newConfirm(&c), []tea.KeyPressMsg{keyRunes("n")})
 	if c {
 		t.Error("n must answer No")
 	}
 	var d bool
-	driveHuh(newConfirm(&d), []tea.KeyMsg{keyRunes("l")})
+	driveHuh(newConfirm(&d), []tea.KeyPressMsg{keyRunes("l")})
 	if !d {
 		t.Error("toggle must move focus to Yes")
 	}
@@ -63,14 +63,14 @@ func TestHuhSelectDefaultsFirst(t *testing.T) {
 			huh.NewOption("hai", "hai"),
 		).Value(choice).WithKeyMap(huh.NewDefaultKeyMap())
 	}
-	enter := []tea.KeyMsg{keyType(tea.KeyEnter)}
+	enter := []tea.KeyPressMsg{keyType(tea.KeyEnter)}
 	var untouched string
 	driveHuh(newSelect(&untouched), enter)
 	if untouched != "một" {
 		t.Errorf("untouched select = %q, want first option", untouched)
 	}
 	var moved string
-	driveHuh(newSelect(&moved), []tea.KeyMsg{keyType(tea.KeyDown), keyType(tea.KeyEnter)})
+	driveHuh(newSelect(&moved), []tea.KeyPressMsg{keyType(tea.KeyDown), keyType(tea.KeyEnter)})
 	if moved != "hai" {
 		t.Errorf("down+enter = %q, want hai", moved)
 	}

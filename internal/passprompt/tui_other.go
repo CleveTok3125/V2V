@@ -4,12 +4,13 @@ package passprompt
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/CleveTok3125/V2V/internal/tui"
 )
@@ -57,7 +58,7 @@ func Password(opts PasswordOpts) (string, error) {
 // meterColor bands the meter bar by score, matching the label bands
 // one-to-one: bar, color, and label can never contradict each other.
 // The bits number stays informational only.
-func meterColor(a Assessment) lipgloss.Color {
+func meterColor(a Assessment) color.Color {
 	switch {
 	case a.Score <= 1:
 		return lipgloss.Color("1")
@@ -105,7 +106,7 @@ type passwordModel struct {
 	opts    PasswordOpts
 	assess  func(string) Assessment
 	snap    Assessment
-	phase   int // 0 = entry, 1 = confirmation
+	phase   int  // 0 = entry, 1 = confirmation
 	expect  bool // confirm-against-known-value mode (opts.Expect)
 	first   string
 	round   int
@@ -183,12 +184,12 @@ func (m passwordModel) submit() passwordModel {
 }
 
 func (m passwordModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyMsg); ok {
-		switch key.Type {
-		case tea.KeyCtrlC, tea.KeyEsc:
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		switch key.String() {
+		case "ctrl+c", "esc":
 			m.aborted, m.done = true, true
 			return m, tea.Quit
-		case tea.KeyEnter:
+		case "enter":
 			m = m.submit()
 			if m.done {
 				return m, tea.Quit
@@ -204,7 +205,7 @@ func (m passwordModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m passwordModel) View() string {
+func (m passwordModel) View() tea.View {
 	title := m.opts.Title
 	if m.phase == 1 {
 		title = m.opts.ConfirmTitle
@@ -221,7 +222,7 @@ func (m passwordModel) View() string {
 		out += errStyle.Render(m.errMsg) + "\n"
 	}
 	out += hintStyle.Render("Enter xác nhận • Esc hủy")
-	return out
+	return tea.NewView(out)
 }
 
 func runPassword(opts PasswordOpts) (string, error) {
