@@ -254,6 +254,14 @@ type app struct {
 	pendingOlder bool
 	status       string
 
+	// New-chat counting for the footer hint: entryCount is how many entries
+	// the active tab had at the last refresh, countTab the tab it belongs to,
+	// and newEntries what arrived while the reader stayed above the newest
+	// line.
+	entryCount int
+	countTab   int
+	newEntries int
+
 	// Hover state for the expand trailers. The pointer position is kept so a
 	// scroll or a redraw can re-resolve it, trailers holds the spans drawn on
 	// screen and chatText the rows they were read from.
@@ -277,6 +285,7 @@ func newApp(sess *Session) *app {
 		active:   tabIndexChat,
 		dirty:    true,
 		hoverRow: -1,
+		countTab: -1,
 		styles:   newTUIStyles(),
 		viewport: viewport.New(viewport.WithWidth(80), viewport.WithHeight(10)),
 	}
@@ -1149,6 +1158,28 @@ func (a *app) refreshContent() {
 	a.viewport.SetContent(content)
 	newLines := a.viewport.TotalLineCount()
 
+	// Count what arrived while the reader is somewhere above the newest line.
+	// Older history prepended at the top is not news, and a tab switch starts
+	// the count over.
+	switch {
+	case a.countTab != a.active:
+		a.countTab = a.active
+		a.entryCount = len(lines)
+		a.newEntries = 0
+	case a.pendingOlder:
+		// Prepended history is not news, but the count has to follow it so
+		// the next arrival is not counted twice.
+		a.entryCount = len(lines)
+	case atBottom:
+		a.entryCount = len(lines)
+		a.newEntries = 0
+	case len(lines) > a.entryCount:
+		a.newEntries += len(lines) - a.entryCount
+		a.entryCount = len(lines)
+	default:
+		a.entryCount = len(lines)
+	}
+
 	switch {
 	case a.pendingOlder:
 		// Older history was prepended: move down by the inserted lines so
@@ -1267,7 +1298,11 @@ func (a *app) renderFooter() string {
 		line = line + " • " + mode
 	}
 	if !a.viewport.AtBottom() {
-		line = "▼ Ctrl+End: về mới nhất • " + line
+		hint := "▼ Ctrl+End: về mới nhất"
+		if a.newEntries > 0 {
+			hint = fmt.Sprintf("▼ %d tin mới — Ctrl+End: về mới nhất", a.newEntries)
+		}
+		line = hint + " • " + line
 	}
 	return a.styles.footer.MaxWidth(a.width).Render(line)
 }
