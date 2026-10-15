@@ -405,3 +405,52 @@ func TestAppPromptMarkers(t *testing.T) {
 		t.Fatalf("command-mode prompt must stay the input marker, got %q", got)
 	}
 }
+
+func TestAppChatWrapsLongLines(t *testing.T) {
+	a, sess := newTestApp()
+	a.width = 24
+	a.layout()
+	sess.Display.TabChat.append(noticeEntry("alpha bravo charlie delta echo foxtrot golf"))
+	a.dirty = true
+	a.refreshContent()
+	if got := a.viewport.TotalLineCount(); got < 2 {
+		t.Fatalf("long line must wrap, total lines = %d", got)
+	}
+	if view := a.viewport.View(); !strings.Contains(view, "alpha") {
+		t.Fatalf("wrapped view must keep the head:\n%s", view)
+	}
+}
+
+func TestAppMouseWheelScrolls(t *testing.T) {
+	a, sess := newTestApp()
+	for i := 0; i < 60; i++ {
+		sess.Display.TabChat.append(noticeEntry("line"))
+	}
+	a.dirty = true
+	a.refreshContent()
+	a.viewport.GotoBottom()
+	before := a.viewport.YOffset()
+	a.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if a.viewport.YOffset() >= before {
+		t.Fatalf("wheel up must scroll up: before=%d after=%d", before, a.viewport.YOffset())
+	}
+}
+
+func TestAppFooterShowsOnlyState(t *testing.T) {
+	a, _ := newTestApp()
+	if got := a.renderFooter(); !strings.Contains(got, "?") {
+		t.Fatalf("idle footer must point at the help, got %q", got)
+	}
+	if got := a.renderFooter(); strings.Contains(got, "Enter") || strings.Contains(got, "Tab ") {
+		t.Fatalf("idle footer must not list key bindings, got %q", got)
+	}
+	a.status = "Đang tải lịch sử cũ…"
+	if got := a.renderFooter(); !strings.Contains(got, "Đang tải") {
+		t.Fatalf("status must show in the footer, got %q", got)
+	}
+	a.status = ""
+	a.prompt = "| reply #12 > "
+	if got := a.renderFooter(); !strings.Contains(got, "reply #12") {
+		t.Fatalf("reply prompt must show in the footer, got %q", got)
+	}
+}

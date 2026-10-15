@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Tab indices inside the app are 0-based; the session keeps its own
@@ -121,16 +122,40 @@ func (t *tuiTerm) Refresh()           {}
 func (t *tuiTerm) Close()             { t.once.Do(func() { close(t.closed) }) }
 func (t *tuiTerm) Writer() io.Writer  { return io.Discard }
 
-// Styles for the chrome around the chat viewport and the input box.
-var (
-	tabActiveStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")).Padding(0, 1)
-	tabInactiveStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Padding(0, 1)
-	inputChatStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("62"))
-	inputCmdStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("214"))
-	footerStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	helpStyle        = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("212")).Padding(1, 2)
-	helpTitleStyle   = lipgloss.NewStyle().Bold(true)
-)
+// tuiStyles holds the chrome styles. Colours come from the client config
+// theme (ui.theme.accent) instead of being hardcoded, so a themed config is
+// honoured; the idle input border and the footer use a neutral grey.
+type tuiStyles struct {
+	tabActive   lipgloss.Style
+	tabInactive lipgloss.Style
+	inputChat   lipgloss.Style
+	inputCmd    lipgloss.Style
+	footer      lipgloss.Style
+	help        lipgloss.Style
+	helpTitle   lipgloss.Style
+}
+
+// newTUIStyles resolves the chrome styles, falling back to the built-in
+// accent when no client config is loaded.
+func newTUIStyles() tuiStyles {
+	accent := lipgloss.Color("#4f7dff")
+	dim := lipgloss.Color("240")
+	if ClientCfg != nil {
+		if v := strings.TrimSpace(ClientCfg.UI.Theme.Accent); v != "" {
+			accent = lipgloss.Color(v)
+		}
+	}
+	rounded := lipgloss.RoundedBorder()
+	return tuiStyles{
+		tabActive:   lipgloss.NewStyle().Bold(true).Foreground(accent).Padding(0, 1),
+		tabInactive: lipgloss.NewStyle().Foreground(dim).Padding(0, 1),
+		inputChat:   lipgloss.NewStyle().Border(rounded).BorderForeground(dim),
+		inputCmd:    lipgloss.NewStyle().Border(rounded).BorderForeground(accent),
+		footer:      lipgloss.NewStyle().Foreground(dim),
+		help:        lipgloss.NewStyle().Border(rounded).BorderForeground(accent).Padding(1, 2),
+		helpTitle:   lipgloss.NewStyle().Bold(true),
+	}
+}
 
 // app is the Bubble Tea model: a tab bar, the chat viewport and the input
 // box. It reads the session buffers on demand and never touches the
@@ -143,6 +168,7 @@ type app struct {
 
 	viewport viewport.Model
 	input    textarea.Model
+	styles   tuiStyles
 
 	hist         *inputHistory
 	active       int
@@ -168,6 +194,7 @@ func newApp(sess *Session) *app {
 		lines:    lines,
 		active:   tabIndexChat,
 		dirty:    true,
+		styles:   newTUIStyles(),
 		viewport: viewport.New(viewport.WithWidth(80), viewport.WithHeight(10)),
 	}
 	a.term = &tuiTerm{lines: lines, sink: sink, closed: make(chan struct{})}
@@ -223,6 +250,11 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiPromptMsg:
 		a.prompt = msg.prompt
 		return a, nil
+	case tea.MouseWheelMsg:
+		var cmd tea.Cmd
+		a.viewport, cmd = a.viewport.Update(msg)
+		a.maybeLoadOlder()
+		return a, cmd
 	case tea.KeyPressMsg:
 		if handled, cmd := a.handleKey(msg); handled {
 			return a, cmd
@@ -444,7 +476,13 @@ func (a *app) refreshContent() {
 		sb.WriteString(e.text())
 	}
 	prevLines := a.viewport.TotalLineCount()
-	a.viewport.SetContent(sb.String())
+	// Wrap at word boundaries (ANSI-aware) before handing the text to the
+	// viewport, whose own SoftWrap would break mid-word.
+	content := sb.String()
+	if a.width > 0 {
+		content = ansi.Wrap(content, a.width, " ")
+	}
+	a.viewport.SetContent(content)
 	newLines := a.viewport.TotalLineCount()
 
 	switch {
@@ -467,39 +505,39 @@ func (a *app) renderTabs() string {
 	parts := make([]string, 0, len(labels))
 	for i, l := range labels {
 		if i == a.active {
-			parts = append(parts, tabActiveStyle.Render(l))
+			parts = append(parts, a.styles.tabActive.Render(l))
 			continue
 		}
-		parts = append(parts, tabInactiveStyle.Render(l))
+		parts = append(parts, a.styles.tabInactive.Render(l))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
 func (a *app) renderInput() string {
 	if a.cmdMode {
-		return inputCmdStyle.Render(a.input.View())
+		return a.styles.inputCmd.Render(a.input.View())
 	}
-	return inputChatStyle.Render(a.input.View())
+	return a.styles.inputChat.Render(a.input.View())
 }
 
+// renderFooter shows transient state: a background-load status, or the reply
+// prompt; when idle it points at the help overlay. The key list itself lives
+// in that overlay.
 func (a *app) renderFooter() string {
-	hint := "Enter gửi • Shift+Enter xuống dòng • Tab đổi tab • ? trợ giúp • Ctrl+D thoát"
-	if !a.enhanced {
-		hint = "Enter gửi • Alt+Enter xuống dòng • Tab đổi tab • ? trợ giúp • Ctrl+D thoát"
+	line := a.status
+	if line == "" && a.prompt != "" && a.prompt != "| > " {
+		line = strings.TrimSpace(a.prompt)
 	}
-	switch {
-	case a.status != "":
-		hint = a.status
-	case a.prompt != "" && a.prompt != "| > ":
-		hint = strings.TrimSpace(a.prompt) + "  " + hint
+	if line == "" {
+		line = "? trợ giúp"
 	}
-	return footerStyle.MaxWidth(a.width).Render(hint)
+	return a.styles.footer.MaxWidth(a.width).Render(line)
 }
 
 // helpView is the keybinding overlay, centred over the chat area.
 func (a *app) helpView() string {
 	lines := []string{
-		helpTitleStyle.Render("Phím tắt"),
+		a.styles.helpTitle.Render("Phím tắt"),
 		"",
 		"Tab / Shift+Tab     đổi tab (1:chat, 2:system)",
 		"Enter               gửi tin nhắn",
@@ -507,12 +545,14 @@ func (a *app) helpView() string {
 		"Alt+Enter / Ctrl+J  xuống dòng (dự phòng)",
 		"↑ / ↓               lịch sử nhập (khi nháp một dòng)",
 		"PgUp / PgDn         cuộn chat; tới đỉnh để tải thêm",
+		"Lăn chuột           cuộn chat",
+		"Shift + kéo chuột   chọn (bôi đen) văn bản",
 		"Ctrl+C              xóa nháp",
 		"Ctrl+D              thoát",
 		"? / F1              đóng trợ giúp",
 		"Esc                 đóng trợ giúp",
 	}
-	box := helpStyle.Render(strings.Join(lines, "\n"))
+	box := a.styles.help.Render(strings.Join(lines, "\n"))
 	return lipgloss.Place(a.width, a.viewport.Height(), lipgloss.Center, lipgloss.Center, box)
 }
 
@@ -525,10 +565,13 @@ func (a *app) View() tea.View {
 	if a.showHelp {
 		chat = a.helpView()
 	}
-	return tea.NewView(strings.Join([]string{
+	v := tea.NewView(strings.Join([]string{
 		a.renderTabs(),
 		chat,
 		a.renderInput(),
 		a.renderFooter(),
 	}, "\n"))
+	// Capture the mouse so the wheel scrolls the chat; clicks are ignored.
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
 }
