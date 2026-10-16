@@ -59,7 +59,8 @@ func noticeLine(kind, text string) string {
 }
 
 // drainReplay runs the tail-window seq page and splits the stream into
-// content lines, footer and trailer.
+// content lines and trailer. Progress lives in the status bar from the
+// trailer, never as chat lines.
 func drainReplay(t *testing.T, s *ChatServer, wantJoins bool) (contents []string, footer string, trailer HistorySync) {
 	t.Helper()
 	sess := &ClientSession{Send: make(chan []byte, 4096), DisplayName: "T#0000", Perms: GetDefaultPermission(), WantJoins: wantJoins}
@@ -79,16 +80,6 @@ func drainReplay(t *testing.T, s *ChatServer, wantJoins bool) (contents []string
 					trailer = hs
 					<-done
 					return contents, footer, trailer
-				}
-				// Markers are tagged now, so the window they open or
-				// close is read off the tags rather than the wording.
-				var marker WireMessage
-				if err := json.Unmarshal([]byte(line), &marker); err == nil &&
-					wire.HasTag(marker.Tags, wire.TagHistory) {
-					if wire.HasAnyTag(marker.Tags, wire.TagHistoryEnd, wire.TagHistoryExhausted) {
-						footer = line
-					}
-					continue
 				}
 				contents = append(contents, line)
 			}
@@ -131,12 +122,12 @@ func TestReplay_Filtered(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	seedReplayHistory(s)
-	contents, footer, trailer := drainReplay(t, s, false)
+	contents, _, trailer := drainReplay(t, s, false)
 	if len(contents) != 4 {
 		t.Fatalf("filtered replay = %d lines, want 4 (date+2 chats+old join): %q", len(contents), contents)
 	}
-	if !strings.Contains(footer, "(4/6)") {
-		t.Fatalf("footer missing counts: %q", footer)
+	if trailer.Sent != 4 || trailer.Total != 6 {
+		t.Fatalf("trailer counts wrong: %+v", trailer)
 	}
 	if trailer.MinHeight != 3 || trailer.MaxHeight != 6 || trailer.Sent != 4 || trailer.Total != 6 {
 		t.Fatalf("trailer bounds/counts wrong: %+v", trailer)
@@ -148,12 +139,12 @@ func TestReplay_WithJoins(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	seedReplayHistory(s)
-	contents, footer, trailer := drainReplay(t, s, true)
+	contents, _, trailer := drainReplay(t, s, true)
 	if len(contents) != 6 {
 		t.Fatalf("full replay = %d lines, want 6: %q", len(contents), contents)
 	}
-	if !strings.Contains(footer, "(6/6)") {
-		t.Fatalf("footer missing counts: %q", footer)
+	if trailer.Sent != 6 || trailer.Total != 6 {
+		t.Fatalf("trailer counts wrong: %+v", trailer)
 	}
 	if trailer.MinHeight != 3 || trailer.MaxHeight != 6 {
 		t.Fatalf("trailer bounds wrong: %+v", trailer)
@@ -188,13 +179,13 @@ func TestReplay_LiveShape142(t *testing.T) {
 			s.Chain.appendMessageToHistory(noticeLine("leave", "visitor left"))
 		}
 	}
-	contents, footer, trailer := drainReplay(t, s, false)
+	contents, _, trailer := drainReplay(t, s, false)
 	want := chats + dates
 	if len(contents) != want {
 		t.Fatalf("filtered replay = %d lines, want %d (chats+dates)", len(contents), want)
 	}
-	if !strings.Contains(footer, fmt.Sprintf("(%d/142)", want)) {
-		t.Fatalf("footer missing counts: %q", footer)
+	if trailer.Sent != want || trailer.Total != 142 {
+		t.Fatalf("trailer counts wrong: %+v (want sent=%d total=142)", trailer, want)
 	}
 	if trailer.MinHeight != firstChat || trailer.MaxHeight != lastChat || trailer.Sent != want || trailer.Total != 142 {
 		t.Fatalf("trailer wrong: %+v (want min=%d max=%d)", trailer, firstChat, lastChat)
@@ -349,7 +340,8 @@ func TestAudit_LiveAndReplay(t *testing.T) {
 func peerConn() *websocket.Conn { return &websocket.Conn{} }
 
 // drainSegment runs SendChatSegment and splits the stream into content
-// lines, footer and trailer.
+// lines and trailer. An empty window is exhausted (total==0) and still
+// terminates with a trailer.
 func drainSegment(t *testing.T, s *ChatServer, before uint64, limit int) (contents []string, footer string, trailer HistorySync) {
 	t.Helper()
 	sess := &ClientSession{Send: make(chan []byte, 4096), DisplayName: "T#0000", Perms: GetDefaultPermission()}
@@ -368,12 +360,6 @@ func drainSegment(t *testing.T, s *ChatServer, before uint64, limit int) (conten
 					trailer = hs
 					<-done
 					return contents, footer, trailer
-				}
-				if tags := markerTags(line); wire.HasTag(tags, wire.TagHistory) {
-					if wire.HasAnyTag(tags, wire.TagHistoryEnd, wire.TagHistoryExhausted) {
-						footer = line
-					}
-					continue
 				}
 				contents = append(contents, line)
 			}
@@ -418,19 +404,16 @@ func TestSegment_OldestAbsolute(t *testing.T) {
 }
 
 // A cutoff below every height yields an empty but terminated stream.
-// An exhausted window (no chained line older than the cutoff) says so
-// plainly instead of a bare zero count, and still terminates the
-// stream with a trailer so the requester never hangs.
+// An exhausted window has total==0 and still terminates the stream with
+// a trailer so the requester never hangs; the client renders the result
+// in its status bar.
 func TestSegment_Exhausted(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
 	seedSegmentHistory(s)
-	contents, footer, trailer := drainSegment(t, s, 1, 10)
+	contents, _, trailer := drainSegment(t, s, 1, 10)
 	if len(contents) != 0 {
 		t.Fatalf("segment before 1 must be empty, got %q", contents)
-	}
-	if !strings.Contains(footer, "không còn tin cũ hơn") {
-		t.Fatalf("exhausted segment must say so: %q", footer)
 	}
 	if trailer.Sent != 0 || trailer.Total != 0 {
 		t.Fatalf("empty segment trailer wrong: %+v", trailer)

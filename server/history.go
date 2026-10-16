@@ -289,15 +289,6 @@ func powNoticeWire(text string, tier int, leaves ...string) WireMessage {
 	return notice
 }
 
-// markerWire builds a replay window marker. Unlike a notice it carries no
-// server time — it is a frame for the client's replay state machine, not a
-// line to read — and the text is only what an older client would print.
-// Callers pass the full chain via WithTags, since a marker names both the
-// window it opens or closes and, for a footer, how it closed.
-func markerWire(tags []string, text string) WireMessage {
-	return WireMessage{Type: "system", Tags: tags, Text: text}
-}
-
 // noticeWire builds one unchained system line. leaves names the tag leaves
 // rather than the finished list, so every producer publishes the same
 // root-to-leaf chain and none of them can emit a partial chain that would
@@ -373,14 +364,14 @@ func (s *ChatServer) serveHistorySegment(session *ClientSession, before uint64, 
 	s.Chain.Mu.RUnlock()
 	if before != 0 && ready && before > tip {
 		s.Hub.BroadcastMu.Lock()
-		s.Chain.sendReplay(session, nil, replaySegment)
+		s.Chain.sendReplay(session, nil)
 		s.Hub.BroadcastMu.Unlock()
 		return
 	}
 	lines := s.Chain.collectSegment(before, limit)
 	s.Hub.BroadcastMu.Lock()
 	defer s.Hub.BroadcastMu.Unlock()
-	s.Chain.sendReplay(session, lines, replaySegment)
+	s.Chain.sendReplay(session, lines)
 }
 
 func (h *Hub) CheckAndBroadcastDate(now time.Time) {
@@ -586,13 +577,12 @@ func (c *ChainService) collectSegment(before uint64, limit int) []string {
 }
 
 // SendChatSegment collects and sends one on-demand segment. An exhausted
-// window still terminates the stream (header, plain exhausted footer,
-// trailer) so the requester never hangs waiting.
+// window still sends its trailer so the requester never hangs waiting.
 func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, limit int) {
 	if limit <= 0 {
 		return
 	}
-	c.sendReplay(session, c.collectSegment(before, limit), replaySegment)
+	c.sendReplay(session, c.collectSegment(before, limit))
 }
 
 // collectAfterSeq returns up to limit stored lines with seq > afterSeq,
@@ -656,20 +646,19 @@ func (s *ChatServer) serveHistorySeq(session *ClientSession, afterSeq, beforeSeq
 	}
 	var lines []string
 	var meta pageMeta
-	var mode replayMode
 	switch {
 	case afterSeq != nil:
 		l, more, next := s.Chain.collectAfterSeq(*afterSeq, limit)
-		lines, meta, mode = l, pageMeta{Direction: "after", NextSeq: next, More: more}, replayJoin
+		lines, meta = l, pageMeta{Direction: "after", NextSeq: next, More: more}
 	case beforeSeq != nil:
 		l, more, next := s.Chain.collectBeforeSeq(*beforeSeq, limit)
-		lines, meta, mode = l, pageMeta{Direction: "before", NextSeq: next, More: more}, replaySegment
+		lines, meta = l, pageMeta{Direction: "before", NextSeq: next, More: more}
 	default:
 		return
 	}
 	s.Hub.BroadcastMu.Lock()
 	defer s.Hub.BroadcastMu.Unlock()
-	s.Chain.sendReplayPage(session, lines, mode, meta)
+	s.Chain.sendReplayPage(session, lines, meta)
 }
 
 // collectRanges returns up to limit chained lines whose chain_height
@@ -735,21 +724,21 @@ func (s *ChatServer) serveHistoryRanges(session *ClientSession, ranges []HeightR
 	lines := s.Chain.collectRanges(ranges, limit)
 	s.Hub.BroadcastMu.Lock()
 	defer s.Hub.BroadcastMu.Unlock()
-	s.Chain.sendReplayPage(session, lines, replayRecovery, pageMeta{})
+	s.Chain.sendReplayPage(session, lines, pageMeta{Direction: "recover"})
 }
 
-// sendReplay renders stored lines in replay format: header, content,
-// human footer with counts, and a HistorySync trailer. lines must be a
-// private copy. Sends never block (drops on a full peer buffer count
-// and log); the trailer reports what actually queued. All footer variants
-// keep the boundary substring so the client still opens and closes the
-// replay window.
+// sendReplay renders stored lines in replay format: content batches plus
+// a HistorySync trailer. lines must be a private copy. Sends never block
+// (drops on a full peer buffer count and log); the trailer reports what
+// actually queued. Progress and results are rendered by the client into
+// its status bar from the trailer, never as chat lines.
 // historySyncTrailer encodes the machine-readable trailer closing a
 // replay. Dropped counts sends a full peer buffer refused: the client
 // skips its fork check when non-zero, since an incomplete window cannot
 // prove the log changed.
-// pageMeta carries seq-cursor metadata for a paged response. Zero values
-// mean "not a seq page": other replays keep legacy trailer fields only.
+// pageMeta carries seq-cursor metadata for a paged response. Direction is
+// "after", "before" or "recover"; zero values mean a height-cursor older
+// window (treated as "before" by the client via its request state).
 type pageMeta struct {
 	Direction string
 	NextSeq   uint64
@@ -763,37 +752,11 @@ func historySyncTrailer(minHeight, maxHeight uint64, sent, total, dropped int, f
 	return trailer
 }
 
-// replayMode selects the replay footer label: the connect-time join
-// burst, an on-demand older segment, or a recovery window answering
-// missed heights. Only the label changes; the format is identical.
-type replayMode int
-
-const (
-	replayJoin replayMode = iota
-	replaySegment
-	replayRecovery
-)
-
-func (c *ChainService) sendReplay(session *ClientSession, lines []string, mode replayMode) {
-	c.sendReplayPage(session, lines, mode, pageMeta{})
+func (c *ChainService) sendReplay(session *ClientSession, lines []string) {
+	c.sendReplayPage(session, lines, pageMeta{})
 }
 
-// replayHeader returns the wording and the tag leaf of the marker that
-// opens a window of the given kind. The text is what a client draws; the
-// tag is what it reads, and deriving both from the mode keeps a wording
-// change from drifting away from the window it names.
-func replayHeader(mode replayMode) (text string, leaf string) {
-	switch mode {
-	case replaySegment:
-		return "--- Lịch sử cũ ---", wire.TagHistoryOlder
-	case replayRecovery:
-		return "--- Lịch sử bù ---", wire.TagHistoryRecover
-	default:
-		return "--- Lịch sử chat gần đây ---", wire.TagHistoryBegin
-	}
-}
-
-func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, mode replayMode, meta pageMeta) {
+func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, meta pageMeta) {
 	// Replay filters join/leave unless the session asked for them.
 	// Dates, audits and untagged lines always go. Filtered lines never
 	// occupied chain positions, so the replayed window has no gaps.
@@ -808,8 +771,7 @@ func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, mo
 	// every broadcast. Drops are counted and logged; the trailer reports
 	// what was actually queued. Content lines coalesce into multi-line
 	// frames (newline-separated JSON) so a bounded window fits the
-	// per-session send queue; header, footer and trailer stay separate
-	// frames.
+	// per-session send queue; the trailer stays a separate frame.
 	replaySend := func(b []byte) bool {
 		select {
 		case session.Send <- b:
@@ -854,11 +816,6 @@ func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, mo
 		batchN++
 	}
 
-	headerText, headerLeaf := replayHeader(mode)
-	headerLine, _ := json.Marshal(markerWire(wire.WithTags(headerLeaf), headerText))
-	if !replaySend(headerLine) {
-		dropped++
-	}
 	for _, msgStr := range lines {
 		// Keep history messages as stored (could be legacy ANSI string or WireMessage JSON)
 		// For WireMessage JSON, send as is; for legacy, clean and send
@@ -906,39 +863,10 @@ func (c *ChainService) sendReplayPage(session *ClientSession, lines []string, mo
 		}
 	}
 	flushBatch()
-	// The footer carries both the window it closes and how it closed, so
-	// the client can tell a counted end from an exhausted one without
-	// reading the wording.
-	window := []string{wire.TagHistory}
-	switch mode {
-	case replaySegment:
-		window = append(window, wire.TagHistoryOlder)
-	case replayRecovery:
-		window = append(window, wire.TagHistoryRecover)
-	}
-	footer := fmt.Sprintf("--- Kết thúc lịch sử (%d/%d) ---", sent, len(lines))
-	closer := wire.TagHistoryEnd
-	if mode != replayJoin {
-		noun := "lịch sử cũ"
-		exhausted := "--- Kết thúc lịch sử cũ: không còn tin cũ hơn ---"
-		if mode == replayRecovery {
-			noun = "lịch sử bù"
-			exhausted = "--- Kết thúc lịch sử bù: không còn tin trong bộ nhớ ---"
-		}
-		footer = fmt.Sprintf("--- Kết thúc %s (%d/%d) ---", noun, sent, len(lines))
-		if !haveHeight {
-			footer = exhausted
-			closer = wire.TagHistoryExhausted
-		}
-	}
-	footerLine, _ := json.Marshal(markerWire(wire.WithTags(append(window, closer)...), footer))
-	if !replaySend(footerLine) {
-		dropped++
-	}
 	if !replaySend(historySyncTrailer(minHeight, maxHeight, sent, len(lines), dropped, firstSeq, lastSeq, meta)) {
 		dropped++
 	}
 	if dropped > 0 {
-		logWarnf("⚠️ (history,limit,replay) Dropped %d/%d lines for slow peer (buffer full)", dropped, len(lines)+3)
+		logWarnf("⚠️ (history,limit,replay) Dropped %d/%d lines for slow peer (buffer full)", dropped, len(lines)+1)
 	}
 }

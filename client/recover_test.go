@@ -151,7 +151,7 @@ func TestRecoveryRequestOnGap(t *testing.T) {
 	}
 }
 
-// A complete refill verifies, renders and confirms.
+// A complete refill verifies, renders and confirms in the status bar.
 func TestRecoveryWindowFlow(t *testing.T) {
 	conn := &captureConn{frames: make(chan []byte)}
 	sess := recoverTestSession(t, 9, conn)
@@ -177,13 +177,16 @@ func TestRecoveryWindowFlow(t *testing.T) {
 			t.Fatalf("recovered #%d must index", h)
 		}
 	}
-	if !strings.Contains(tabSysText(sess), "Đã bù 2 tin bị lỡ") {
-		t.Fatalf("missing confirmation: %q", tabSysText(sess))
+	if got := sess.uiStatus(); !strings.Contains(got, "Đã bù 2 tin bị lỡ") {
+		t.Fatalf("missing status confirmation: %q", got)
+	}
+	if strings.Contains(tabSysText(sess), "Đã bù") {
+		t.Fatalf("confirmation must not spam chat: %q", tabSysText(sess))
 	}
 }
 
 // A wire that does not continue its anchor fails; with no retries left
-// the loss is reported.
+// the loss is reported in the status bar.
 func TestRecoveryMismatchFails(t *testing.T) {
 	setRecoverCfg(t, 0, "1ms", 1000)
 	conn := &captureConn{frames: make(chan []byte)}
@@ -203,8 +206,8 @@ func TestRecoveryMismatchFails(t *testing.T) {
 	if sess.Chain.RecoverPending != nil {
 		t.Fatal("failed refill must clear pending")
 	}
-	if !strings.Contains(tabSysText(sess), "Không bù đủ tin") {
-		t.Fatalf("missing failure notice: %q", tabSysText(sess))
+	if got := sess.uiStatus(); !strings.Contains(got, "Không bù đủ tin") {
+		t.Fatalf("missing status failure notice: %q", got)
 	}
 	if _, ok := sess.Chain.WireIdx.get(101); ok {
 		t.Fatal("failed wire must not index")
@@ -258,7 +261,7 @@ func TestRecoveryRetriesIncomplete(t *testing.T) {
 	}
 }
 
-// Exhausting retries reports the loss.
+// Exhausting retries reports the loss in the status bar.
 func TestRecoveryExhausts(t *testing.T) {
 	setRecoverCfg(t, 0, "1ms", 1000)
 	conn := &captureConn{frames: make(chan []byte)}
@@ -275,8 +278,8 @@ func TestRecoveryExhausts(t *testing.T) {
 	if sess.Chain.RecoverPending != nil {
 		t.Fatal("exhausted refill must clear pending")
 	}
-	if !strings.Contains(tabSysText(sess), "Không bù đủ tin") {
-		t.Fatalf("missing notice: %q", tabSysText(sess))
+	if got := sess.uiStatus(); !strings.Contains(got, "Không bù đủ tin") {
+		t.Fatalf("missing status notice: %q", got)
 	}
 }
 
@@ -461,10 +464,8 @@ func TestGreetingAfterCatchup(t *testing.T) {
 		return raw
 	}
 	conn.frames <- frame(HistoryInfo{Type: "history_info", MinSeq: 1, MaxSeq: 2, MinHeight: 100, MaxHeight: 101, Count: 2})
-	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistoryBegin), "--- Lịch sử chat gần đây ---"))
 	conn.frames <- frame(wires[0])
 	conn.frames <- frame(wires[1])
-	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistory, wire.TagHistoryEnd), "--- Kết thúc lịch sử (2/2) ---"))
 	conn.frames <- frame(HistorySync{Type: "history_sync", Direction: "after", FirstSeq: 1, LastSeq: 2, Sent: 2, Total: 2})
 
 	go sess.runPump()
@@ -514,14 +515,10 @@ func TestLoadPagesUntilMaxSeq(t *testing.T) {
 		return raw
 	}
 	conn.frames <- frame(HistoryInfo{Type: "history_info", MinSeq: 1, MaxSeq: 3, MinHeight: 1, MaxHeight: 3, Count: 3})
-	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistoryBegin), "--- Lịch sử chat gần đây ---"))
 	conn.frames <- frame(wires[0])
 	conn.frames <- frame(wires[1])
-	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistory, wire.TagHistoryEnd), "--- Kết thúc lịch sử (2/3) ---"))
 	conn.frames <- frame(HistorySync{Type: "history_sync", Direction: "after", FirstSeq: 1, LastSeq: 2, NextSeq: 2, More: true, Sent: 2, Total: 2})
-	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistoryBegin), "--- Lịch sử chat gần đây ---"))
 	conn.frames <- frame(wires[2])
-	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistory, wire.TagHistoryEnd), "--- Kết thúc lịch sử (1/1) ---"))
 	conn.frames <- frame(HistorySync{Type: "history_sync", Direction: "after", FirstSeq: 3, LastSeq: 3, NextSeq: 3, More: false, Sent: 1, Total: 1})
 
 	go sess.runPump()
@@ -548,10 +545,10 @@ func TestLoadPagesUntilMaxSeq(t *testing.T) {
 	}
 }
 
-// TestLoadAnnouncesSync: the load prints a "Đang tải lịch sử" banner
-// before the history so a slow load does not look like a hang, the
-// banner precedes the loaded lines, page markers stay hidden, and a
-// batched frame's trailing newline does not render a blank line.
+// TestLoadAnnouncesSync: the load shows progress in the status bar, never
+// as chat lines. Page markers stay hidden (old servers) or absent (new
+// servers), and a batched frame's trailing newline does not render a
+// blank line.
 func TestLoadAnnouncesSync(t *testing.T) {
 	conn := &captureConn{frames: make(chan []byte, 16)}
 	sess := recoverTestSession(t, 9, conn)
@@ -560,7 +557,7 @@ func TestLoadAnnouncesSync(t *testing.T) {
 	out := &chatSpy{sess: sess}
 	sess.Display.ActiveTab = TabChat
 	anchor := [32]byte{9}
-	wires := recoverTestChain(anchor, 1, 1)
+	wires := recoverTestChain(anchor, 101, 1)
 	frame := func(v any) []byte {
 		raw, err := json.Marshal(v)
 		if err != nil {
@@ -568,10 +565,8 @@ func TestLoadAnnouncesSync(t *testing.T) {
 		}
 		return raw
 	}
-	conn.frames <- frame(HistoryInfo{Type: "history_info", MinSeq: 1, MaxSeq: 1, MinHeight: 1, MaxHeight: 1, Count: 1})
-	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistoryBegin), "--- Lịch sử chat gần đây ---"))
+	conn.frames <- frame(HistoryInfo{Type: "history_info", MinSeq: 1, MaxSeq: 1, MinHeight: 101, MaxHeight: 101, Count: 1})
 	conn.frames <- frame(wires[0])
-	conn.frames <- frame(replayMarker(wire.WithTags(wire.TagHistory, wire.TagHistoryEnd), "--- Kết thúc lịch sử (1/1) ---"))
 	conn.frames <- frame(HistorySync{Type: "history_sync", Direction: "after", FirstSeq: 1, LastSeq: 1, NextSeq: 1, Sent: 1, Total: 1})
 
 	go sess.runPump()
@@ -579,15 +574,19 @@ func TestLoadAnnouncesSync(t *testing.T) {
 	stopPump(t, sess, func() { close(conn.frames) })
 
 	text := out.String()
-	bi := strings.Index(text, "[Local]: Đang tải lịch sử")
-	mi := strings.Index(text, "msg")
-	if bi < 0 || mi < 0 || bi > mi {
-		t.Fatalf("local sync banner must precede the loaded history: %q", text)
+	if strings.Contains(text, "[Local]: Đang tải lịch sử") {
+		t.Fatalf("sync progress must not spam chat: %q", text)
+	}
+	if !strings.Contains(text, "msg") {
+		t.Fatalf("loaded history missing: %q", text)
 	}
 	if strings.Contains(text, "Lịch sử chat gần đây") || strings.Contains(text, "Kết thúc lịch sử") {
 		t.Fatalf("page markers must stay hidden during the load: %q", text)
 	}
 	if strings.Contains(text, "\n| \n") {
 		t.Fatalf("batched frames must not render blank lines: %q", text)
+	}
+	if got := sess.uiStatus(); !strings.Contains(got, "Đã tải 1 tin") {
+		t.Fatalf("load result must show in status: %q", got)
 	}
 }

@@ -156,7 +156,7 @@ func TestReadPump_HistoryRequest(t *testing.T) {
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	var trailer HistorySync
-	var sawOldHeader bool
+	var contents int
 	for {
 		clientConn.SetReadDeadline(deadline)
 		_, msg, err := clientConn.ReadMessage()
@@ -168,12 +168,23 @@ func TestReadPump_HistoryRequest(t *testing.T) {
 			trailer = hs
 			break
 		}
-		if wire.HasTag(markerTags(string(msg)), wire.TagHistoryOlder) {
-			sawOldHeader = true
+		if wire.HasTag(markerTags(string(msg)), wire.TagHistory) {
+			t.Fatalf("replay must not emit history markers, got %q", msg)
+		}
+		for _, line := range replayFrameLines(msg) {
+			var inner HistorySync
+			if err := json.Unmarshal([]byte(line), &inner); err == nil && inner.Type == "history_sync" {
+				trailer = inner
+				break
+			}
+			contents++
+		}
+		if trailer.Type == "history_sync" {
+			break
 		}
 	}
-	if !sawOldHeader {
-		t.Fatal("segment must open with the older-history header")
+	if contents != 2 {
+		t.Fatalf("segment must carry 2 content lines, got %d", contents)
 	}
 	if trailer.MinHeight != 1 || trailer.MaxHeight != 2 || trailer.Sent != 2 || trailer.Total != 2 {
 		t.Fatalf("segment trailer wrong: %+v", trailer)

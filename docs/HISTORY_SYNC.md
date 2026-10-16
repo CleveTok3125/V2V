@@ -219,12 +219,14 @@ round-trip covers every missing run, even when they are scattered.
 ## Client initial load
 
 1. Connect and authenticate.
-2. Receive `history_info`; print a sync banner (so a slow load does not
-   look like a hang), then pick a start `seq` so the load covers at most
-   `initialLines` recent lines (start = `max_seq - initialLines`, then
-   page with the exclusive `after_seq`).
+2. Receive `history_info`; show progress in the status bar (so a slow load
+   does not look like a hang), then pick a start `seq` so the load covers
+   at most `initialLines` recent lines (start = `max_seq - initialLines`,
+   then page with the exclusive `after_seq`).
 3. Page ascending in `batchLines` batches until the tip or `initialLines`
    is reached, rendering each batch in order and verifying the chain.
+   The finished result shows in the status bar until its TTL, never as
+   chat lines.
 4. Live frames that arrive during the load are held and merged, then the
    whole stream is printed once, so the loaded history and live traffic
    appear as one continuous stream. A held load is released on a timeout

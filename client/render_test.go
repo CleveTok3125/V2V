@@ -233,27 +233,29 @@ func TestHandleReplayMarkerTracksWindows(t *testing.T) {
 	}
 }
 
-// TestHandleReplayMarkerHidesRecoveryAndLoading: markers are noise while a
-// load is in progress, and a recovery window's markers are noise on their
-// own because the merge draws its own summary.
-func TestHandleReplayMarkerHidesRecoveryAndLoading(t *testing.T) {
+// TestHandleReplayMarkerHidesAll: markers from older servers never render
+// as chat lines. Progress lives in the status bar from the trailer.
+func TestHandleReplayMarkerHidesAll(t *testing.T) {
 	marker := func(tags ...string) WireMessage {
 		return WireMessage{Type: "system", Tags: wire.WithTags(tags...), Text: "MARKERTEXT"}
 	}
 
+	for _, tags := range [][]string{
+		{wire.TagHistoryOlder},
+		{wire.TagHistoryRecover},
+		{wire.TagHistoryBegin},
+	} {
+		sess := sessionForDispatch(t)
+		sess.handleReplayMarker(marker(tags...))
+		if containsLine(sess.Display.TabChat.lines, "MARKERTEXT") {
+			t.Fatalf("markers must never draw in chat: %v", tags)
+		}
+		if containsLine(sess.Display.TabSys.lines, "MARKERTEXT") {
+			t.Fatalf("markers must never land in system tab: %v", tags)
+		}
+	}
+
 	sess := sessionForDispatch(t)
-	sess.handleReplayMarker(marker(wire.TagHistoryOlder))
-	if !containsLine(sess.Display.TabChat.lines, "MARKERTEXT") {
-		t.Fatal("a plain segment marker must be drawn in the chat tab")
-	}
-
-	sess = sessionForDispatch(t)
-	sess.handleReplayMarker(marker(wire.TagHistoryRecover))
-	if containsLine(sess.Display.TabChat.lines, "MARKERTEXT") {
-		t.Fatal("recovery markers must stay hidden")
-	}
-
-	sess = sessionForDispatch(t)
 	sess.Chain.Loading = true
 	sess.handleReplayMarker(marker(wire.TagHistoryBegin))
 	if containsLine(sess.Display.TabChat.lines, "MARKERTEXT") {
@@ -280,17 +282,15 @@ func containsLine(lines []entry, needle string) bool {
 	return false
 }
 
-// TestHandleReplayMarkerRespectsNotifyGates: a marker is a notice, so the
-// history branch and the root are gates over it like any other. The taxonomy
-// advertises system.history.* in /notify and in the web panel, and a toggle
-// there that suppresses nothing is a lie about what the client can do.
-// Muting stops the live print only; the line stays reviewable in the tab.
-func TestHandleReplayMarkerRespectsNotifyGates(t *testing.T) {
+// TestHandleReplayMarkerNeverRenders: markers only drive the replay state
+// machine for older servers. They never print, so notify gates do not
+// apply to them.
+func TestHandleReplayMarkerNeverRenders(t *testing.T) {
 	marker := func(tags ...string) WireMessage {
 		return WireMessage{Type: "system", Tags: wire.WithTags(tags...), Text: "MARKERTEXT"}
 	}
 
-	for _, muted := range []string{wire.TagHistory, wire.TagRoot} {
+	for _, muted := range []string{wire.TagHistory, wire.TagRoot, wire.TagJoin} {
 		sess, out := queueTestSession(t)
 		sess.Chain.WireIdx = newWireIndex(8)
 		sess.Chain.RenderCache = newRenderCache(8)
@@ -298,21 +298,11 @@ func TestHandleReplayMarkerRespectsNotifyGates(t *testing.T) {
 		sess.handleReplayMarker(marker(wire.TagHistoryOlder))
 
 		if strings.Contains(out.String(), "MARKERTEXT") {
-			t.Errorf("muting %q must stop a replay marker printing live", muted)
+			t.Errorf("muting %q must not print a marker", muted)
 		}
-		if !containsLine(sess.Display.TabSys.lines, "MARKERTEXT") {
-			t.Errorf("muting %q must leave the marker reviewable in the system tab", muted)
+		if containsLine(sess.Display.TabSys.lines, "MARKERTEXT") {
+			t.Errorf("muting %q must not store a marker", muted)
 		}
-	}
-
-	// Muting something else leaves the marker alone.
-	sess, out := queueTestSession(t)
-	sess.Chain.WireIdx = newWireIndex(8)
-	sess.Chain.RenderCache = newRenderCache(8)
-	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagJoin: true}, PowMinTier: 1}
-	sess.handleReplayMarker(marker(wire.TagHistoryOlder))
-	if !strings.Contains(out.String(), "MARKERTEXT") {
-		t.Error("muting join must not silence a replay marker")
 	}
 }
 

@@ -119,6 +119,12 @@ type DisplayState struct {
 	// Under DisplayMu.
 	PendingGreeting string
 
+	// StatusMsg is a transient footer notice (history sync results).
+	// Shown in the status bar until StatusUntil, then cleared. Under
+	// DisplayMu like the other display state.
+	StatusMsg   string
+	StatusUntil time.Time
+
 	// Coalesced repaint state.
 	RefreshMu      sync.Mutex
 	LastRefresh    time.Time

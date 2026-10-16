@@ -42,7 +42,7 @@ func TestCollectRanges(t *testing.T) {
 }
 
 // drainRanges runs serveHistoryRanges and returns its content lines and
-// trailer.
+// trailer. No history markers are emitted.
 func drainRanges(t *testing.T, s *ChatServer, ranges []HeightRange, limit int) (contents []string, trailer HistorySync) {
 	t.Helper()
 	sess := &ClientSession{Send: make(chan []byte, 4096), DisplayName: "T#0000", Perms: GetDefaultPermission()}
@@ -62,7 +62,7 @@ func drainRanges(t *testing.T, s *ChatServer, ranges []HeightRange, limit int) (
 					return contents, hs
 				}
 				if wire.HasTag(markerTags(line), wire.TagHistory) {
-					continue
+					t.Fatalf("refill must not emit history markers, got %q", line)
 				}
 				contents = append(contents, line)
 			}

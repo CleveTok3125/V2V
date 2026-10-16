@@ -48,12 +48,12 @@ and is what `/notify` and the web settings panel render.
 | `system.join` | someone joined | `server/clientHandler.go` |
 | `system.leave` | someone left | `server/clientHandler.go` |
 | `system.date` | the daily banner | `server/history.go` (`BroadcastDate`) |
-| `system.history` | replay window markers | `server/history.go` |
-| `system.history.begin` | catch-up window header | `replayHeader(replayJoin)` |
-| `system.history.older` | on-demand older-segment header | `replayHeader(replaySegment)` |
-| `system.history.recover` | recovery window header | `replayHeader(replayRecovery)` |
-| `system.history.end` | counted footer (`sent/total`) | `sendReplayPage` |
-| `system.history.exhausted` | footer: no older lines left | `sendReplayPage` |
+| `system.history` | replay window markers (legacy, no longer emitted) | `lib/wire/tags.go` (client compat only) |
+| `system.history.begin` | catch-up window header (legacy) | — |
+| `system.history.older` | on-demand older-segment header (legacy) | — |
+| `system.history.recover` | recovery window header (legacy) | — |
+| `system.history.end` | counted footer (legacy) | — |
+| `system.history.exhausted` | footer: no older lines left (legacy) | — |
 | `system.pow` | the proof-of-work flow | (intermediate) |
 | `system.pow.gate` | chat held pending a pre-connect proof | `server/clientHandler.go` |
 | `system.pow.screening` | in-chat challenge, solved, rejected, declined | `server/powscreen.go` |
@@ -67,9 +67,11 @@ and is what `/notify` and the web settings panel render.
 Two entries deserve their own note. `system.audit` has a route
 (`Hub.BroadcastAudit`) but no producer, so no line carries the tag today
 and muting it changes nothing; it stays in the tree so the wire shape is
-settled before anything publishes on it. `system.history` is an
-intermediate node with no producer of its own — it exists so
-`/notify system.history off` is one switch rather than five.
+settled before anything publishes on it. `system.history` and its children
+are legacy: the server no longer emits markers, the client tracks windows
+from its requests until the `history_sync` trailer and renders progress
+in the status bar. The tags stay so an old server still drives the same
+state machine without ever printing.
 
 ## Wire format
 

@@ -22,7 +22,6 @@ import (
 	"github.com/CleveTok3125/V2V/lib/clientcore"
 	"github.com/CleveTok3125/V2V/lib/filter"
 	"github.com/CleveTok3125/V2V/lib/trip"
-	"github.com/CleveTok3125/V2V/lib/wire"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -854,7 +853,8 @@ func pruneMissing(p *recoverWindow) int {
 }
 
 // sendRecoverLocked files one refill request for the pending window's
-// remaining missing heights and arms its settle timeout. Caller must
+// remaining missing heights and arms its settle timeout. The window is
+// tracked from the request until its history_sync trailer. Caller must
 // hold DisplayMu.
 func (s *Session) sendRecoverLocked() bool {
 	p := s.Chain.RecoverPending
@@ -869,6 +869,7 @@ func (s *Session) sendRecoverLocked() bool {
 	if err := s.sendJSON(HistoryRequest{Type: "history_request", Ranges: ranges, Limit: len(p.Missing)}); err != nil {
 		return false
 	}
+	s.Chain.InRecover = true
 	p.Attempts++
 	p.Received = 0
 	p.Failed = false
@@ -1016,17 +1017,21 @@ func (s *Session) renderRecoveredInPlace(msg WireMessage) {
 }
 
 // finishRecovery settles one refill attempt: a window with nothing left
-// missing confirms; otherwise it retries the remainder after the
-// configured delay, up to history.recoverRetries, and finally reports
-// the loss. Caller holds DisplayMu.
+// missing confirms in the status bar; otherwise it retries the remainder
+// after the configured delay, up to history.recoverRetries, and finally
+// reports the loss in the status bar. Caller holds DisplayMu.
 func (s *Session) finishRecovery() {
 	p := s.Chain.RecoverPending
 	if p == nil {
+		s.Chain.InRecover = false
 		return
 	}
 	if len(p.Missing) == 0 && !p.Failed {
 		s.Chain.RecoverPending = nil
-		s.emitLocalFeedbackTags(wire.WithTags(wire.TagHistory), fmt.Sprintf("| [Local]: ↩ Đã bù %d tin bị lỡ.\n", p.Received))
+		s.Chain.InRecover = false
+		if p.Received > 0 {
+			s.setStatusLocked(fmt.Sprintf("Đã bù %d tin bị lỡ", p.Received))
+		}
 		s.releaseCatchupLocked()
 		return
 	}
@@ -1052,14 +1057,15 @@ func (s *Session) finishRecovery() {
 	s.abandonRecoveryLocked(p)
 }
 
-// abandonRecoveryLocked clears the pending refill and reports the loss.
-// Caller must hold DisplayMu.
+// abandonRecoveryLocked clears the pending refill and reports the loss
+// in the status bar. Caller must hold DisplayMu.
 func (s *Session) abandonRecoveryLocked(p *recoverWindow) {
 	if s.Chain.RecoverPending != p {
 		return
 	}
 	s.Chain.RecoverPending = nil
-	s.emitLocalFeedbackTags(wire.WithTags(wire.TagHistory), fmt.Sprintf("| [Local]: ↩ Không bù đủ tin (nhận %d/%d).\n", p.Received, p.Received+len(p.Missing)))
+	s.Chain.InRecover = false
+	s.setStatusLocked(fmt.Sprintf("Không bù đủ tin (nhận %d/%d)", p.Received, p.Received+len(p.Missing)))
 	s.releaseCatchupLocked()
 }
 

@@ -343,7 +343,6 @@ func TestOlderWindowPrepends(t *testing.T) {
 	sess.emitTabLive(true, TabChat, noticeEntry("load notice"))
 	sess.emitTabLive(true, TabChat, entry{header: "10:00 A", height: 5})
 	sess.trackReplayWindow([]string{wire.TagHistory, wire.TagHistoryOlder}, true)
-	sess.emitTabLive(true, TabChat, noticeEntry("--- Lịch sử cũ ---"))
 	sess.emitTabLive(true, TabChat, entry{header: "09:00 B", height: 3})
 	sess.trackReplayWindow([]string{wire.TagHistory, wire.TagHistoryOlder, wire.TagHistoryEnd}, false)
 	lines := append([]entry{}, sess.Display.TabChat.lines...)
@@ -352,7 +351,7 @@ func TestOlderWindowPrepends(t *testing.T) {
 	for i, e := range lines {
 		got[i] = e.header
 	}
-	want := []string{"load notice", "--- Lịch sử cũ ---", "09:00 B", "10:00 A"}
+	want := []string{"load notice", "09:00 B", "10:00 A"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("order = %q, want %q", got, want)
 	}

@@ -64,13 +64,10 @@ func (s *Session) emitRawLineLocked(line string) {
 }
 
 // trackReplayWindow updates the replay window flags for one boundary
-// line. A join/load header raises InSync (full verification); the
-// on-demand segment header raises InOlder (render and index only —
-// older heights can never verify against the running tip); the
-// recovery header raises InRecover (render, index, and verify against
-// the refill anchor). Any footer flushes a stashed date banner first
-// (otherwise a banner closing the window is silently dropped) and then
-// clears all three. Caller must hold DisplayMu.
+// line from an older server. New servers send no markers: windows are
+// tracked from the request (requestOlder, handleHistoryInfo,
+// sendRecoverLocked) until their history_sync trailer. Kept so an old
+// server still drives the same state machine.
 func (s *Session) trackReplayWindow(tags []string, start bool) {
 	if start {
 		switch {
@@ -96,9 +93,9 @@ func (s *Session) trackReplayWindow(tags []string, start bool) {
 	s.Chain.InSync = false
 }
 
-// handleReplayMarker applies one replay window marker. Markers are tagged,
-// so which window a line opens or closes comes from the wire rather than
-// from its wording; the text is only ever drawn.
+// handleReplayMarker applies one replay window marker from an older
+// server. Markers never render as chat lines: progress and results live
+// in the status bar from the trailer. Only the state machine runs.
 func (s *Session) handleReplayMarker(msg WireMessage) {
 	tags := msg.Tags
 	boundary, start := parseHistoryBoundary(tags)
@@ -110,21 +107,10 @@ func (s *Session) handleReplayMarker(msg WireMessage) {
 
 	s.Display.DisplayMu.Lock()
 	s.trackReplayWindow(tags, start)
-	// A page during the client-driven load closes with its own
-	// header/footer; printing them per page would pepper the stream with
-	// markers. The load prints one banner up front and the merge hides
-	// recovery markers, so all of them stay hidden while Loading.
-	recovery := wire.HasTag(tags, wire.TagHistoryRecover)
-	if !(s.Chain.Loading || recovery) {
-		// Markers are notices like any other, so muting the history branch
-		// or the root has to silence them. Suppressed either way they still
-		// land in the tab.
-		s.emitTabLive(s.notifyTagsAllowed(tags), TabChat, systemEntry(fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(msg.Text))))
-	}
 	// A recovery footer settles its refill after the footer line, so the
 	// confirmation reads as a result of the window instead of preceding its
 	// own footer.
-	if !start && recovery {
+	if !start && wire.HasTag(tags, wire.TagHistoryRecover) {
 		s.finishRecovery()
 	}
 	s.Display.DisplayMu.Unlock()
@@ -133,7 +119,7 @@ func (s *Session) handleReplayMarker(msg WireMessage) {
 // handleHistoryInfo starts the client-driven initial load: the server
 // announces the available window, the client holds live output and
 // pages ascending until it has initialLines or the server reports no
-// more. Caller refreshes after.
+// more. Progress shows in the status bar. Caller refreshes after.
 func (s *Session) handleHistoryInfo(info HistoryInfo) {
 	s.Display.DisplayMu.Lock()
 	defer s.Display.DisplayMu.Unlock()
@@ -145,14 +131,12 @@ func (s *Session) handleHistoryInfo(info HistoryInfo) {
 		target = ClientCfg.HistoryInitialLines()
 	}
 	s.Chain.Loading = true
+	s.Chain.InSync = true
 	s.Chain.SyncHeights = map[uint64][32]byte{}
 	s.Chain.LoadTarget = target
 	s.Chain.LoadLoaded = 0
 	s.Chain.LoadRetried = 0
 	s.Chain.LoadMaxSeq = info.MaxSeq
-	// Announce the sync as a local line so a slow/large load does not
-	// look like a hang.
-	s.emitLocalFeedbackTags(wire.WithTags(wire.TagHistory), "| [Local]: Đang tải lịch sử...\n")
 	// after_seq is exclusive: to load the last `target` lines ending at
 	// MaxSeq, start just below MaxSeq-target+1.
 	after := uint64(0)
@@ -219,10 +203,18 @@ func (s *Session) onLoadPageLocked(hs HistorySync) {
 	s.finishLoadLocked()
 }
 
-// finishLoadLocked ends the initial load: release the hold and run the
-// fork check against the received heights. Caller must hold DisplayMu.
+// finishLoadLocked ends the initial load: release the hold, show the
+// result in the status bar, and run the fork check against the received
+// heights. Caller must hold DisplayMu.
 func (s *Session) finishLoadLocked() {
+	loaded := s.Chain.LoadLoaded
 	s.Chain.Loading = false
+	s.Chain.InSync = false
+	if loaded > 0 {
+		s.setStatusLocked(fmt.Sprintf("Đã tải %d tin", loaded))
+	} else {
+		s.setStatusLocked("Không có lịch sử")
+	}
 	s.releaseCatchupLocked()
 	if warn, flush := forkWarning(HistorySync{Type: "history_sync", MaxHeight: ^uint64(0)},
 		s.Chain.HavePersistedTip, s.Chain.PersistedTip, s.Chain.PersistedHeight, s.Chain.SyncHeights); warn != "" {
@@ -236,28 +228,38 @@ func (s *Session) finishLoadLocked() {
 
 // handleHistorySync consumes a replay trailer from either a whole
 // frame or a coalesced per-line blob. A load-page trailer continues the
-// initial load; a recovery trailer settles its refill; anything else
-// (a dropped recovery footer) is settled if a refill is pending.
+// initial load; an older trailer settles its segment and shows the
+// result in the status bar; a recovery trailer settles its refill.
 // Caller refreshes after.
 func (s *Session) handleHistorySync(hs HistorySync) {
 	s.Display.DisplayMu.Lock()
-	s.Chain.InSync = false
-	if s.Chain.InRecover {
-		// The recovery footer never arrived; settle at the trailer.
-		s.Chain.InRecover = false
-		s.finishRecovery()
-		s.Display.DisplayMu.Unlock()
-		return
-	}
 	if s.Chain.Loading && hs.Direction == "after" {
 		s.onLoadPageLocked(hs)
 		s.Display.DisplayMu.Unlock()
 		return
 	}
-	// Non-load trailer: a recovery whose footer was dropped is still
-	// pending (a present footer settles it at the pump, after its line).
-	if s.Chain.RecoverPending != nil {
+	if s.Chain.InOlder {
+		s.Chain.InOlder = false
+		s.flushDateBannerLocked()
+		s.Pending.PendingDateBannerWire = nil
+		if hs.Total == 0 {
+			// Nothing below the oldest known height: stop asking.
+			s.Chain.OlderExhausted = true
+			s.setStatusLocked("Không còn tin cũ hơn")
+		} else {
+			s.setStatusLocked(fmt.Sprintf("Đã tải %d tin cũ", hs.Sent))
+		}
+		if s.Chain.RecoverPending != nil {
+			s.finishRecovery()
+		}
+		s.Display.DisplayMu.Unlock()
+		return
+	}
+	if s.Chain.InRecover || s.Chain.RecoverPending != nil || hs.Direction == "recover" {
+		s.Chain.InRecover = false
 		s.finishRecovery()
+		s.Display.DisplayMu.Unlock()
+		return
 	}
 	s.Display.DisplayMu.Unlock()
 }

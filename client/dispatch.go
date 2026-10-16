@@ -738,14 +738,27 @@ func (s *Session) cmdClearhistory(text string) bool {
 // pump renders it like the join burst.
 // requestOlder asks the server for the window below the oldest height in
 // memory. Reports ok=false when nothing is in memory to page below.
+// The older window is tracked from the request: InOlder stays set until
+// its history_sync trailer arrives, so content lines splice above the
+// anchor while progress shows in the status bar.
 func (s *Session) requestOlder(limit int) (bool, error) {
 	s.Display.DisplayMu.Lock()
 	before, ok := s.Chain.WireIdx.oldest()
-	s.Display.DisplayMu.Unlock()
 	if !ok {
+		s.Display.DisplayMu.Unlock()
 		return false, nil
 	}
-	return true, s.sendJSON(HistoryRequest{Type: "history_request", Before: before, Limit: limit})
+	s.Chain.InOlder = true
+	s.Chain.OlderInsert = olderAnchor(s.Display.TabChat)
+	s.Chain.OlderInsertSys = olderAnchor(s.Display.TabSys)
+	s.Display.DisplayMu.Unlock()
+	err := s.sendJSON(HistoryRequest{Type: "history_request", Before: before, Limit: limit})
+	if err != nil {
+		s.Display.DisplayMu.Lock()
+		s.Chain.InOlder = false
+		s.Display.DisplayMu.Unlock()
+	}
+	return true, err
 }
 
 // olderAvailable reports whether a page-up at the top could return more
@@ -758,7 +771,26 @@ func (s *Session) olderAvailable() bool {
 	return ok && oldest > 1 && !s.Chain.InOlder && !s.Chain.OlderExhausted
 }
 
-// uiStatus is a short footer status for in-flight background loads.
+// statusNoticeTTL is how long a finished sync result stays in the
+// footer before clearing.
+const statusNoticeTTL = 5 * time.Second
+
+// setStatusLocked shows a transient footer notice until its TTL. Caller
+// must hold DisplayMu. A refresh is scheduled past the expiry so the
+// footer clears without new traffic.
+func (s *Session) setStatusLocked(text string) {
+	s.Display.StatusMsg = text
+	s.Display.StatusUntil = time.Now().Add(statusNoticeTTL)
+	if s.Display.Sink != nil {
+		time.AfterFunc(statusNoticeTTL+100*time.Millisecond, func() {
+			s.refreshTerminal()
+		})
+	}
+}
+
+// uiStatus is a short footer status for in-flight background loads and
+// finished sync results. In-flight takes precedence; a finished result
+// shows until its TTL, then clears.
 func (s *Session) uiStatus() string {
 	s.Display.DisplayMu.Lock()
 	defer s.Display.DisplayMu.Unlock()
@@ -777,6 +809,10 @@ func (s *Session) uiStatus() string {
 	case s.Pending.ReplyDraft > 0:
 		return "reply nháp: Enter gửi, ^C hủy"
 	default:
+		if s.Display.StatusMsg != "" && time.Now().Before(s.Display.StatusUntil) {
+			return s.Display.StatusMsg
+		}
+		s.Display.StatusMsg = ""
 		return ""
 	}
 }
