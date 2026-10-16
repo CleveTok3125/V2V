@@ -1320,7 +1320,11 @@ func (a *app) helpView() string {
 
 func (a *app) View() tea.View {
 	if a.quitting {
-		return tea.NewView("")
+		v := tea.NewView("")
+		// Stay in the alternate screen until the program exits so the
+		// renderer restores the terminal instead of leaving the UI behind.
+		v.AltScreen = true
+		return v
 	}
 	a.syncReplyLine()
 	a.refreshContent()
@@ -1331,6 +1335,9 @@ func (a *app) View() tea.View {
 	parts := []string{a.renderTabs(), chat}
 	parts = append(parts, a.renderInputArea(), a.renderFooter())
 	v := tea.NewView(strings.Join(parts, "\n"))
+	// Full-screen UI: run in the alternate screen buffer so quitting
+	// restores the terminal instead of leaving the UI in the scrollback.
+	v.AltScreen = true
 	// Capture the mouse so the wheel scrolls the chat and a pointer move can
 	// highlight the expand trailers.
 	v.MouseMode = tea.MouseModeAllMotion

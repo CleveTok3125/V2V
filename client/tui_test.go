@@ -799,6 +799,17 @@ func TestAppScrollbar(t *testing.T) {
 	}
 }
 
+func TestAppViewUsesAltScreen(t *testing.T) {
+	a, _ := newTestApp()
+	if !a.View().AltScreen {
+		t.Fatal("the chat view must use the alternate screen so quitting leaves no UI behind")
+	}
+	a.quitting = true
+	if !a.View().AltScreen {
+		t.Fatal("the quitting view must stay in the alternate screen until exit")
+	}
+}
+
 func TestAppFooterShowsOnlyState(t *testing.T) {
 	a, _ := newTestApp()
 	if got := a.renderFooter(); !strings.Contains(got, "?") {
