@@ -56,8 +56,10 @@ func cutCells(s string, budget int) string {
 }
 
 // expandMarker opens the trailer's command bracket. The renderer and the
-// click handler both read it from here so they cannot drift apart.
-const expandMarker = "[Xem thêm: /expand #"
+// click handler both read it from here so they cannot drift apart. Spaces
+// inside are non-breaking so word-wrap keeps the bracket on one row: a
+// bracket split across rows loses hover and click.
+const expandMarker = "[Xem\u00a0thêm:\u00a0/expand\u00a0#"
 
 // expandTrailer renders the inline trailer addressing a collapsed block: dim
 // "..." plus the expand command. The app draws the bracket as a button on

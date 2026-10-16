@@ -57,7 +57,7 @@ func TestCollapseBody(t *testing.T) {
 	if len(lines) != 5 {
 		t.Fatalf("folded body = %d lines, want 5 preview", len(lines))
 	}
-	if !strings.Contains(lines[4], "/expand #42") {
+	if !strings.Contains(lines[4], expandMarker+"42]") {
 		t.Fatalf("trailer must address height on the last preview row, got %q", lines[4])
 	}
 	// Height-less wires never fold (no /expand address exists).
@@ -81,7 +81,7 @@ func TestCollapseBody(t *testing.T) {
 	if got := estimateRows(out, 80); got > 6 {
 		t.Fatalf("folded wall = %d rows, want ≤ preview + wrapped trailer", got)
 	}
-	if !strings.Contains(out, "/expand #7]") {
+	if !strings.Contains(out, expandMarker+"7]") {
 		t.Fatalf("folded wall must carry trailer, got %q", out[len(out)-60:])
 	}
 	// Mid-line cut never splits a wide rune: 500 あ (1000 cells = 13
@@ -126,7 +126,7 @@ func TestMaybeCollapse(t *testing.T) {
 	// header: the body is the only part that shrinks.
 	hdr := "| 15:04 Alice • #99:abcd"
 	out := maybeCollapse(entry{header: hdr, body: mk(30)}, wire, TabChat)
-	if !strings.Contains(out.body, "/expand #99") {
+	if !strings.Contains(out.body, expandMarker+"99") {
 		t.Fatalf("long head must fold with address, got %q", out.body[len(out.body)-40:])
 	}
 	if out.header != hdr {
@@ -160,7 +160,7 @@ func TestCollapsedIndex(t *testing.T) {
 }
 
 func TestExpandTrailer(t *testing.T) {
-	if got := expandTrailer(1234); got != "\x1b[90m...\x1b[m [Xem thêm: /expand #1234]" {
+	if got := expandTrailer(1234); got != "\x1b[90m...\x1b[m [Xem\u00a0thêm:\u00a0/expand\u00a0#1234]" {
 		t.Fatalf("trailer = %q", got)
 	}
 }
@@ -185,5 +185,14 @@ func TestCollapseAccessors(t *testing.T) {
 	var nilCfg *config.ClientConfig
 	if !nilCfg.CollapseEnabled() || nilCfg.CollapseRows() != 10 || nilCfg.CollapsePreviewRows() != 5 {
 		t.Fatal("nil config must fall back to defaults")
+	}
+}
+
+func TestExpandMarkerUnbreakable(t *testing.T) {
+	if strings.Contains(expandMarker, " ") {
+		t.Fatalf("marker must not contain breakable spaces, got %q", expandMarker)
+	}
+	if !strings.Contains(expandMarker, "\u00a0") {
+		t.Fatalf("marker must use non-breaking spaces, got %q", expandMarker)
 	}
 }

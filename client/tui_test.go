@@ -1035,6 +1035,43 @@ func TestAppTrailerHoverUnderlines(t *testing.T) {
 	}
 }
 
+func TestAppTrailerSurvivesWrap(t *testing.T) {
+	for _, n := range []int{50, 60} {
+		sess, _ := behaviorSession(t)
+		seedIndexedWire(sess, 42)
+		sess.Display.TabChat.append(entry{body: strings.Repeat("a", n) + expandTrailer(42), height: 42, collapsed: true})
+		a := newApp(sess)
+		a.width, a.height = 80, 24
+		a.layout()
+		a.dirty = true
+		a.refreshContent()
+		if len(a.trailers) != 1 {
+			t.Fatalf("content %d must expose one trailer, got %d", n, len(a.trailers))
+		}
+		span := a.trailers[0]
+		y := span.row - a.viewport.YOffset() + chatTop
+		a.Update(tea.MouseMotionMsg{X: span.start, Y: y})
+		underlined := false
+		for _, line := range strings.Split(a.View().Content, "\n") {
+			if strings.Contains(line, "\x1b[4m") {
+				underlined = true
+				break
+			}
+		}
+		if !underlined {
+			t.Fatalf("content %d must underline on hover", n)
+		}
+		if _, cmd := a.Update(tea.MouseClickMsg{X: span.start, Y: y, Button: tea.MouseLeft}); cmd == nil {
+			t.Fatalf("content %d click must expand", n)
+		} else {
+			cmd()
+		}
+		if sess.Display.TabChat.lines[0].collapsed {
+			t.Fatalf("content %d must unfold", n)
+		}
+	}
+}
+
 func TestAppNewMessageHint(t *testing.T) {
 	a, sess := newTestApp()
 	fill := func(n int) {
