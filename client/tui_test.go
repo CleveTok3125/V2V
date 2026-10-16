@@ -210,7 +210,7 @@ func TestAppShiftEnterNeedsEnhancement(t *testing.T) {
 func TestAppChatTabIsFullStream(t *testing.T) {
 	_, sess := newTestApp()
 	sess.Display.DisplayMu.Lock()
-	sess.emitLocalFeedback("| [Local]: hello\n")
+	sess.emitLocalFeedback("[Local]: hello\n")
 	sess.Display.DisplayMu.Unlock()
 	if len(sess.Display.TabChat.lines) != 1 || len(sess.Display.TabSys.lines) != 1 {
 		t.Fatalf("system line must land in both tabs: chat=%d sys=%d",

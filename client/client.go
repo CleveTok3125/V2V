@@ -122,9 +122,9 @@ var historyFile string
 func emitWhoami(mu *sync.Mutex, emit func(string), uname, authType, role string, unlimited bool, prefix string) {
 	mu.Lock()
 	defer mu.Unlock()
-	rows := []string{fmt.Sprintf("| [Local]: Người dùng: %s | Xác thực: %s", serverField(uname), serverField(authType))}
+	rows := []string{fmt.Sprintf("[Local]: Người dùng: %s | Xác thực: %s", serverField(uname), serverField(authType))}
 	if role != "" {
-		rows = append(rows, fmt.Sprintf("|   Role: %s | Unlimited: %v | Prefix: %q", serverField(role), unlimited, serverField(prefix)))
+		rows = append(rows, fmt.Sprintf("  Role: %s | Unlimited: %v | Prefix: %q", serverField(role), unlimited, serverField(prefix)))
 	}
 	emit(strings.Join(rows, "\n"))
 }

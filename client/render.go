@@ -276,7 +276,7 @@ func (s *Session) badgeForWire(msg WireMessage, av bool) (colored, urlStr string
 }
 
 // renderChatBlock renders one wire message as one block: an author header
-// ("| HH:MM name • #height:hash • ✍️ badge") and the text as indented rows
+// ("HH:MM name • #height:hash • ✍️ badge") and the text as indented rows
 // under it. Legacy lines without chain fields lose only the number. System
 // wires render sanitized text as a single row in their classified tab.
 // Caller must hold s.Display.DisplayMu.
@@ -325,7 +325,7 @@ func (s *Session) replyPreviewLine() string {
 		return ""
 	}
 	for _, q := range s.quoteLinesFor(height, pending) {
-		return stripGutter(q)
+		return q
 	}
 	return ""
 }

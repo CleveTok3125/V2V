@@ -247,15 +247,6 @@ func (c *renderCache) put(key string, b renderedBlock) {
 	}
 }
 
-// headerMetaRe matches the message number inside a header row
-// ("| 14:19 Name#83e4 | #1234:abcd"). It anchors on the "| HH:MM " the
-// header opens with, so a body row containing "#12:" cannot match.
-//
-// The ".*" is greedy on purpose: a display name may itself contain "#1:ff",
-// and the renderer reads the last one, so matching the last keeps a name
-// from standing in for it. The hash part may be empty while scanning and
-// compares apart.
-
 // mentionRe matches @-mentions of message heights ("@#1234", "@#1234:abcd").
 // The @ prefix separates them from server-stamped "name#hash" display
 // names, which never open with "@#".
@@ -414,7 +405,7 @@ func wrapPendingQuote(line string, pending bool) string {
 }
 
 // formatQuote renders one quote preview line from a resolved head entry:
-// "| ↩ #height: first line…", truncated to maxRunes for narrow screens.
+// "↩ #height: first line…", truncated to maxRunes for narrow screens.
 // Pending (placeholder) quotes carry the grey wrapper plus ⏳ so the erase
 // region check keeps passing; confirmed quotes render plain.
 func formatQuote(height uint64, headEntry string, pending bool, maxRunes int) string {
@@ -541,9 +532,9 @@ func (x *wireIndex) oldest() (uint64, bool) {
 // to never collide with chain-level labels.
 func formatInfoBlock(msg WireMessage) []string {
 	row := func(label, value string) string {
-		return fmt.Sprintf("|   %-13s %s\n", label, value)
+		return fmt.Sprintf("  %-13s %s\n", label, value)
 	}
-	out := []string{fmt.Sprintf("| [Local]: #%d — chi tiết metadata:\n", msg.ChainHeight)}
+	out := []string{fmt.Sprintf("[Local]: #%d — chi tiết metadata:\n", msg.ChainHeight)}
 	out = append(out, row("height:", strconv.FormatUint(msg.ChainHeight, 10)))
 	out = append(out, row("tmp_id:", strconv.FormatUint(msg.TmpID, 10)))
 	out = append(out, row("reply_to:", strconv.FormatUint(msg.ReplyTo, 10)))
@@ -753,7 +744,7 @@ func forkWarning(hs HistorySync, havePersistedTip bool, persistedTip [32]byte, p
 	if !ok || got == persistedTip {
 		return "", false
 	}
-	return fmt.Sprintf("| [Local]: Lịch sử server khác tip đã lưu ở #%d — log có thể đã phân nhánh (fork).\n", persistedHeight), true
+	return fmt.Sprintf("[Local]: Lịch sử server khác tip đã lưu ở #%d — log có thể đã phân nhánh (fork).\n", persistedHeight), true
 }
 
 // Session echo tracking and chain verification (moved from main).
@@ -1129,7 +1120,7 @@ func (s *Session) planEchoConsume(msg WireMessage, allowStash bool) echoConsume 
 func (s *Session) consumeEchoLocked(msg WireMessage, allowStash bool) {
 	act := s.planEchoConsume(msg, allowStash)
 	for _, w := range act.stale {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Echo không khớp tin đang chờ (tmp_id=%d) — ID có thể đã bị sửa.\n", w.TmpID))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: Echo không khớp tin đang chờ (tmp_id=%d) — ID có thể đã bị sửa.\n", w.TmpID))
 	}
 	if act.matched {
 		// Arm the slot instead of erasing: the render that follows this call
@@ -1193,7 +1184,7 @@ func (s *Session) warnChainGap(from, to uint64) {
 		return
 	}
 	s.Chain.ChainGapWarned = true
-	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Bỏ lỡ %d tin (#%d–%d) do kết nối chậm — đã nối lại chuỗi.\n", to-from-1, from+1, to-1))
+	s.emitLocalFeedback(fmt.Sprintf("[Local]: Bỏ lỡ %d tin (#%d–%d) do kết nối chậm — đã nối lại chuỗi.\n", to-from-1, from+1, to-1))
 }
 
 func (s *Session) checkChainLink(msg WireMessage) {
@@ -1221,7 +1212,7 @@ func (s *Session) checkChainLink(msg WireMessage) {
 		if !ok {
 			if !s.Chain.ChainWarned {
 				s.Chain.ChainWarned = true
-				s.emitLocalFeedback("| [Local]: Chain link đầu tiên sai định dạng — bỏ qua kiểm tra.\n")
+				s.emitLocalFeedback("[Local]: Chain link đầu tiên sai định dạng — bỏ qua kiểm tra.\n")
 			}
 			return
 		}
@@ -1250,7 +1241,7 @@ func (s *Session) checkChainLink(msg WireMessage) {
 		}
 		if !s.Chain.ChainWarned {
 			s.Chain.ChainWarned = true
-			s.emitLocalFeedback(fmt.Sprintf("| [Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", msg.ChainHeight, err))
+			s.emitLocalFeedback(fmt.Sprintf("[Local]: Chuỗi tin bị đứt ở #%d (%v) — server hoặc lịch sử có thể đã bị sửa.\n", msg.ChainHeight, err))
 		}
 		if parsed, ok := chain.ParseHex64(msg.ChainHash); ok {
 			s.noteChainTip(parsed, msg.ChainHeight)

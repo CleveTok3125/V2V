@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -1089,38 +1088,6 @@ func drawBox(headerRows, bodyRows []string, width int, border lipgloss.Style) st
 	}
 	out = append(out, bar("╰", "╯"))
 	return strings.Join(out, "\n")
-}
-
-// stripGutter removes the "|" line gutter (plus the up-to-three spaces that
-// follow it) and an input marker ("> " or "...") when present, on every row.
-// The box supplies its own inset, and a multi-row header (an input echo, a
-// heredoc frame) must not keep a stray "|" on its later rows.
-func stripGutter(s string) string {
-	if s == "" {
-		return ""
-	}
-	lines := strings.Split(s, "\n")
-	for i, line := range lines {
-		lines[i] = stripGutterLine(line)
-	}
-	return strings.Join(lines, "\n")
-}
-
-// leadANSIRe matches the escape sequences a row may start with (SGR or OSC8),
-// so the gutter behind them is still found: the placeholder and a pending quote
-// arrive dim-wrapped.
-var leadANSIRe = regexp.MustCompile(`^(?:\x1b\[[0-9;]*m|\x1b\]8;;[^\x1b]*\x1b\\)+`)
-
-func stripGutterLine(line string) string {
-	prefix := leadANSIRe.FindString(line)
-	line = line[len(prefix):]
-	line = strings.TrimPrefix(line, "|")
-	for i := 0; i < 3 && strings.HasPrefix(line, " "); i++ {
-		line = line[1:]
-	}
-	line = strings.TrimPrefix(line, "> ")
-	line = strings.TrimPrefix(line, "... ")
-	return prefix + line
 }
 
 func (a *app) refreshContent() {

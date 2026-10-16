@@ -60,7 +60,7 @@ func (s *Session) showDateBannerLocked(day string) bool {
 // TabChat ungated rather than being classified by wording.
 // Caller must hold DisplayMu.
 func (s *Session) emitRawLineLocked(line string) {
-	s.emitTabLive(true, TabChat, systemEntry(fmt.Sprintf("| %s\n", filter.SanitizeForDisplay(line))))
+	s.emitTabLive(true, TabChat, systemEntry(filter.SanitizeForDisplay(line)))
 }
 
 // trackReplayWindow updates the replay window flags for one boundary
@@ -290,7 +290,7 @@ func (s *Session) runPump() {
 				s.Display.DisplayMu.Lock()
 				s.releaseCatchupLocked()
 				s.flushPendingGreetingLocked()
-				s.emitLocalFeedbackLive(true, "| [Local]: ❌ Mất kết nối server\n")
+				s.emitLocalFeedbackLive(true, "[Local]: ❌ Mất kết nối server\n")
 				s.Display.DisplayMu.Unlock()
 				// Give the app a moment to paint the notice before the
 				// process exits (os.Exit skips the app's teardown).
@@ -370,7 +370,7 @@ func (s *Session) runPump() {
 		}
 		for _, line := range strings.Split(string(msg), "\n") {
 			// A batched frame ends with a newline; the empty tail would
-			// otherwise render as a blank "|" line between blocks.
+			// otherwise render as a blank line between blocks.
 			if strings.TrimSpace(line) == "" {
 				continue
 			}

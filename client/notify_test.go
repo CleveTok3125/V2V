@@ -112,7 +112,7 @@ func TestEmitLocalFeedbackTagsMutesLiveButBuffers(t *testing.T) {
 	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagPow: true}}
 
 	sess.Display.DisplayMu.Lock()
-	sess.emitLocalFeedbackTags(wire.WithTags(wire.TagPow), "| [Local]: muted\n")
+	sess.emitLocalFeedbackTags(wire.WithTags(wire.TagPow), "[Local]: muted\n")
 	sess.Display.DisplayMu.Unlock()
 
 	if out.String() != "" {
@@ -124,7 +124,7 @@ func TestEmitLocalFeedbackTagsMutesLiveButBuffers(t *testing.T) {
 
 	sess.notifySetTag(wire.TagPow, true)
 	sess.Display.DisplayMu.Lock()
-	sess.emitLocalFeedbackTags(wire.WithTags(wire.TagPow), "| [Local]: loud\n")
+	sess.emitLocalFeedbackTags(wire.WithTags(wire.TagPow), "[Local]: loud\n")
 	sess.Display.DisplayMu.Unlock()
 
 	if !strings.Contains(out.String(), "loud") {
@@ -139,7 +139,7 @@ func TestCriticalNoticeBypassesGates(t *testing.T) {
 	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagPow: true, wire.TagHistory: true, wire.TagJoin: true, wire.TagDate: true, wire.TagRoot: true}}
 
 	sess.Display.DisplayMu.Lock()
-	sess.emitLocalFeedback("| [Local]: Chuỗi tin bị đứt\n")
+	sess.emitLocalFeedback("[Local]: Chuỗi tin bị đứt\n")
 	sess.Display.DisplayMu.Unlock()
 
 	if !strings.Contains(out.String(), "bị đứt") {
@@ -215,7 +215,7 @@ func TestPowNoticeMutedStillBuffers(t *testing.T) {
 	sess.Display.Notify = NotifyState{Muted: map[string]bool{wire.TagPow: true}, PowMinTier: 1}
 
 	sess.Display.DisplayMu.Lock()
-	sess.emitLocalFeedbackLive(sess.notifyPowLive(1), "| [Local]: Đang giải PoW (tier 1)…\n")
+	sess.emitLocalFeedbackLive(sess.notifyPowLive(1), "[Local]: Đang giải PoW (tier 1)…\n")
 	sess.Display.DisplayMu.Unlock()
 
 	if out.String() != "" {
@@ -238,7 +238,7 @@ func TestRawFrameIsNotClassifiedByWording(t *testing.T) {
 	sess.Chain.RenderCache = newRenderCache(10)
 
 	sess.Display.DisplayMu.Lock()
-	sess.emitRawLineLocked("| [Hệ thống]: Bạn đang chat quá nhanh!")
+	sess.emitRawLineLocked("[Hệ thống]: Bạn đang chat quá nhanh!")
 	sess.Display.DisplayMu.Unlock()
 
 	if !strings.Contains(out.String(), "quá nhanh") {

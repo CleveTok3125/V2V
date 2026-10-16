@@ -38,7 +38,7 @@ func (s *Session) echoInputLine(text string) slotRef {
 func (s *Session) checkSendGuards(text string) bool {
 	if err := filter.ValidateMessage(text); err != nil {
 		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin nhắn chứa ký tự không hợp lệ và đã bị chặn (client-side): %v\n", err))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: Tin nhắn chứa ký tự không hợp lệ và đã bị chặn (client-side): %v\n", err))
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return false
@@ -53,14 +53,14 @@ func (s *Session) checkSendGuards(text string) bool {
 		}, false); err != nil {
 			if err == guard.ErrTooFast {
 				s.Display.DisplayMu.Lock()
-				s.emitLocalFeedback(fmt.Sprintf("| [Local]: Bạn đang chat quá nhanh! Vui lòng đợi %v.\n", ClientCfg.Limits.MessageCooldown))
+				s.emitLocalFeedback(fmt.Sprintf("[Local]: Bạn đang chat quá nhanh! Vui lòng đợi %v.\n", ClientCfg.Limits.MessageCooldown))
 				s.Display.DisplayMu.Unlock()
 				s.refreshTerminal()
 				return false
 			}
 			if err == guard.ErrTooLong {
 				s.Display.DisplayMu.Lock()
-				s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin nhắn quá dài (tối đa %d ký tự).\n", ClientCfg.Limits.MaxMessageLength))
+				s.emitLocalFeedback(fmt.Sprintf("[Local]: Tin nhắn quá dài (tối đa %d ký tự).\n", ClientCfg.Limits.MaxMessageLength))
 				s.Display.DisplayMu.Unlock()
 				s.refreshTerminal()
 				return false

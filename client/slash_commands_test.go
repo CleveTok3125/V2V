@@ -47,7 +47,7 @@ func TestCmdWhoamiLines(t *testing.T) {
 	if len(sess.Display.TabSys.lines) != 1 {
 		t.Fatalf("key whoami must emit 1 entry, got %d", len(sess.Display.TabSys.lines))
 	}
-	if got := out.String(); !strings.Contains(got, "Bob") || !strings.Contains(got, "\nRole:") {
+	if got := out.String(); !strings.Contains(got, "Bob") || !strings.Contains(got, "\n  Role:") {
 		t.Fatalf("key whoami rows must be adjacent: %q", got)
 	}
 }
@@ -121,19 +121,19 @@ func TestCmdHelpRowsShareOneEntry(t *testing.T) {
 		t.Fatalf("the table must be one entry, got %d", n)
 	}
 	got := out.String()
-	if !strings.Contains(got, "Trợ giúp — danh sách lệnh:\n- /help, /h") {
+	if !strings.Contains(got, "Trợ giúp — danh sách lệnh:\n  - /help, /h") {
 		t.Fatalf("the header must carry the first row: %q", got)
 	}
-	if strings.Contains(got, "\n\n- ") {
+	if strings.Contains(got, "\n\n  - ") {
 		t.Fatalf("table rows must not be separated: %q", got)
 	}
 	col := -1
 	for _, line := range strings.Split(got, "\n") {
-		if !strings.HasPrefix(line, "- ") {
+		if !strings.HasPrefix(line, "  - ") {
 			continue
 		}
 		at := strings.Index(line, ": ")
-		if at < 0 || at > len("- ")+helpUsageCap {
+		if at < 0 || at > len("  - ")+helpUsageCap {
 			continue // the row that breaks out of the column
 		}
 		if col < 0 {
@@ -161,7 +161,7 @@ func TestCmdNotifyListingIsOneAlignedEntry(t *testing.T) {
 		t.Fatalf("the listing must be one entry, got %d", n)
 	}
 	got := out.String()
-	if !strings.Contains(got, "Thông báo (tag → trạng thái):\nsystem") {
+	if !strings.Contains(got, "Thông báo (tag → trạng thái):\n  system") {
 		t.Fatalf("the header must carry the tree: %q", got)
 	}
 	col := -1
@@ -200,7 +200,7 @@ func TestCmdInfoBlockIsOneEntry(t *testing.T) {
 	if got := out.String(); !strings.Contains(got, "[Local]: #42 — chi tiết metadata:") {
 		t.Fatalf("the block must open with its header: %q", got)
 	}
-	if got := out.String(); strings.Contains(got, "\n\nheight:") {
+	if got := out.String(); strings.Contains(got, "\n\n  height:") {
 		t.Fatalf("block rows must not be separated: %q", got)
 	}
 }

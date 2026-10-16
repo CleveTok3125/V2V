@@ -61,7 +61,7 @@ func (s *Session) dispatch(text string) (string, cmdAction) {
 	// already returned.
 	if isUnknownSlashCommand(text) {
 		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Lệnh không tồn tại: %s. Gõ /help để xem danh sách.\n", text))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: Lệnh không tồn tại: %s. Gõ /help để xem danh sách.\n", text))
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		// Rejected input never sends: drop the one-shot reply target
@@ -88,14 +88,14 @@ func (s *Session) handleReadErr(err error) cmdAction {
 		s.Pending.ReplyDraft = 0
 		s.Display.Term.SetPrompt("| > ")
 		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback("| [Local]: Đã hủy reply nháp.\n")
+		s.emitLocalFeedback("[Local]: Đã hủy reply nháp.\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return cmdDone
 	}
 	s.Display.Term.SetPrompt("| > ")
 	s.Display.DisplayMu.Lock()
-	s.emitLocalFeedback("| [Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.\n")
+	s.emitLocalFeedback("[Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.\n")
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
 	return cmdDone
@@ -183,7 +183,7 @@ func (s *Session) cmdStatus(text string) bool {
 	}
 	s.Display.ShowJoinMu.RUnlock()
 	s.Display.DisplayMu.Lock()
-	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Server: %s | Đã kết nối: %s | Phiên bản: %s | Show-join: %s\n",
+	s.emitLocalFeedback(fmt.Sprintf("[Local]: Server: %s | Đã kết nối: %s | Phiên bản: %s | Show-join: %s\n",
 		s.WSURL, time.Since(s.Connected).Round(time.Second), Version, sj))
 	s.Display.DisplayMu.Unlock()
 	return true
@@ -241,13 +241,13 @@ func (s *Session) cmdHelp(text string) bool {
 		}
 	}
 	rows := make([]string, 0, len(lines)+1)
-	rows = append(rows, "| [Local]: Trợ giúp — danh sách lệnh:")
+	rows = append(rows, "[Local]: Trợ giúp — danh sách lệnh:")
 	for _, l := range lines {
 		if l.usage == "" {
-			rows = append(rows, "|   - "+l.desc)
+			rows = append(rows, "  - "+l.desc)
 			continue
 		}
-		rows = append(rows, fmt.Sprintf("|   - %-*s: %s", width, l.usage, l.desc))
+		rows = append(rows, fmt.Sprintf("  - %-*s: %s", width, l.usage, l.desc))
 	}
 	s.Display.DisplayMu.Lock()
 	// One entry: every entry carries a trailing gap row, so a row per entry
@@ -269,7 +269,7 @@ func (s *Session) cmdShowjoin(text string) bool {
 	}
 	s.Display.ShowJoinMu.Unlock()
 	s.Display.DisplayMu.Lock()
-	s.emitLocalFeedback(fmt.Sprintf("| [Local]: %s hiển thị thông báo người dùng ra/vào phòng cho các tin kế tiếp.\n", status))
+	s.emitLocalFeedback(fmt.Sprintf("[Local]: %s hiển thị thông báo người dùng ra/vào phòng cho các tin kế tiếp.\n", status))
 	s.Display.DisplayMu.Unlock()
 	return true
 }
@@ -286,7 +286,7 @@ func (s *Session) cmdAutoverify(text string) bool {
 	}
 	s.Verify.AutoVerifyMu.Unlock()
 	s.Display.DisplayMu.Lock()
-	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Auto-verify đã %s (mặc định BẬT, verify song song qua channel FIFO).\n", status))
+	s.emitLocalFeedback(fmt.Sprintf("[Local]: Auto-verify đã %s (mặc định BẬT, verify song song qua channel FIFO).\n", status))
 	s.Display.DisplayMu.Unlock()
 	return true
 }
@@ -303,7 +303,7 @@ func notifyTagRow(tag, state string) string {
 	if width < 1 {
 		width = 1
 	}
-	return fmt.Sprintf("|   %s%-*s %s", indent, width, tag, state)
+	return fmt.Sprintf("  %s%-*s %s", indent, width, tag, state)
 }
 
 // cmdNotify lists or toggles the informational notice gates. Muting a
@@ -324,7 +324,7 @@ func (s *Session) cmdNotify(text string) bool {
 	}
 	if len(fields) == 0 {
 		rows := make([]string, 0, len(wire.AllTags())+4)
-		rows = append(rows, "| [Local]: Thông báo (tag → trạng thái):")
+		rows = append(rows, "[Local]: Thông báo (tag → trạng thái):")
 		for _, tag := range wire.AllTags() {
 			state := onOffLabel(s.notifyTagEnabled(tag))
 			// Indent by depth so the subtree reads as one, and show the
@@ -333,9 +333,9 @@ func (s *Session) cmdNotify(text string) bool {
 			rows = append(rows, notifyTagRow(tag, state))
 		}
 		rows = append(rows,
-			fmt.Sprintf("|   powmin = %d", s.notifyPowMinTier()),
-			"|   Dùng /notify <tag> on|off | all on|off | powmin <N> (off: ẩn live, vẫn lưu tab 2)",
-			"|   powmin ẩn thông báo PoW trong phòng; thông báo PoW lúc vào cửa theo ui.powMinTier",
+			fmt.Sprintf("  powmin = %d", s.notifyPowMinTier()),
+			"  Dùng /notify <tag> on|off | all on|off | powmin <N> (off: ẩn live, vẫn lưu tab 2)",
+			"  powmin ẩn thông báo PoW trong phòng; thông báo PoW lúc vào cửa theo ui.powMinTier",
 		)
 		// The listing is one entry: every row carries a trailing gap row
 		// otherwise, which would space the tree out.
@@ -344,37 +344,37 @@ func (s *Session) cmdNotify(text string) bool {
 	}
 	if fields[0] == "powmin" {
 		if len(fields) != 2 {
-			s.emitLocalFeedback("| [Local]: Dùng /notify powmin <N> (N >= 1).\n")
+			s.emitLocalFeedback("[Local]: Dùng /notify powmin <N> (N >= 1).\n")
 			return true
 		}
 		tier, err := strconv.Atoi(fields[1])
 		if err != nil || tier < 1 {
-			s.emitLocalFeedback("| [Local]: powmin phải là số nguyên >= 1.\n")
+			s.emitLocalFeedback("[Local]: powmin phải là số nguyên >= 1.\n")
 			return true
 		}
 		s.notifySetPowMinTier(tier)
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Notify powmin = %d (áp dụng từ giờ cho PoW trong phòng).\n", tier))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: Notify powmin = %d (áp dụng từ giờ cho PoW trong phòng).\n", tier))
 		return true
 	}
 	if len(fields) != 2 {
-		s.emitLocalFeedback("| [Local]: Dùng /notify <tag> on|off | all on|off | powmin <N>.\n")
+		s.emitLocalFeedback("[Local]: Dùng /notify <tag> on|off | all on|off | powmin <N>.\n")
 		return true
 	}
 	on, ok := parseOnOff(fields[1])
 	if !ok {
-		s.emitLocalFeedback("| [Local]: Giá trị phải là on hoặc off.\n")
+		s.emitLocalFeedback("[Local]: Giá trị phải là on hoặc off.\n")
 		return true
 	}
 	if fields[0] == "all" {
 		s.notifySetAll(on)
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Notify all = %s.\n", onOffLabel(on)))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: Notify all = %s.\n", onOffLabel(on)))
 		return true
 	}
 	if !s.notifySetTag(fields[0], on) {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Không rõ tag thông báo: %s (xem /notify)\n", fields[0]))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: Không rõ tag thông báo: %s (xem /notify)\n", fields[0]))
 		return true
 	}
-	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Notify %s = %s.\n", fields[0], onOffLabel(on)))
+	s.emitLocalFeedback(fmt.Sprintf("[Local]: Notify %s = %s.\n", fields[0], onOffLabel(on)))
 	return true
 }
 
@@ -431,7 +431,7 @@ func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 	}
 	if !ClientCfg.ReplyEnabled() {
 		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback("| [Local]: Reply đã tắt trong config (ui.reply.enabled).\n")
+		s.emitLocalFeedback("[Local]: Reply đã tắt trong config (ui.reply.enabled).\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return text, cmdDone, true
@@ -446,7 +446,7 @@ func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 	height, suffix, err := parseFindArg(target)
 	if err != nil {
 		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback("| [Local]: Dùng /reply <height>[:hash] [tin nhắn] (vd /reply 1234 đồng ý; /reply 1234 để soạn nháp).\n")
+		s.emitLocalFeedback("[Local]: Dùng /reply <height>[:hash] [tin nhắn] (vd /reply 1234 đồng ý; /reply 1234 để soạn nháp).\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return text, cmdDone, true
@@ -457,7 +457,7 @@ func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 	s.Display.DisplayMu.Unlock()
 	if !found {
 		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ, không reply được.\n", height))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: Tin #%d không còn trong bộ nhớ, không reply được.\n", height))
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return text, cmdDone, true
@@ -498,7 +498,7 @@ func (s *Session) cmdMeta(text string) bool {
 	default:
 		s.Display.ShowMetaMu.Unlock()
 		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback("| [Local]: Dùng /meta, /meta on hoặc /meta off.\n")
+		s.emitLocalFeedback("[Local]: Dùng /meta, /meta on hoặc /meta off.\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return true
@@ -509,7 +509,7 @@ func (s *Session) cmdMeta(text string) bool {
 	}
 	s.Display.ShowMetaMu.Unlock()
 	s.Display.DisplayMu.Lock()
-	s.emitLocalFeedback(fmt.Sprintf("| [Local]: Dòng meta (#height:hash) %s (chain vẫn verify ngầm).\n", state))
+	s.emitLocalFeedback(fmt.Sprintf("[Local]: Dòng meta (#height:hash) %s (chain vẫn verify ngầm).\n", state))
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
 	return true
@@ -528,7 +528,7 @@ func (s *Session) cmdFind(text string) bool {
 	height, suffix, err := parseFindArg(rest)
 	if err != nil {
 		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: %v.\n", err))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: %v.\n", err))
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return true
@@ -548,7 +548,7 @@ func (s *Session) cmdFind(text string) bool {
 		}
 	}
 	if len(found) == 0 {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Không thấy #%d trong bộ nhớ (tin cũ đã bị evict hoặc chưa sync).\n", height))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: Không thấy #%d trong bộ nhớ (tin cũ đã bị evict hoặc chưa sync).\n", height))
 	} else {
 		for _, e := range found {
 			// The hit rides inside the local block as a nested block that
@@ -574,7 +574,7 @@ func (s *Session) cmdExpand(text string) bool {
 	height, _, err := parseFindArg(rest)
 	if err != nil {
 		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback("| [Local]: Dùng /expand #height (vd /expand 1234).\n")
+		s.emitLocalFeedback("[Local]: Dùng /expand #height (vd /expand 1234).\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return true
@@ -592,12 +592,12 @@ func (s *Session) cmdExpand(text string) bool {
 func (s *Session) unfoldableBlockLocked(height uint64) (int, entry, bool) {
 	wire, ok := s.Chain.WireIdx.get(height)
 	if !ok {
-		s.emitLocalFeedback("| [Local]: Tin đã trôi khỏi bộ nhớ hoặc chưa sync.\n")
+		s.emitLocalFeedback("[Local]: Tin đã trôi khỏi bộ nhớ hoặc chưa sync.\n")
 		return 0, entry{}, false
 	}
 	idx := collapsedIndex(s.Display.TabChat.lines, height)
 	if idx < 0 {
-		s.emitLocalFeedback("| [Local]: Tin này không thu gọn.\n")
+		s.emitLocalFeedback("[Local]: Tin này không thu gọn.\n")
 		return 0, entry{}, false
 	}
 	s.Verify.AutoVerifyMu.RLock()
@@ -662,7 +662,7 @@ func (s *Session) cmdInfo(text string) bool {
 	height, suffix, err := parseFindArg(rest)
 	if err != nil {
 		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback("| [Local]: Dùng /info <height>[:hash] (vd /info 1234).\n")
+		s.emitLocalFeedback("[Local]: Dùng /info <height>[:hash] (vd /info 1234).\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return true
@@ -670,13 +670,13 @@ func (s *Session) cmdInfo(text string) bool {
 	s.Display.DisplayMu.Lock()
 	wire, ok := s.Chain.WireIdx.get(height)
 	if !ok {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height))
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return true
 	}
 	if suffix != "" && !strings.HasPrefix(strings.ToLower(wire.ChainHash), suffix) {
-		s.emitLocalFeedback("| [Local]: Height đúng nhưng hash khác — kiểm tra lại số.\n")
+		s.emitLocalFeedback("[Local]: Height đúng nhưng hash khác — kiểm tra lại số.\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return true
@@ -697,7 +697,7 @@ func (s *Session) cmdCopy(text string) bool {
 	height, _, err := parseFindArg(rest)
 	if err != nil {
 		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback("| [Local]: Dùng /copy <height>[:hash] (vd /copy 1234).\n")
+		s.emitLocalFeedback("[Local]: Dùng /copy <height>[:hash] (vd /copy 1234).\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return true
@@ -705,15 +705,15 @@ func (s *Session) cmdCopy(text string) bool {
 	s.Display.DisplayMu.Lock()
 	wire, ok := s.Chain.WireIdx.get(height)
 	if !ok {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: Tin #%d không còn trong bộ nhớ (legacy không có metadata, hoặc đã evict).\n", height))
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return true
 	}
 	if err := copyToClipboard(wire.Text); err != nil {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: %v.\n", err))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: %v.\n", err))
 	} else {
-		s.emitLocalFeedback(fmt.Sprintf("| [Local]: Đã copy nội dung tin #%d.\n", height))
+		s.emitLocalFeedback(fmt.Sprintf("[Local]: Đã copy nội dung tin #%d.\n", height))
 		scheduleClipboardClear(wire.Text, ClientCfg.ClipboardClearAfterSec())
 	}
 	s.Display.DisplayMu.Unlock()
@@ -727,7 +727,7 @@ func (s *Session) cmdClearhistory(text string) bool {
 	}
 	os.Remove(historyFile)
 	s.Display.DisplayMu.Lock()
-	s.emitLocalFeedback(fmt.Sprintf("| [Local]: 🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile))
+	s.emitLocalFeedback(fmt.Sprintf("[Local]: 🗑️ Đã xóa file lịch sử gõ phím tại: %s\n", historyFile))
 	s.Display.DisplayMu.Unlock()
 	return true
 }
@@ -834,18 +834,18 @@ func (s *Session) cmdOlder(text string) bool {
 	if rest := strings.TrimSpace(strings.TrimPrefix(text, "/older")); rest != "" {
 		n, err := strconv.Atoi(rest)
 		if err != nil || n <= 0 {
-			s.emitOlderNotice("| [Local]: Dùng /older [số dòng] (vd /older 50).\n")
+			s.emitOlderNotice("[Local]: Dùng /older [số dòng] (vd /older 50).\n")
 			return true
 		}
 		limit = n
 	}
 	ok, err := s.requestOlder(limit)
 	if !ok {
-		s.emitOlderNotice("| [Local]: Chưa có tin nào trong bộ nhớ — không có gì để lùi.\n")
+		s.emitOlderNotice("[Local]: Chưa có tin nào trong bộ nhớ — không có gì để lùi.\n")
 		return true
 	}
 	if err != nil {
-		s.emitOlderNotice(fmt.Sprintf("| [Local]: Không gửi được yêu cầu lịch sử cũ: %v.\n", err))
+		s.emitOlderNotice(fmt.Sprintf("[Local]: Không gửi được yêu cầu lịch sử cũ: %v.\n", err))
 	}
 	return true
 }

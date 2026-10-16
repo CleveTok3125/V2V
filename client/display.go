@@ -152,15 +152,15 @@ func (s *Session) replaceSlot(slot slotRef, next entry) bool {
 }
 
 // noticeEntry is a locally generated line as a buffer entry: one header row,
-// no chain position and no body. Callers write the line with a "| " gutter for
-// readability; the box supplies its own frame, so it is dropped here.
+// no chain position and no body. The box draws its own frame, so the text
+// is stored as is.
 func noticeEntry(line string) entry {
-	return entry{header: stripGutter(strings.TrimSuffix(line, "\n")), kind: kindNotice}
+	return entry{header: strings.TrimSuffix(line, "\n"), kind: kindNotice}
 }
 
 // systemEntry is a server system line as a buffer entry.
 func systemEntry(line string) entry {
-	return entry{header: stripGutter(strings.TrimSuffix(line, "\n")), kind: kindSystem}
+	return entry{header: strings.TrimSuffix(line, "\n"), kind: kindSystem}
 }
 
 // emitLocalFeedbackTags is emitLocalFeedback for informational notices

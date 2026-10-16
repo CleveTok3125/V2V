@@ -159,7 +159,7 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 
 - Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, `/meta`/`/m` with optional `on|off`, `/find`/`/f` with `<height>[:hash]`, `/info` with `<height>[:hash]` and `/expand`/`/xpan` with `<height>`.
 - Session commands: `/whoami`/`/w`, `/status`, `/showjoin`/`/sj`, `/autoverify`/`/av`, `/notify`/`/nt`, `/clear`/`/c`, `/clearhistory`/`/ch` (deletes the keystroke history file), `/copy <height>[:hash]` (clipboard, auto-cleared).
-- Anything else starting with `/` is an unknown command (`client/commands.go:isUnknownSlashCommand`) rejected locally with `| [Local]: Lệnh không tồn tại…`, never broadcast or trip-signed.
+- Anything else starting with `/` is an unknown command (`client/commands.go:isUnknownSlashCommand`) rejected locally with `[Local]: Lệnh không tồn tại…`, never broadcast or trip-signed.
 - Code blocks (```) are unaffected, so they double as the escape hatch for sending literal text starting with `/`.
 - `/reply <height>[:hash] <text>` quotes a buffered message; the height suffix acts as a typo checksum.
 - Bare `/reply <height>` opens a draft: the quote previews at once and the next line becomes the body (any `/` command or empty-line `^C` aborts); only chat messages are quotable, never server markers.
@@ -171,7 +171,7 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 - `/find` looks up messages by chain height (the mandatory identifier; a bare hash is rejected since short hashes collide by design, and an appended `:hash` acts only as a typo checksum) across both tab buffers; a hit nests the whole matching block — frame, structure and style — under a `Tìm #height trong bộ nhớ:` header, so a replayed line never reads as live chat. Evicted history reports as not found.
 - Code block input: the textarea holds the whole message, newlines and all, so the input loop sends the draft as typed and never reads a continuation.
 - `Ctrl+C` aborts collection via `ErrInputCancel` (empty line cancels on WASM, any interrupt cancels on desktop) and discards everything silently, while `Ctrl+D` (`io.EOF`) keeps quitting.
-- `Ctrl+C` on the main prompt prints `| [Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.` instead of quitting.
+- `Ctrl+C` on the main prompt prints `[Local]: Ctrl+C chỉ hủy dòng nhập, thoát app bằng Ctrl+D.` instead of quitting.
 
 ## Wire protocol & history
 

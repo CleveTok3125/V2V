@@ -242,7 +242,7 @@ func TestEntryIndexByHeight(t *testing.T) {
 	lines := []entry{
 		{header: "| 15:04 Alice • #1234:abcd", height: 1234, hashHex: "abcd"},
 		{header: "| 15:05 Bob • #1235:abce ✍️ ◆ x9y8", height: 1235, hashHex: "abce"},
-		{header: "| [Local]: quoted", body: "|   quoted \"#1234:abcd\" text"},
+		{header: "[Local]: quoted", body: "|   quoted \"#1234:abcd\" text"},
 	}
 	// Only an entry whose identity fields name a height answers. The notice
 	// above quotes the same shape in its body, and must not be taken for one:
@@ -989,7 +989,7 @@ func TestRecoveredBlockGoesAfterItsPredecessor(t *testing.T) {
 
 	sess.Display.DisplayMu.Lock()
 	sess.renderChatBlock(chainWireWithText(100, "first-message", 0x21))
-	sess.emitTab(TabChat, noticeEntry("| [Local]: notice-after-block\n"))
+	sess.emitTab(TabChat, noticeEntry("[Local]: notice-after-block\n"))
 	sess.Display.DisplayMu.Unlock()
 
 	sess.Display.DisplayMu.Lock()
