@@ -70,8 +70,6 @@ func loadRolesMap() (map[string]any, error) {
 }
 
 func readPasteJSON() ([]byte, error) {
-	// Try file first if provided via --file handled separately
-	// For --paste, read from stdin; if interactive and no pipe, prompt via huh
 	if tui.HasControllingTTY() {
 		var pasted string
 		form := huh.NewForm(huh.NewGroup(

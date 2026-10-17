@@ -37,11 +37,10 @@ import (
 // handshake that follows.
 const socks5DialTimeout = 45 * time.Second
 
-// socks5NetDialer returns a gorilla NetDialContext that connects to
-// the proxy and handshakes to host:port via x/net/proxy, leaving a
-// bare stream. gorilla applies TLS itself when the URL asks for wss.
-// The target hostname travels unresolved (socks5h semantics): the
-// proxy resolves it, nothing is looked up locally.
+// socks5NetDialer returns a gorilla dialer via x/net/proxy.
+//
+// gorilla applies TLS; the stream stays bare. The target hostname
+// travels unresolved: the proxy resolves it, nothing is looked up locally.
 func socks5NetDialer(p *clientcore.ProxyConfig) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, portStr, err := net.SplitHostPort(addr)
@@ -64,9 +63,8 @@ func socks5NetDialer(p *clientcore.ProxyConfig) func(ctx context.Context, networ
 			defer identity.ZeroBytes(passCopy)
 			auth = &proxy.Auth{User: string(userCopy), Password: string(passCopy)}
 		}
-		// The forward dialer honors ctx (ContextDialer), so the TCP
-		// setup aborts when the caller gives up instead of pinning a
-		// socket for the full 45s; the timeout below is the backstop.
+		// The forward dialer honors ctx, so TCP setup aborts when the caller gives up.
+		// The dial timeout is the backstop.
 		forward := &net.Dialer{Timeout: socks5DialTimeout}
 		socksDialer, err := proxy.SOCKS5("tcp",
 			net.JoinHostPort(p.Host, strconv.Itoa(p.Port)), auth, forward)

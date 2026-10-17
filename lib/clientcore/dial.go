@@ -76,9 +76,10 @@ func gateChallengeBody(resp *http.Response) (raw string, isGate bool) {
 	return raw, isGate
 }
 
-// DialManaged dials with TLS auto-upgrade plus join-gate retries: on a 429
-// gate challenge it solves the proof of work, waits out the ticket and
-// redials with the lease pass, up to the configured attempt budget.
+// DialManaged dials with TLS auto-upgrade plus join-gate retries.
+//
+// On a 429 challenge it solves the proof of work, waits out the ticket,
+// then redials with the lease pass.
 func (d Dialer) DialManaged(wsURL string) (Conn, string, error) {
 	url := wsURL
 	upgraded := false
@@ -145,10 +146,10 @@ func (d Dialer) DialManaged(wsURL string) (Conn, string, error) {
 	return nil, url, errors.New("join gate retries exhausted")
 }
 
-// ReadChallenge reads the opening auth_challenge packet. Anything else (or a
-// read failure) aborts the session before any secret is derived. A frame of
-// another type yields ErrNotAuthChallenge; a read failure yields the socket
-// error, so a caller can tell a protocol mismatch from a dead connection.
+// ReadChallenge reads the opening auth_challenge packet.
+//
+// Any other frame yields ErrNotAuthChallenge; a read failure yields
+// the socket error. Either aborts the session before secret derivation.
 func ReadChallenge(conn Conn) (wire.AuthPacket, error) {
 	var challenge wire.AuthPacket
 	if err := conn.ReadJSON(&challenge); err != nil {

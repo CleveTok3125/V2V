@@ -17,15 +17,15 @@ type entry struct {
 	collapsed bool   // body was folded, so /expand targets this entry
 	banner    bool   // a date banner row, so it can anchor older windows
 	day       string // sys_date of a banner, "" otherwise
-	kind      int    // box border colour: kindChat, kindLocal, kindSystem
-	quoteKind int    // border colour of the nested quote block, same scale
+	kind      int    // box border color: kindChat, kindLocal, kindSystem
+	quoteKind int    // border color of the nested quote block, same scale
 	// quoteEntry, when set, is the block nested inside this one: it renders
 	// with its own frame, structure and style instead of a plain quote row.
 	quoteEntry *entry
 	muted      bool // muted notice: buffered for the system tab, hidden in chat
 }
 
-// Entry box kinds pick the border colour and the side of the viewport.
+// Entry box kinds pick the border color and the side of the viewport.
 const (
 	kindChat   = iota // a chat wire from anyone else: left, blue
 	kindMine          // our own echoed chat wire: right, blue
@@ -68,9 +68,9 @@ func (e entry) text() string {
 	return sb.String()
 }
 
-// rows is how many terminal rows the entry occupies at the given width.
-// matchesHeight reports whether this entry is the one that reports h, with an
-// optional hash prefix to tell two entries at the same height apart.
+// matchesHeight reports whether this entry reports height h.
+//
+// A hash prefix separates entries at the same height.
 func (e entry) matchesHeight(h uint64, hashPrefix string) bool {
 	// Zero means the entry reports no chain position at all, so it can never
 	// answer for a height.

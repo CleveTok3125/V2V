@@ -41,7 +41,6 @@ func (c *RoleAddIdentityCmd) Run() error {
 	if strings.TrimSpace(c.Role) == "" {
 		return errors.New("role là bắt buộc")
 	}
-	// Handle paste/file
 	if c.Paste || c.File != "" {
 		var data []byte
 		var err error
@@ -56,12 +55,10 @@ func (c *RoleAddIdentityCmd) Run() error {
 				return err
 			}
 		}
-		// Try to parse as snippet: could be {"public_key":..., "hmac_shield":...} or full role map or identities array
 		var raw map[string]any
 		if err := json.Unmarshal(data, &raw); err != nil {
 			return fmt.Errorf("JSON không hợp lệ: %w", err)
 		}
-		// Detect shape: if contains public_key directly, it's single identity
 		if pk, ok := raw["public_key"].(string); ok {
 			c.PublicKey = pk
 			if hs, ok := raw["hmac_shield"].(string); ok {
@@ -71,7 +68,6 @@ func (c *RoleAddIdentityCmd) Run() error {
 				c.ServerPubKey = sp
 			}
 		} else {
-			// Try full roles.json or role wrapper: look for identities[0]
 			for _, v := range raw {
 				if m, ok := v.(map[string]any); ok {
 					if ids, ok := m["identities"].([]any); ok && len(ids) > 0 {
@@ -82,7 +78,6 @@ func (c *RoleAddIdentityCmd) Run() error {
 							break
 						}
 					}
-					// Direct identities map
 					if _, ok := m["public_key"]; ok {
 						c.PublicKey, _ = m["public_key"].(string)
 						c.HmacShield, _ = m["hmac_shield"].(string)
@@ -92,7 +87,6 @@ func (c *RoleAddIdentityCmd) Run() error {
 			}
 		}
 	}
-	// Interactive prompt for missing fields if still empty and TTY
 	if tui.HasControllingTTY() {
 		if c.PublicKey == "" || c.HmacShield == "" {
 			form := huh.NewForm(huh.NewGroup(
@@ -108,13 +102,11 @@ func (c *RoleAddIdentityCmd) Run() error {
 	if c.PublicKey == "" || c.HmacShield == "" {
 		return errors.New("public_key và hmac_shield là bắt buộc (hoặc dùng --paste)")
 	}
-	// Check role exists, warn if not
 	root, _ := loadRolesMap()
 	_, exists := root[c.Role]
 	if !exists {
 		fmt.Printf("⚠️  Role \"%s\" chưa tồn tại — sẽ tạo mới\n", c.Role)
 	}
-	// Append identity, dedupe by public_key
 	return identity.MergeRolesFile(rolesPath(), c.Role, func(e map[string]any) {
 		list, _ := e["identities"].([]any)
 		newEntry := map[string]any{
@@ -162,7 +154,6 @@ func (c *RoleImportCmd) Run() error {
 			return err
 		}
 	} else {
-		// Try stdin
 		if tui.HasControllingTTY() {
 			return errors.New("dùng --file <path> hoặc --paste để import")
 		}
@@ -189,8 +180,6 @@ func (c *RoleImportCmd) Run() error {
 		} else {
 			fmt.Printf("✅ Đã import role \"%s\"\n", role)
 		}
-		// Use MergeRolesFile to ensure atomic write per role, or write whole file at end
-		// For efficiency, just set in root and write once at end
 		root[role] = v
 	}
 	out, _ := json.MarshalIndent(root, "", "  ")

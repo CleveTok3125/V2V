@@ -63,9 +63,9 @@ type tuiSink struct {
 
 func (k *tuiSink) attach(p *tea.Program) { k.program = p }
 
-// Notify wakes the app. It is safe to call from any goroutine and before
-// the program runs: the first render pulls the whole buffer anyway, so a
-// refresh dropped before start loses nothing.
+// Notify wakes the app for a buffer change.
+//
+// Safe from any goroutine; pre-start refreshes drop safely.
 func (k *tuiSink) Notify() {
 	if !k.started.Load() {
 		return
@@ -90,10 +90,10 @@ func (k *tuiSink) ack() {
 	k.mu.Unlock()
 }
 
-// send delivers a message once the program is running. It never blocks the
-// caller: the session calls it while holding DisplayMu, and the event loop
-// takes that same lock to render, so a synchronous send could deadlock
-// against a render in progress.
+// send delivers a message once the program runs.
+//
+// It never blocks; the session holds DisplayMu during render,
+// so a synchronous send could deadlock.
 func (k *tuiSink) send(m tea.Msg) {
 	if !k.started.Load() {
 		return
@@ -151,9 +151,10 @@ const commandBorderColor = "198"
 // chrome so the mode and status stand out (ANSI 250).
 const footerFg = "250"
 
-// tuiStyles holds the chrome styles. Colours come from the client config
-// theme (ui.theme.accent) instead of being hardcoded, so a themed config is
-// honoured; the idle input border and the footer use a neutral grey.
+// tuiStyles holds the chrome styles.
+//
+// Colors come from the client config theme;
+// the idle input border and the footer use a neutral gray.
 type tuiStyles struct {
 	tabActive   lipgloss.Style
 	tabInactive lipgloss.Style
@@ -206,8 +207,8 @@ func newTUIStyles() tuiStyles {
 	}
 }
 
-// Input border modes: grey when the draft is empty, accent blue when it has
-// text, and the command colour in slash command mode.
+// Input border modes: grey for empty drafts, accent blue with text,
+// and command color in slash command mode.
 const (
 	inputModeEmpty = iota
 	inputModeText
@@ -936,12 +937,9 @@ func (a *app) copySelection() {
 	a.notice = fmt.Sprintf("Đã copy %d dòng", strings.Count(text, "\n")+1)
 }
 
-// renderEntryBox draws one entry as a bordered block hugging its content
-// up to the viewport width. Border color follows the entry kind; frame,
-// divider and nested quote draw here because lipgloss has no border
-// label, mid divider, or nested block.
-// boxStyle picks the border colour of a block from its kind, so a nested
-// quote keeps the real style of the block it shows.
+// boxStyle picks the border color of a block from its kind.
+//
+// A nested quote keeps the style of the block it shows.
 func (a *app) boxStyle(kind int) lipgloss.Style {
 	switch kind {
 	case kindLocal, kindNotice:
@@ -953,6 +951,10 @@ func (a *app) boxStyle(kind int) lipgloss.Style {
 	}
 }
 
+// renderEntryBox draws one entry as a bordered block hugging its content.
+//
+// The frame, divider, and nested quote draw here;
+// lipgloss has no border label, mid divider, or nested block.
 func (a *app) renderEntryBox(e entry) string {
 	return a.renderEntryBoxMax(e, a.chatWidth(), true)
 }
@@ -1187,7 +1189,7 @@ func (a *app) tabAt(x int) (int, bool) {
 	return 0, false
 }
 
-// inputMode picks the input border colour from the draft state.
+// inputMode picks the input border color from the draft state.
 func (a *app) inputMode() int {
 	switch {
 	case a.cmdMode:

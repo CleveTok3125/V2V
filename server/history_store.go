@@ -124,8 +124,7 @@ func (h *HistoryStore) open() error {
 	}
 
 	// Chat plaintext stays owner-only. Existing files keep whatever
-	// mode they already have (OpenFile never rechmods): deployments
-	// predating this must chmod once, see the commit message.
+	// mode they already have; deployments predating this must chmod once.
 	file, err := os.OpenFile(h.Filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -605,14 +604,11 @@ func (h *HistoryStore) relabelGenLocked(from, to int) bool {
 	return false
 }
 
-// windowBefore merges disk generations old→new into ring, stopping at
-// the first chained height at or above bound (excluded). Generations
-// above level are skipped; the caller bounds disk against RAM first so
-// chained content never overlaps RAM. Unchained lines travel by position
-// and may repeat a few across the RAM seam. Files open per request,
-// never locked: rotation renames atomically, so a scan sees a
-// consistent (if slightly stale) view. Missing files are skipped, never
-// fatal.
+// windowBefore merges disk generations old to new into ring,
+// stopping at the first chained height at or above bound.
+//
+// The caller bounds disk against RAM first so content never overlaps.
+// Missing files are skipped, never fatal.
 func (h *HistoryStore) windowBefore(ring *windowRing, bound uint64, level int) {
 	if h == nil || ring == nil {
 		return

@@ -81,9 +81,11 @@ func PlatformName(wasm bool) string {
 	return "native"
 }
 
-// VerifyPowOffer checks the server signature against the pinned identity when
-// one is known (an empty pin means trust-on-first-use), then clamps the preset
-// to the platform. Tampering with tier or difficulty breaks the signature.
+// VerifyPowOffer checks the server signature against the pinned identity,
+// then clamps the preset to the platform.
+//
+// Empty pin means trust-on-first-use. Tampering with tier or difficulty
+// breaks the signature.
 func VerifyPowOffer(o wire.PowOffer, pin string, wasm bool) (pow.Preset, error) {
 	preset := pow.Preset{Time: o.T, Memory: o.M, Threads: o.P, Difficulty: o.Difficulty}
 	if pin != "" {

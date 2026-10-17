@@ -68,11 +68,9 @@ func tabForWire(msg WireMessage) int {
 	return TabSystem
 }
 
-// parseHistoryBoundary reports whether a replay marker opens (header) or
-// closes (footer) a window. The server tags each marker with the window it
-// names and, for a footer, how it closed, so this reads the wire instead of
-// the wording — which is what keeps the state machine, the fork check and
-// echo matching from depending on a string a copy edit could change.
+// parseHistoryBoundary classifies a replay marker as header or footer.
+//
+// It reads wire tags; untagged lines report false.
 func parseHistoryBoundary(tags []string) (boundary bool, start bool) {
 	if !wire.HasTag(tags, wire.TagHistory) {
 		return false, false
@@ -217,10 +215,9 @@ func (s *Session) absoluteVerifyURL(urlStr string) string {
 	return urlStr
 }
 
-// badgeForWire verifies a trip badge and builds its colored display
-// plus the manual-verify hyperlink (kept, opens the stateless API).
-// av selects verified vs plain rendering; it is part of the render
-// cache key, so toggling /autoverify never serves stale colors.
+// badgeForWire builds the colored trip badge plus verify link.
+//
+// av selects verified versus plain rendering.
 func (s *Session) badgeForWire(msg WireMessage, av bool) (colored, urlStr string) {
 	h := sha256.Sum256([]byte(msg.Trip.Pub))
 	plain := "◆ " + hex.EncodeToString(h[:])[:8]

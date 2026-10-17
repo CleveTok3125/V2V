@@ -53,10 +53,9 @@ const displayNameSeparators = " _-.'"
 // reader structure the server never sent.
 const displayStructuralRunes = "|•#:✍◆↩┌└─·"
 
-// displayLegacyAllowed is the rule a display name followed before it became an
-// allowlist: any graphic rune but newline, U+FFFD, and the Cf, Mn, Me, Zl and
-// Zp categories. An admin-authored prefix keeps this permissive rule so an
-// existing roles.json keeps working, and loses only displayStructuralRunes.
+// displayLegacyAllowed is the pre-allowlist display-name rule.
+//
+// An admin-authored prefix keeps this rule so existing roles.json keeps working.
 func displayLegacyAllowed(r rune) bool {
 	switch {
 	case r == '\n', r == 0xFFFD:
@@ -107,11 +106,10 @@ func ValidateDisplayName(name string) error {
 	return nil
 }
 
-// ValidateDisplayPrefix checks an admin-authored CustomPrefix, the "[Admin] "
-// in "[Admin] name#hash". It is config, not user input, so it keeps
-// displayLegacyAllowed instead of the name allowlist: existing prefixes use
-// brackets or "*", and neither spoofs a header. What it may not carry is a
-// rune that builds one. An empty prefix is valid.
+// ValidateDisplayPrefix checks an admin-authored CustomPrefix.
+//
+// Brackets and "*" are allowed; runes that build a header are rejected.
+// An empty prefix is valid.
 func ValidateDisplayPrefix(prefix string) error {
 	if !utf8.ValidString(prefix) {
 		return fmt.Errorf("%w: invalid utf8", ErrInvalidDisplayPrefix)

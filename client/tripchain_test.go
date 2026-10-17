@@ -26,7 +26,6 @@ func TestDeriveTripKeyDeterministic(t *testing.T) {
 	if hex.EncodeToString(pub1) == hex.EncodeToString(pub3) {
 		t.Fatalf("different serverPub should give different pub")
 	}
-	// Different passphrase
 	_, pub4, _ := deriveTripKey("different", "deadbeef00112233445566778899aabbccddeeff00112233445566778899aabbcc")
 	if hex.EncodeToString(pub1) == hex.EncodeToString(pub4) {
 		t.Fatalf("different passphrase should give different pub")

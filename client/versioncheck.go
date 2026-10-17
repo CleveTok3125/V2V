@@ -23,11 +23,12 @@ const (
 	versionUnknown
 )
 
-// versionCore strips a stamp down to the commit it was built from so
-// different schemes for the same commit compare equal: release tags
-// ("v0.9.0-18-g4be8087" -> "4be8087"), dev stamps ("dev-4be8087" ->
-// "4be8087"), anything else compares verbatim. The second return
-// reports a "-dirty" working tree, whose content genuinely differs.
+// versionCore reduces a stamp to its commit.
+//
+// Release and dev schemes for one commit compare equal;
+// anything else compares verbatim.
+//
+// The second return reports a "-dirty" working tree.
 func versionCore(v string) (core string, dirty bool) {
 	dirty = strings.HasSuffix(v, "-dirty")
 	core = strings.TrimSuffix(v, "-dirty")
@@ -39,10 +40,11 @@ func versionCore(v string) (core string, dirty bool) {
 	return core, dirty
 }
 
-// decideVersionCheck maps mode + versions to a verdict. Pure: the whole
-// policy matrix is unit-tested here, I/O stays in checkServerVersion.
-// Same commit on both sides matches; a dirty tree on either side still
-// warns (enforce aborts) because the content may genuinely differ.
+// decideVersionCheck maps mode and versions to a verdict.
+//
+// Same commit matches; a dirty tree still warns.
+//
+// Pure; I/O stays in checkServerVersion.
 func decideVersionCheck(mode, server, expected string) versionVerdict {
 	if server == "" {
 		return versionUnknown

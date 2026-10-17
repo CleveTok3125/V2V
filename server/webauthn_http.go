@@ -217,11 +217,10 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// enrollFailure answers a failed enrollment step. Only reasons the caller can
-// act on are echoed; anything else is an internal fault, and its detail stays
-// in the log because a raw os error carries the server's filesystem layout
-// into the browser. The status says whose fault it is: 403 for a rejected
-// ceremony, 500 for a store the server cannot touch.
+// enrollFailure answers a failed enrollment step.
+//
+// Only actionable reasons are echoed; internal detail stays in the log.
+// Status is 403 for a rejected ceremony, 500 for store failure.
 func enrollFailure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errTicketUnknown),

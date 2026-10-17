@@ -94,11 +94,9 @@ func pollPairStatus(httpBase, ticket string, ttlSec int) bool {
 	return false
 }
 
-// pairOpener builds the command that opens a URL, without running it. The
-// URL reaches the process as its own argv entry and never through a shell,
-// so nothing in it can be word-split or expanded. Splitting this from
-// openPairURL is what lets the choice be tested at all: running an opener
-// from a test spawns a real process and a real browser.
+// pairOpener builds the opener command without running it.
+//
+// The URL stays one argv entry with no word split.
 func pairOpener(goos, url string) (string, []string, bool) {
 	if url == "" {
 		return "", nil, false
@@ -133,10 +131,11 @@ func openPairURL(url string) bool {
 	return true
 }
 
-// The cells draw two module rows each: the top half takes the foreground
-// colour and the bottom half the background, so both are set per cell.
-// Relying on the terminal's own palette would draw a light-on-dark code on a
-// dark theme, and some scanners refuse an inverted code.
+// The cells draw two module rows each.
+//
+// The top half takes the foreground color and the bottom half the background,
+// so both are set per cell. Relying on the terminal palette would draw
+// a light-on-dark code on a dark theme.
 const (
 	qrBothDark  = "\x1b[30;40m▀\x1b[0m" // top dark, bottom dark
 	qrTopDark   = "\x1b[30;47m▀\x1b[0m" // top dark, bottom light
@@ -154,10 +153,9 @@ const qrQuiet = 4
 // code is shown at all.
 const qrLevel = qr.M
 
-// qrCellText picks the cell for two stacked modules. The drawing is ours
-// because a terminal code has to own its quiet zone: the cells carry explicit
-// colours, and a library that draws that margin as light-on-dark halves puts
-// a black band under the code.
+// qrCellText picks the cell for two stacked modules.
+//
+// The cells carry explicit colors to own the quiet zone.
 func qrCellText(topDark, bottomDark bool) string {
 	switch {
 	case topDark && bottomDark:
@@ -261,7 +259,6 @@ func printPairQR(url string) {
 	if rows <= 0 {
 		return // no terminal to measure: piped, redirected, or unknown size
 	}
-	// Room for the link above and the hint below.
 	const reservedRows = 6
 	code, ok := renderPairQR(url, rows-reservedRows, termWidth())
 	if !ok {

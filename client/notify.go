@@ -94,10 +94,9 @@ func notifyPowWanted(tier int) bool {
 		(ClientCfg == nil || tier >= ClientCfg.NotifyPowMinTier())
 }
 
-// notifyTagsAllowed reports whether a line carrying tags may print live.
-// A line is hidden when any tag it carries, or any ancestor of one, is
-// muted, so switching off a node hides its whole subtree. A line with no
-// tags is always live.
+// notifyTagsAllowed reports whether a tagged line may print live.
+//
+// A muted tag or ancestor hides the whole subtree; untagged lines stay live.
 func (s *Session) notifyTagsAllowed(tags []string) bool {
 	// Chat carries no tags and is never gated. Short-circuiting here keeps
 	// the render path off the lock and off a per-call map.
@@ -119,11 +118,9 @@ func (s *Session) notifyPowLive(tier int) bool {
 	return s.Display.Notify.PowLive(tier)
 }
 
-// notifyWireAllowed reports whether a system wire may print live: no tag it
-// carries, and no ancestor of one, is muted; and a proof-of-work notice is
-// not below the tier floor. The floor has to be checked here and not only
-// where the client emits its own solving line, or ui.powMinTier would
-// appear to work while a server-sent challenge below it still printed.
+// notifyWireAllowed reports whether a system wire may print live.
+//
+// A muted tag or ancestor hides it; PoW notices also check the tier floor.
 func (s *Session) notifyWireAllowed(msg WireMessage) bool {
 	// Untagged content (chat) is never gated, and the gate state is a map:
 	// reading it without the lock races /notify, which writes it.
@@ -142,10 +139,9 @@ func (s *Session) notifyPowMinTier() int {
 	return s.Display.Notify.PowMinTier
 }
 
-// notifySetTag mutes or unmutes one tag path. It reports false for a path
-// that is not in the taxonomy, so /notify cannot create a gate that no
-// notice would ever match. The caller emits the confirmation after
-// releasing NotifyMu, so the lock order stays leaf-only.
+// notifySetTag mutes or unmutes one tag path.
+//
+// Reports false for paths outside the taxonomy.
 func (s *Session) notifySetTag(tag string, on bool) bool {
 	if !wire.HasTag(wire.AllTags(), tag) {
 		return false
@@ -178,10 +174,9 @@ func (s *Session) notifySetAll(on bool) {
 	s.Display.NotifyMu.Unlock()
 }
 
-// notifyTagEnabled reports whether one tag path is currently shown. A
-// path is shown unless it is muted itself, and muting a node covers its
-// subtree — so a child of a muted parent reads as off even though its own
-// key is not set.
+// notifyTagEnabled reports whether one tag path shows.
+//
+// A child of a muted parent reads as off.
 func (s *Session) notifyTagEnabled(tag string) bool {
 	s.Display.NotifyMu.RLock()
 	defer s.Display.NotifyMu.RUnlock()

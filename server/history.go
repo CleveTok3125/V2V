@@ -29,11 +29,9 @@ const (
 	tripChainStale                           // seq not newer: ignore
 )
 
-// applyTripChain folds one recovered (already signature-verified) record
-// into the tip for its key. Continuity is checked so a truncated log or a
-// forked chain is reported, but the higher seq is still adopted: the live
-// client that produced it continues from that seq, so refusing it would
-// only strand that identity. LastSeen is stamped by the caller.
+// applyTripChain folds one verified recovered record into the tip.
+//
+// Continuity faults report as gap or fork, but the higher seq is adopted.
 func applyTripChain(cur TripChain, has bool, seq uint32, prevBytes, newPrev []byte) (TripChain, tripChainUpdate) {
 	if !has {
 		return TripChain{Seq: seq, PrevHash: newPrev}, tripChainExtended
@@ -227,11 +225,9 @@ func (h *Hub) sendWithRetry(conn *websocket.Conn, client *ClientSession, msg []b
 }
 
 // fanout sends one marshaled wire to every client except sender.
-// isSystem selects the retry policy; echo returns a delivery
-// confirmation to the sender itself. Callers hold BroadcastMu when
-// ordering against chained records matters; the notice path skips it
-// (registerClient already holds it across replay+join, so taking it
-// here would self-deadlock). Callers must NOT hold ClientsMu.
+//
+// Callers hold BroadcastMu when ordering against chained records matters.
+// Callers must not hold ClientsMu.
 func (h *Hub) fanout(data []byte, sender *websocket.Conn, isSystem, echo bool) {
 	h.ClientsMu.RLock()
 	defer h.ClientsMu.RUnlock()
@@ -278,11 +274,9 @@ func serverLocation() *time.Location {
 	return time.UTC
 }
 
-// powNoticeWire is noticeWire for a notice whose text names a
-// proof-of-work tier. The tier travels as a field as well as in the text,
-// so the client can apply ui.powMinTier to the notice without parsing the
-// banner — the floor says how much work to announce, so a challenge below
-// it is exactly the line a user asking for a higher floor wants gone.
+// powNoticeWire is noticeWire for a notice naming a proof-of-work tier.
+//
+// The tier also travels as SysPowTier, so ui.powMinTier filters without parsing.
 func powNoticeWire(text string, tier int, leaves ...string) WireMessage {
 	notice := noticeWire(time.Now(), text, leaves...)
 	notice.SysPowTier = tier
@@ -346,12 +340,10 @@ func (h *Hub) BroadcastWire(wire WireMessage, sender *websocket.Conn, serverPub 
 	h.fanout(data, sender, false, true)
 }
 
-// serveHistorySegment serves one on-demand older segment. The expensive
-// collection (RAM scan, raw file read, full zstd decode) runs outside
-// BroadcastMu so a paging request cannot stall live broadcasts; only the
-// send holds the lock, so segment lines and the trailer stay contiguous
-// (same ordering contract as the join replay: BroadcastMu -> Chain.Mu,
-// never the reverse).
+// serveHistorySegment serves one on-demand older segment.
+//
+// Collection runs outside BroadcastMu; only the send holds the lock,
+// so segment lines and the trailer stay contiguous.
 func (s *ChatServer) serveHistorySegment(session *ClientSession, before uint64, limit int) {
 	if limit <= 0 {
 		return
@@ -462,12 +454,10 @@ func selectWindow(lines []string, before uint64, limit int) []string {
 	return r.lines()
 }
 
-// recordLine renders one disk record in RAM string form (marshaled wire
-// or raw message), mirroring InitHistoryStore. False means the record
-// holds nothing renderable and must be skipped like the loader skips it.
-// JSON history lines always carry Seq>0 after backfill; raw legacy lines
-// carry none and the client treats raw as history (splice), while JSON
-// with Seq==0 is always live-only (unicast) and must append.
+// recordLine renders one disk record in RAM string form.
+//
+// Raw lines splice as history; JSON with Seq==0 appends as live-only.
+// False means nothing renderable.
 func recordLine(rec historyRecord) (string, bool) {
 	if rec.Wire != nil {
 		data, _ := json.Marshal(rec.Wire)
@@ -543,13 +533,10 @@ func (c *ChainService) historyInfo() HistoryInfo {
 	return info
 }
 
-// collectSegment gathers up to limit stored lines older than before in
-// replay order, without sending. before is an exclusive chain height;
-// 0 means the tail window. Unchained lines carry no height, so the
-// cutoff is the first line at or above before. Lines evicted from RAM
-// come from disk when the lookup level allows; the RAM seam may repeat
-// a few unchained lines, chained content stays exact. Disk I/O and zstd
-// decode run outside BroadcastMu.
+// collectSegment gathers up to limit stored lines older than before, in replay order.
+//
+// before is exclusive height; 0 means the tail window.
+// The RAM seam may repeat unchained lines; chained content stays exact.
 func (c *ChainService) collectSegment(before uint64, limit int) []string {
 	if limit <= 0 {
 		return nil
@@ -588,13 +575,9 @@ func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, li
 	c.sendReplay(session, c.collectSegment(before, limit))
 }
 
-// collectAfterSeq returns up to limit stored lines with seq > afterSeq,
-// oldest first, plus whether more remain and the resume cursor (the last
-// seq returned). RAM only: the recent window is what an initial load or
-// a refill needs; deeper history stays on the height-cursor path.
-// Live-only lines (unicast, seq 0, never stored) never appear here:
-// they are not history and the client always appends them instead of
-// splicing them into an older window.
+// collectAfterSeq returns stored lines with seq > afterSeq, oldest first.
+//
+// Live-only lines never appear here.
 func (c *ChainService) collectAfterSeq(afterSeq uint64, limit int) (lines []string, more bool, next uint64) {
 	if limit <= 0 {
 		return nil, false, 0
@@ -615,11 +598,9 @@ func (c *ChainService) collectAfterSeq(afterSeq uint64, limit int) (lines []stri
 	return lines, false, 0
 }
 
-// collectBeforeSeq returns up to limit stored lines with seq < beforeSeq,
-// newest first (beforeSeq 0 means from the tip), plus whether more remain
-// and the resume cursor (the smallest seq returned). Live-only lines
-// (seq 0) are skipped: they are never history, so a client must never
-// splice them into an older window.
+// collectBeforeSeq returns stored lines with seq < beforeSeq, newest first.
+//
+// Seq 0 is skipped.
 func (c *ChainService) collectBeforeSeq(beforeSeq uint64, limit int) (lines []string, more bool, next uint64) {
 	if limit <= 0 {
 		return nil, false, 0
@@ -735,15 +716,9 @@ func (s *ChatServer) serveHistoryRanges(session *ClientSession, ranges []HeightR
 	s.Chain.sendReplayPage(session, lines, pageMeta{Direction: "recover"})
 }
 
-// sendReplay renders stored lines in replay format: content batches plus
-// a HistorySync trailer. lines must be a private copy. Sends never block
-// (drops on a full peer buffer count and log); the trailer reports what
-// actually queued. Progress and results are rendered by the client into
-// its status bar from the trailer, never as chat lines.
-// historySyncTrailer encodes the machine-readable trailer closing a
-// replay. Dropped counts sends a full peer buffer refused: the client
-// skips its fork check when non-zero, since an incomplete window cannot
-// prove the log changed.
+// sendReplay renders stored lines in replay format.
+//
+// Sends never block; the trailer reports what actually queued.
 // pageMeta carries seq-cursor metadata for a paged response. Direction is
 // "after", "before" or "recover"; zero values mean a height-cursor older
 // window (treated as "before" by the client via its request state).
@@ -753,6 +728,10 @@ type pageMeta struct {
 	More      bool
 }
 
+// historySyncTrailer encodes the machine-readable trailer closing a replay.
+//
+// Dropped counts a full peer buffer refused; the client skips
+// its fork check on an incomplete window.
 func historySyncTrailer(minHeight, maxHeight uint64, sent, total, dropped int, firstSeq, lastSeq uint64, meta pageMeta) []byte {
 	trailer, _ := json.Marshal(HistorySync{Type: "history_sync", MinHeight: minHeight, MaxHeight: maxHeight,
 		Sent: sent, Total: total, Dropped: dropped,

@@ -64,7 +64,6 @@ func (fp *fakeSocksProxy) handle(client net.Conn) {
 	if _, err := client.Write([]byte{0x05, 0x00}); err != nil {
 		return
 	}
-	// CONNECT request.
 	head := make([]byte, 4)
 	if _, err := io.ReadFull(client, head); err != nil {
 		return
@@ -207,7 +206,6 @@ func TestSocks5WipeOnlyAfterWSSuccess(t *testing.T) {
 	headers := http.Header{}
 	d := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, HandshakeTimeout: 10 * time.Second}
 
-	// wss:// against a plain-WS server: SOCKS ok, TLS fails.
 	if _, _, err := dialSocks5WSWithDialer("wss://"+plainAddr+"/ws", headers, p, d); err == nil {
 		t.Fatal("wss against plain ws unexpectedly succeeded")
 	}

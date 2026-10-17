@@ -1,9 +1,9 @@
 package main
 
-// The browser half of a desktop passkey login. The page has just run
-// navigator.credentials.get over the pair ticket and posts the assertion
-// here; the handler verifies it against the role the desktop named and
-// records the role as proved so the desktop's next poll can spend it.
+// pair_submit handles the browser half of desktop passkey login.
+//
+// It verifies the assertion and records the role as proved
+// for the desktop's next poll.
 
 import (
 	"encoding/json"

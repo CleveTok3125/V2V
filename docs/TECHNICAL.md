@@ -545,7 +545,7 @@ exhausting host fds, threads, RAM or disk.
 
 Planned work grouped by dependency, in recommended order. Each item stays self-contained: it can land without the others, but the order avoids rework.
 
-### Phase 0 — Foundation
+### Phase 0 — foundation
 
 - **Session surgery** — client split into display/chain/verify/pending groups with a fixed `Display -> Chain -> Pending` order (tip persist outside the lock, queue-only pending guards); server split into `ChainService` (tip, history, store) and `Hub` (presence and send ordering) with the lock order unchanged. — *DONE*
 - **Dependency arrows** — `markup` is the sole facade (`Style` alias, `DefaultStyle`, `Linkify` passthroughs): `client` no longer imports `codebg`/`linkify` directly; `strength` owns its report type and `guard` takes a plain limits struct are done. — *DONE*

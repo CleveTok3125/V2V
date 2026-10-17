@@ -47,10 +47,10 @@ func getClientIP(r *http.Request) string {
 	return resolveClientIP(r).ClientIP
 }
 
-// refuseUntrustedProxy answers 403 and reports the rejection. Both entry points
-// that can meet a strict chain — the WebSocket upgrade and the HTTP routes
-// guarded by rejectUntrustedProxy — report it through here, so a refused
-// request reads the same whichever endpoint it arrived on.
+// refuseUntrustedProxy answers 403 and reports the rejection.
+//
+// Both the WebSocket upgrade and the HTTP routes report here,
+// so a refusal reads the same whichever endpoint it arrived on.
 func refuseUntrustedProxy(w http.ResponseWriter, r *http.Request, outcome trustedproxy.Outcome) {
 	logWarnf("⛔ (proxy,reject) Reject %s (%s): %s", trustedproxy.Clip(outcome.RemoteIP, 200), outcome.Reason, proxyHeadersForLog(r))
 	http.Error(w, "Untrusted proxy.", http.StatusForbidden)

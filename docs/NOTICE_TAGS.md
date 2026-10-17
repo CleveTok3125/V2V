@@ -64,8 +64,7 @@ and is what `/notify` and the web settings panel render.
 | `system.auth` | tripcode too long, concurrent identity login | `server/auth.go` |
 | `system.audit` | reserved: a management line chained as evidence | **none yet** |
 
-Two entries deserve their own note. `system.audit` has a route
-(`Hub.BroadcastAudit`) but no producer, so no line carries the tag today
+`system.audit` has a route (`Hub.BroadcastAudit`) but no producer, so no line carries the tag today
 and muting it changes nothing; it stays in the tree so the wire shape is
 settled before anything publishes on it. `system.history` and its children
 are legacy: the server no longer emits markers, the client tracks windows

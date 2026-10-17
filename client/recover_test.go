@@ -78,7 +78,7 @@ func recoverTestChain(anchor [32]byte, start uint64, n int) []WireMessage {
 // replayMarker builds a replay window marker the way the server sends it.
 // Only the wording is ever drawn; the tags are what the client reads, so a
 // test that fed a plain marker string would no longer arm the replay state
-// machine and would pass without checking any window behaviour.
+// machine and would pass without checking any window behavior.
 func replayMarker(tags []string, text string) WireMessage {
 	return WireMessage{Type: "system", Tags: tags, Text: text}
 }

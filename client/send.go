@@ -32,9 +32,9 @@ func (s *Session) echoInputLine(text string) slotRef {
 	return s.appendEntrySlot(true, TabChat, inputEchoEntry([]string{text}))
 }
 
-// extendInputEcho rewrites the input echo as more lines arrive, so a fenced
-// block reads as one growing entry rather than a row that stops changing.
 // checkSendGuards runs the client-side content and cooldown gates.
+//
+// Reports false when the line must not send.
 func (s *Session) checkSendGuards(text string) bool {
 	if err := filter.ValidateMessage(text); err != nil {
 		s.Display.DisplayMu.Lock()
@@ -44,7 +44,6 @@ func (s *Session) checkSendGuards(text string) bool {
 		return false
 	}
 
-	// Guard: client-side MessageCooldown (mirror server, zero-trust)
 	if ClientCfg != nil {
 		if err := guard.ValidateMessageForSend(text, s.Pending.LastMessageTime, &guard.Limits{
 			MaxMessageLength: ClientCfg.Limits.MaxMessageLength,
@@ -197,16 +196,11 @@ func (s *Session) sendMessage(text string, placeholder entry, slot slotRef, phSh
 			s.Pending.TmpSeq--
 		}
 	}
-	// Reply targets are one-shot: consumed by the send above whether
-	// it succeeded or not (a failed send ends the session anyway).
-	// Reset happens after placeholder tracking below, which records
-	// the target for echo matching.
+	// Reply targets are one-shot: consumed by the send whether it succeeds or not.
 	if err != nil {
-		// Mark placeholder as failed (red) is handled by server unicast; keep placeholder grey until then
 		s.Pending.LastMessageTime = time.Now()
 	} else {
 		s.Pending.LastMessageTime = time.Now()
-		// Track placeholder so the server echo can replace it.
 		s.Display.DisplayMu.Lock()
 		// Queue guard nested per Display -> Chain -> Pending; the
 		// erasePlaceholderLocked call in this function stays on DisplayMu.
@@ -241,16 +235,15 @@ func (s *Session) sendMessage(text string, placeholder entry, slot slotRef, phSh
 				}
 			}
 		}
-		// Queue done: release before the erase, which stays on
-		// DisplayMu (still held throughout, so no interleave).
+		// Release Pending.Mu before the erase; DisplayMu stays held throughout,
+		// so no other send interleaves here.
 		s.Pending.Mu.Unlock()
 		if haveStashed {
 			s.erasePlaceholderLocked(pm)
 		}
 		s.Display.DisplayMu.Unlock()
 	}
-	// Reply targets are one-shot, cleared after tracking above (the
-	// pending entry already captured the target for echo matching).
+	// Reply targets are one-shot; the pending entry already captured the target.
 	s.Pending.PendingReplyTo = 0
 	if err != nil {
 		fmt.Println("❌ Lỗi gửi tin nhắn:", err)

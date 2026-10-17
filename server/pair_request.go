@@ -1,10 +1,9 @@
 package main
 
-// The desktop's ask for a pairing ticket. It is HTTP rather than a websocket
-// dial for a reason the connection cooldown enforces: a desktop logs in
-// twice, once to ask and once to spend, and two dials from one address
-// inside CONNECTION_COOLDOWN are refused as churn. Keeping the ask off the
-// socket leaves the desktop exactly one dial, the one that becomes a session.
+// handlePairRequest mints a pairing ticket over HTTP.
+//
+// Keeping the ask off the socket leaves the desktop exactly one dial,
+// the one that becomes a session.
 
 import (
 	"encoding/json"

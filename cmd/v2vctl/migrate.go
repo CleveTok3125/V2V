@@ -27,7 +27,6 @@ func (m *MigrateCmd) Run() error {
 	if outPath == "" {
 		outPath = inPath
 	}
-	// Detect current file status
 	enc, _ := identity.IsEncrypted(inPath)
 	var curPreset string
 	if enc {
@@ -66,7 +65,6 @@ func (m *MigrateCmd) Run() error {
 		}
 	}
 
-	// Handle In -> .old backup
 	oldPath := inPath + ".old"
 	if _, err := os.Stat(oldPath); err == nil {
 		if !m.Force {
@@ -88,7 +86,6 @@ func (m *MigrateCmd) Run() error {
 		fmt.Printf("⚠️  Ghi đè %s\n", oldPath)
 	}
 
-	// Load with old passphrase if needed
 	var idf *identity.IdentityFile
 	var oldPass string
 	if enc {
@@ -120,7 +117,6 @@ func (m *MigrateCmd) Run() error {
 		}
 	}
 
-	// Determine new preset
 	var p *identity.Params
 	switch m.Preset {
 	case "wasm":
@@ -130,7 +126,6 @@ func (m *MigrateCmd) Run() error {
 		pp := identity.PresetNative
 		p = &pp
 	case "custom":
-		// For custom, prompt for t/m/p if interactive
 		if tui.HasControllingTTY() {
 			var tStr, mStr string
 			form := huh.NewForm(huh.NewGroup(
@@ -140,7 +135,6 @@ func (m *MigrateCmd) Run() error {
 			if err := form.Run(); err != nil {
 				return err
 			}
-			// Parse and set custom, fallback to native if invalid
 			pp := identity.PresetNative
 			if tStr != "" {
 				if _, err := fmt.Sscanf(tStr, "%d", &pp.Time); err != nil {
@@ -176,7 +170,6 @@ func (m *MigrateCmd) Run() error {
 		newPass = pass
 	}
 
-	// Write to temp out path first
 	tmpOut := outPath
 	if outPath == inPath {
 		tmpOut = inPath + ".tmp-migrate"
@@ -194,18 +187,15 @@ func (m *MigrateCmd) Run() error {
 		return err
 	}
 
-	// Atomic In -> .old and Out -> In
 	if err := os.Rename(inPath, oldPath); err != nil {
 		os.Remove(tmpOut)
 		return fmt.Errorf("không thể backup %s -> %s: %w", inPath, oldPath, err)
 	}
 	if err := os.Rename(tmpOut, inPath); err != nil {
-		// Try to restore backup on failure
 		_ = os.Rename(oldPath, inPath)
 		os.Remove(tmpOut)
 		return err
 	}
-	// Fsync dir
 	if dirFile, err := os.Open(filepath.Dir(inPath)); err == nil {
 		_ = dirFile.Sync()
 		dirFile.Close()

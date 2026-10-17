@@ -1,9 +1,8 @@
 package main
 
-// Message-entry chrome styles. Entries used to be assembled from hand-written
-// SGR sequences; the chrome now goes through lipgloss so it follows the
-// terminal colour profile like the tabs, input and footer. Colours stay ANSI
-// basics where the old codes were basics, so the look is unchanged.
+// Message-entry chrome styles through lipgloss.
+//
+// Colors stay ANSI basics where the old codes were basics.
 
 import (
 	"image/color"

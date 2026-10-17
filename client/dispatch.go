@@ -55,9 +55,9 @@ func (s *Session) dispatch(text string) (string, cmdAction) {
 			return text, cmdDone
 		}
 	}
-	// Unknown slash input: every built-in command was already matched
-	// above, so anything still starting with "/" is a mistyped command
-	// rejected locally and never broadcast. Known commands above
+	// Unknown slash input: every built-in command was already matched,
+	// so anything still starting with "/" is a mistyped command
+	// rejected locally and never broadcast. Known commands
 	// already returned.
 	if isUnknownSlashCommand(text) {
 		s.Display.DisplayMu.Lock()
@@ -82,7 +82,7 @@ func (s *Session) handleReadErr(err error) cmdAction {
 	}
 	// Reply targets attach to the next send only; reset first so a
 	// rejected message never leaks its quote into a later one. The
-	// draft/inline /reply handlers below re-arm it when due.
+	// draft and inline reply handlers re-arm it when a new target attaches.
 	s.Pending.PendingReplyTo = 0
 	if s.Pending.ReplyDraft > 0 {
 		s.Pending.ReplyDraft = 0
@@ -118,13 +118,12 @@ func (s *Session) cancelReply() bool {
 // slash input aborts it, anything else becomes the quoted body.
 func (s *Session) handleDraftGate(text string) {
 	if strings.HasPrefix(text, "/") {
-		// Any slash command aborts the draft, then runs normally
-		// through the dispatch below (a "/" body could never send
-		// anyway: the unknown-slash guard rejects it).
+		// Any slash command aborts the draft, then runs normal dispatch
+		// (a "/" body could never send anyway:
+		// the unknown-slash guard rejects it).
 		s.Pending.ReplyDraft = 0
 		s.Display.Term.SetPrompt("| > ")
 	} else {
-		// Draft body (codeblock fences included): attach and send.
 		s.Pending.PendingReplyTo = s.Pending.ReplyDraft
 		s.Pending.ReplyDraft = 0
 		s.Display.Term.SetPrompt("| > ")
@@ -464,15 +463,14 @@ func (s *Session) cmdReply(text string) (string, cmdAction, bool) {
 	}
 	if body == "" {
 		// Draft mode: quote now, body on the next line. Any slash
-		// command or empty-line ^C aborts it (see loop top).
+		// command or empty-line cancel aborts draft mode.
 		s.Pending.ReplyDraft = height
 		s.Display.Term.SetPrompt(fmt.Sprintf("↩ #%d > ", height))
 		s.refreshTerminal()
 		return text, cmdDone, true
 	}
 	// Quote validated: the body flows through the remaining dispatch
-	// (later slash commands, unknown-slash guard, then send) with the
-	// target attached one-shot.
+	// with the target attached one-shot.
 	s.Pending.PendingReplyTo = height
 	return body, cmdPass, true
 }
@@ -725,10 +723,13 @@ func (s *Session) cmdCopy(text string) bool {
 	return true
 }
 
-// latestChatCopy returns the newest chat message in the chat buffer: its
-// height and raw text. WireIdx holds the raw text; a buffer fallback covers
-// an index eviction. Reports false when no chat message is buffered.
-// Callers must hold DisplayMu.
+// latestChatCopy returns the newest chat message in the chat buffer:
+// its height and raw text.
+//
+// WireIdx holds the raw text; a buffer fallback covers an index eviction.
+// Reports false when no chat message is buffered.
+//
+// Caller holds DisplayMu.
 func (s *Session) latestChatCopy() (uint64, string, bool) {
 	for i := len(s.Display.TabChat.lines) - 1; i >= 0; i-- {
 		e := s.Display.TabChat.lines[i]
@@ -756,8 +757,10 @@ func (s *Session) latestChatCopy() (uint64, string, bool) {
 }
 
 // latestSystemCopy returns the newest system line in the system buffer.
-// Date banners and empty lines never count as messages.
-// Callers must hold DisplayMu.
+//
+// Skips date banners and empty lines.
+//
+// Caller holds DisplayMu.
 func (s *Session) latestSystemCopy() (string, bool) {
 	for i := len(s.Display.TabSys.lines) - 1; i >= 0; i-- {
 		e := s.Display.TabSys.lines[i]
@@ -781,9 +784,10 @@ func (s *Session) latestSystemCopy() (string, bool) {
 	return "", false
 }
 
-// copyLatestLocked copies the newest message for the active tab: the newest
-// chat message in the chat tab, the newest system line in the system tab.
-// Callers must not hold DisplayMu.
+// copyLatestLocked copies the newest message for the active tab:
+// chat messages in the chat tab, system lines in the system tab.
+//
+// Caller must not hold DisplayMu.
 func (s *Session) copyLatestLocked() {
 	s.Display.DisplayMu.Lock()
 	if s.Display.ActiveTab == TabSystem {

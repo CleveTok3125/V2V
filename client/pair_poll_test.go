@@ -91,7 +91,6 @@ func TestPollPairStatusSurvivesAFailedPoll(t *testing.T) {
 	var calls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if atomic.AddInt32(&calls, 1) == 1 {
-			// Close the connection without answering.
 			hj, ok := w.(http.Hijacker)
 			if !ok {
 				return

@@ -244,7 +244,7 @@ func TestRenderPairQRMatchesTheEncoder(t *testing.T) {
 	}
 }
 
-// TestRenderPairQRCarriesItsOwnColours: the cell colours must be explicit.
+// TestRenderPairQRCarriesItsOwnColours: the cell colors must be explicit.
 // Half-block cells take their top from the foreground and their bottom from
 // the background, so relying on the terminal's palette draws a light-on-dark
 // code on a dark theme, which some scanners refuse.

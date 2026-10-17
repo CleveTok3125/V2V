@@ -14,7 +14,6 @@ func LoadOrCreateServerIdentity(path string) (*ServerIdentity, error) {
 	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
 		var s ServerIdentity
 		if err := json.Unmarshal(data, &s); err == nil && s.PrivateKey != "" && s.PublicKey != "" {
-			// Validate keypair
 			priv, err := hex.DecodeString(s.PrivateKey)
 			if err == nil && len(priv) == ed25519.PrivateKeySize {
 				pub, err2 := hex.DecodeString(s.PublicKey)
@@ -29,7 +28,6 @@ func LoadOrCreateServerIdentity(path string) (*ServerIdentity, error) {
 			logWarnf("⚠️ (identity,created,fail) file %s không hợp lệ, tạo mới", path)
 		}
 	}
-	// Create new
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err

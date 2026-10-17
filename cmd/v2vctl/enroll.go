@@ -77,12 +77,10 @@ func (e *EnrollCmd) Run() error {
 	return nil
 }
 
-// enrollOrigin resolves the origin enrollment links point at. The ambient
-// variable wins as an explicit override; otherwise the instance .env is
-// consulted, because that is the file the server reads and an operator
-// running this tool on the host rarely has the value exported. An empty
-// result means no link can be built, and the caller must refuse rather than
-// print a bare path.
+// enrollOrigin resolves the origin enrollment links point at.
+//
+// Empty means no link can be built, so the caller must refuse
+// rather than print a bare path.
 func enrollOrigin() string {
 	if v := strings.TrimSpace(env.WebauthnOrigin()); v != "" {
 		return strings.TrimRight(v, "/")

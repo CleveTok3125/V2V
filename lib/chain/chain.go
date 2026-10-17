@@ -23,10 +23,10 @@ const (
 	domainLegacy  = "V2V-chain-legacy-anchor"
 )
 
-// Hash links one message into the log. Fields are length-prefixed so
-// concatenation is unambiguous regardless of embedded separators. tmpID
-// is covered too, so renumbering breaks the link for every observer.
-// replyTo (v2) covers the quote target the same way.
+// Hash links one message into the log.
+//
+// Fields are length-prefixed for unambiguous concatenation.
+// tmpID and replyTo are covered so renumbering or quote swaps break the link.
 func Hash(prev [32]byte, height uint64, tmpID uint64, replyTo uint64, typ, tim, display, text, tripSig string) [32]byte {
 	h := sha256.New()
 	h.Write([]byte(domainLink))
@@ -115,10 +115,9 @@ func TripSigOf(w wire.WireMessage) string {
 	return ""
 }
 
-// VerifyWire dispatches on the link encoding: v2 covers the reply
-// target, v1 (absent) is the pre-reply encoding that old records keep
-// verifying against. Single home for the branch both ends share, so a
-// future v3 cannot drift client vs server.
+// VerifyWire verifies a wire against the expected link, dispatching on encoding.
+//
+// v2 covers the reply target; absent version is the pre-reply encoding.
 func VerifyWire(prev [32]byte, w wire.WireMessage, want [32]byte) bool {
 	if w.ChainVer >= 2 {
 		return VerifyLink(prev, w.ChainHeight, w.TmpID, w.ReplyTo, w.Type, w.Time, w.DisplayName, w.Text, TripSigOf(w), want)

@@ -33,8 +33,7 @@ func BadgeColorWithPalette(badge string, pal [][3]int) string {
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b)
 }
 
-// BadgeRGB returns the palette colour for a badge as 8-bit channels, for
-// callers that style the badge themselves.
+// BadgeRGB returns the palette color for a badge as 8-bit channels.
 func BadgeRGB(badge string) (r, g, b uint8) {
 	return BadgeRGBWithPalette(badge, palette)
 }
@@ -60,10 +59,9 @@ func clamp(v int) int {
 	return v
 }
 
-// CanonicalPayload is the signed payload for trip messages, shared by client/server.
-// displayName is the final server-rendered name (e.g. "[Admin] Anonymous" or "Anonymous#abcd") — binding it prevents displayName spoofing.
-// tmpID is the sender's per-session message counter — binding it makes server-side ID tampering fail verification.
-// replyTo quotes a chain height for replies — binding it makes server-side quote swapping fail verification.
+// CanonicalPayload is the signed payload for trip messages, shared by client and server.
+//
+// displayName, tmpID, and replyTo are bound so spoofing or tampering fails verification.
 func CanonicalPayload(serverPub string, seq uint32, prev []byte, msgHash []byte, pub []byte, displayName string, tmpID uint64, replyTo uint64) []byte {
 	return []byte(fmt.Sprintf("%s\x00%d\x00%x\x00%x\x00%x\x00%s\x00%d\x00%d", serverPub, seq, prev, msgHash, pub, displayName, tmpID, replyTo))
 }

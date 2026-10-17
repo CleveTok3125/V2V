@@ -20,10 +20,9 @@ func corsOrigin(r *http.Request) (string, bool) {
 	return "", false
 }
 
-// corsMiddleware answers preflight requests and stamps CORS headers for
-// origins in ALLOWED_ORIGINS. It sits in front of the mux, so a preflight
-// never reaches a handler and never counts in the HTTP abuse metrics.
-// Allow-Credentials stays unset: the API carries its proof in the body.
+// corsMiddleware answers preflights and stamps CORS headers for ALLOWED_ORIGINS.
+//
+// Allow-Credentials stays unset because proof travels in the body.
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin, ok := corsOrigin(r)

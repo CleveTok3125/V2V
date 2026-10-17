@@ -60,7 +60,7 @@ func (wasmOutput) Write(p []byte) (int, error) {
 
 // runTUI runs the app against the browser terminal. Bubble Tea parses the
 // keystroke bytes and paints the screen, so no terminal emulation lives in
-// Go. Colour is forced because the wasm build has no TTY to detect from.
+// Go. Color is forced because the wasm build has no TTY to detect from.
 func runTUI(a *app) error {
 	input := newWasmInput()
 

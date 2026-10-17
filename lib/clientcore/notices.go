@@ -17,11 +17,9 @@ func (n Notices) TagsAllowed(tags []string) bool {
 	return len(wire.BlockedBy(tags, n.Muted)) == 0
 }
 
-// PowAllowed reports whether a proof-of-work notice of this tier is at or
-// above the tier floor. It is strict: a tier of zero means the notice carries
-// none, and WireAllowed treats those as unfiltered rather than delegating
-// here, because the floor says how much work to announce, not which outcome
-// to hide.
+// PowAllowed reports whether a proof-of-work notice meets the tier floor.
+//
+// Tier zero carries no proof, so WireAllowed treats it as unfiltered.
 func (n Notices) PowAllowed(tier int) bool { return tier >= n.PowMinTier }
 
 // PowLive is PowAllowed plus the tag gate on the pow tag.
@@ -29,9 +27,10 @@ func (n Notices) PowLive(tier int) bool {
 	return n.TagsAllowed([]string{wire.TagPow}) && n.PowAllowed(tier)
 }
 
-// WireAllowed reports whether a wire is live. The tier floor is checked here
-// and not only where a client emits its own solving line, or ui.powMinTier
-// would appear to work while a server-sent challenge below it still printed.
+// WireAllowed reports whether a wire is live.
+//
+// The tier floor is checked here so a server-sent challenge below
+// ui.powMinTier stays hidden.
 func (n Notices) WireAllowed(msg wire.WireMessage) bool {
 	tags := TagsForWire(msg)
 	if !n.TagsAllowed(tags) {
@@ -46,10 +45,9 @@ func (n Notices) WireAllowed(msg wire.WireMessage) bool {
 	return n.PowAllowed(msg.SysPowTier)
 }
 
-// TagsForWire returns the tags a wire is gated on, or nil for content that is
-// always live. Only system lines are notices; chat is never muted. An
-// untagged system line falls back to the root, so a notice from a peer that
-// predates tagging is still covered by the system switch.
+// TagsForWire returns the tags gating a wire, or nil for always-live content.
+//
+// Only system lines are notices; an untagged system line falls back to the root.
 func TagsForWire(msg wire.WireMessage) []string {
 	if msg.Type != "system" {
 		return nil

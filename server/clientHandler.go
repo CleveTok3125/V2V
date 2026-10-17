@@ -204,12 +204,10 @@ func (c *ClientSession) WritePump() {
 	}
 }
 
-// allowSlowSend enforces the tier slowmode for non-unlimited
-// sessions: tier 2+ may only send once per base×mult (per IP, so a
-// second connection cannot halve it). Unlimited keeps the existing
-// bypass and tiers below 2 cost nothing (no map record). A drop warns
-// best-effort and never touches lastMessageTime: the window stays
-// anchored at the last allowed send.
+// allowSlowSend enforces the tier slowmode for non-unlimited sessions.
+//
+// Tier 2+ may send once per base×mult per IP; unlimited bypasses.
+// A drop warns best-effort and never touches lastMessageTime.
 func (s *ChatServer) allowSlowSend(session *ClientSession, clientIP string, base time.Duration) bool {
 	if session.Perms.CanMessageUnlimited {
 		return true

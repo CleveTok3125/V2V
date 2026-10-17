@@ -267,10 +267,9 @@ func authErrIsProbe(err error) bool {
 	return true
 }
 
-// penalizeAuthFailure decides whether a rejected handshake counts toward the
-// IP ban. It shares one classification with the behaviour score, plus the
-// pre-existing rule that a packet with no role carries no penalty: an
-// anonymous guest has nothing to fail at.
+// penalizeAuthFailure decides whether a rejected handshake counts toward the IP ban.
+//
+// A packet with no role carries no penalty.
 func penalizeAuthFailure(resp AuthPacket, err error) bool {
 	if resp.Role == "" {
 		return false
@@ -563,7 +562,7 @@ func (s *ChatServer) generateDisplayName(username string, clientIP string, perms
 func (s *ChatServer) authenticateClient(conn *websocket.Conn, clientIP, expectedHost string, onion bool) (*ClientSession, error) {
 	perms, authPacket, err := s.HandleAuth(conn, clientIP, expectedHost, onion)
 	if err != nil {
-		// The behaviour ring records the same errors as the ban, e.g. a bad
+		// The behavior ring records the same errors as the ban, e.g. a bad
 		// signature, but a client that simply went away is not an anomaly.
 		if authErrIsProbe(err) {
 			s.observeAuthErr(clientIP, err)

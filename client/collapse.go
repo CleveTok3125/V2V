@@ -80,10 +80,9 @@ func collapsedIndex(lines []entry, height uint64) int {
 	return -1
 }
 
-// foldLines walks lines once, emitting whole lines while they fit in
-// budget rows. A single wall taller than the whole budget is cut
-// mid-line instead (line boundaries cannot apply when one line owns
-// every row). Returns emitted lines, possibly empty.
+// foldLines emits whole lines while they fit in budget rows.
+//
+// A wall taller than the budget cuts mid-line.
 func foldLines(lines []string, budget, width int) []string {
 	var kept []string
 	used := 0
@@ -100,9 +99,9 @@ func foldLines(lines []string, budget, width int) []string {
 	return kept
 }
 
-// collapseBody folds a body to preview rows with the expand trailer on the
-// last kept row. The header is not touched: folding it away would leave a body
-// with nobody attached to it. False means the body fits untouched.
+// collapseBody folds a body to preview rows plus expand trailer.
+//
+// The header stays intact; false means the body fits untouched.
 func collapseBody(body string, height uint64, rows, preview, width int) (string, bool) {
 	if height == 0 || body == "" {
 		return body, false

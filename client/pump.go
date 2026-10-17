@@ -23,14 +23,17 @@ const catchupHoldMax = 5 * time.Second
 // arrives shortly after connect.
 const greetingGrace = 400 * time.Millisecond
 
-// flushDateBannerLocked prints a stashed date banner to TabSystem
-// before the block that follows it. A live banner during an older
-// window appends; a history banner splices. Caller must hold DisplayMu.
+// flushDateBannerLocked prints a stashed date banner before the next block.
+//
+// Live banners append; history banners splice.
+//
+// Caller holds DisplayMu.
 func (s *Session) flushDateBannerLocked() {
 	if s.Pending.PendingDateBannerWire != nil {
 		msg := s.Pending.PendingDateBannerWire
 		s.Pending.PendingDateBannerWire = nil
 		if s.showDateBannerLocked(msg.SysDate) {
+			// Live banner appends even mid-window; history still splices.
 			wasOlder := s.Chain.InOlder
 			if wasOlder && !s.isOlderHistoryWire(*msg) {
 				s.Chain.InOlder = false
@@ -212,17 +215,16 @@ func (s *Session) onLoadPageLocked(hs HistorySync) {
 	s.finishLoadLocked()
 }
 
-// finishLoadLocked ends the initial load: flush held live lines after
-// all history so they land at the bottom in arrival order, release the
-// hold, show the result in the status bar, and run the fork check.
-// Caller must hold DisplayMu.
+// finishLoadLocked ends the initial load and flushes held live lines.
+//
+// Held lines land after history, in arrival order.
+//
+// Caller holds DisplayMu.
 func (s *Session) finishLoadLocked() {
 	loaded := s.Chain.LoadLoaded
 	s.Chain.Loading = false
 	s.Chain.InSync = false
-	// Held lines are live-only (newer than the window, or seq-less):
-	// append them now that history is complete, bypassing any older
-	// window still in flight (they are live, never older history).
+	// Held lines are live, never older history.
 	if len(s.Chain.LoadHold) > 0 {
 		s.Display.ShowJoinMu.RLock()
 		isShowingJoin := s.Display.ShowJoinLeave
@@ -359,7 +361,6 @@ func (s *Session) runPump() {
 		isShowingJoin := s.Display.ShowJoinLeave
 		s.Display.ShowJoinMu.RUnlock()
 
-		// Try to handle structured WireMessage JSON first (for new protocol)
 		var chatWire WireMessage
 		if err := json.Unmarshal(msg, &chatWire); err == nil && chatWire.Type == "chat" {
 			s.Display.DisplayMu.Lock()
@@ -431,8 +432,7 @@ func (s *Session) runPump() {
 			s.refreshCoalesced()
 			continue
 		}
-		// Machine-readable replay trailer: never rendered, only the
-		// fork check below consumes it.
+		// Machine-readable replay trailer: never rendered, only consumed for fork check.
 		if hs, ok := parseHistorySync(msg); ok {
 			s.handleHistorySync(hs)
 			s.refreshCoalesced()

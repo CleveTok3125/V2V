@@ -167,7 +167,6 @@ func TestReadLimitRejectsOversizeFrame(t *testing.T) {
 		}
 		defer c.Close()
 		_ = c.WriteMessage(websocket.TextMessage, []byte(strings.Repeat("a", 64)))
-		// Second frame blows the limit the client sets below.
 		_ = c.WriteMessage(websocket.TextMessage, []byte(strings.Repeat("b", 4096)))
 		<-time.After(500 * time.Millisecond)
 	}))

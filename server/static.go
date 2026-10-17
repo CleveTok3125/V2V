@@ -50,12 +50,10 @@ func resolveWebtermDir(exeDir string) string {
 	return "webterm"
 }
 
-// webFilesHandler serves the static asset directory with transparent support
-// for precompressed variants: when the client advertises br/gzip support and
-// a matching "<name>.br" / "<name>.gz" exists next to the original (both are
-// produced once by `make web`), the variant is streamed instead with the
-// proper Content-Encoding. This shrinks big assets such as app.wasm to a
-// fraction of their size without spending any CPU compressing per request.
+// webFilesHandler serves the static asset directory with precompressed variants.
+//
+// When the client advertises br/gzip and a matching file exists,
+// the variant streams with the proper Content-Encoding.
 func webFilesHandler(dir string) http.Handler {
 	fsys := os.DirFS(dir)
 	fileServer := http.FileServer(http.Dir(dir))

@@ -523,10 +523,11 @@ func (x *wireIndex) oldest() (uint64, bool) {
 	return min, true
 }
 
-// minSeq returns the smallest history seq among indexed wires, 0 when
-// none carries one (empty or all legacy). The older window splices only
-// unchained notices below this bound; live lines (newer, or seq-less
-// live-only) append instead. Callers must hold DisplayMu.
+// minSeq returns the smallest history seq among indexed wires.
+//
+// Zero when empty or all legacy.
+//
+// Caller holds DisplayMu.
 func (x *wireIndex) minSeq() uint64 {
 	if x == nil || len(x.items) == 0 {
 		return 0
@@ -547,12 +548,14 @@ func (x *wireIndex) minSeq() uint64 {
 	return min
 }
 
-// isOlderHistoryWire reports whether a JSON wire belongs to the
-// in-flight older window (splice at the anchor) rather than live
-// traffic (append at the bottom). Chained lines compare heights,
-// unchained notices compare seqs, seq-less live-only never splices.
-// Zero bounds mean an old-server marker window with no cursor: splice
-// everything (legacy behavior). Caller must hold DisplayMu.
+// isOlderHistoryWire reports whether a JSON wire belongs to the older window.
+//
+// Chained lines compare heights; unchained notices compare seqs.
+// Seq-less lines append.
+//
+// Zero bounds splice everything for old servers.
+//
+// Caller holds DisplayMu.
 func (s *Session) isOlderHistoryWire(msg WireMessage) bool {
 	if s.Chain.OlderHeightBound == 0 && s.Chain.OlderSeqBound == 0 {
 		return true
@@ -566,12 +569,12 @@ func (s *Session) isOlderHistoryWire(msg WireMessage) bool {
 	return msg.Seq < s.Chain.OlderSeqBound
 }
 
-// isLoadHistoryWire reports whether a JSON wire belongs to the initial
-// load window (append in page order) rather than live traffic (hold
-// until the load completes). Stored lines carry Seq in the window;
-// legacy chained lines without a cursor (Height>0, Seq==0) are history
-// too: live chained lines always carry Seq. Seq-less live-only
-// (unicast, Height==0) never belongs. Caller must hold DisplayMu.
+// isLoadHistoryWire reports whether a JSON wire belongs to the initial load window.
+//
+// Seq in the window counts as history; legacy chained lines count as history.
+// Seq-less live-only lines never belong.
+//
+// Caller holds DisplayMu.
 func (s *Session) isLoadHistoryWire(msg WireMessage) bool {
 	if msg.Seq > 0 {
 		return msg.Seq >= s.Chain.LoadStartSeq && msg.Seq <= s.Chain.LoadMaxSeq
@@ -626,9 +629,7 @@ func formatInfoBlock(msg WireMessage) []string {
 		}
 		out = append(out, row("trip:", fmt.Sprintf("◆ %s %s%s", shortBadge(tm.Pub), verdict, detail)))
 		out = append(out, row("trip.seq:", strconv.FormatUint(uint64(tm.Seq), 10)))
-		// Every signature input, so the verdict above is checkable by
-		// eye: sha256(text) against msg_hash, then ed25519 over the
-		// payload bytes against sig with pub.
+		// List every signature input so the trip verdict is checkable by eye.
 		out = append(out, row("trip.pub:", hexField(tm.Pub)))
 		out = append(out, row("trip.prev:", hexField(tm.Prev)))
 		out = append(out, row("trip.sig:", hexField(tm.Sig)))
@@ -1213,9 +1214,8 @@ func (s *Session) noteChainTip(tip [32]byte, height uint64) {
 }
 
 func (s *Session) flushChainTip() {
-	// Same guard as noteChainTip: callable lock-free (gracefulQuit,
-	// disconnect path) or nested under DisplayMu (pump paths).
-	// Snapshot under the lock, write outside it (see noteChainTip).
+	// Same guard as noteChainTip: callable lock-free or nested under DisplayMu.
+	// Snapshot under the lock; write outside it.
 	s.Chain.Mu.Lock()
 	if !s.Chain.ChainHaveTip {
 		s.Chain.Mu.Unlock()
@@ -1279,8 +1279,7 @@ func (s *Session) checkChainLink(msg WireMessage) {
 		// transit by the server's non-blocking send to a slow peer,
 		// not rewritten in the log. Re-anchor with one light notice;
 		// the tamper latch stays free so a later real break warns.
-		// Only when the received hash is well-formed: a malformed hash
-		// falls through to the tamper warning below.
+		// Only when the received hash is well-formed; a malformed hash warns as tamper.
 		if parsed, ok := chain.ParseHex64(msg.ChainHash); ok &&
 			s.Chain.ChainHaveTip && err == clientcore.ErrPrevMismatch && msg.ChainHeight > s.Chain.ChainHeight+1 {
 			oldH, oldTip := s.Chain.ChainHeight, s.Chain.ChainTip

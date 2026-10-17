@@ -59,7 +59,6 @@ func promptPassphrase() (string, error) {
 }
 
 func loadContainer(path string) (*identity.IdentityFile, error) {
-	// Check if file is encrypted and need passphrase
 	if enc, _ := identity.IsEncrypted(path); enc {
 		// Try env first
 		if pass := env.Passphrase(); pass != "" {

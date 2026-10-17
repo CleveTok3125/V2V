@@ -139,9 +139,8 @@ func (s *ChatServer) livePairTicketLocked(ticket, clientIP string) (*pairTicket,
 }
 
 // markPairVerified records that a browser proved the role for this ticket.
-// A rejected assertion deliberately does not clear a previous success and
-// does not spend the ticket: the person may simply be holding the wrong
-// passkey and should be able to try another one on the same link.
+//
+// A rejected assertion neither clears a prior success nor spends the ticket.
 func (s *ChatServer) markPairVerified(ticket string) bool {
 	s.PairTicketsMu.Lock()
 	defer s.PairTicketsMu.Unlock()
