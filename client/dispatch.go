@@ -215,7 +215,7 @@ func helpLines() []helpLine {
 		{"/notify, /nt [<tag> on|off | all on|off | powmin <N>]", "Ẩn/hiện thông báo theo tag"},
 		{"/info <n>[:hash]", "Xem đầy đủ metadata tin nhắn (verify lại tại local)"},
 		{"/expand <n>, /xpan", "Mở đầy đủ tin bị thu gọn (vd /expand 1234)"},
-		{"/copy <n>[:hash]", "Copy nội dung thô tin nhắn vào clipboard"},
+		{"/copy [<n>[:hash]]", "Copy nội dung thô tin nhắn vào clipboard (trống: tin mới nhất)"},
 		{"/tab, /t [1|2]", "Chuyển tab chat / local & system"},
 		{"/meta, /m [on|off]", "Hiện/ẩn dòng meta #height:hash (mặc định hiện, chain vẫn verify)"},
 		{"/find, /f <n>[:hash]", "Tìm tin theo số height trong bộ nhớ (vd /find 1234)"},
@@ -694,10 +694,14 @@ func (s *Session) cmdCopy(text string) bool {
 		return false
 	}
 	rest := strings.TrimSpace(strings.TrimPrefix(text, "/copy"))
+	if rest == "" {
+		s.copyLatestLocked()
+		return true
+	}
 	height, _, err := parseFindArg(rest)
 	if err != nil {
 		s.Display.DisplayMu.Lock()
-		s.emitLocalFeedback("[Local]: Dùng /copy <height>[:hash] (vd /copy 1234).\n")
+		s.emitLocalFeedback("[Local]: Dùng /copy [<height>[:hash]] (vd /copy 1234; trống: tin mới nhất).\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return true
@@ -719,6 +723,100 @@ func (s *Session) cmdCopy(text string) bool {
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
 	return true
+}
+
+// latestChatCopy returns the newest chat message in the chat buffer: its
+// height and raw text. WireIdx holds the raw text; a buffer fallback covers
+// an index eviction. Reports false when no chat message is buffered.
+// Callers must hold DisplayMu.
+func (s *Session) latestChatCopy() (uint64, string, bool) {
+	for i := len(s.Display.TabChat.lines) - 1; i >= 0; i-- {
+		e := s.Display.TabChat.lines[i]
+		if e.muted || e.height == 0 {
+			continue
+		}
+		if wire, ok := s.Chain.WireIdx.get(e.height); ok {
+			if strings.TrimSpace(wire.Text) == "" {
+				continue
+			}
+			return e.height, wire.Text, true
+		}
+		var txt string
+		if e.body != "" {
+			txt = stripANSIForFind(e.body)
+		} else {
+			txt = stripANSIForFind(e.header)
+		}
+		if strings.TrimSpace(txt) == "" {
+			continue
+		}
+		return e.height, txt, true
+	}
+	return 0, "", false
+}
+
+// latestSystemCopy returns the newest system line in the system buffer.
+// Date banners and empty lines never count as messages.
+// Callers must hold DisplayMu.
+func (s *Session) latestSystemCopy() (string, bool) {
+	for i := len(s.Display.TabSys.lines) - 1; i >= 0; i-- {
+		e := s.Display.TabSys.lines[i]
+		if e.kind != kindSystem || e.banner {
+			continue
+		}
+		txt := stripANSIForFind(e.header)
+		if e.body != "" {
+			body := stripANSIForFind(e.body)
+			if txt != "" {
+				txt += "\n" + body
+			} else {
+				txt = body
+			}
+		}
+		if strings.TrimSpace(txt) == "" {
+			continue
+		}
+		return txt, true
+	}
+	return "", false
+}
+
+// copyLatestLocked copies the newest message for the active tab: the newest
+// chat message in the chat tab, the newest system line in the system tab.
+// Callers must not hold DisplayMu.
+func (s *Session) copyLatestLocked() {
+	s.Display.DisplayMu.Lock()
+	if s.Display.ActiveTab == TabSystem {
+		if txt, ok := s.latestSystemCopy(); ok {
+			if err := copyToClipboard(txt); err != nil {
+				s.emitLocalFeedback(fmt.Sprintf("[Local]: %v.\n", err))
+			} else {
+				s.emitLocalFeedback("[Local]: Đã copy tin system mới nhất.\n")
+				scheduleClipboardClear(txt, ClientCfg.ClipboardClearAfterSec())
+			}
+			s.Display.DisplayMu.Unlock()
+			s.refreshTerminal()
+			return
+		}
+		s.emitLocalFeedback("[Local]: Chưa có tin system nào để copy.\n")
+		s.Display.DisplayMu.Unlock()
+		s.refreshTerminal()
+		return
+	}
+	if height, txt, ok := s.latestChatCopy(); ok {
+		if err := copyToClipboard(txt); err != nil {
+			s.emitLocalFeedback(fmt.Sprintf("[Local]: %v.\n", err))
+		} else {
+			s.emitLocalFeedback(fmt.Sprintf("[Local]: Đã copy nội dung tin #%d.\n", height))
+			scheduleClipboardClear(txt, ClientCfg.ClipboardClearAfterSec())
+		}
+		s.Display.DisplayMu.Unlock()
+		s.refreshTerminal()
+		return
+	}
+	s.emitLocalFeedback("[Local]: Chưa có tin nhắn nào để copy.\n")
+	s.Display.DisplayMu.Unlock()
+	s.refreshTerminal()
 }
 
 func (s *Session) cmdClearhistory(text string) bool {

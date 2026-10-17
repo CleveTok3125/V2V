@@ -158,7 +158,7 @@ Single terminal, two views: Tab 1 (chat + trip badges) and Tab 2 (local, system,
 ## Slash commands
 
 - Dispatch matches exact tokens (`/help`, `/quit`, …), `/tab`/`/t` with optional `1|2`, `/meta`/`/m` with optional `on|off`, `/find`/`/f` with `<height>[:hash]`, `/info` with `<height>[:hash]` and `/expand`/`/xpan` with `<height>`.
-- Session commands: `/whoami`/`/w`, `/status`, `/showjoin`/`/sj`, `/autoverify`/`/av`, `/notify`/`/nt`, `/clear`/`/c`, `/clearhistory`/`/ch` (deletes the keystroke history file), `/copy <height>[:hash]` (clipboard, auto-cleared).
+- Session commands: `/whoami`/`/w`, `/status`, `/showjoin`/`/sj`, `/autoverify`/`/av`, `/notify`/`/nt`, `/clear`/`/c`, `/clearhistory`/`/ch` (deletes the keystroke history file), `/copy [<height>[:hash]]` (clipboard, auto-cleared; bare copies the newest chat message in tab 1 or the newest system line in tab 2).
 - Anything else starting with `/` is an unknown command (`client/commands.go:isUnknownSlashCommand`) rejected locally with `[Local]: Lệnh không tồn tại…`, never broadcast or trip-signed.
 - Code blocks (```) are unaffected, so they double as the escape hatch for sending literal text starting with `/`.
 - `/reply <height>[:hash] <text>` quotes a buffered message; the height suffix acts as a typo checksum.
@@ -363,7 +363,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - Clicking the badge in the web terminal copies the verify URL and asks with a native `window.confirm` whether to open the verify page in a new tab; a blocked popup leaves the copied link as the fallback.
 - Every web-terminal link click is routed by hand: a verify link takes the copy-and-confirm path above, and any remaining `http(s)` link asks a `window.confirm` that spells out the destination before opening a new tab. Nothing else reaches `window.open`, so a scheme crafted into a message can never be executed (`lib/filter.osc8TargetAllowed` already strips non-`http(s)` OSC8 targets; this is the second gate).
 - The page re-fetches the same URL with `Accept: application/json`, so curl/fetch behavior is unchanged.
-- `/copy <height>[:hash]` copies raw message text to the OS clipboard for pasting into the page (plaintext lives in the clipboard until auto-cleared or overwritten — any local app can read it).
+- `/copy [<height>[:hash]]` copies raw message text to the OS clipboard for pasting into the page (plaintext lives in the clipboard until auto-cleared or overwritten — any local app can read it); bare `/copy` copies the newest chat message in tab 1 or the newest system line in tab 2.
 - Verify pages require HTTPS/localhost, and plain-HTTP shows a warning banner since pasted text could be intercepted in transit.
 - `display_name` stays in badge URLs because the signature binds it, and it is only a pseudonym.
 

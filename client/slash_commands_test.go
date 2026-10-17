@@ -93,7 +93,7 @@ func TestCommandsAnswerInOneEntry(t *testing.T) {
 		{"autoverify", func(s *Session) { s.cmdAutoverify("/av") }},
 		{"meta", func(s *Session) { s.cmdMeta("/meta on") }},
 		{"clearhistory", func(s *Session) { s.cmdClearhistory("/ch") }},
-		{"copy usage", func(s *Session) { s.cmdCopy("/copy") }},
+		{"copy empty", func(s *Session) { s.cmdCopy("/copy") }},
 		{"older usage", func(s *Session) { s.cmdOlder("/older x") }},
 		{"info usage", func(s *Session) { s.cmdInfo("/info") }},
 		{"unknown command", func(s *Session) { s.dispatch("/halp") }},
@@ -418,14 +418,96 @@ func TestCmdCopyBranches(t *testing.T) {
 	if !sess.cmdCopy("/copy") {
 		t.Fatal("bare /copy must match")
 	}
-	if got := out.String(); !strings.Contains(got, "/copy") {
-		t.Fatalf("bare /copy must print usage: %q", got)
+	if got := out.String(); !strings.Contains(got, "Chưa có tin nhắn nào") {
+		t.Fatalf("bare /copy with no chat must report empty: %q", got)
+	}
+
+	sess, out = behaviorSession(t)
+	sess.Display.ActiveTab = TabSystem
+	sess.cmdCopy("/copy")
+	if got := out.String(); !strings.Contains(got, "Chưa có tin system nào") {
+		t.Fatalf("bare /copy with no system must report empty: %q", got)
+	}
+
+	sess, out = behaviorSession(t)
+	seedIndexedWire(sess, 42)
+	sess.Display.TabChat.append(chatBlockForTest(42, "abcd0000", "15:04", "Alice", "hi"))
+	sess.cmdCopy("/copy")
+	if got := out.String(); strings.Contains(got, "Dùng /copy") || strings.Contains(got, "Chưa có") {
+		t.Fatalf("bare /copy with chat must copy latest, got: %q", got)
+	}
+
+	sess, out = behaviorSession(t)
+	sess.Display.ActiveTab = TabSystem
+	sess.Display.TabSys.append(entry{header: "system notice", kind: kindSystem})
+	sess.cmdCopy("/copy")
+	if got := out.String(); strings.Contains(got, "Dùng /copy") || strings.Contains(got, "Chưa có") {
+		t.Fatalf("bare /copy with system must copy latest, got: %q", got)
 	}
 
 	sess, out = behaviorSession(t)
 	sess.cmdCopy("/copy 9999")
 	if got := out.String(); !strings.Contains(got, "không còn trong bộ nhớ") {
 		t.Fatalf("evicted height must report: %q", got)
+	}
+
+	sess, out = behaviorSession(t)
+	sess.cmdCopy("/copy abc")
+	if got := out.String(); !strings.Contains(got, "Dùng /copy") {
+		t.Fatalf("bad arg must print usage: %q", got)
+	}
+}
+
+func TestCopyLatestSelectsNewest(t *testing.T) {
+	sess, _ := behaviorSession(t)
+	sess.Chain.WireIdx.put(WireMessage{Type: "chat", Text: "first", ChainHeight: 10, ChainHash: "aa"})
+	sess.Chain.WireIdx.put(WireMessage{Type: "chat", Text: "second", ChainHeight: 20, ChainHash: "bb"})
+	sess.Display.TabChat.append(chatBlockForTest(10, "aa", "15:04", "Alice", "FIRST-RENDERED"))
+	sess.Display.TabChat.append(chatBlockForTest(20, "bb", "15:05", "Bob", "SECOND-RENDERED"))
+	sess.Display.TabChat.append(noticeEntry("[Local]: xong"))
+	sess.Display.TabChat.append(entry{header: "join", kind: kindSystem})
+	sess.Display.DisplayMu.Lock()
+	h, txt, ok := sess.latestChatCopy()
+	sess.Display.DisplayMu.Unlock()
+	if !ok || h != 20 || txt != "second" {
+		t.Fatalf("latest chat = %d %q %v, want 20 second", h, txt, ok)
+	}
+
+	sess, _ = behaviorSession(t)
+	sess.Display.TabChat.append(chatBlockForTest(30, "cc", "15:06", "Alice", "fallback-body"))
+	sess.Display.DisplayMu.Lock()
+	h, txt, ok = sess.latestChatCopy()
+	sess.Display.DisplayMu.Unlock()
+	if !ok || h != 30 || txt != "fallback-body" {
+		t.Fatalf("evicted fallback = %d %q %v, want 30 fallback-body", h, txt, ok)
+	}
+
+	sess, _ = behaviorSession(t)
+	sess.Display.ActiveTab = TabSystem
+	sess.Display.TabSys.append(entry{header: "sys-one", kind: kindSystem})
+	sess.Display.TabSys.append(noticeEntry("[Local]: xong"))
+	sess.Display.TabSys.append(entry{header: "2026-10-17", kind: kindSystem, banner: true, day: "2026-10-17"})
+	sess.Display.TabSys.append(entry{header: "sys-two", kind: kindSystem})
+	sess.Display.DisplayMu.Lock()
+	txt, ok = sess.latestSystemCopy()
+	sess.Display.DisplayMu.Unlock()
+	if !ok || txt != "sys-two" {
+		t.Fatalf("latest system = %q %v, want sys-two", txt, ok)
+	}
+
+	sess, _ = behaviorSession(t)
+	sess.Display.DisplayMu.Lock()
+	_, _, ok = sess.latestChatCopy()
+	sess.Display.DisplayMu.Unlock()
+	if ok {
+		t.Fatal("empty chat must report false")
+	}
+	sess.Display.ActiveTab = TabSystem
+	sess.Display.DisplayMu.Lock()
+	_, ok = sess.latestSystemCopy()
+	sess.Display.DisplayMu.Unlock()
+	if ok {
+		t.Fatal("empty system must report false")
 	}
 }
 
