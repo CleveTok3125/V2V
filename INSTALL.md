@@ -36,12 +36,12 @@ docker-compose.yml    # container deployment
 | Container image   | —            | amd64, arm64 | —            | —               | —                  |
 | `serve.py` bundle | any (Python) | any (Python) | any (Python) | any (Python)    | —                  |
 
-The table lists officially released artifacts. On Android some components
-ship no artifact but still run, with or without small changes. The WASM
-client runs in any modern browser (Android and iOS included), and the
-`serve.py` bundle is OS-independent, needing only Python 3. Client and
-`V2Vctl` ship as bare binaries; the server ships as `.tar.gz`, or `.zip`
-on Windows.
+- Only the table rows ship as released artifacts. On Android, components
+  without an artifact still run, with or without small changes.
+- The WASM client runs in any modern browser; the `serve.py` bundle
+  needs only Python 3.
+- Client and `V2Vctl` ship as bare binaries; the server ships as
+  `.tar.gz`, or `.zip` on Windows.
 
 ## Version coupling
 
@@ -75,13 +75,12 @@ allow `/web/`
 instead, point that server at the extracted directory with the same
 `/web/` prefix; the assets reference `/web/...` paths.
 
-Passkey is bound to one `WEBAUTHN_RPID` and one `WEBAUTHN_ORIGIN`
-(`RPOrigins` holds a single value), so a page served from a different host
-cannot run the ceremony. Serving this bundle from `127.0.0.1`/`localhost`
-over plain HTTP therefore disables passkey login; guest, tripcode and
-ed25519 key logins still work. Using passkey here means serving the page
-from the exact `WEBAUTHN_ORIGIN` hostname over HTTPS, which cannot also
-serve a different production origin at the same time.
+- Passkey is bound to one `WEBAUTHN_RPID` and one `WEBAUTHN_ORIGIN`.
+  A page served from a different host cannot run the ceremony.
+- Serving this bundle from `127.0.0.1`/`localhost` over plain HTTP
+  disables passkey login; guest, tripcode, and ed25519 key logins still work.
+- Using passkey here means serving the page from the exact
+  `WEBAUTHN_ORIGIN` hostname over HTTPS.
 
 `v2vctl enroll` builds its link from `WEBAUTHN_ORIGIN` (the environment, or
 the instance `.env` if unset) and refuses to issue a ticket without one: a
