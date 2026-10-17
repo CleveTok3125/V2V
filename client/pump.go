@@ -24,12 +24,20 @@ const catchupHoldMax = 5 * time.Second
 const greetingGrace = 400 * time.Millisecond
 
 // flushDateBannerLocked prints a stashed date banner to TabSystem
-// before the block that follows it. Caller must hold s.Display.DisplayMu.
+// before the block that follows it. A live banner during an older
+// window appends; a history banner splices. Caller must hold DisplayMu.
 func (s *Session) flushDateBannerLocked() {
 	if s.Pending.PendingDateBannerWire != nil {
 		msg := s.Pending.PendingDateBannerWire
 		s.Pending.PendingDateBannerWire = nil
 		if s.showDateBannerLocked(msg.SysDate) {
+			wasOlder := s.Chain.InOlder
+			if wasOlder && !s.isOlderHistoryWire(*msg) {
+				s.Chain.InOlder = false
+				s.renderChatBlock(*msg)
+				s.Chain.InOlder = wasOlder
+				return
+			}
 			s.renderChatBlock(*msg)
 		}
 	}
@@ -136,6 +144,7 @@ func (s *Session) handleHistoryInfo(info HistoryInfo) {
 	s.Chain.LoadTarget = target
 	s.Chain.LoadLoaded = 0
 	s.Chain.LoadRetried = 0
+	s.Chain.LoadHold = nil
 	s.Chain.LoadMaxSeq = info.MaxSeq
 	// after_seq is exclusive: to load the last `target` lines ending at
 	// MaxSeq, start just below MaxSeq-target+1.
@@ -203,13 +212,55 @@ func (s *Session) onLoadPageLocked(hs HistorySync) {
 	s.finishLoadLocked()
 }
 
-// finishLoadLocked ends the initial load: release the hold, show the
-// result in the status bar, and run the fork check against the received
-// heights. Caller must hold DisplayMu.
+// finishLoadLocked ends the initial load: flush held live lines after
+// all history so they land at the bottom in arrival order, release the
+// hold, show the result in the status bar, and run the fork check.
+// Caller must hold DisplayMu.
 func (s *Session) finishLoadLocked() {
 	loaded := s.Chain.LoadLoaded
 	s.Chain.Loading = false
 	s.Chain.InSync = false
+	// Held lines are live-only (newer than the window, or seq-less):
+	// append them now that history is complete, bypassing any older
+	// window still in flight (they are live, never older history).
+	if len(s.Chain.LoadHold) > 0 {
+		s.Display.ShowJoinMu.RLock()
+		isShowingJoin := s.Display.ShowJoinLeave
+		s.Display.ShowJoinMu.RUnlock()
+		wasOlder := s.Chain.InOlder
+		s.Chain.InOlder = false
+		for _, h := range s.Chain.LoadHold {
+			if h.isRaw {
+				s.emitRawLineLocked(h.raw)
+				continue
+			}
+			msg := h.msg
+			if msg.Type == "chat" {
+				if rendered := s.verifyReplayWire(msg, true); !rendered {
+					s.flushDateBannerLocked()
+					s.renderChatBlock(msg)
+				}
+				continue
+			}
+			if msg.Type != "system" {
+				continue
+			}
+			rendered := s.verifyReplayWire(msg, false)
+			if !rendered && !isShowingJoin && wire.HasTag(msg.Tags, wire.TagDate) {
+				s.Pending.PendingDateBannerWire = &msg
+				continue
+			}
+			if !rendered && !isShowingJoin && wire.HasAnyTag(msg.Tags, wire.TagJoin, wire.TagLeave) {
+				continue
+			}
+			if !rendered {
+				s.flushDateBannerLocked()
+				s.renderChatBlock(msg)
+			}
+		}
+		s.Chain.InOlder = wasOlder
+		s.Chain.LoadHold = nil
+	}
 	if loaded > 0 {
 		s.setStatusLocked(fmt.Sprintf("Đã tải %d tin", loaded))
 	} else {
@@ -240,6 +291,8 @@ func (s *Session) handleHistorySync(hs HistorySync) {
 	}
 	if s.Chain.InOlder {
 		s.Chain.InOlder = false
+		s.Chain.OlderHeightBound = 0
+		s.Chain.OlderSeqBound = 0
 		s.flushDateBannerLocked()
 		s.Pending.PendingDateBannerWire = nil
 		if hs.Total == 0 {
@@ -310,10 +363,25 @@ func (s *Session) runPump() {
 		var chatWire WireMessage
 		if err := json.Unmarshal(msg, &chatWire); err == nil && chatWire.Type == "chat" {
 			s.Display.DisplayMu.Lock()
-			if rendered := s.verifyReplayWire(chatWire, true); !rendered {
+			if s.Chain.Loading && s.Chain.InSync && !s.isLoadHistoryWire(chatWire) {
+				s.Chain.LoadHold = append(s.Chain.LoadHold, heldLine{msg: chatWire})
+				s.Display.DisplayMu.Unlock()
+				s.refreshCoalesced()
+				continue
+			}
+			wasOlder := s.Chain.InOlder
+			liveOlder := wasOlder && !s.isOlderHistoryWire(chatWire)
+			if liveOlder {
 				s.flushDateBannerLocked()
+				s.Chain.InOlder = false
+			}
+			if rendered := s.verifyReplayWire(chatWire, true); !rendered {
+				if !liveOlder {
+					s.flushDateBannerLocked()
+				}
 				s.renderChatBlock(chatWire)
 			}
+			s.Chain.InOlder = wasOlder
 			s.Display.DisplayMu.Unlock()
 			s.refreshCoalesced()
 			continue
@@ -326,22 +394,39 @@ func (s *Session) runPump() {
 				continue
 			}
 			s.Display.DisplayMu.Lock()
+			if s.Chain.Loading && s.Chain.InSync && !s.isLoadHistoryWire(sysWire) {
+				s.Chain.LoadHold = append(s.Chain.LoadHold, heldLine{msg: sysWire})
+				s.Display.DisplayMu.Unlock()
+				s.refreshCoalesced()
+				continue
+			}
+			wasOlder := s.Chain.InOlder
+			liveOlder := wasOlder && !s.isOlderHistoryWire(sysWire)
+			if liveOlder {
+				s.flushDateBannerLocked()
+				s.Chain.InOlder = false
+			}
 			rendered := s.verifyReplayWire(sysWire, false)
-			if !rendered && !isShowingJoin && wire.HasTag(sysWire.Tags, wire.TagDate) {
+			if !rendered && !isShowingJoin && wire.HasTag(sysWire.Tags, wire.TagDate) && !liveOlder {
 				s.Pending.PendingDateBannerWire = &sysWire
+				s.Chain.InOlder = wasOlder
 				s.Display.DisplayMu.Unlock()
 				s.refreshCoalesced()
 				continue
 			}
 			if !rendered && !isShowingJoin && wire.HasAnyTag(sysWire.Tags, wire.TagJoin, wire.TagLeave) {
+				s.Chain.InOlder = wasOlder
 				s.Display.DisplayMu.Unlock()
 				s.refreshCoalesced()
 				continue
 			}
 			if !rendered {
-				s.flushDateBannerLocked()
+				if !liveOlder {
+					s.flushDateBannerLocked()
+				}
 				s.renderChatBlock(sysWire)
 			}
+			s.Chain.InOlder = wasOlder
 			s.Display.DisplayMu.Unlock()
 			s.refreshCoalesced()
 			continue
@@ -386,20 +471,36 @@ func (s *Session) runPump() {
 					continue
 				}
 				s.Display.DisplayMu.Lock()
+				if s.Chain.Loading && s.Chain.InSync && !s.isLoadHistoryWire(wl) {
+					s.Chain.LoadHold = append(s.Chain.LoadHold, heldLine{msg: wl})
+					s.Display.DisplayMu.Unlock()
+					continue
+				}
+				wasOlder := s.Chain.InOlder
+				liveOlder := wasOlder && !s.isOlderHistoryWire(wl)
+				if liveOlder {
+					s.flushDateBannerLocked()
+					s.Chain.InOlder = false
+				}
 				rendered := s.verifyReplayWire(wl, wl.Type == "chat")
-				if !rendered && wl.Type == "system" && !isShowingJoin && wire.HasTag(wl.Tags, wire.TagDate) {
+				if !rendered && wl.Type == "system" && !isShowingJoin && wire.HasTag(wl.Tags, wire.TagDate) && !liveOlder {
 					s.Pending.PendingDateBannerWire = &wl
+					s.Chain.InOlder = wasOlder
 					s.Display.DisplayMu.Unlock()
 					continue
 				}
 				if !rendered && wl.Type == "system" && !isShowingJoin && wire.HasAnyTag(wl.Tags, wire.TagJoin, wire.TagLeave) {
+					s.Chain.InOlder = wasOlder
 					s.Display.DisplayMu.Unlock()
 					continue
 				}
 				if !rendered {
-					s.flushDateBannerLocked()
+					if !liveOlder {
+						s.flushDateBannerLocked()
+					}
 					s.renderChatBlock(wl)
 				}
+				s.Chain.InOlder = wasOlder
 				s.Display.DisplayMu.Unlock()
 				continue
 			}
@@ -409,6 +510,11 @@ func (s *Session) runPump() {
 				s.Display.DisplayMu.Unlock()
 			}
 			s.Display.DisplayMu.Lock()
+			if s.Chain.Loading && s.Chain.InSync {
+				s.Chain.LoadHold = append(s.Chain.LoadHold, heldLine{raw: line, isRaw: true})
+				s.Display.DisplayMu.Unlock()
+				continue
+			}
 			s.emitRawLineLocked(line)
 			s.Display.DisplayMu.Unlock()
 		}

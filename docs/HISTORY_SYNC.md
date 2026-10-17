@@ -266,6 +266,12 @@ Because paging and live delivery share the same chain and the same
   `dropped > 0`; the peer re-requests the span instead of trusting it.
 - **Legacy records**: records written before `seq` existed are backfilled
   on load, so they page like any other line.
+- **Live-only lines**: direct system notices (unicast, per-client) carry
+  no `seq` and never enter storage, so they never appear in a history
+  response. A peer must never splice a `seq`-less JSON line into an
+  older window: it appends (or holds during the initial load) instead.
+  Raw legacy lines carry no `seq` either but arrive only in history
+  responses, so they splice like any other older line.
 
 ## Configuration
 

@@ -847,6 +847,8 @@ func (s *Session) requestOlder(limit int) (bool, error) {
 		return false, nil
 	}
 	s.Chain.InOlder = true
+	s.Chain.OlderHeightBound = before
+	s.Chain.OlderSeqBound = s.Chain.WireIdx.minSeq()
 	s.Chain.OlderInsert = olderAnchor(s.Display.TabChat)
 	s.Chain.OlderInsertSys = olderAnchor(s.Display.TabSys)
 	s.Display.DisplayMu.Unlock()
@@ -854,6 +856,8 @@ func (s *Session) requestOlder(limit int) (bool, error) {
 	if err != nil {
 		s.Display.DisplayMu.Lock()
 		s.Chain.InOlder = false
+		s.Chain.OlderHeightBound = 0
+		s.Chain.OlderSeqBound = 0
 		s.Display.DisplayMu.Unlock()
 	}
 	return true, err

@@ -168,6 +168,13 @@ type ChainState struct {
 	// header and advanced as entries land.
 	OlderInsert    int
 	OlderInsertSys int
+	// OlderHeightBound/OlderSeqBound snapshot the oldest held line at
+	// request time: chained history splices only below the height bound,
+	// unchained notices only below the seq bound. Live lines (newer, or
+	// seq-less live-only) append instead. Zero bounds mean an old-server
+	// marker window with no cursor: splice everything (legacy behavior).
+	OlderHeightBound uint64
+	OlderSeqBound    uint64
 	// InRecover marks a recovery window in flight: the server is
 	// refilling missed heights at or above the running tip's past.
 	// Recovery wires verify against their own anchor (the tip at
@@ -207,9 +214,21 @@ type ChainState struct {
 	LoadTarget   int
 	LoadLoaded   int
 	LoadRetried  int
+	// LoadHold queues live wires that arrive during the initial load.
+	// History pages append oldest-first; live lines held here flush after
+	// the load so they land after all history, in arrival order.
+	LoadHold     []heldLine
 	TipSinceSave uint64
 	WireIdx      *wireIndex
 	RenderCache  *renderCache
+}
+
+// heldLine is one live line held during the initial load: a JSON wire
+// or a raw legacy line, in arrival order.
+type heldLine struct {
+	msg   WireMessage
+	raw   string
+	isRaw bool
 }
 
 // VerifyState carries the autoverify toggle: whether a received badge is

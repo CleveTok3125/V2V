@@ -523,6 +523,62 @@ func (x *wireIndex) oldest() (uint64, bool) {
 	return min, true
 }
 
+// minSeq returns the smallest history seq among indexed wires, 0 when
+// none carries one (empty or all legacy). The older window splices only
+// unchained notices below this bound; live lines (newer, or seq-less
+// live-only) append instead. Callers must hold DisplayMu.
+func (x *wireIndex) minSeq() uint64 {
+	if x == nil || len(x.items) == 0 {
+		return 0
+	}
+	var min uint64
+	first := true
+	for _, w := range x.items {
+		if w.Seq == 0 {
+			continue
+		}
+		if first || w.Seq < min {
+			min, first = w.Seq, false
+		}
+	}
+	if first {
+		return 0
+	}
+	return min
+}
+
+// isOlderHistoryWire reports whether a JSON wire belongs to the
+// in-flight older window (splice at the anchor) rather than live
+// traffic (append at the bottom). Chained lines compare heights,
+// unchained notices compare seqs, seq-less live-only never splices.
+// Zero bounds mean an old-server marker window with no cursor: splice
+// everything (legacy behavior). Caller must hold DisplayMu.
+func (s *Session) isOlderHistoryWire(msg WireMessage) bool {
+	if s.Chain.OlderHeightBound == 0 && s.Chain.OlderSeqBound == 0 {
+		return true
+	}
+	if msg.ChainHeight > 0 {
+		return msg.ChainHeight < s.Chain.OlderHeightBound
+	}
+	if msg.Seq == 0 {
+		return false
+	}
+	return msg.Seq < s.Chain.OlderSeqBound
+}
+
+// isLoadHistoryWire reports whether a JSON wire belongs to the initial
+// load window (append in page order) rather than live traffic (hold
+// until the load completes). Stored lines carry Seq in the window;
+// legacy chained lines without a cursor (Height>0, Seq==0) are history
+// too: live chained lines always carry Seq. Seq-less live-only
+// (unicast, Height==0) never belongs. Caller must hold DisplayMu.
+func (s *Session) isLoadHistoryWire(msg WireMessage) bool {
+	if msg.Seq > 0 {
+		return msg.Seq >= s.Chain.LoadStartSeq && msg.Seq <= s.Chain.LoadMaxSeq
+	}
+	return msg.ChainHeight > 0
+}
+
 // formatInfoBlock renders the full metadata detail of one indexed wire.
 // Both verdicts recompute locally without network: the chain content
 // hash and, for signed messages, the trip signature.

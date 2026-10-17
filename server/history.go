@@ -465,6 +465,9 @@ func selectWindow(lines []string, before uint64, limit int) []string {
 // recordLine renders one disk record in RAM string form (marshaled wire
 // or raw message), mirroring InitHistoryStore. False means the record
 // holds nothing renderable and must be skipped like the loader skips it.
+// JSON history lines always carry Seq>0 after backfill; raw legacy lines
+// carry none and the client treats raw as history (splice), while JSON
+// with Seq==0 is always live-only (unicast) and must append.
 func recordLine(rec historyRecord) (string, bool) {
 	if rec.Wire != nil {
 		data, _ := json.Marshal(rec.Wire)
@@ -589,6 +592,9 @@ func (c *ChainService) SendChatSegment(session *ClientSession, before uint64, li
 // oldest first, plus whether more remain and the resume cursor (the last
 // seq returned). RAM only: the recent window is what an initial load or
 // a refill needs; deeper history stays on the height-cursor path.
+// Live-only lines (unicast, seq 0, never stored) never appear here:
+// they are not history and the client always appends them instead of
+// splicing them into an older window.
 func (c *ChainService) collectAfterSeq(afterSeq uint64, limit int) (lines []string, more bool, next uint64) {
 	if limit <= 0 {
 		return nil, false, 0
@@ -611,7 +617,9 @@ func (c *ChainService) collectAfterSeq(afterSeq uint64, limit int) (lines []stri
 
 // collectBeforeSeq returns up to limit stored lines with seq < beforeSeq,
 // newest first (beforeSeq 0 means from the tip), plus whether more remain
-// and the resume cursor (the smallest seq returned).
+// and the resume cursor (the smallest seq returned). Live-only lines
+// (seq 0) are skipped: they are never history, so a client must never
+// splice them into an older window.
 func (c *ChainService) collectBeforeSeq(beforeSeq uint64, limit int) (lines []string, more bool, next uint64) {
 	if limit <= 0 {
 		return nil, false, 0
