@@ -975,10 +975,10 @@ func TestAppExpandTrailerClick(t *testing.T) {
 	a.layout()
 	a.dirty = true
 	a.refreshContent()
-	if len(a.trailers) != 1 {
-		t.Fatalf("the folded block must expose one trailer, got %d", len(a.trailers))
+	if len(a.clicks) != 1 {
+		t.Fatalf("the folded block must expose one trailer, got %d", len(a.clicks))
 	}
-	span := a.trailers[0]
+	span := a.clicks[0]
 	y := span.row - a.viewport.YOffset() + chatTop
 
 	// The bracket is a button: clicking it unfolds the block where it sits.
@@ -1017,10 +1017,10 @@ func TestAppTrailerHoverUnderlines(t *testing.T) {
 	a.layout()
 	a.dirty = true
 	a.refreshContent()
-	if len(a.trailers) != 1 {
-		t.Fatalf("the folded block must expose one trailer, got %d", len(a.trailers))
+	if len(a.clicks) != 1 {
+		t.Fatalf("the folded block must expose one trailer, got %d", len(a.clicks))
 	}
-	span := a.trailers[0]
+	span := a.clicks[0]
 	y := span.row - a.viewport.YOffset() + chatTop
 
 	// The row that draws the trailer, with its escapes intact.
@@ -1055,10 +1055,10 @@ func TestAppTrailerSurvivesWrap(t *testing.T) {
 		a.layout()
 		a.dirty = true
 		a.refreshContent()
-		if len(a.trailers) != 1 {
-			t.Fatalf("content %d must expose one trailer, got %d", n, len(a.trailers))
+		if len(a.clicks) != 1 {
+			t.Fatalf("content %d must expose one trailer, got %d", n, len(a.clicks))
 		}
-		span := a.trailers[0]
+		span := a.clicks[0]
 		y := span.row - a.viewport.YOffset() + chatTop
 		a.Update(tea.MouseMotionMsg{X: span.start, Y: y})
 		underlined := false

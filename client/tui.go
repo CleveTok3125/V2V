@@ -264,17 +264,16 @@ type app struct {
 	countTab   int
 	newEntries int
 
-	// Hover state for the expand trailers. The pointer position is kept so a
-	// scroll or a redraw can re-resolve it, trailers holds the spans drawn on
-	// screen and chatText the rows they were read from.
+	// Hover state for the clickable brackets. The pointer position is
+	// kept so a scroll or a redraw can re-resolve it, clicks holds the
+	// spans drawn on screen and chatText the rows they were read from.
 	mouseIn    bool
 	mouseX     int
 	mouseY     int
 	hoverRow   int
 	hoverStart int
 	hoverEnd   int
-	trailers   []trailerSpan
-	votes      []voteSpan
+	clicks     []clickSpan
 	chatText   string
 }
 
@@ -402,11 +401,8 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if msg.Button == tea.MouseLeft {
-			if span, ok := a.trailerAt(msg.X, msg.Y); ok {
-				return a, a.expandCmd(span.height)
-			}
-			if span, ok := a.voteAt(msg.X, msg.Y); ok {
-				return a, a.voteCmd(span.height, span.direction)
+			if span, ok := a.clickAt(msg.X, msg.Y); ok {
+				return a, span.run
 			}
 			if p, ok := a.contentPos(msg.X, msg.Y); ok {
 				a.selActive, a.selAnchor, a.selCursor = true, p, p
@@ -435,8 +431,7 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.viewport, cmd = a.viewport.Update(msg)
 		a.maybeLoadOlder()
 		// The rows moved under a pointer that did not.
-		a.scanTrailers()
-		a.scanVotes()
+		a.scanClicks()
 		if a.refreshHover() {
 			a.dirty = true
 		}
@@ -1156,8 +1151,7 @@ func (a *app) refreshContent() {
 	}
 	a.status = a.sess.uiStatus()
 	a.chatText = content
-	a.scanTrailers()
-	a.scanVotes()
+	a.scanClicks()
 	a.refreshHover()
 	a.dirty = false
 }
@@ -1321,13 +1315,35 @@ func (a *app) View() tea.View {
 	return v
 }
 
-// trailerSpan is the geometry of one expand trailer on screen: the content row
-// it sits on and the columns its command bracket covers.
-type trailerSpan struct {
-	row    int
-	start  int
-	end    int
-	height uint64
+// clickSpan is one clickable bracket on screen: its row, its columns
+// and the command a click runs. Finders parse each button kind off
+// drawn text; scan, hover and click are shared.
+type clickSpan struct {
+	row, start, end int
+	run             tea.Cmd
+}
+
+// visualRows splits logical lines the way the viewport renders them:
+// hard cuts at multiples of width, ANSI-aware. It mirrors bubbles'
+// softWrap without gutters (this app sets none), so click spans and the
+// pointer share one row space even when a header wraps. A cut landing
+// inside a token still disables that click: no vote on ambiguity.
+func visualRows(lines []string, width int) []string {
+	if width < 1 {
+		width = 80
+	}
+	var out []string
+	for _, line := range lines {
+		lineWidth := ansi.StringWidth(line)
+		if lineWidth <= width {
+			out = append(out, line)
+			continue
+		}
+		for idx := 0; idx < lineWidth; idx += width {
+			out = append(out, ansi.Cut(line, idx, width+idx))
+		}
+	}
+	return out
 }
 
 // trailerOnLine locates the expand trailer drawn on one rendered row. Columns
@@ -1352,15 +1368,15 @@ func trailerOnLine(line string) (height uint64, start, end int, ok bool) {
 	return parsed, start, end, true
 }
 
-// scanTrailers records the trailers among the rows on screen, so a pointer
-// move only has to look up a span. Only the visible range is read: the rows
-// above and below cannot be hovered.
-func (a *app) scanTrailers() {
-	a.trailers = a.trailers[:0]
+// scanClicks records the clickable brackets among the rows on screen,
+// so a pointer move only has to look up a span. Only the visible range
+// is read: the rows above and below cannot be hovered.
+func (a *app) scanClicks() {
+	a.clicks = a.clicks[:0]
 	if a.chatText == "" {
 		return
 	}
-	lines := strings.Split(a.chatText, "\n")
+	lines := visualRows(strings.Split(a.chatText, "\n"), a.chatWidth())
 	top := a.viewport.YOffset()
 	for i := 0; i < a.viewport.Height(); i++ {
 		row := top + i
@@ -1368,23 +1384,32 @@ func (a *app) scanTrailers() {
 			break
 		}
 		if height, start, end, ok := trailerOnLine(lines[row]); ok {
-			a.trailers = append(a.trailers, trailerSpan{row: row, start: start, end: end, height: height})
+			a.clicks = append(a.clicks, clickSpan{row: row, start: start, end: end, run: a.expandCmd(height)})
+		}
+		spans := voteSpansOnLine(lines[row])
+		for _, found := range spans {
+			a.clicks = append(a.clicks, clickSpan{row: row, start: found.start, end: found.end, run: a.voteCmd(found.height, found.direction)})
+		}
+		if len(spans) == 0 && row-1 >= 0 {
+			for _, found := range recoverWrappedStrip(lines[row-1], lines[row]) {
+				a.clicks = append(a.clicks, clickSpan{row: row, start: found.start, end: found.end, run: a.voteCmd(found.height, found.direction)})
+			}
 		}
 	}
 }
 
-// trailerAt maps a screen cell to the trailer drawn there.
-func (a *app) trailerAt(x, y int) (trailerSpan, bool) {
+// clickAt maps a screen cell to the clickable bracket drawn there.
+func (a *app) clickAt(x, y int) (clickSpan, bool) {
 	if a.showHelp {
-		return trailerSpan{}, false
+		return clickSpan{}, false
 	}
 	row := a.viewport.YOffset() + (y - chatTop)
-	for _, span := range a.trailers {
+	for _, span := range a.clicks {
 		if span.row == row && x >= span.start && x < span.end {
 			return span, true
 		}
 	}
-	return trailerSpan{}, false
+	return clickSpan{}, false
 }
 
 // refreshHover re-resolves the button under the pointer, which a scroll
@@ -1394,9 +1419,7 @@ func (a *app) refreshHover() bool {
 	row, start := a.hoverRow, a.hoverStart
 	a.hoverRow, a.hoverStart, a.hoverEnd = -1, 0, 0
 	if a.mouseIn {
-		if span, ok := a.trailerAt(a.mouseX, a.mouseY); ok {
-			a.hoverRow, a.hoverStart, a.hoverEnd = span.row, span.start, span.end
-		} else if span, ok := a.voteAt(a.mouseX, a.mouseY); ok {
+		if span, ok := a.clickAt(a.mouseX, a.mouseY); ok {
 			a.hoverRow, a.hoverStart, a.hoverEnd = span.row, span.start, span.end
 		}
 	}
@@ -1410,16 +1433,6 @@ func (a *app) expandCmd(height uint64) tea.Cmd {
 		a.sess.expandInPlace(height)
 		return nil
 	}
-}
-
-// voteSpan is the geometry of one vote token on screen: the content
-// row it sits on, the columns it covers, and the vote a click casts.
-type voteSpan struct {
-	row       int
-	start     int
-	end       int
-	height    uint64
-	direction int
 }
 
 // voteFound is one parsed vote token: the vote it casts and its cell
@@ -1439,39 +1452,120 @@ var voteMeta = regexp.MustCompile(`• #(\d+):([0-9a-f]{4})`)
 // voteArrow matches one score token: ▲12 or ▼3.
 var voteArrow = regexp.MustCompile(`([▲▼])(\d+)`)
 
+// parseVoteMeta reads the "#height:hash" reference a vote strip belongs
+// to. It reports the height and the byte offset just past the match.
+func parseVoteMeta(plain string) (height uint64, metaEnd int, ok bool) {
+	meta := voteMeta.FindStringSubmatchIndex(plain)
+	if meta == nil {
+		return 0, 0, false
+	}
+	parsed, err := strconv.ParseUint(plain[meta[2]:meta[3]], 10, 64)
+	if err != nil || parsed == 0 {
+		return 0, 0, false
+	}
+	return parsed, meta[1], true
+}
+
+// arrowDirection reads the vote direction off one score token.
+func arrowDirection(token string) int {
+	if strings.HasPrefix(token, "▲") {
+		return wire.DirUpvote
+	}
+	return wire.DirDownvote
+}
+
 // voteSpansOnLine locates every vote token drawn on one rendered row
 // next to its meta reference.
 //
-// A row without the reference, or a token wrapped onto another row
-// than its reference, yields nothing: no vote on ambiguity. Tokens
-// before the reference are ignored: the genuine strip always renders
-// after the meta, while legacy display names may still carry arrow runes.
+// A row without the reference yields nothing here; a strip wrapped onto
+// the next row is recovered by scanClicks instead. Tokens before the
+// reference are ignored: the genuine strip always renders after the
+// meta, while legacy display names may still carry arrow runes.
 func voteSpansOnLine(line string) []voteFound {
 	plain := ansi.Strip(line)
-	meta := voteMeta.FindStringSubmatchIndex(plain)
-	if meta == nil {
-		return nil
-	}
-	height, err := strconv.ParseUint(plain[meta[2]:meta[3]], 10, 64)
-	if err != nil || height == 0 {
+	height, metaEnd, ok := parseVoteMeta(plain)
+	if !ok {
 		return nil
 	}
 	var out []voteFound
 	for _, arrow := range voteArrow.FindAllStringSubmatchIndex(plain, -1) {
-		if arrow[0] <= meta[1] {
+		if arrow[0] <= metaEnd {
 			continue
 		}
-		direction := wire.DirDownvote
-		if plain[arrow[2]:arrow[3]] == "▲" {
-			direction = wire.DirUpvote
-		}
+		token := plain[arrow[0]:arrow[1]]
 		start := ansi.StringWidth(plain[:arrow[0]])
 		out = append(out, voteFound{
 			height:    height,
-			direction: direction,
+			direction: arrowDirection(token),
 			start:     start,
-			end:       start + ansi.StringWidth(plain[arrow[0]:arrow[1]]),
+			end:       start + ansi.StringWidth(token),
 		})
+	}
+	return out
+}
+
+// stripRemnantTokens locates vote tokens on a row holding nothing else:
+// frame borders and padding aside, the row must be tokens only. A body
+// line starting with an arrow carries other text, so it never passes.
+func stripRemnantTokens(line string) []voteFound {
+	plain := ansi.Strip(line)
+	i := 0
+	skipPad := func() {
+		for i < len(plain) && (plain[i] == ' ' || strings.HasPrefix(plain[i:], "│")) {
+			if plain[i] == ' ' {
+				i++
+			} else {
+				i += len("│")
+			}
+		}
+	}
+	skipPad()
+	var out []voteFound
+	for i < len(plain) {
+		arrow := voteArrow.FindStringSubmatchIndex(plain[i:])
+		if arrow == nil || arrow[0] != 0 {
+			return nil
+		}
+		token := plain[i : i+arrow[1]]
+		start := ansi.StringWidth(plain[:i])
+		out = append(out, voteFound{
+			direction: arrowDirection(token),
+			start:     start,
+			end:       start + ansi.StringWidth(token),
+		})
+		i += arrow[1]
+		skipPad()
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// recoverWrappedStrip maps a strip remnant (tokens wrapped off their
+// meta row) onto the meta of the row directly above. Only directions
+// the meta row itself lacks are taken: a body line mimicking a strip
+// next to a complete one stays unclickable. Deeper wraps stay dark.
+func recoverWrappedStrip(prevLine, line string) []voteFound {
+	remnant := stripRemnantTokens(line)
+	if len(remnant) == 0 {
+		return nil
+	}
+	height, _, ok := parseVoteMeta(ansi.Strip(prevLine))
+	if !ok {
+		return nil
+	}
+	present := map[int]bool{}
+	for _, found := range voteSpansOnLine(prevLine) {
+		present[found.direction] = true
+	}
+	var out []voteFound
+	for _, found := range remnant {
+		if present[found.direction] {
+			continue
+		}
+		found.height = height
+		out = append(out, found)
 	}
 	return out
 }
@@ -1484,41 +1578,6 @@ func voteOnLine(line string) (height uint64, direction, start, end int, ok bool)
 	}
 	first := spans[0]
 	return first.height, first.direction, first.start, first.end, true
-}
-
-// scanVotes records the vote tokens among the rows on screen, so a
-// pointer move only has to look up a span. Only the visible range is
-// read: the rows above and below cannot be hovered.
-func (a *app) scanVotes() {
-	a.votes = a.votes[:0]
-	if a.chatText == "" {
-		return
-	}
-	lines := strings.Split(a.chatText, "\n")
-	top := a.viewport.YOffset()
-	for i := 0; i < a.viewport.Height(); i++ {
-		row := top + i
-		if row < 0 || row >= len(lines) {
-			break
-		}
-		for _, found := range voteSpansOnLine(lines[row]) {
-			a.votes = append(a.votes, voteSpan{row: row, start: found.start, end: found.end, height: found.height, direction: found.direction})
-		}
-	}
-}
-
-// voteAt maps a screen cell to the vote token drawn there.
-func (a *app) voteAt(x, y int) (voteSpan, bool) {
-	if a.showHelp {
-		return voteSpan{}, false
-	}
-	row := a.viewport.YOffset() + (y - chatTop)
-	for _, span := range a.votes {
-		if span.row == row && x >= span.start && x < span.end {
-			return span, true
-		}
-	}
-	return voteSpan{}, false
 }
 
 // voteCmd casts a clicked vote off the UI thread: the buffer lookup

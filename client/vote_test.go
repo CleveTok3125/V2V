@@ -154,6 +154,22 @@ func TestVoteOnLine(t *testing.T) {
 	}
 }
 
+func TestVisualRowsMirrorViewport(t *testing.T) {
+	rows := visualRows([]string{"abcdefghij", "short"}, 4)
+	want := []string{"abcd", "efgh", "ij", "shor", "t"}
+	if len(rows) != len(want) {
+		t.Fatalf("rows = %q, want %q", rows, want)
+	}
+	for i := range want {
+		if rows[i] != want[i] {
+			t.Fatalf("rows = %q, want %q", rows, want)
+		}
+	}
+	if got := visualRows(nil, 0); len(got) != 0 {
+		t.Fatalf("empty input must stay empty: %q", got)
+	}
+}
+
 func TestAppVoteTokenClick(t *testing.T) {
 	sess, _ := behaviorSession(t)
 	seedIndexedWire(sess, 42)
@@ -168,14 +184,11 @@ func TestAppVoteTokenClick(t *testing.T) {
 	a.layout()
 	a.dirty = true
 	a.refreshContent()
-	if len(a.votes) != 2 {
-		t.Fatalf("up and down tokens must expose two spans, got %d", len(a.votes))
+	if len(a.clicks) != 2 {
+		t.Fatalf("up and down tokens must expose two spans, got %d", len(a.clicks))
 	}
 	click := func(i int, direction int) {
-		span := a.votes[i]
-		if span.direction != direction {
-			t.Fatalf("span %d direction = %d, want %d", i, span.direction, direction)
-		}
+		span := a.clicks[i]
 		y := span.row - a.viewport.YOffset() + chatTop
 		stub.wrote = nil
 		_, cmd := a.Update(tea.MouseClickMsg{X: span.start, Y: y, Button: tea.MouseLeft})
@@ -192,7 +205,7 @@ func TestAppVoteTokenClick(t *testing.T) {
 	click(1, wire.DirDownvote)
 
 	// Left of a token it stays a plain selection.
-	span := a.votes[0]
+	span := a.clicks[0]
 	y := span.row - a.viewport.YOffset() + chatTop
 	model, cmd := a.Update(tea.MouseClickMsg{X: span.start - 1, Y: y, Button: tea.MouseLeft})
 	if cmd != nil {
@@ -200,5 +213,60 @@ func TestAppVoteTokenClick(t *testing.T) {
 	}
 	if next, ok := model.(*app); !ok || !next.selActive {
 		t.Fatal("a click off the tokens must still start a selection")
+	}
+}
+
+func TestAppVoteTokenClickNarrow(t *testing.T) {
+	// Width 30 wraps only the down token off the meta row; width 28
+	// wraps the whole strip. Both must stay votable.
+	for _, width := range []int{28, 30} {
+		sess, _ := behaviorSession(t)
+		seedIndexedWire(sess, 42)
+		stub := &stubConn{}
+		sess.Conn = stub
+		sess.Display.TabChat.append(entry{
+			header: "15:04 Alice • #42:abcd ▲0 ▼0",
+			height: 42, hashHex: "abcd",
+		})
+		a := newApp(sess)
+		a.width, a.height = width, 24
+		a.layout()
+		a.dirty = true
+		a.refreshContent()
+		if len(a.clicks) != 2 {
+			t.Fatalf("width %d: a wrapped strip must expose two spans, got %d", width, len(a.clicks))
+		}
+		span := a.clicks[0]
+		y := span.row - a.viewport.YOffset() + chatTop
+		_, cmd := a.Update(tea.MouseClickMsg{X: span.start, Y: y, Button: tea.MouseLeft})
+		if cmd == nil {
+			t.Fatalf("width %d: a click on a wrapped token must vote", width)
+		}
+		cmd()
+		req, ok := stub.wrote.(VoteRequest)
+		if !ok || req.Target != 42 || req.Direction != wire.DirUpvote {
+			t.Fatalf("width %d: wrapped click wrote = %#v", width, stub.wrote)
+		}
+	}
+}
+
+func TestRecoverWrappedStrip(t *testing.T) {
+	meta := "│ 15:04 Alice • #42:abcd"
+	if got := recoverWrappedStrip(meta, "│ ▼0"); len(got) != 1 || got[0].direction != wire.DirDownvote || got[0].height != 42 {
+		t.Fatalf("remnant must map to the meta above: %+v", got)
+	}
+	// A body line starting with an arrow carries other text.
+	if got := recoverWrappedStrip(meta, "│ ▼ hello"); len(got) != 0 {
+		t.Fatalf("body mimic must not map: %+v", got)
+	}
+	// No meta above means no mapping.
+	if got := recoverWrappedStrip("│ plain body", "│ ▼0"); len(got) != 0 {
+		t.Fatalf("meta-less above must not map: %+v", got)
+	}
+	// The meta row already shows a down token: a mimicking body line
+	// next to it stays unclickable.
+	full := "│ 15:04 Alice • #42:abcd ▲0 ▼0"
+	if got := recoverWrappedStrip(full, "│ ▼0"); len(got) != 0 {
+		t.Fatalf("complete meta must not adopt body tokens: %+v", got)
 	}
 }
