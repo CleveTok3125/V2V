@@ -15,7 +15,12 @@ import (
 var dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 // warnStyle marks a failed or unverified badge (ANSI 9, formerly "\x1b[91m").
+// Downvote counts reuse it: the same negative signal in the vote strip.
 var warnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+
+// upvoteStyle greens the upvote count (ANSI 10, the bright counterpart
+// of the downvote red).
+var upvoteStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
 
 // badgeStyle colours a verified badge with its palette colour.
 func badgeStyle(badge string) lipgloss.Style {

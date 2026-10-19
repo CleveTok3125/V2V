@@ -21,7 +21,8 @@ func (s *Session) voteStripFor(height uint64) string {
 	if s.Chain.Votes != nil {
 		count = s.Chain.Votes[height]
 	}
-	return fmt.Sprintf("▲%d ▼%d", count.Upvotes, count.Downvotes)
+	return upvoteStyle.Render(fmt.Sprintf("▲%d", count.Upvotes)) +
+		" " + warnStyle.Render(fmt.Sprintf("▼%d", count.Downvotes))
 }
 
 // applyVoteLocked folds one vote wire into the score map and repaints

@@ -40,7 +40,7 @@ func TestVoteStripEmpty(t *testing.T) {
 	if got := sess.voteStripFor(0); got != "" {
 		t.Fatalf("height 0 must render no strip, got %q", got)
 	}
-	if got := sess.voteStripFor(5); got != "▲0 ▼0" {
+	if got := stripANSIForFind(sess.voteStripFor(5)); got != "▲0 ▼0" {
 		t.Fatalf("fresh message must show zero counts, got %q", got)
 	}
 }
@@ -61,7 +61,7 @@ func TestApplyVoteRepaintsTarget(t *testing.T) {
 		sess.Display.DisplayMu.Unlock()
 		t.Fatalf("map = %+v, want 12/3", got)
 	}
-	header := sess.Display.TabChat.lines[0].header
+	header := stripANSIForFind(sess.Display.TabChat.lines[0].header)
 	sess.Display.DisplayMu.Unlock()
 	if !strings.Contains(header, "▲12 ▼3") {
 		t.Fatalf("header %q must carry the strip", header)
