@@ -63,6 +63,7 @@ type (
 	PowOffer       = wire.PowOffer
 	PowResult      = wire.PowResult
 	PowDecline     = wire.PowDecline
+	VoteRequest    = wire.VoteRequest
 )
 
 // WebSocket message type constants (RFC 6455) so the shared chat logic does

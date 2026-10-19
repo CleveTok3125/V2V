@@ -12,6 +12,7 @@ import (
 func TestWireJSONKeySet(t *testing.T) {
 	full := WireMessage{
 		Type: "system", Time: "12:00", DisplayName: "Bob#1234", Tags: []string{"system", "system.join"}, SysDate: "2026-01-02", SysPowTier: 3, Text: "hi",
+		VoteTarget: 7, VoteUp: 12, VoteDown: 3,
 		Trip:        &TripMeta{Pub: "p", Seq: 1, Prev: "q", Sig: "s", ServerPub: "sp", MsgHash: "m", DisplayName: "Bob#1234", TmpID: 2, ReplyTo: 3},
 		TmpID:       2,
 		ReplyTo:     3,
@@ -30,7 +31,7 @@ func TestWireJSONKeySet(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	wantTop := []string{"type", "time", "displayName", "tags", "sys_pow_tier", "sys_date", "text", "trip", "tmp_id", "reply_to", "chain_prev", "chain_hash", "chain_height", "chain_ver", "seq", "sent_at"}
+	wantTop := []string{"type", "time", "displayName", "tags", "sys_pow_tier", "sys_date", "vote_target", "vote_up", "vote_down", "text", "trip", "tmp_id", "reply_to", "chain_prev", "chain_hash", "chain_height", "chain_ver", "seq", "sent_at"}
 	if len(got) != len(wantTop) {
 		t.Fatalf("top-level keys = %v, want %v", keysOf(got), wantTop)
 	}

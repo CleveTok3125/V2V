@@ -22,6 +22,7 @@ import (
 	"github.com/CleveTok3125/V2V/lib/clientcore"
 	"github.com/CleveTok3125/V2V/lib/filter"
 	"github.com/CleveTok3125/V2V/lib/trip"
+	"github.com/CleveTok3125/V2V/lib/wire"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -691,6 +692,22 @@ func shortBadge(pubHex string) string {
 // lines without a chain height.
 func quotable(msg WireMessage) bool {
 	return msg.Type == "chat" && msg.ChainHeight > 0
+}
+
+// VoteScore is the cumulative total for one chain height. No voter
+// identity travels with it.
+type VoteScore struct {
+	Up   int
+	Down int
+}
+
+// score nets the up/down totals. Negative reads as-is.
+func (v VoteScore) score() int { return v.Up - v.Down }
+
+// isVoteWire reports whether a wire carries vote totals: an unchained
+// system line tagged system.vote naming its target height.
+func isVoteWire(msg WireMessage) bool {
+	return msg.Type == "system" && msg.VoteTarget > 0 && wire.HasTag(msg.Tags, wire.TagVote)
 }
 
 // chainTipFile derives the persisted-tip path next to the readline history.

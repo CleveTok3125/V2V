@@ -63,6 +63,25 @@ type TripChain struct {
 	LastSeen time.Time
 }
 
+// VoteScore is the cumulative total for one chain height. Stored by
+// height only: no voter identity is kept long-term.
+type VoteScore struct {
+	Up   int
+	Down int
+}
+
+// voteDedupEntry remembers one IP's last direction for one height so a
+// repeat reads as duplicate. Ephemeral: expires after voteDedupTTL
+// and never persists.
+type voteDedupEntry struct {
+	Dir int8
+	At  time.Time
+}
+
+// voteDedupTTL bounds the duplicate memory: past it a repeat counts as
+// a new vote. 24h covers brigade retries without growing forever.
+const voteDedupTTL = 24 * time.Hour
+
 // Protocol schema lives in lib/wire (single source). Aliases keep
 // every existing reference compiling while guaranteeing client and
 // server serialize identically.
@@ -74,6 +93,7 @@ type (
 	HistoryRequest = wire.HistoryRequest
 	HeightRange    = wire.HeightRange
 	HistoryInfo    = wire.HistoryInfo
+	VoteRequest    = wire.VoteRequest
 )
 
 type ServerIdentity struct {
@@ -181,6 +201,14 @@ type ChatServer struct {
 	TripChains   sync.Map // pub hex -> TripChain
 	TripChainsMu sync.Mutex
 
+	// VoteScores holds cumulative vote totals by chain height. No voter
+	// identity is kept: one height maps to one score. VoteDedup is the
+	// short-term duplicate memory (IP+height -> last dir), expiring
+	// after voteDedupTTL. Both share VoteMu.
+	VoteScores map[uint64]*VoteScore
+	VoteDedup  map[string]voteDedupEntry
+	VoteMu     sync.Mutex
+
 	// Display identity salt per server session (ephemeral, not persisted)
 	DisplaySalt []byte
 
@@ -222,6 +250,8 @@ func NewChatServer() *ChatServer {
 		Chain:           ChainService{History: make([]string, 0)},
 		RoleRegistry:    make(map[string]RoleDefinition),
 		PairTickets:     make(map[string]*pairTicket),
+		VoteScores:      make(map[uint64]*VoteScore),
+		VoteDedup:       make(map[string]voteDedupEntry),
 		WebAuthn:        NewWebAuthnStore(env.WebauthnStore()),
 		Gate:            NewGateStore(),
 		Attack:          NewAttackState(),

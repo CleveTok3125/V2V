@@ -302,6 +302,8 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			AfterSeq  *uint64       `json:"after_seq"`
 			BeforeSeq *uint64       `json:"before_seq"`
 			Ranges    []HeightRange `json:"ranges"`
+			Target    uint64        `json:"target"`
+			Dir       int           `json:"dir"`
 		}
 		if err := json.Unmarshal([]byte(raw), &env); err == nil && env.Type != "" {
 			switch env.Type {
@@ -338,6 +340,10 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 				continue
 			case "pow_result", "pow_decline":
 				s.handlePowFrame(session, raw)
+				updateReadDeadline()
+				continue
+			case "vote":
+				s.handleVote(session, clientIP, env.Target, env.Dir)
 				updateReadDeadline()
 				continue
 			}

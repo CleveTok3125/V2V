@@ -237,6 +237,10 @@ func (s *Session) finishLoadLocked() {
 				continue
 			}
 			msg := h.msg
+			if isVoteWire(msg) {
+				s.applyVoteLocked(msg)
+				continue
+			}
 			if msg.Type == "chat" {
 				if rendered := s.verifyReplayWire(msg, true); !rendered {
 					s.flushDateBannerLocked()
@@ -394,6 +398,15 @@ func (s *Session) runPump() {
 				s.refreshCoalesced()
 				continue
 			}
+			// Vote totals never render as entries: they fold into the
+			// target chat block score, muted or not.
+			if isVoteWire(sysWire) {
+				s.Display.DisplayMu.Lock()
+				s.applyVoteLocked(sysWire)
+				s.Display.DisplayMu.Unlock()
+				s.refreshCoalesced()
+				continue
+			}
 			s.Display.DisplayMu.Lock()
 			if s.Chain.Loading && s.Chain.InSync && !s.isLoadHistoryWire(sysWire) {
 				s.Chain.LoadHold = append(s.Chain.LoadHold, heldLine{msg: sysWire})
@@ -468,6 +481,12 @@ func (s *Session) runPump() {
 			if err := json.Unmarshal([]byte(line), &wl); err == nil && (wl.Type == "chat" || wl.Type == "system") {
 				if wire.HasTag(wl.Tags, wire.TagHistory) {
 					s.handleReplayMarker(wl)
+					continue
+				}
+				if isVoteWire(wl) {
+					s.Display.DisplayMu.Lock()
+					s.applyVoteLocked(wl)
+					s.Display.DisplayMu.Unlock()
 					continue
 				}
 				s.Display.DisplayMu.Lock()

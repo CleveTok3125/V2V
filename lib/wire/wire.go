@@ -45,9 +45,16 @@ type WireMessage struct {
 	// SysDate is the calendar day a date banner announces ("2006-01-02").
 	// Display metadata only: date notices are unchained, and this stays
 	// outside the chain hash.
-	SysDate string    `json:"sys_date,omitempty"`
-	Text    string    `json:"text,omitempty"`
-	Trip    *TripMeta `json:"trip,omitempty"`
+	SysDate string `json:"sys_date,omitempty"`
+	// VoteTarget names the chain height a vote total belongs to. VoteUp
+	// and VoteDown are the cumulative totals for that height. Display
+	// metadata only: vote lines are unchained and stay outside the
+	// chain hash, like SysDate and SysPowTier.
+	VoteTarget uint64    `json:"vote_target,omitempty"`
+	VoteUp     int       `json:"vote_up,omitempty"`
+	VoteDown   int       `json:"vote_down,omitempty"`
+	Text       string    `json:"text,omitempty"`
+	Trip       *TripMeta `json:"trip,omitempty"`
 	// TmpID is the sender's per-session counter, relayed verbatim and
 	// never assigned by the server. ReplyTo quotes a chain height,
 	// relayed verbatim and covered by the link (v2+).
@@ -207,4 +214,12 @@ type PowResult struct {
 type PowDecline struct {
 	Type        string `json:"type"` // "pow_decline"
 	ChallengeID string `json:"challenge_id,omitempty"`
+}
+
+// VoteRequest casts one vote for a chained message. Dir is +1 (up),
+// -1 (down) or 0 (withdraw). Unknown heights are rejected.
+type VoteRequest struct {
+	Type   string `json:"type"` // "vote"
+	Target uint64 `json:"target,omitempty"`
+	Dir    int    `json:"dir,omitempty"`
 }

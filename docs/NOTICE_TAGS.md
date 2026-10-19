@@ -62,6 +62,7 @@ and is what `/notify` and the web settings panel render.
 | `system.trip` | trip structure: no content, pubkey mismatch, bad signature, wrong seq, broken prev, unsigned | `server/clientHandler.go` |
 | `system.filter` | rejected characters | `server/clientHandler.go` |
 | `system.auth` | tripcode too long, concurrent identity login | `server/auth.go` |
+| `system.vote` | vote totals for one chain height | `server/history.go` (`BroadcastVote`) |
 | `system.audit` | reserved: a management line chained as evidence | **none yet** |
 
 `system.audit` has a route (`Hub.BroadcastAudit`) but no producer, so no line carries the tag today

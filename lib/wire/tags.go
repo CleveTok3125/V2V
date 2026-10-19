@@ -46,6 +46,11 @@ const (
 	TagTrip     = "system.trip"
 	TagFilter   = "system.filter"
 	TagAuth     = "system.auth"
+
+	// TagVote marks a vote total broadcast: an unchained system line
+	// carrying the cumulative up/down for one chain height. Clients
+	// fold it into the target message score instead of printing it.
+	TagVote = "system.vote"
 )
 
 // tagTree lists every known tag, parents before children.
@@ -69,6 +74,7 @@ var tagTree = []string{
 	TagTrip,
 	TagFilter,
 	TagAuth,
+	TagVote,
 }
 
 // AllTags returns every known tag, parents before children.

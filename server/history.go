@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/CleveTok3125/V2V/lib/strutil"
 	"time"
@@ -199,6 +200,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 	}
 
 	s.Chain.seq = lastSeq
+	s.rebuildVoteScores()
 
 	loggedCount := len(s.Chain.History)
 	if loggedCount > 0 {
@@ -296,20 +298,140 @@ func noticeWire(now time.Time, text string, leaves ...string) WireMessage {
 	}
 }
 
+// BroadcastVote publishes cumulative vote totals for one chain height
+// as an unchained system line. The fallback text keeps old clients
+// readable.
+func (h *Hub) BroadcastVote(target uint64, up, down int) {
+	now := time.Now().In(serverLocation())
+	h.storeSystem(WireMessage{
+		Type: "system", Time: now.Format("15:04"),
+		Tags:       wire.WithTags(wire.TagVote),
+		Text:       fmt.Sprintf("#%d ▲%d ▼%d (%+d)", target, up, down, up-down),
+		VoteTarget: target, VoteUp: up, VoteDown: down,
+	}, now, nil)
+}
+
+// voteDedupKey scopes duplicate memory by address and height. The key
+// lives in RAM only and is never logged or persisted.
+func voteDedupKey(ip string, target uint64) string {
+	return ip + "|" + strconv.FormatUint(target, 10)
+}
+
+// applyVote folds one direction into the cumulative total for target.
+// Dir is +1 (up), -1 (down) or 0 (withdraw). A fresh repeat of the same
+// direction reports dup so the caller rejects the repeat. Totals only:
+// no voter identity is stored.
+func (s *ChatServer) applyVote(ip string, target uint64, dir int) (up, down int, dup, changed bool) {
+	now := time.Now()
+	s.VoteMu.Lock()
+	defer s.VoteMu.Unlock()
+	if len(s.VoteDedup) > 10000 {
+		for k, v := range s.VoteDedup {
+			if now.Sub(v.At) > voteDedupTTL {
+				delete(s.VoteDedup, k)
+			}
+		}
+	}
+	key := voteDedupKey(ip, target)
+	prev, has := s.VoteDedup[key]
+	if has && now.Sub(prev.At) > voteDedupTTL {
+		has = false
+	}
+	if has && prev.Dir == int8(dir) {
+		tot := s.VoteScores[target]
+		if tot != nil {
+			up, down = tot.Up, tot.Down
+		}
+		return up, down, true, false
+	}
+	tot := s.VoteScores[target]
+	if tot == nil {
+		tot = &VoteScore{}
+		s.VoteScores[target] = tot
+	}
+	dec := func(v *int) {
+		if *v > 0 {
+			*v--
+		}
+	}
+	if has {
+		switch {
+		case dir == 0 && prev.Dir > 0:
+			dec(&tot.Up)
+		case dir == 0 && prev.Dir < 0:
+			dec(&tot.Down)
+		case dir > 0 && prev.Dir < 0:
+			dec(&tot.Down)
+			tot.Up++
+		case dir < 0 && prev.Dir > 0:
+			dec(&tot.Up)
+			tot.Down++
+		case dir > 0:
+			tot.Up++
+		case dir < 0:
+			tot.Down++
+		}
+	} else {
+		switch {
+		case dir > 0:
+			tot.Up++
+		case dir < 0:
+			tot.Down++
+		default:
+			return tot.Up, tot.Down, false, false
+		}
+	}
+	s.VoteDedup[key] = voteDedupEntry{Dir: int8(dir), At: now}
+	return tot.Up, tot.Down, false, true
+}
+
+// rebuildVoteScores replays stored vote lines into the totals cache.
+// Each line carries cumulative totals, so the last line per target
+// wins. Call after history load; takes no locks across the scan.
+func (s *ChatServer) rebuildVoteScores() {
+	s.Chain.Mu.RLock()
+	lines := append([]string(nil), s.Chain.History...)
+	s.Chain.Mu.RUnlock()
+	scores := make(map[uint64]*VoteScore)
+	for _, msgStr := range lines {
+		var stored WireMessage
+		if err := json.Unmarshal([]byte(msgStr), &stored); err != nil {
+			continue
+		}
+		if stored.Type != "system" || stored.VoteTarget == 0 {
+			continue
+		}
+		if !wire.HasTag(stored.Tags, wire.TagVote) {
+			continue
+		}
+		scores[stored.VoteTarget] = &VoteScore{Up: stored.VoteUp, Down: stored.VoteDown}
+	}
+	s.VoteMu.Lock()
+	s.VoteScores = scores
+	s.VoteMu.Unlock()
+}
+
 // broadcastSystem stores and broadcasts one unchained system line. day is
 // the machine date a date banner announces, empty for every other notice.
 func (h *Hub) broadcastSystem(text string, leaves []string, day string, sender *websocket.Conn) {
 	now := time.Now().In(serverLocation())
+	notice := noticeWire(now, text, leaves...)
+	notice.SysDate = day
+	h.storeSystem(notice, now, sender)
+}
+
+// storeSystem assigns one unchained line its history seq, persists it
+// and broadcasts it live. The single path for notices and vote totals,
+// so seq order always matches persisted order.
+func (h *Hub) storeSystem(msg WireMessage, now time.Time, sender *websocket.Conn) {
 	// Seq is assigned under Chain.Mu, and the disk enqueue happens under
 	// the same lock, so persisted order always matches seq order.
 	h.chain.Mu.Lock()
-	notice := noticeWire(now, text, leaves...)
-	notice.SysDate = day
-	notice.Seq = h.chain.assignSeqLocked()
-	data, _ := json.Marshal(notice)
+	msg.Seq = h.chain.assignSeqLocked()
+	data, _ := json.Marshal(msg)
 	h.chain.appendMessageLocked(string(data))
 	if h.chain.Store != nil {
-		h.chain.Store.EnqueueWire(notice, now)
+		h.chain.Store.EnqueueWire(msg, now)
 	}
 	h.chain.Mu.Unlock()
 	h.fanout(data, sender, true, false)

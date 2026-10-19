@@ -162,7 +162,7 @@ func TestDeclaredTagsAreInTheTree(t *testing.T) {
 		"gate":            TagPowGate,
 		"screening":       TagPowScreen,
 		"limit":           TagLimit, "envelope": TagEnvelope, "trip": TagTrip,
-		"filter": TagFilter, "auth": TagAuth,
+		"filter": TagFilter, "auth": TagAuth, "vote": TagVote,
 	}
 	for kind, tag := range produced {
 		if !declared[tag] {

@@ -219,6 +219,10 @@ type ChainState struct {
 	TipSinceSave uint64
 	WireIdx      *wireIndex
 	RenderCache  *renderCache
+	// Votes holds cumulative vote totals by chain height, folded from
+	// system.vote lines. DisplayMu guards it like the tab buffers: every
+	// pump render and vote apply runs under it.
+	Votes map[uint64]VoteScore
 }
 
 // heldLine is a live line held during the initial load.
@@ -283,6 +287,7 @@ func NewSession() *Session {
 		},
 		Chain: ChainState{
 			SyncHeights: map[uint64][32]byte{},
+			Votes:       map[uint64]VoteScore{},
 		},
 		// No muted tags, so a Session that never runs initUI (tests,
 		// embedded use) still prints every notice.
@@ -584,5 +589,8 @@ func (s *Session) initUI() bool {
 	s.Chain.WireIdx = newWireIndex(1000)
 
 	s.Chain.RenderCache = newRenderCache(200)
+	if s.Chain.Votes == nil {
+		s.Chain.Votes = make(map[uint64]VoteScore)
+	}
 	return true
 }

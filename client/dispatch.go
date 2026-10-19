@@ -45,7 +45,7 @@ func (s *Session) dispatch(text string) (string, cmdAction) {
 	}
 	for _, cmd := range []func(string) bool{
 		s.cmdMeta, s.cmdFind, s.cmdExpand, s.cmdInfo,
-		s.cmdCopy, s.cmdClearhistory, s.cmdOlder,
+		s.cmdCopy, s.cmdClearhistory, s.cmdOlder, s.cmdVote,
 	} {
 		if cmd(text) {
 			// Inline /reply body intercepted by a command is never
@@ -221,6 +221,9 @@ func helpLines() []helpLine {
 		{"/older [n]", "Lấy thêm n tin cũ hơn từ server (mặc định 50)"},
 		{"/reply <n>[:hash] text", "Trả lời tin #n kèm quote (vd /reply 1234 đồng ý)"},
 		{"/reply <n>", "Soạn reply nháp, dòng tiếp theo là nội dung"},
+		{"/up <n>[:hash]", "Vote up tin #n (vd /up 1234)"},
+		{"/down <n>[:hash]", "Vote down tin #n"},
+		{"/unvote <n>[:hash]", "Hủy vote tin #n"},
 		{desc: "Gõ @#n (vd @#1234) trong tin để nhắc tới tin khác (sáng lên khi còn trong bộ nhớ)"},
 		{desc: "Lệnh lạ bắt đầu bằng / bị chặn, không gửi đi (muốn gửi chữ / đầu dòng thì dùng codeblock)"},
 		{desc: "Gõ ``` ở đầu và cuối tin nhắn để gửi Code block / nhiều dòng (^C hủy nhập)"},
@@ -681,7 +684,11 @@ func (s *Session) cmdInfo(text string) bool {
 	}
 	// One entry: the rows already end with a newline, so joining them empty
 	// keeps the block together and trimming drops the last one.
-	s.emitLocalFeedback(strings.TrimRight(strings.Join(formatInfoBlock(wire), ""), "\n"))
+	rows := formatInfoBlock(wire)
+	if vote, ok := s.Chain.Votes[height]; ok {
+		rows = append(rows, fmt.Sprintf("  %-13s ▲%d ▼%d (%+d)\n", "vote:", vote.Up, vote.Down, vote.score()))
+	}
+	s.emitLocalFeedback(strings.TrimRight(strings.Join(rows, ""), "\n"))
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
 	return true
