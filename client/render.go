@@ -327,19 +327,6 @@ func (s *Session) replyPreviewLine() string {
 	return ""
 }
 
-// voteSuffixFor renders the score strip for one height: "" when no
-// votes, otherwise " ▲12 ▼3". Caller holds DisplayMu.
-func (s *Session) voteSuffixFor(height uint64) string {
-	if height == 0 || s.Chain.Votes == nil {
-		return ""
-	}
-	vote, ok := s.Chain.Votes[height]
-	if !ok || (vote.Up == 0 && vote.Down == 0) {
-		return ""
-	}
-	return fmt.Sprintf(" ▲%d ▼%d", vote.Up, vote.Down)
-}
-
 // buildChatBlock renders one wire into a buffer entry without emitting. Pure
 // given (wire, av, withMeta); cached by renderChatBlock. A part is never
 // patched in place: a change means rendering the whole entry again.
@@ -370,7 +357,7 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (e entry, t
 			}
 		}
 		header += " • " + metaLineFor(msg.ChainHeight, msg.ChainHash, badge)
-		header += s.voteSuffixFor(msg.ChainHeight)
+		header += " " + s.voteStripFor(msg.ChainHeight)
 	}
 	body := renderMentions(renderChatText(msg.Text), s.resolveMentionLocked, ClientCfg.MentionEnabled(), mentionStyle(ClientCfg.MentionColor()))
 	// A parse that swallowed the text (an unclosed fence, say) leaves an
@@ -449,12 +436,12 @@ func (s *Session) renderChatBlock(msg WireMessage) {
 	// depend on buffer state (eviction), which the key cannot see.
 	if msg.ChainHash != "" && !strings.Contains(msg.Text, "@#") && msg.ReplyTo == 0 {
 		// Vote totals mutate without touching the chained bytes, so the
-		// score rides the key: a new total renders a new block instead
+		// strip rides the key: a new total renders a new block instead
 		// of serving the pre-vote one.
 		key := strings.ToLower(msg.ChainHash) + "\x00" + msg.Type +
 			"\x00" + map[bool]string{true: "v", false: "p"}[av] +
 			"\x00" + map[bool]string{true: "m", false: "n"}[withMeta] +
-			"\x00" + s.voteSuffixFor(msg.ChainHeight)
+			"\x00" + s.voteStripFor(msg.ChainHeight)
 		if hit, ok := s.Chain.RenderCache.get(key); ok {
 			emit(hit.tab, hit.entry)
 			return

@@ -6,11 +6,13 @@ import (
 
 // handleVote folds one vote into the cumulative total for a chained
 // message and broadcasts the new total. Votes reuse the history cost
-// budget, the tier slowmode and the behavior observation of chat:
-// no separate limiter exists for them.
-func (s *ChatServer) handleVote(session *ClientSession, clientIP string, target uint64, dir int) {
-	if dir < -1 || dir > 1 {
-		s.observeErr(clientIP, "vote:dir")
+// budget, the tier slowmode and the behavior observation of chat, plus
+// a dedicated per-IP cooldown at message cadence.
+func (s *ChatServer) handleVote(session *ClientSession, clientIP string, target uint64, direction int) {
+	switch direction {
+	case wire.DirUpvote, wire.DirDownvote, wire.DirWithdraw:
+	default:
+		s.observeErr(clientIP, "vote:direction")
 		s.unicastNotice(session, "[Hệ thống]: Hướng vote không hợp lệ.", wire.TagEnvelope)
 		return
 	}
@@ -35,19 +37,26 @@ func (s *ChatServer) handleVote(session *ClientSession, clientIP string, target 
 		s.unicastNotice(session, "[Hệ thống]: Vote quá nhanh, thử lại sau.", wire.TagLimit)
 		return
 	}
+	// One vote per message cadence per IP, on its own tracker so voting
+	// never steals chat cooldown and chatting never steals vote cooldown.
+	// Without this the history budget alone (hundreds per second) lets one
+	// address spray votes across messages or flip one message nonstop,
+	// each vote storing and broadcasting a line.
+	if !s.VoteCooldown.Allow(clientIP, Cfg.Dynamic.Load().MessageCooldown) {
+		s.unicastNotice(session, "[Hệ thống]: Bạn đang vote quá nhanh, thử lại sau.", wire.TagLimit)
+		return
+	}
 	if !s.allowSlowSend(session, clientIP, Cfg.Dynamic.Load().MessageCooldown) {
 		return
 	}
 	s.observeMessage(clientIP)
-	up, down, dup, changed := s.applyVote(clientIP, target, dir)
-	if dup {
-		s.observeErr(clientIP, "vote:dup")
-		s.unicastNotice(session, "[Hệ thống]: Bạn đã vote tin này rồi.", wire.TagLimit)
-		return
-	}
+	upvotes, downvotes, dup, changed := s.applyVote(clientIP, target, direction)
 	if !changed {
+		if dup {
+			s.observeErr(clientIP, "vote:dup")
+		}
 		s.unicastNotice(session, "[Hệ thống]: Chưa có vote để hủy.", wire.TagLimit)
 		return
 	}
-	s.Hub.BroadcastVote(target, up, down)
+	s.Hub.BroadcastVote(target, upvotes, downvotes)
 }

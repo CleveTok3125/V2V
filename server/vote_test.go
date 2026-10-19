@@ -4,44 +4,56 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/CleveTok3125/V2V/lib/config"
 	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
-// applyVote keeps totals by height only: repeats of the same direction
-// from one address report dup, an opposite direction flips.
-func TestApplyVoteDupAndFlip(t *testing.T) {
+// applyVote keeps totals by height only: repeating the held direction
+// toggles it back off, an opposite direction flips it.
+func TestApplyVoteToggle(t *testing.T) {
 	s := NewChatServer()
-	up, down, dup, changed := s.applyVote("1.1.1.1", 5, 1)
-	if dup || !changed || up != 1 || down != 0 {
-		t.Fatalf("first up = %d/%d dup=%v changed=%v", up, down, dup, changed)
+	upvotes, downvotes, dup, changed := s.applyVote("1.1.1.1", 5, wire.DirUpvote)
+	if dup || !changed || upvotes != 1 || downvotes != 0 {
+		t.Fatalf("first upvote = %d/%d dup=%v changed=%v", upvotes, downvotes, dup, changed)
 	}
-	if _, _, dup, _ := s.applyVote("1.1.1.1", 5, 1); !dup {
-		t.Fatal("same direction repeat must report dup")
+	upvotes, downvotes, dup, changed = s.applyVote("1.1.1.1", 5, wire.DirUpvote)
+	if dup || !changed || upvotes != 0 || downvotes != 0 {
+		t.Fatalf("repeat upvote must toggle off = %d/%d dup=%v changed=%v", upvotes, downvotes, dup, changed)
 	}
-	up, down, dup, changed = s.applyVote("1.1.1.1", 5, -1)
-	if dup || !changed || up != 0 || down != 1 {
-		t.Fatalf("flip = %d/%d dup=%v changed=%v", up, down, dup, changed)
+	upvotes, downvotes, dup, changed = s.applyVote("1.1.1.1", 5, wire.DirDownvote)
+	if dup || !changed || upvotes != 0 || downvotes != 1 {
+		t.Fatalf("downvote after withdraw = %d/%d dup=%v changed=%v", upvotes, downvotes, dup, changed)
 	}
-	up, down, dup, changed = s.applyVote("1.1.1.1", 5, 0)
-	if dup || !changed || up != 0 || down != 0 {
-		t.Fatalf("withdraw = %d/%d dup=%v changed=%v", up, down, dup, changed)
+	upvotes, downvotes, dup, changed = s.applyVote("1.1.1.1", 5, wire.DirUpvote)
+	if dup || !changed || upvotes != 1 || downvotes != 0 {
+		t.Fatalf("flip = %d/%d dup=%v changed=%v", upvotes, downvotes, dup, changed)
 	}
-	if _, _, _, changed := s.applyVote("1.1.1.1", 5, 0); changed {
+	upvotes, downvotes, dup, changed = s.applyVote("1.1.1.1", 5, wire.DirWithdraw)
+	if dup || !changed || upvotes != 0 || downvotes != 0 {
+		t.Fatalf("withdraw = %d/%d dup=%v changed=%v", upvotes, downvotes, dup, changed)
+	}
+	if _, _, _, changed := s.applyVote("1.1.1.1", 5, wire.DirWithdraw); changed {
 		t.Fatal("withdraw with nothing held must not change")
+	}
+	if _, _, dup, changed := s.applyVote("1.1.1.1", 5, wire.DirWithdraw); !dup || changed {
+		t.Fatalf("repeat withdraw must report dup without change, dup=%v changed=%v", dup, changed)
+	}
+	if _, _, dup, _ := s.applyVote("2.2.2.2", 6, wire.DirWithdraw); dup {
+		t.Fatal("first withdraw must not report dup")
 	}
 }
 
 // Totals aggregate across addresses and may go negative.
 func TestApplyVoteNegativeAcrossIPs(t *testing.T) {
 	s := NewChatServer()
-	s.applyVote("1.1.1.1", 9, -1)
-	s.applyVote("2.2.2.2", 9, -1)
-	up, down, _, _ := s.applyVote("3.3.3.3", 9, 1)
-	if up != 1 || down != 2 {
-		t.Fatalf("totals = %d/%d, want 1/2", up, down)
+	s.applyVote("1.1.1.1", 9, wire.DirDownvote)
+	s.applyVote("2.2.2.2", 9, wire.DirDownvote)
+	upvotes, downvotes, _, _ := s.applyVote("3.3.3.3", 9, wire.DirUpvote)
+	if upvotes != 1 || downvotes != 2 {
+		t.Fatalf("totals = %d/%d, want 1/2", upvotes, downvotes)
 	}
-	if up-down != -1 {
-		t.Fatalf("score = %d, want -1", up-down)
+	if upvotes-downvotes != -1 {
+		t.Fatalf("score = %d, want -1", upvotes-downvotes)
 	}
 }
 
@@ -57,7 +69,7 @@ func TestBroadcastVoteWire(t *testing.T) {
 	if err := json.Unmarshal([]byte(s.Chain.History[0]), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Type != "system" || got.VoteTarget != 7 || got.VoteUp != 12 || got.VoteDown != 3 {
+	if got.Type != "system" || got.VoteTarget != 7 || got.VoteUpvotes != 12 || got.VoteDownvotes != 3 {
 		t.Fatalf("vote wire = %+v", got)
 	}
 	if !wire.HasTag(got.Tags, wire.TagVote) {
@@ -83,15 +95,15 @@ func TestRebuildVoteScores(t *testing.T) {
 	fresh.rebuildVoteScores()
 	fresh.VoteMu.Lock()
 	defer fresh.VoteMu.Unlock()
-	if tot := fresh.VoteScores[4]; tot == nil || tot.Up != 2 || tot.Down != 1 {
+	if tot := fresh.VoteScores[4]; tot == nil || tot.Upvotes != 2 || tot.Downvotes != 1 {
 		t.Fatalf("height 4 = %+v, want 2/1", tot)
 	}
-	if tot := fresh.VoteScores[8]; tot == nil || tot.Up != 0 || tot.Down != 5 {
+	if tot := fresh.VoteScores[8]; tot == nil || tot.Upvotes != 0 || tot.Downvotes != 5 {
 		t.Fatalf("height 8 = %+v, want 0/5", tot)
 	}
 }
 
-// handleVote rejects bad dirs and future heights without storing.
+// handleVote rejects bad directions and future heights without storing.
 func TestHandleVoteRejects(t *testing.T) {
 	testCfg(t)
 	s := NewChatServer()
@@ -106,32 +118,56 @@ func TestHandleVoteRejects(t *testing.T) {
 	}
 }
 
-// handleVote stores once then rejects the repeat as duplicate.
-func TestHandleVoteOkThenDup(t *testing.T) {
+// handleVote toggles a repeat vote back off and broadcasts both totals.
+func TestHandleVoteToggleOff(t *testing.T) {
 	testCfg(t)
+	dyn := config.DefaultDynamic()
+	dyn.MessageCooldown = 0
+	Cfg.Dynamic.Store(dyn)
 	s := NewChatServer()
 	sess := &ClientSession{Send: make(chan []byte, 16)}
 	s.handleVote(sess, "7.7.7.7", 1, 1)
-	if len(s.Chain.History) != 1 {
-		t.Fatalf("history = %d, want 1", len(s.Chain.History))
-	}
 	s.handleVote(sess, "7.7.7.7", 1, 1)
-	if len(s.Chain.History) != 1 {
-		t.Fatalf("dup must not store, history = %d", len(s.Chain.History))
+	if len(s.Chain.History) != 2 {
+		t.Fatalf("toggle must store, history = %d", len(s.Chain.History))
 	}
 	s.VoteMu.Lock()
 	tot := s.VoteScores[1]
 	s.VoteMu.Unlock()
-	if tot == nil || tot.Up != 1 || tot.Down != 0 {
-		t.Fatalf("totals = %+v, want 1/0", tot)
+	if tot == nil || tot.Upvotes != 0 || tot.Downvotes != 0 {
+		t.Fatalf("totals = %+v, want 0/0", tot)
 	}
 }
 
-// VoteRequest rides the envelope type switch like history_request.
+// handleVote throttles rapid votes from one address at message cadence.
+func TestHandleVoteCooldown(t *testing.T) {
+	testCfg(t)
+	s := NewChatServer()
+	sess := &ClientSession{Send: make(chan []byte, 16)}
+	s.handleVote(sess, "6.6.6.6", 1, wire.DirUpvote)
+	s.handleVote(sess, "6.6.6.6", 2, wire.DirUpvote)
+	if len(s.Chain.History) != 1 {
+		t.Fatalf("second rapid vote must not store, history = %d", len(s.Chain.History))
+	}
+	s.handleVote(sess, "7.7.7.6", 2, wire.DirUpvote)
+	if len(s.Chain.History) != 2 {
+		t.Fatalf("another address must still vote, history = %d", len(s.Chain.History))
+	}
+}
+
+// VoteRequest rides the envelope type switch like history_request. The
+// direction keeps its short key on the wire.
 func TestVoteRequestRoundTrip(t *testing.T) {
-	raw, _ := json.Marshal(wire.VoteRequest{Type: "vote", Target: 11, Dir: -1})
+	raw, _ := json.Marshal(wire.VoteRequest{Type: "vote", Target: 11, Direction: wire.DirDownvote})
 	var back wire.VoteRequest
-	if err := json.Unmarshal(raw, &back); err != nil || back.Target != 11 || back.Dir != -1 {
+	if err := json.Unmarshal(raw, &back); err != nil || back.Target != 11 || back.Direction != wire.DirDownvote {
 		t.Fatalf("round trip = %+v %v", back, err)
+	}
+	var keys map[string]any
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := keys["dir"]; !ok {
+		t.Fatalf("direction must serialize as dir, got %v", keys)
 	}
 }

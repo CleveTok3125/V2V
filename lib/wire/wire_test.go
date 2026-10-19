@@ -12,7 +12,7 @@ import (
 func TestWireJSONKeySet(t *testing.T) {
 	full := WireMessage{
 		Type: "system", Time: "12:00", DisplayName: "Bob#1234", Tags: []string{"system", "system.join"}, SysDate: "2026-01-02", SysPowTier: 3, Text: "hi",
-		VoteTarget: 7, VoteUp: 12, VoteDown: 3,
+		VoteTarget: 7, VoteUpvotes: 12, VoteDownvotes: 3,
 		Trip:        &TripMeta{Pub: "p", Seq: 1, Prev: "q", Sig: "s", ServerPub: "sp", MsgHash: "m", DisplayName: "Bob#1234", TmpID: 2, ReplyTo: 3},
 		TmpID:       2,
 		ReplyTo:     3,

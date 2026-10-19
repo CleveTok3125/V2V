@@ -301,13 +301,13 @@ func noticeWire(now time.Time, text string, leaves ...string) WireMessage {
 // BroadcastVote publishes cumulative vote totals for one chain height
 // as an unchained system line. The fallback text keeps old clients
 // readable.
-func (h *Hub) BroadcastVote(target uint64, up, down int) {
+func (h *Hub) BroadcastVote(target uint64, upvotes, downvotes int) {
 	now := time.Now().In(serverLocation())
 	h.storeSystem(WireMessage{
 		Type: "system", Time: now.Format("15:04"),
 		Tags:       wire.WithTags(wire.TagVote),
-		Text:       fmt.Sprintf("#%d ▲%d ▼%d (%+d)", target, up, down, up-down),
-		VoteTarget: target, VoteUp: up, VoteDown: down,
+		Text:       fmt.Sprintf("#%d ▲%d upvotes ▼%d downvotes (%+d)", target, upvotes, downvotes, upvotes-downvotes),
+		VoteTarget: target, VoteUpvotes: upvotes, VoteDownvotes: downvotes,
 	}, now, nil)
 }
 
@@ -318,10 +318,13 @@ func voteDedupKey(ip string, target uint64) string {
 }
 
 // applyVote folds one direction into the cumulative total for target.
-// Dir is +1 (up), -1 (down) or 0 (withdraw). A fresh repeat of the same
-// direction reports dup so the caller rejects the repeat. Totals only:
-// no voter identity is stored.
-func (s *ChatServer) applyVote(ip string, target uint64, dir int) (up, down int, dup, changed bool) {
+//
+// Direction is DirUpvote, DirDownvote or DirWithdraw. Repeating the
+// held direction withdraws it (toggle): only withdrawing with nothing
+// held reports dup.
+//
+// Totals only: no voter identity is stored.
+func (s *ChatServer) applyVote(ip string, target uint64, direction int) (upvotes, downvotes int, dup, changed bool) {
 	now := time.Now()
 	s.VoteMu.Lock()
 	defer s.VoteMu.Unlock()
@@ -337,57 +340,71 @@ func (s *ChatServer) applyVote(ip string, target uint64, dir int) (up, down int,
 	if has && now.Sub(prev.At) > voteDedupTTL {
 		has = false
 	}
-	if has && prev.Dir == int8(dir) {
-		tot := s.VoteScores[target]
-		if tot != nil {
-			up, down = tot.Up, tot.Down
+	dec := func(v *int) {
+		if *v > 0 {
+			*v--
 		}
-		return up, down, true, false
+	}
+	if has && prev.Direction == int8(direction) {
+		tot := s.VoteScores[target]
+		if tot == nil {
+			tot = &VoteScore{}
+			s.VoteScores[target] = tot
+		}
+		if direction == wire.DirWithdraw {
+			return tot.Upvotes, tot.Downvotes, true, false
+		}
+		// Repeat: toggle the held vote back off, so pressing the same
+		// button again removes the vote instead of erroring.
+		if direction == wire.DirUpvote {
+			dec(&tot.Upvotes)
+		} else {
+			dec(&tot.Downvotes)
+		}
+		s.VoteDedup[key] = voteDedupEntry{Direction: wire.DirWithdraw, At: now}
+		return tot.Upvotes, tot.Downvotes, false, true
 	}
 	tot := s.VoteScores[target]
 	if tot == nil {
 		tot = &VoteScore{}
 		s.VoteScores[target] = tot
 	}
-	dec := func(v *int) {
-		if *v > 0 {
-			*v--
-		}
-	}
 	if has {
 		switch {
-		case dir == 0 && prev.Dir > 0:
-			dec(&tot.Up)
-		case dir == 0 && prev.Dir < 0:
-			dec(&tot.Down)
-		case dir > 0 && prev.Dir < 0:
-			dec(&tot.Down)
-			tot.Up++
-		case dir < 0 && prev.Dir > 0:
-			dec(&tot.Up)
-			tot.Down++
-		case dir > 0:
-			tot.Up++
-		case dir < 0:
-			tot.Down++
+		case direction == wire.DirWithdraw && prev.Direction == wire.DirUpvote:
+			dec(&tot.Upvotes)
+		case direction == wire.DirWithdraw && prev.Direction == wire.DirDownvote:
+			dec(&tot.Downvotes)
+		case direction == wire.DirUpvote && prev.Direction == wire.DirDownvote:
+			dec(&tot.Downvotes)
+			tot.Upvotes++
+		case direction == wire.DirDownvote && prev.Direction == wire.DirUpvote:
+			dec(&tot.Upvotes)
+			tot.Downvotes++
+		case direction == wire.DirUpvote:
+			tot.Upvotes++
+		case direction == wire.DirDownvote:
+			tot.Downvotes++
 		}
 	} else {
-		switch {
-		case dir > 0:
-			tot.Up++
-		case dir < 0:
-			tot.Down++
+		switch direction {
+		case wire.DirUpvote:
+			tot.Upvotes++
+		case wire.DirDownvote:
+			tot.Downvotes++
 		default:
-			return tot.Up, tot.Down, false, false
+			return tot.Upvotes, tot.Downvotes, false, false
 		}
 	}
-	s.VoteDedup[key] = voteDedupEntry{Dir: int8(dir), At: now}
-	return tot.Up, tot.Down, false, true
+	s.VoteDedup[key] = voteDedupEntry{Direction: int8(direction), At: now}
+	return tot.Upvotes, tot.Downvotes, false, true
 }
 
 // rebuildVoteScores replays stored vote lines into the totals cache.
-// Each line carries cumulative totals, so the last line per target
-// wins. Call after history load; takes no locks across the scan.
+//
+// Each line carries cumulative totals, so the last line per target wins.
+//
+// Call after history load; takes no locks across the scan.
 func (s *ChatServer) rebuildVoteScores() {
 	s.Chain.Mu.RLock()
 	lines := append([]string(nil), s.Chain.History...)
@@ -404,7 +421,7 @@ func (s *ChatServer) rebuildVoteScores() {
 		if !wire.HasTag(stored.Tags, wire.TagVote) {
 			continue
 		}
-		scores[stored.VoteTarget] = &VoteScore{Up: stored.VoteUp, Down: stored.VoteDown}
+		scores[stored.VoteTarget] = &VoteScore{Upvotes: stored.VoteUpvotes, Downvotes: stored.VoteDownvotes}
 	}
 	s.VoteMu.Lock()
 	s.VoteScores = scores

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/CleveTok3125/V2V/lib/wire"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -272,6 +274,7 @@ type app struct {
 	hoverStart int
 	hoverEnd   int
 	trailers   []trailerSpan
+	votes      []voteSpan
 	chatText   string
 }
 
@@ -402,6 +405,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if span, ok := a.trailerAt(msg.X, msg.Y); ok {
 				return a, a.expandCmd(span.height)
 			}
+			if span, ok := a.voteAt(msg.X, msg.Y); ok {
+				return a, a.voteCmd(span.height, span.direction)
+			}
 			if p, ok := a.contentPos(msg.X, msg.Y); ok {
 				a.selActive, a.selAnchor, a.selCursor = true, p, p
 			}
@@ -430,6 +436,7 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.maybeLoadOlder()
 		// The rows moved under a pointer that did not.
 		a.scanTrailers()
+		a.scanVotes()
 		if a.refreshHover() {
 			a.dirty = true
 		}
@@ -1150,6 +1157,7 @@ func (a *app) refreshContent() {
 	a.status = a.sess.uiStatus()
 	a.chatText = content
 	a.scanTrailers()
+	a.scanVotes()
 	a.refreshHover()
 	a.dirty = false
 }
@@ -1379,13 +1387,16 @@ func (a *app) trailerAt(x, y int) (trailerSpan, bool) {
 	return trailerSpan{}, false
 }
 
-// refreshHover re-resolves the trailer under the pointer, which a scroll or a
-// redraw can move without the pointer moving. Reports whether it changed.
+// refreshHover re-resolves the button under the pointer, which a scroll
+// or a redraw can move without the pointer moving. Reports whether it
+// changed.
 func (a *app) refreshHover() bool {
 	row, start := a.hoverRow, a.hoverStart
 	a.hoverRow, a.hoverStart, a.hoverEnd = -1, 0, 0
 	if a.mouseIn {
 		if span, ok := a.trailerAt(a.mouseX, a.mouseY); ok {
+			a.hoverRow, a.hoverStart, a.hoverEnd = span.row, span.start, span.end
+		} else if span, ok := a.voteAt(a.mouseX, a.mouseY); ok {
 			a.hoverRow, a.hoverStart, a.hoverEnd = span.row, span.start, span.end
 		}
 	}
@@ -1397,6 +1408,124 @@ func (a *app) refreshHover() bool {
 func (a *app) expandCmd(height uint64) tea.Cmd {
 	return func() tea.Msg {
 		a.sess.expandInPlace(height)
+		return nil
+	}
+}
+
+// voteSpan is the geometry of one vote token on screen: the content
+// row it sits on, the columns it covers, and the vote a click casts.
+type voteSpan struct {
+	row       int
+	start     int
+	end       int
+	height    uint64
+	direction int
+}
+
+// voteFound is one parsed vote token: the vote it casts and its cell
+// columns on the row.
+type voteFound struct {
+	height    uint64
+	direction int
+	start     int
+	end       int
+}
+
+// voteMeta locates the "#height:hash" reference a vote strip belongs
+// to: the meta separator plus a numeric height and a 4-hex tail, the
+// shape metaLineFor prints.
+var voteMeta = regexp.MustCompile(`• #(\d+):([0-9a-f]{4})`)
+
+// voteArrow matches one score token: ▲12 or ▼3.
+var voteArrow = regexp.MustCompile(`([▲▼])(\d+)`)
+
+// voteSpansOnLine locates every vote token drawn on one rendered row
+// next to its meta reference.
+//
+// A row without the reference, or a token wrapped onto another row
+// than its reference, yields nothing: no vote on ambiguity. Tokens
+// before the reference are ignored: the genuine strip always renders
+// after the meta, while legacy display names may still carry arrow runes.
+func voteSpansOnLine(line string) []voteFound {
+	plain := ansi.Strip(line)
+	meta := voteMeta.FindStringSubmatchIndex(plain)
+	if meta == nil {
+		return nil
+	}
+	height, err := strconv.ParseUint(plain[meta[2]:meta[3]], 10, 64)
+	if err != nil || height == 0 {
+		return nil
+	}
+	var out []voteFound
+	for _, arrow := range voteArrow.FindAllStringSubmatchIndex(plain, -1) {
+		if arrow[0] <= meta[1] {
+			continue
+		}
+		direction := wire.DirDownvote
+		if plain[arrow[2]:arrow[3]] == "▲" {
+			direction = wire.DirUpvote
+		}
+		start := ansi.StringWidth(plain[:arrow[0]])
+		out = append(out, voteFound{
+			height:    height,
+			direction: direction,
+			start:     start,
+			end:       start + ansi.StringWidth(plain[arrow[0]:arrow[1]]),
+		})
+	}
+	return out
+}
+
+// voteOnLine locates the first vote token drawn on one rendered row.
+func voteOnLine(line string) (height uint64, direction, start, end int, ok bool) {
+	spans := voteSpansOnLine(line)
+	if len(spans) == 0 {
+		return 0, 0, 0, 0, false
+	}
+	first := spans[0]
+	return first.height, first.direction, first.start, first.end, true
+}
+
+// scanVotes records the vote tokens among the rows on screen, so a
+// pointer move only has to look up a span. Only the visible range is
+// read: the rows above and below cannot be hovered.
+func (a *app) scanVotes() {
+	a.votes = a.votes[:0]
+	if a.chatText == "" {
+		return
+	}
+	lines := strings.Split(a.chatText, "\n")
+	top := a.viewport.YOffset()
+	for i := 0; i < a.viewport.Height(); i++ {
+		row := top + i
+		if row < 0 || row >= len(lines) {
+			break
+		}
+		for _, found := range voteSpansOnLine(lines[row]) {
+			a.votes = append(a.votes, voteSpan{row: row, start: found.start, end: found.end, height: found.height, direction: found.direction})
+		}
+	}
+}
+
+// voteAt maps a screen cell to the vote token drawn there.
+func (a *app) voteAt(x, y int) (voteSpan, bool) {
+	if a.showHelp {
+		return voteSpan{}, false
+	}
+	row := a.viewport.YOffset() + (y - chatTop)
+	for _, span := range a.votes {
+		if span.row == row && x >= span.start && x < span.end {
+			return span, true
+		}
+	}
+	return voteSpan{}, false
+}
+
+// voteCmd casts a clicked vote off the UI thread: the buffer lookup
+// and the socket write belong to the session.
+func (a *app) voteCmd(height uint64, direction int) tea.Cmd {
+	return func() tea.Msg {
+		a.sess.sendVote(height, "", direction)
 		return nil
 	}
 }

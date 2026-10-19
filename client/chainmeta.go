@@ -697,12 +697,12 @@ func quotable(msg WireMessage) bool {
 // VoteScore is the cumulative total for one chain height. No voter
 // identity travels with it.
 type VoteScore struct {
-	Up   int
-	Down int
+	Upvotes   int
+	Downvotes int
 }
 
-// score nets the up/down totals. Negative reads as-is.
-func (v VoteScore) score() int { return v.Up - v.Down }
+// score nets one total. Negative reads as-is.
+func (v VoteScore) score() int { return v.Upvotes - v.Downvotes }
 
 // isVoteWire reports whether a wire carries vote totals: an unchained
 // system line tagged system.vote naming its target height.

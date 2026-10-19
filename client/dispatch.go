@@ -221,8 +221,8 @@ func helpLines() []helpLine {
 		{"/older [n]", "Lấy thêm n tin cũ hơn từ server (mặc định 50)"},
 		{"/reply <n>[:hash] text", "Trả lời tin #n kèm quote (vd /reply 1234 đồng ý)"},
 		{"/reply <n>", "Soạn reply nháp, dòng tiếp theo là nội dung"},
-		{"/up <n>[:hash]", "Vote up tin #n (vd /up 1234)"},
-		{"/down <n>[:hash]", "Vote down tin #n"},
+		{"/upvote, /up <n>[:hash]", "Upvote tin #n (vd /upvote 1234)"},
+		{"/downvote, /down <n>[:hash]", "Downvote tin #n"},
 		{"/unvote <n>[:hash]", "Hủy vote tin #n"},
 		{desc: "Gõ @#n (vd @#1234) trong tin để nhắc tới tin khác (sáng lên khi còn trong bộ nhớ)"},
 		{desc: "Lệnh lạ bắt đầu bằng / bị chặn, không gửi đi (muốn gửi chữ / đầu dòng thì dùng codeblock)"},
@@ -686,7 +686,7 @@ func (s *Session) cmdInfo(text string) bool {
 	// keeps the block together and trimming drops the last one.
 	rows := formatInfoBlock(wire)
 	if vote, ok := s.Chain.Votes[height]; ok {
-		rows = append(rows, fmt.Sprintf("  %-13s ▲%d ▼%d (%+d)\n", "vote:", vote.Up, vote.Down, vote.score()))
+		rows = append(rows, fmt.Sprintf("  %-13s %d upvotes, %d downvotes (%+d)\n", "votes:", vote.Upvotes, vote.Downvotes, vote.score()))
 	}
 	s.emitLocalFeedback(strings.TrimRight(strings.Join(rows, ""), "\n"))
 	s.Display.DisplayMu.Unlock()

@@ -66,16 +66,16 @@ type TripChain struct {
 // VoteScore is the cumulative total for one chain height. Stored by
 // height only: no voter identity is kept long-term.
 type VoteScore struct {
-	Up   int
-	Down int
+	Upvotes   int
+	Downvotes int
 }
 
 // voteDedupEntry remembers one IP's last direction for one height so a
 // repeat reads as duplicate. Ephemeral: expires after voteDedupTTL
 // and never persists.
 type voteDedupEntry struct {
-	Dir int8
-	At  time.Time
+	Direction int8
+	At        time.Time
 }
 
 // voteDedupTTL bounds the duplicate memory: past it a repeat counts as
@@ -204,10 +204,12 @@ type ChatServer struct {
 	// VoteScores holds cumulative vote totals by chain height. No voter
 	// identity is kept: one height maps to one score. VoteDedup is the
 	// short-term duplicate memory (IP+height -> last dir), expiring
-	// after voteDedupTTL. Both share VoteMu.
-	VoteScores map[uint64]*VoteScore
-	VoteDedup  map[string]voteDedupEntry
-	VoteMu     sync.Mutex
+	// after voteDedupTTL. VoteCooldown throttles vote rate per IP at the
+	// chat message cadence. All three share VoteMu.
+	VoteScores   map[uint64]*VoteScore
+	VoteDedup    map[string]voteDedupEntry
+	VoteCooldown *guard.CooldownMap
+	VoteMu       sync.Mutex
 
 	// Display identity salt per server session (ephemeral, not persisted)
 	DisplaySalt []byte
@@ -252,6 +254,7 @@ func NewChatServer() *ChatServer {
 		PairTickets:     make(map[string]*pairTicket),
 		VoteScores:      make(map[uint64]*VoteScore),
 		VoteDedup:       make(map[string]voteDedupEntry),
+		VoteCooldown:    guard.NewCooldownMap(),
 		WebAuthn:        NewWebAuthnStore(env.WebauthnStore()),
 		Gate:            NewGateStore(),
 		Attack:          NewAttackState(),
