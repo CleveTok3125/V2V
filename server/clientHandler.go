@@ -56,7 +56,7 @@ func (s *ChatServer) acquireIPConnection(w http.ResponseWriter, clientIP string)
 
 	if s.IpCounts[clientIP] >= dynCfg.MaxConnectionsPerIP {
 		logWarnf("⛔ (ban,limit) Từ chối: %s đã vượt quá giới hạn %d kết nối.", clientIP, dynCfg.MaxConnectionsPerIP)
-		http.Error(w, "Bạn đã mở quá nhiều kết nối từ địa chỉ IP này.", http.StatusTooManyRequests)
+		rejectIPBusy(w, "Bạn đã mở quá nhiều kết nối từ địa chỉ IP này.")
 		return false
 	}
 	s.IpCounts[clientIP]++

@@ -89,8 +89,7 @@ func (s *ChatServer) handleEnrollBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !enrollBeginCooldowns.Allow(getClientIP(r), enrollBeginCooldown) {
-		setRetryAfter(w, enrollBeginCooldowns.RetryAfter(getClientIP(r), enrollBeginCooldown))
-		http.Error(w, "too many enroll attempts", http.StatusTooManyRequests)
+		rejectCooldown(w, enrollBeginCooldowns, getClientIP(r), enrollBeginCooldown, "too many enroll attempts")
 		return
 	}
 	if !s.checkHTTPPass(w, r, "webauthn_begin", getClientIP(r)) {
@@ -160,8 +159,7 @@ func (s *ChatServer) handleEnrollFinish(w http.ResponseWriter, r *http.Request) 
 	// Rate-limit before touching the store: each finish does a pending
 	// lookup (file read) even for a bogus ticket, so spam is disk I/O.
 	if !enrollFinishCooldowns.Allow(getClientIP(r), enrollFinishCooldown) {
-		setRetryAfter(w, enrollFinishCooldowns.RetryAfter(getClientIP(r), enrollFinishCooldown))
-		http.Error(w, "too many enroll attempts", http.StatusTooManyRequests)
+		rejectCooldown(w, enrollFinishCooldowns, getClientIP(r), enrollFinishCooldown, "too many enroll attempts")
 		return
 	}
 	if !s.checkHTTPPass(w, r, "webauthn_finish", getClientIP(r)) {

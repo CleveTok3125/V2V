@@ -47,8 +47,7 @@ func (s *ChatServer) handlePairSubmit(w http.ResponseWriter, r *http.Request) {
 		// The browser needs the number: it offers a retry button and must
 		// know how long to keep it disabled, or the first press is refused
 		// again and reads as an unexplained failure.
-		setRetryAfter(w, pairSubmitCooldowns.RetryAfter(clientIP, pairSubmitCooldown))
-		http.Error(w, "too many attempts", http.StatusTooManyRequests)
+		rejectCooldown(w, pairSubmitCooldowns, clientIP, pairSubmitCooldown, "too many attempts")
 		return
 	}
 

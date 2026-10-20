@@ -73,7 +73,7 @@ func (s *ChatServer) handlePairRequest(w http.ResponseWriter, r *http.Request) {
 	// "too many attempts" that leaves the person waiting out a window for a
 	// request that never reached the store.
 	if !pairRequestCooldowns.Allow(clientIP, pairRequestCooldown) {
-		http.Error(w, "too many attempts", http.StatusTooManyRequests)
+		rejectCooldown(w, pairRequestCooldowns, clientIP, pairRequestCooldown, "too many attempts")
 		return
 	}
 

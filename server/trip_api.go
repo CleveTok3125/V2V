@@ -53,6 +53,7 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 	// Use shared CooldownMap via guard logic (200ms)
 	if !guardTripCooldown.Allow(clientIP, 200*time.Millisecond) {
 		logWarnf("⛔ (limit,rate,verify) %s bị hạn chế", clientIP)
+		setRetryAfter(w, guardTripCooldown.RetryAfter(clientIP, 200*time.Millisecond))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		json.NewEncoder(w).Encode(map[string]any{"valid": false, "error": "rate limited, slow down"})
