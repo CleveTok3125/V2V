@@ -29,7 +29,7 @@ func (s *ChatServer) handlePairStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	clientIP := getClientIP(r)
 	if !pairStatusCooldowns.Allow(clientIP, pairStatusCooldown) {
-		rejectCooldown(w, pairStatusCooldowns, clientIP, pairStatusCooldown, "too many attempts")
+		s.rejectCooldown(w, pairStatusCooldowns, clientIP, pairStatusCooldown, "too many attempts")
 		return
 	}
 	ticket := r.URL.Query().Get("ticket")

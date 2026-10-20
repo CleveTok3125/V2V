@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/trustedproxy"
@@ -56,7 +57,7 @@ func (s *ChatServer) acquireIPConnection(w http.ResponseWriter, clientIP string)
 
 	if s.IpCounts[clientIP] >= dynCfg.MaxConnectionsPerIP {
 		logWarnf("⛔ (ban,limit) Từ chối: %s đã vượt quá giới hạn %d kết nối.", clientIP, dynCfg.MaxConnectionsPerIP)
-		rejectIPBusy(w, "Bạn đã mở quá nhiều kết nối từ địa chỉ IP này.")
+		s.rejectIPBusy(w, "Bạn đã mở quá nhiều kết nối từ địa chỉ IP này.")
 		return false
 	}
 	s.IpCounts[clientIP]++
@@ -116,6 +117,7 @@ func (h *Hub) registerClient(session *ClientSession, clientIP string) {
 		select {
 		case session.Send <- data:
 		default:
+			atomic.AddInt64(&h.drops, 1)
 		}
 	}
 

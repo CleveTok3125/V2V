@@ -144,6 +144,7 @@ func (s *ChatServer) ServeWS(w http.ResponseWriter, r *http.Request) {
 		if s.Attack != nil {
 			s.Attack.note503()
 		}
+		s.countReject(rejectFullCause)
 		s.observeHTTP(clientIP, "join_ws", http.StatusServiceUnavailable)
 		w.Header().Set("Retry-After", "5")
 		http.Error(w, "Server is full, retry later.", http.StatusServiceUnavailable)

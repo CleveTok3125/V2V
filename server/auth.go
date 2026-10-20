@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -363,6 +364,7 @@ func (h *Hub) alertConcurrentIdentity(identityPubHex, newClientIP string) {
 	select {
 	case prev.Send <- alert:
 	default:
+		atomic.AddInt64(&h.drops, 1)
 	}
 	logWarnf("⚠️ (auth,concurrent,identity) identity đăng nhập song song từ %s (phiên cũ còn sống)", newClientIP)
 }
@@ -435,6 +437,7 @@ func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string)
 	now := time.Now()
 	if guard.IsBanned(rec, now) {
 		s.AuthFailsMu.Unlock()
+		s.countReject(rejectCooldownCause)
 		logWarnf("⛔ (ban) Từ chối %s. Vui lòng đợi đến %s.", clientIP, rec.UnlockTime.Format("15:04:05"))
 		setRetryAfter(w, rec.UnlockTime.Sub(now))
 		http.Error(w, "IP của bạn đang bị khóa tạm thời do xác thực sai nhiều lần.", http.StatusTooManyRequests)
@@ -447,6 +450,7 @@ func (s *ChatServer) CheckConnectionRate(w http.ResponseWriter, clientIP string)
 		cooldown := Cfg.Dynamic.Load().ConnectionCooldown
 		if ok, _ := guard.CheckConnectionRate(now, rec, lastTime, cooldown); !ok {
 			s.LastConnectMu.Unlock()
+			s.countReject(rejectCooldownCause)
 			logWarnf("⛔ (ban,limit) Từ chối: %s kết nối ra/vào quá nhanh.", clientIP)
 			setRetryAfter(w, cooldown-time.Since(lastTime))
 			http.Error(w, "Bạn thao tác ra/vào quá nhanh! Vui lòng đợi vài giây rồi thử lại.", http.StatusTooManyRequests)

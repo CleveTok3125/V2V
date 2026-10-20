@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/behavior"
@@ -270,6 +271,7 @@ func (s *ChatServer) checkGatePass(w http.ResponseWriter, r *http.Request, clien
 		if s.Attack != nil {
 			s.Attack.noteGate()
 		}
+		s.countReject(rejectGateCause)
 		s.observeHTTP(clientIP, "join_ws", http.StatusTooManyRequests)
 		w.Header().Set("Retry-After", "5")
 		w.Header().Set("Content-Type", "application/json")
@@ -322,6 +324,7 @@ func (s *ChatServer) checkHTTPPass(w http.ResponseWriter, r *http.Request, class
 		tok = r.Header.Get("X-V2V-Pass")
 	}
 	if !s.Gate.UsePass(clientIP, tok, false) {
+		s.countReject(rejectGateCause)
 		w.Header().Set("Retry-After", "5")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -451,10 +454,14 @@ func (s *ChatServer) attackSampler() {
 			ScaleW:    a.EffectiveScaleW(),
 		})
 		if st.Under && !wasUnder {
-			logErrorf("🚨 (under_attack,alert) entered (scale=%.2f)", st.Scale)
+			r := s.loadRejects()
+			logErrorf("🚨 (under_attack,alert) entered (scale=%.2f rejects=cd:%d ip:%d gate:%d full:%d drops=%d)",
+				st.Scale, r.Cooldown, r.PerIP, r.Gate, r.Full, atomic.LoadInt64(&s.Hub.drops))
 		}
 		if !st.Under && wasUnder {
-			logInfof("✅ (under_attack) left (quiet %v)", a.UnderAttackTTL)
+			r := s.loadRejects()
+			logInfof("✅ (under_attack) left (quiet %v rejects=cd:%d ip:%d gate:%d full:%d drops=%d)",
+				a.UnderAttackTTL, r.Cooldown, r.PerIP, r.Gate, r.Full, atomic.LoadInt64(&s.Hub.drops))
 		}
 		wasUnder = st.Under
 		if s.Gate != nil {

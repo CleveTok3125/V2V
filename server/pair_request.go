@@ -73,13 +73,14 @@ func (s *ChatServer) handlePairRequest(w http.ResponseWriter, r *http.Request) {
 	// "too many attempts" that leaves the person waiting out a window for a
 	// request that never reached the store.
 	if !pairRequestCooldowns.Allow(clientIP, pairRequestCooldown) {
-		rejectCooldown(w, pairRequestCooldowns, clientIP, pairRequestCooldown, "too many attempts")
+		s.rejectCooldown(w, pairRequestCooldowns, clientIP, pairRequestCooldown, "too many attempts")
 		return
 	}
 
 	ticket, err := s.issuePairTicket(req.Role, clientIP)
 	if err != nil {
 		if errors.Is(err, ErrPairCapacity) {
+			s.countReject(rejectFullCause)
 			http.Error(w, "no room for another pairing", http.StatusServiceUnavailable)
 			return
 		}

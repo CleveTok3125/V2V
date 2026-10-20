@@ -141,6 +141,12 @@ type Hub struct {
 	Clients   map[*websocket.Conn]*ClientSession
 	ClientsMu sync.RWMutex
 
+	// drops counts frames shed on a full send queue (fanout, echo,
+	// history-info, concurrent-identity alert). Cumulative like
+	// RejectStat; the disk queue keeps its own counter in HistoryStore.
+	// int64 plus atomic: no new lock on the broadcast path.
+	drops int64
+
 	// ActiveIdentities tracks the live session holding each privileged
 	// ed25519 identity (pubkey hex -> session) for concurrency alerts.
 	ActiveIdentities sync.Map
@@ -178,6 +184,11 @@ type ChatServer struct {
 	// check and registration, so a burst cannot overshoot the cap.
 	Blocklist []*net.IPNet
 	Inflight  int64
+
+	// Rejects tallies cumulative admission refusals by cause for the
+	// under-attack transition log. No endpoint exposes it: the operator
+	// reads one line per incident, not a dashboard.
+	Rejects RejectStat
 
 	LastConnectTime map[string]time.Time
 	LastConnectMu   sync.Mutex
