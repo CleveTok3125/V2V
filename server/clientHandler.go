@@ -82,11 +82,11 @@ func (s *ChatServer) releaseIPConnection(clientIP string) {
 // and heavy readers slow down first.
 func (s *ChatServer) allowHistoryRequest(clientIP string, cost int) bool {
 	cfg := Cfg.Dynamic.Load()
-	c := float64(cost)
+	charged := float64(cost)
 	if s.degraded() {
-		c *= 2
+		charged *= 2
 	}
-	return s.HistoryBudget.Allow(clientIP, c, float64(cfg.HistoryBudgetBurst), float64(cfg.HistoryBudgetPerSec))
+	return s.HistoryBudget.Allow(clientIP, charged, float64(cfg.HistoryBudgetBurst), float64(cfg.HistoryBudgetPerSec))
 }
 
 func (h *Hub) registerClient(session *ClientSession, clientIP string) {

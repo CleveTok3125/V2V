@@ -54,8 +54,8 @@ const (
 
 // countReject tallies one refusal. Helpers call it, so callers only
 // choose the helper and the totals stay consistent.
-func (s *ChatServer) countReject(c rejectCause) {
-	switch c {
+func (s *ChatServer) countReject(cause rejectCause) {
+	switch cause {
 	case rejectCooldownCause:
 		atomic.AddInt64(&s.Rejects.Cooldown, 1)
 	case rejectPerIPCause:
@@ -79,9 +79,9 @@ func (s *ChatServer) loadRejects() RejectStat {
 
 // rejectCooldown refuses with 429 and the remaining wait from meter.
 // Call after Allow denied: the recorded time supplies Retry-After.
-func (s *ChatServer) rejectCooldown(w http.ResponseWriter, meter *guard.CooldownMap, ip string, d time.Duration, msg string) {
+func (s *ChatServer) rejectCooldown(w http.ResponseWriter, meter *guard.CooldownMap, clientIP string, window time.Duration, msg string) {
 	s.countReject(rejectCooldownCause)
-	setRetryAfter(w, meter.RetryAfter(ip, d))
+	setRetryAfter(w, meter.RetryAfter(clientIP, window))
 	http.Error(w, msg, http.StatusTooManyRequests)
 }
 

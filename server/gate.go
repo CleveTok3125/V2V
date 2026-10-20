@@ -454,14 +454,14 @@ func (s *ChatServer) attackSampler() {
 			ScaleW:    a.EffectiveScaleW(),
 		})
 		if st.Under && !wasUnder {
-			r := s.loadRejects()
+			rej := s.loadRejects()
 			logErrorf("🚨 (under_attack,alert) entered (scale=%.2f rejects=cd:%d ip:%d gate:%d full:%d drops=%d)",
-				st.Scale, r.Cooldown, r.PerIP, r.Gate, r.Full, atomic.LoadInt64(&s.Hub.drops))
+				st.Scale, rej.Cooldown, rej.PerIP, rej.Gate, rej.Full, atomic.LoadInt64(&s.Hub.drops))
 		}
 		if !st.Under && wasUnder {
-			r := s.loadRejects()
+			rej := s.loadRejects()
 			logInfof("✅ (under_attack) left (quiet %v rejects=cd:%d ip:%d gate:%d full:%d drops=%d)",
-				a.UnderAttackTTL, r.Cooldown, r.PerIP, r.Gate, r.Full, atomic.LoadInt64(&s.Hub.drops))
+				a.UnderAttackTTL, rej.Cooldown, rej.PerIP, rej.Gate, rej.Full, atomic.LoadInt64(&s.Hub.drops))
 		}
 		wasUnder = st.Under
 		if s.Gate != nil {
