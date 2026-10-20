@@ -208,7 +208,10 @@ round-trip covers every missing run, even when they are scattered.
   server has to read disk tiers. The budget refills at a configured
   rate up to a configured burst. This lets a legitimate initial load
   (whose total is bounded by the window) proceed immediately while
-  sustained abuse drains the budget and is throttled.
+  sustained abuse drains the budget and is throttled. Under soft
+  pressure (near the connection cap or under attack) each request
+  costs double, so light pages keep flowing while heavy readers slow
+  down first.
 - Budget state is keyed by peer address, not by connection, so parallel
   connections from one address share it. Idle entries are evicted like
   other rate maps.
