@@ -17,7 +17,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -364,7 +363,7 @@ func (h *Hub) alertConcurrentIdentity(identityPubHex, newClientIP string) {
 	select {
 	case prev.Send <- alert:
 	default:
-		atomic.AddInt64(&h.drops, 1)
+		h.stat.addDrop()
 	}
 	logWarnf("⚠️ (auth,concurrent,identity) identity đăng nhập song song từ %s (phiên cũ còn sống)", newClientIP)
 }

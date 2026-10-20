@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -185,7 +184,7 @@ func (s *ChatServer) unicastData(sess *ClientSession, data []byte) {
 	select {
 	case sess.Send <- data:
 	default:
-		atomic.AddInt64(&s.Hub.drops, 1)
+		s.Rejects.addDrop()
 	}
 }
 

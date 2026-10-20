@@ -189,6 +189,7 @@ func (s *ChatServer) serveAuthenticated(session *ClientSession, clientIP string)
 	// Anti-race re-check: a burst that passed the pre-upgrade cap
 	// together must not all stay registered.
 	if s.overCap() {
+		s.countReject(rejectFullCause)
 		s.Hub.unregisterClient(session, clientIP)
 		s.observeDisconnect(clientIP)
 		return

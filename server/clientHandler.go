@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/trustedproxy"
@@ -117,7 +116,7 @@ func (h *Hub) registerClient(session *ClientSession, clientIP string) {
 		select {
 		case session.Send <- data:
 		default:
-			atomic.AddInt64(&h.drops, 1)
+			h.stat.addDrop()
 		}
 	}
 

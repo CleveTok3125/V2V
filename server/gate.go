@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/CleveTok3125/V2V/internal/behavior"
@@ -456,12 +455,12 @@ func (s *ChatServer) attackSampler() {
 		if st.Under && !wasUnder {
 			rej := s.loadRejects()
 			logErrorf("🚨 (under_attack,alert) entered (scale=%.2f rejects=cd:%d ip:%d gate:%d full:%d drops=%d)",
-				st.Scale, rej.Cooldown, rej.PerIP, rej.Gate, rej.Full, atomic.LoadInt64(&s.Hub.drops))
+				st.Scale, rej.Cooldown, rej.PerIP, rej.Gate, rej.Full, rej.Drops)
 		}
 		if !st.Under && wasUnder {
 			rej := s.loadRejects()
 			logInfof("✅ (under_attack) left (quiet %v rejects=cd:%d ip:%d gate:%d full:%d drops=%d)",
-				a.UnderAttackTTL, rej.Cooldown, rej.PerIP, rej.Gate, rej.Full, atomic.LoadInt64(&s.Hub.drops))
+				a.UnderAttackTTL, rej.Cooldown, rej.PerIP, rej.Gate, rej.Full, rej.Drops)
 		}
 		wasUnder = st.Under
 		if s.Gate != nil {

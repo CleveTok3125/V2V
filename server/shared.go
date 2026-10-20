@@ -141,11 +141,11 @@ type Hub struct {
 	Clients   map[*websocket.Conn]*ClientSession
 	ClientsMu sync.RWMutex
 
-	// drops counts frames shed on a full send queue (fanout, echo,
-	// history-info, concurrent-identity alert). Cumulative like
-	// RejectStat; the disk queue keeps its own counter in HistoryStore.
-	// int64 plus atomic: no new lock on the broadcast path.
-	drops int64
+	// stat tallies shed frames (fanout, echo, history-info,
+	// concurrent-identity alert). Points at the server's RejectStat,
+	// wired in NewChatServer; nil for a bare Hub, which drops the
+	// count. The disk queue keeps its own counter in HistoryStore.
+	stat *RejectStat
 
 	// ActiveIdentities tracks the live session holding each privileged
 	// ed25519 identity (pubkey hex -> session) for concurrency alerts.
@@ -185,9 +185,10 @@ type ChatServer struct {
 	Blocklist []*net.IPNet
 	Inflight  int64
 
-	// Rejects tallies cumulative admission refusals by cause for the
-	// under-attack transition log. No endpoint exposes it: the operator
-	// reads one line per incident, not a dashboard.
+	// Rejects tallies cumulative admission refusals by cause plus shed
+	// send-queue drops, for the under-attack transition log. No endpoint
+	// exposes it: the operator reads one line per incident, not a
+	// dashboard. Never copy the server after boot; snapshot instead.
 	Rejects RejectStat
 
 	LastConnectTime map[string]time.Time
@@ -291,6 +292,7 @@ func NewChatServer() *ChatServer {
 		},
 	}
 	s.Hub.chain = &s.Chain
+	s.Hub.stat = &s.Rejects
 	return s
 }
 

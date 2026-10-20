@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"sync/atomic"
 
 	"github.com/CleveTok3125/V2V/lib/strutil"
 	"time"
@@ -222,10 +221,10 @@ func (h *Hub) sendWithRetry(conn *websocket.Conn, client *ClientSession, msg []b
 			select {
 			case client.Send <- msg:
 			case <-time.After(20 * time.Millisecond):
-				atomic.AddInt64(&h.drops, 1)
+				h.stat.addDrop()
 			}
 		} else {
-			atomic.AddInt64(&h.drops, 1)
+			h.stat.addDrop()
 		}
 	}
 }
@@ -248,7 +247,7 @@ func (h *Hub) fanout(data []byte, sender *websocket.Conn, isSystem, echo bool) {
 			select {
 			case sess.Send <- data:
 			default:
-				atomic.AddInt64(&h.drops, 1)
+				h.stat.addDrop()
 			}
 		}
 	}

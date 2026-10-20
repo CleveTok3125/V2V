@@ -94,8 +94,23 @@ func TestHubDropsCounted(t *testing.T) {
 	full <- []byte("wedged")
 	s.Hub.Clients[conn] = &ClientSession{Conn: conn, Send: full}
 	s.Hub.sendWithRetry(conn, s.Hub.Clients[conn], []byte("new"), false)
-	if got := atomic.LoadInt64(&s.Hub.drops); got != 1 {
+	if got := s.loadRejects().Drops; got != 1 {
 		t.Fatalf("drops = %d, want 1", got)
+	}
+}
+
+// TestBareHubDropsNothing: Hub methods stay safe on a zero Hub whose
+// stat pointer was never wired (no NewChatServer). The count is lost
+// instead of panicking.
+func TestBareHubDropsNothing(t *testing.T) {
+	var h Hub
+	conn := &websocket.Conn{}
+	full := make(chan []byte, 1)
+	full <- []byte("wedged")
+	h.Clients = map[*websocket.Conn]*ClientSession{conn: {Conn: conn, Send: full}}
+	h.sendWithRetry(conn, h.Clients[conn], []byte("new"), false)
+	if got := h.stat.snapshot().Drops; got != 0 {
+		t.Fatalf("drops = %d, want 0", got)
 	}
 }
 
