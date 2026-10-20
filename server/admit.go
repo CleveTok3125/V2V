@@ -6,18 +6,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/CleveTok3125/V2V/internal/serverconfig"
 	"github.com/CleveTok3125/V2V/lib/guard"
 )
 
-// softCapRatio is the share of MAX_TOTAL_CONNECTIONS where the server
-// starts degrading gracefully: gate sooner, charge history double.
-// Internal constant like the attack buckets, not operator policy, so a
-// deployment keeps booting with no new key to set.
-const softCapRatio = 0.8
-
-// degraded reports soft pressure: under attack or near the hard cap.
-// Only cheap signals (flag, headcount), never CPU or memory probes, so
-// the hot path stays one flag check plus one map size read.
+// degraded reports soft pressure: under attack or past the configured
+// share of the hard cap (SOFT_CAP_RATIO, default 80%). Only cheap
+// signals (flag, headcount), never CPU or memory probes, so the hot
+// path stays one flag check plus one map size read.
 func (s *ChatServer) degraded() bool {
 	if s.Attack != nil && s.Attack.IsUnderAttack() {
 		return true
@@ -26,7 +22,11 @@ func (s *ChatServer) degraded() bool {
 	if a == nil || a.MaxTotalConnections < 1 {
 		return false
 	}
-	threshold := int(float64(a.MaxTotalConnections) * softCapRatio)
+	ratio := serverconfig.DefaultSoftCapRatio
+	if a.SoftCapRatio > 0 {
+		ratio = a.SoftCapRatio
+	}
+	threshold := int(float64(a.MaxTotalConnections) * ratio)
 	if threshold < 1 {
 		threshold = 1
 	}

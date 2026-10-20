@@ -50,6 +50,7 @@
         "WEBAUTHN_STORE",
         "PAIR_MAX_PENDING",
         "MAX_TOTAL_CONNECTIONS",
+        "SOFT_CAP_RATIO",
         "REQUIRE_IPV4",
         "BLOCKLIST_FILE",
         "ATTACK_ENTER_SECS",

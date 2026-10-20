@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/CleveTok3125/V2V/internal/serverconfig"
 	"github.com/CleveTok3125/V2V/lib/config"
 	"github.com/CleveTok3125/V2V/lib/guard"
 )
@@ -129,6 +130,23 @@ func TestDegradedNearCap(t *testing.T) {
 	atomic.StoreInt64(&s.Inflight, 8)
 	if !s.degraded() {
 		t.Fatal("8 of 10 must be degraded")
+	}
+}
+
+// TestDegradedCustomRatio pins the knob: a 50% share degrades at 5 of
+// 10 instead of the default 8.
+func TestDegradedCustomRatio(t *testing.T) {
+	old := Cfg.Abuse.Load()
+	defer Cfg.Abuse.Store(old)
+	Cfg.Abuse.Store(&serverconfig.AbuseConfig{MaxTotalConnections: 10, SoftCapRatio: 0.5})
+	s := NewChatServer()
+	atomic.StoreInt64(&s.Inflight, 4)
+	if s.degraded() {
+		t.Fatal("4 of 10 at 50% must not be degraded")
+	}
+	atomic.StoreInt64(&s.Inflight, 5)
+	if !s.degraded() {
+		t.Fatal("5 of 10 at 50% must be degraded")
 	}
 }
 

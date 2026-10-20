@@ -26,6 +26,10 @@ type PowTier struct {
 // ticket is a few hundred bytes.
 const DefaultPairMaxPending = 1024
 
+// DefaultSoftCapRatio is the share of MAX_TOTAL_CONNECTIONS where the
+// server starts degrading gracefully when SOFT_CAP_RATIO is unset.
+const DefaultSoftCapRatio = 0.8
+
 // AbuseConfig holds the always-required abuse knobs (group A): global
 // cap, under-attack, PoW ladder and gate. Behavior is nil when
 // BEHAVIOR_ENABLED=false, in which case no group-B key is needed.
@@ -56,6 +60,12 @@ type AbuseConfig struct {
 	// hundred bytes and no connection. Optional with a default, so a
 	// deployment that predates the knob keeps booting.
 	PairMaxPending int
+
+	// SoftCapRatio is the share of MaxTotalConnections where the server
+	// starts degrading gracefully: gate sooner, charge history double.
+	// Optional with a default, so a deployment that predates the knob
+	// keeps booting. Must stay in (0,1].
+	SoftCapRatio float64
 }
 
 // BehaviorConfig holds the group-B knobs, required only when the
@@ -177,6 +187,19 @@ func (l *abuseLoader) optInt(key string, def int) int {
 	return n
 }
 
+func (l *abuseLoader) optFloat(key string, def float64) float64 {
+	v, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(v) == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil {
+		l.bad = append(l.bad, fmt.Sprintf("%s: %v", key, err))
+		return def
+	}
+	return f
+}
+
 func (l *abuseLoader) reqInt(key string) (int, bool) {
 	v, ok := l.raw(key)
 	if !ok {
@@ -294,6 +317,7 @@ func LoadAbuseConfig() (AbuseConfig, []string, error) {
 	cfg.GateHTTPMode, _ = l.reqEnum("GATE_HTTP_MODE", "under-attack", "tier")
 	cfg.PassTTL, _ = l.reqDuration("PASS_TTL")
 	cfg.PairMaxPending = l.optInt("PAIR_MAX_PENDING", DefaultPairMaxPending)
+	cfg.SoftCapRatio = l.optFloat("SOFT_CAP_RATIO", DefaultSoftCapRatio)
 	cfg.PassSingleUse, _ = l.reqBool("PASS_SINGLE_USE")
 
 	if err := l.err(); err != nil {
@@ -346,6 +370,9 @@ func LoadAbuseConfig() (AbuseConfig, []string, error) {
 	}
 	if cfg.PairMaxPending < 1 {
 		return AbuseConfig{}, nil, fmt.Errorf("abuse config: PAIR_MAX_PENDING must be positive")
+	}
+	if cfg.SoftCapRatio <= 0 || cfg.SoftCapRatio > 1 {
+		return AbuseConfig{}, nil, fmt.Errorf("abuse config: SOFT_CAP_RATIO must be in (0,1]")
 	}
 	if cfg.GateHTTPEnabled {
 		raw, ok := l.raw("GATE_HTTP_CLASSES")

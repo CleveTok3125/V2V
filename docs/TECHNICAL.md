@@ -476,8 +476,9 @@ ticket, clock (early answers get `429+Retry-After` without consuming
 the bundle) and PoW (wrong answers consume it) and returns an IP-bound
 lease pass (`PASS_TTL`, reusable unless `PASS_SINGLE_USE`). `ServeWS`
 requires `?gate_pass=`/`X-V2V-Pass` when `POW_FIRST_CONNECT=always`, or
-while degraded — under attack or at 80% of `MAX_TOTAL_CONNECTIONS`
-(`under-attack`, default). The gate check runs
+while degraded — under attack or past `SOFT_CAP_RATIO` of
+`MAX_TOTAL_CONNECTIONS` (default 80%) (`under-attack`, default). The
+gate check runs
 before the connection cooldown so a rejected pre-gate dial never stamps
 it. Challenge issuance is throttled per IP (2s, internal).
 - **PoW** (`lib/pow`): one argon2id (`t/m/p` per tier, memory-hard)
