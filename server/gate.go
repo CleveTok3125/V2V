@@ -244,7 +244,8 @@ func (s *ChatServer) gateTier() int {
 }
 
 // gateRequired reports whether a new handshake must present a gate
-// pass: always in "always" mode, or only while under attack.
+// pass: always in "always" mode, or while degraded (under attack or
+// near the hard cap) in "under-attack" mode.
 func (s *ChatServer) gateRequired() bool {
 	a := Cfg.Abuse.Load()
 	if a == nil || s.Gate == nil {
@@ -253,7 +254,7 @@ func (s *ChatServer) gateRequired() bool {
 	if a.PowFirstConnect == "always" {
 		return true
 	}
-	return a.PowFirstConnect == "under-attack" && s.Attack != nil && s.Attack.IsUnderAttack()
+	return a.PowFirstConnect == "under-attack" && s.degraded()
 }
 
 // checkGatePass validates the handshake pass (query or header). A
@@ -280,9 +281,9 @@ func (s *ChatServer) checkGatePass(w http.ResponseWriter, r *http.Request, clien
 }
 
 // httpGateFor reports whether class needs a lease pass right now:
-// listed in GATE_HTTP_CLASSES and either under attack
-// (GATE_HTTP_MODE=under-attack) or flagged by the behavior engine
-// (GATE_HTTP_MODE=tier, tier >= GATE_HTTP_TIER_MIN). An unscored
+// listed in GATE_HTTP_CLASSES and either degraded (under attack or near
+// the hard cap, GATE_HTTP_MODE=under-attack) or flagged by the behavior
+// engine (GATE_HTTP_MODE=tier, tier >= GATE_HTTP_TIER_MIN). An unscored
 // HTTP-only IP counts as tier 0, so clean clients never see a pass.
 func (s *ChatServer) httpGateFor(class, ip string) bool {
 	a := Cfg.Abuse.Load()
@@ -306,7 +307,7 @@ func (s *ChatServer) httpGateFor(class, ip string) bool {
 		tier, ok := s.Behavior.Tier(ip)
 		return ok && tier >= a.GateHTTPTierMin
 	}
-	return s.Attack != nil && s.Attack.IsUnderAttack()
+	return s.degraded()
 }
 
 // checkHTTPPass enforces the lease pass on heavy endpoints. HTTP

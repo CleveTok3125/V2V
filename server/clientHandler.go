@@ -77,10 +77,15 @@ func (s *ChatServer) releaseIPConnection(clientIP string) {
 // cost budget. cost is the number of lines the request may return,
 // scaled by the disk tier for segment reads. Keyed by IP (not session)
 // so two connections from one address share the budget. Only ReadPump
-// calls it.
+// calls it. While degraded the cost doubles, so cheap pages keep flowing
+// and heavy readers slow down first.
 func (s *ChatServer) allowHistoryRequest(clientIP string, cost int) bool {
 	cfg := Cfg.Dynamic.Load()
-	return s.HistoryBudget.Allow(clientIP, float64(cost), float64(cfg.HistoryBudgetBurst), float64(cfg.HistoryBudgetPerSec))
+	c := float64(cost)
+	if s.degraded() {
+		c *= 2
+	}
+	return s.HistoryBudget.Allow(clientIP, c, float64(cfg.HistoryBudgetBurst), float64(cfg.HistoryBudgetPerSec))
 }
 
 func (h *Hub) registerClient(session *ClientSession, clientIP string) {
