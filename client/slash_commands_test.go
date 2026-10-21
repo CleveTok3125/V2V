@@ -425,7 +425,7 @@ func TestCmdCopyBranches(t *testing.T) {
 	sess, out = behaviorSession(t)
 	sess.Display.ActiveTab = TabSystem
 	sess.cmdCopy("/copy")
-	if got := out.String(); !strings.Contains(got, "Chưa có tin system nào") {
+	if got := out.String(); !strings.Contains(got, "Tab 2 chưa có gì") {
 		t.Fatalf("bare /copy with no system must report empty: %q", got)
 	}
 
@@ -493,6 +493,26 @@ func TestCopyLatestSelectsNewest(t *testing.T) {
 	sess.Display.DisplayMu.Unlock()
 	if !ok || txt != "sys-two" {
 		t.Fatalf("latest system = %q %v, want sys-two", txt, ok)
+	}
+
+	// Tab 2 is the full local and system log: a local line is a copy
+	// source just like a server notice, and a status line about an
+	// earlier copy is not, so a repeated /copy repeats the content.
+	sess, _ = behaviorSession(t)
+	sess.Display.TabSys.append(entry{header: "sys-one", kind: kindSystem})
+	sess.Display.TabSys.append(noticeEntry("[Local]: seed: abc\n  pub: def"))
+	sess.Display.DisplayMu.Lock()
+	txt, ok = sess.latestSystemCopy()
+	sess.Display.DisplayMu.Unlock()
+	if !ok || txt != "[Local]: seed: abc\n  pub: def" {
+		t.Fatalf("local line must be copyable in tab 2: %q %v", txt, ok)
+	}
+	sess.Display.DisplayMu.Lock()
+	sess.emitStatusLocked("[Local]: Đã copy dòng mới nhất tab 2.\n")
+	txt, ok = sess.latestSystemCopy()
+	sess.Display.DisplayMu.Unlock()
+	if !ok || txt != "[Local]: seed: abc\n  pub: def" {
+		t.Fatalf("status line must not become a copy source: %q %v", txt, ok)
 	}
 
 	sess, _ = behaviorSession(t)

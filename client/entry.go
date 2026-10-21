@@ -17,8 +17,10 @@ type entry struct {
 	collapsed bool   // body was folded, so /expand targets this entry
 	banner    bool   // a date banner row, so it can anchor older windows
 	day       string // sys_date of a banner, "" otherwise
-	kind      int    // box border color: kindChat, kindLocal, kindSystem
-	quoteKind int    // border color of the nested quote block, same scale
+	// status marks a line about the buffer itself; never a copy source.
+	status    bool
+	kind      int // box border color: kindChat, kindLocal, kindSystem
+	quoteKind int // border color of the nested quote block, same scale
 	// quoteEntry, when set, is the block nested inside this one: it renders
 	// with its own frame, structure and style instead of a plain quote row.
 	quoteEntry *entry

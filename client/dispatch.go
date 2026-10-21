@@ -215,7 +215,7 @@ func helpLines() []helpLine {
 		{"/notify, /nt [<tag> on|off | all on|off | powmin <N>]", "Ẩn/hiện thông báo theo tag"},
 		{"/info <n>[:hash]", "Xem đầy đủ metadata tin nhắn (verify lại tại local)"},
 		{"/expand <n>, /xpan", "Mở đầy đủ tin bị thu gọn (vd /expand 1234)"},
-		{"/copy [<n>[:hash]]", "Copy nội dung thô tin nhắn vào clipboard (trống: tin mới nhất)"},
+		{"/copy [<n>[:hash]]", "Copy nội dung thô (trống: tab 1 tin chat mới nhất, tab 2 dòng mới nhất)"},
 		{"/tab, /t [1|2]", "Chuyển tab chat / local & system"},
 		{"/meta, /m [on|off]", "Hiện/ẩn dòng meta #height:hash (mặc định hiện, chain vẫn verify)"},
 		{"/find, /f <n>[:hash]", "Tìm tin theo số height trong bộ nhớ (vd /find 1234)"},
@@ -766,15 +766,14 @@ func (s *Session) latestChatCopy() (uint64, string, bool) {
 	return 0, "", false
 }
 
-// latestSystemCopy returns the newest system line in the system buffer.
+// latestSystemCopy returns the newest copyable line in the system buffer.
 //
-// Skips date banners and empty lines.
-//
-// Caller holds DisplayMu.
+// Date banners (no content of their own) and status lines (they report an
+// earlier copy) are skipped. Caller holds DisplayMu.
 func (s *Session) latestSystemCopy() (string, bool) {
 	for i := len(s.Display.TabSys.lines) - 1; i >= 0; i-- {
 		e := s.Display.TabSys.lines[i]
-		if e.kind != kindSystem || e.banner {
+		if e.banner || e.status {
 			continue
 		}
 		txt := stripANSIForFind(e.header)
@@ -794,8 +793,9 @@ func (s *Session) latestSystemCopy() (string, bool) {
 	return "", false
 }
 
-// copyLatestLocked copies the newest message for the active tab:
-// chat messages in the chat tab, system lines in the system tab.
+// copyLatestLocked copies the newest message for the active tab: chat in
+// tab 1, the newest buffered line in tab 2. Its own confirmations are
+// status lines, so they never become the next copy source.
 //
 // Caller must not hold DisplayMu.
 func (s *Session) copyLatestLocked() {
@@ -803,32 +803,32 @@ func (s *Session) copyLatestLocked() {
 	if s.Display.ActiveTab == TabSystem {
 		if txt, ok := s.latestSystemCopy(); ok {
 			if err := copyToClipboard(txt); err != nil {
-				s.emitLocalFeedback(fmt.Sprintf("[Local]: %v.\n", err))
+				s.emitStatusLocked(fmt.Sprintf("[Local]: %v.\n", err))
 			} else {
-				s.emitLocalFeedback("[Local]: Đã copy tin system mới nhất.\n")
+				s.emitStatusLocked("[Local]: Đã copy dòng mới nhất tab 2.\n")
 				scheduleClipboardClear(txt, ClientCfg.ClipboardClearAfterSec())
 			}
 			s.Display.DisplayMu.Unlock()
 			s.refreshTerminal()
 			return
 		}
-		s.emitLocalFeedback("[Local]: Chưa có tin system nào để copy.\n")
+		s.emitStatusLocked("[Local]: Tab 2 chưa có gì để copy.\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return
 	}
 	if height, txt, ok := s.latestChatCopy(); ok {
 		if err := copyToClipboard(txt); err != nil {
-			s.emitLocalFeedback(fmt.Sprintf("[Local]: %v.\n", err))
+			s.emitStatusLocked(fmt.Sprintf("[Local]: %v.\n", err))
 		} else {
-			s.emitLocalFeedback(fmt.Sprintf("[Local]: Đã copy nội dung tin #%d.\n", height))
+			s.emitStatusLocked(fmt.Sprintf("[Local]: Đã copy nội dung tin #%d.\n", height))
 			scheduleClipboardClear(txt, ClientCfg.ClipboardClearAfterSec())
 		}
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return
 	}
-	s.emitLocalFeedback("[Local]: Chưa có tin nhắn nào để copy.\n")
+	s.emitStatusLocked("[Local]: Chưa có tin nhắn nào để copy.\n")
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
 }

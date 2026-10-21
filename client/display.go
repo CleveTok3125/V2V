@@ -175,7 +175,21 @@ func (s *Session) emitLocalFeedbackTags(tags []string, line string) {
 // so it stays reviewable without showing in the chat stream. Caller must hold
 // DisplayMu.
 func (s *Session) emitLocalFeedbackLive(live bool, line string) {
+	s.emitLocalEntry(live, noticeEntry(line))
+}
+
+// emitStatusLocked buffers a line about the buffer itself, such as a copy
+// confirmation. It is printed and buffered like any local line, but never
+// becomes a copy source. Caller must hold DisplayMu.
+func (s *Session) emitStatusLocked(line string) {
 	e := noticeEntry(line)
+	e.status = true
+	s.emitLocalEntry(true, e)
+}
+
+// emitLocalEntry writes one local entry into both buffers. Caller must hold
+// DisplayMu.
+func (s *Session) emitLocalEntry(live bool, e entry) {
 	e.muted = !live
 	s.Display.TabChat.append(e)
 	s.Display.TabSys.append(e)

@@ -377,7 +377,7 @@ Acting under it is the statement.
 - Clicking the badge in the web terminal copies the verify URL and asks with a native `window.confirm` whether to open the verify page in a new tab; a blocked popup leaves the copied link as the fallback.
 - Every web-terminal link click is routed by hand: a verify link takes the copy-and-confirm path above, and any remaining `http(s)` link asks a `window.confirm` that spells out the destination before opening a new tab. Nothing else reaches `window.open`, so a scheme crafted into a message can never be executed (`lib/filter.osc8TargetAllowed` already strips non-`http(s)` OSC8 targets; this is the second gate).
 - The page re-fetches the same URL with `Accept: application/json`, so curl/fetch behavior is unchanged.
-- `/copy [<height>[:hash]]` copies raw message text to the OS clipboard for pasting into the page (plaintext lives in the clipboard until auto-cleared or overwritten — any local app can read it); bare `/copy` copies the newest chat message in tab 1 or the newest system line in tab 2.
+- `/copy [<height>[:hash]]` copies raw message text to the OS clipboard for pasting into the page (plaintext stays there until auto-cleared — any local app can read it). Bare `/copy` takes the newest chat message in tab 1, or the newest buffered line in tab 2 including local feedback; status lines about an earlier copy are skipped.
 - Verify pages require HTTPS/localhost, and plain-HTTP shows a warning banner since pasted text could be intercepted in transit.
 - `display_name` stays in badge URLs because the signature binds it, and it is only a pseudonym.
 
