@@ -133,11 +133,11 @@ import { gateFetch } from "./pow_bridge.js";
           // still shows what the link carried, which is what you need to
           // see to work out why it was rejected. The pill carries the
           // verdict on its own.
-          if (!j.valid) {
+          if (j.exposed) {
+            fail("❌ Danh tính đã lộ seed" + (j.signature_valid ? " (chữ ký khớp)" : " (chữ ký không khớp)"));
+          } else if (!j.valid) {
             fail("❌ Không hợp lệ" + (j.error ? ": " + j.error : ""));
             if (j.error) addField("lỗi", String(j.error), false);
-          } else if (j.exposed) {
-            fail("⚠️ Chữ ký hợp lệ nhưng danh tính đã lộ seed");
           } else {
             setPill("✅ Trip hợp lệ", "ok");
           }

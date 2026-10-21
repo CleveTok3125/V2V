@@ -84,7 +84,7 @@ import { gateFetch } from "./pow_bridge.js";
     "system.history.end", "system.history.exhausted",
     "system.pow", "system.pow.gate", "system.pow.screening",
     "system.audit",
-    "system.limit", "system.envelope", "system.trip",
+    "system.limit", "system.envelope", "system.trip", "system.trip.reveal",
     "system.filter", "system.auth", "system.vote",
   ];
   var OPT_DEFAULTS = {
