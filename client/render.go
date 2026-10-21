@@ -191,13 +191,16 @@ func (s *Session) refreshCoalesced() {
 // messages must never pollute the stash (their tmpIDs belong to previous
 // sessions). Caller holds s.Display.DisplayMu.
 
-// verifyLinkBase returns "https://<host>" for the connected server, or ""
-// when the host is unknown. Badge links must be absolute: the display
-// sanitizer drops an OSC8 target with no http(s) scheme, so a
-// host-relative path would render as plain text, never a link.
+// verifyLinkBase returns the HTTP(S) origin for the connected server, or
+// "" when the host is unknown. Badge links must be absolute: the display
+// sanitizer drops an OSC8 target with no http(s) scheme.
 func (s *Session) verifyLinkBase() string {
 	if u, err := url.Parse(s.WSURL); err == nil && u.Host != "" {
-		return "https://" + u.Host
+		scheme := "https://"
+		if strings.EqualFold(u.Scheme, "ws") || strings.EqualFold(u.Scheme, "http") {
+			scheme = "http://"
+		}
+		return scheme + u.Host
 	}
 	return ""
 }

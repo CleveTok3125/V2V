@@ -134,6 +134,10 @@ func TestAbsoluteVerifyURL(t *testing.T) {
 	if got := s.absoluteVerifyURL("/api/trip/verify?pub=a"); got != "https://chat.example.com/api/trip/verify?pub=a" {
 		t.Fatalf("relative path = %q", got)
 	}
+	sPlain := &Session{WSURL: "ws://127.0.0.1:18080/ws"}
+	if got := sPlain.absoluteVerifyURL("/api/trip/verify?pub=a"); got != "http://127.0.0.1:18080/api/trip/verify?pub=a" {
+		t.Fatalf("ws:// must map to http://, got %q", got)
+	}
 	if got := s.absoluteVerifyURL("https://other.example.com/api/trip/verify"); got != "https://other.example.com/api/trip/verify" {
 		t.Fatalf("absolute URL must pass through, got %q", got)
 	}

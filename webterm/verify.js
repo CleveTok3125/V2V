@@ -107,8 +107,17 @@ import { gateFetch } from "./pow_bridge.js";
         copyText(apiInput.value, btn);
     });
     var api = location.pathname + location.search;
-    gateFetch(api, { headers: { "Accept": "application/json" }, cache: "no-store" })
-        .then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); })
+    function fetchVerify(retried) {
+        return gateFetch(api, { headers: { "Accept": "application/json" }, cache: "no-store" })
+            .then(function (r) {
+            if (r.status === 429 && !retried) {
+                return new Promise(function (resolve) { setTimeout(resolve, 220); })
+                    .then(function () { return fetchVerify(true); });
+            }
+            return r.json().then(function (j) { return { status: r.status, body: j }; });
+        });
+    }
+    fetchVerify(false)
         .then(function (res) {
         var j = res.body || {};
         rawEl.textContent = JSON.stringify(j, null, 2);
