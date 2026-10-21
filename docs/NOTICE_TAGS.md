@@ -60,6 +60,7 @@ and is what `/notify` and the web settings panel render.
 | `system.limit` | rate limit, slowmode, too fast, too long, too many lines | `server/clientHandler.go` |
 | `system.envelope` | bad protocol: missing `tmp_id`, unknown reply target, empty text, obsolete format | `server/clientHandler.go` |
 | `system.trip` | trip structure: no content, pubkey mismatch, bad signature, wrong seq, broken prev, unsigned | `server/clientHandler.go` |
+| `system.trip.reveal` | an identity published its seed: room-wide warning, also unicast to that identity when it rejoins | `server/trip_reveal.go` |
 | `system.filter` | rejected characters | `server/clientHandler.go` |
 | `system.auth` | tripcode too long, concurrent identity login | `server/auth.go` |
 | `system.vote` | vote totals for one chain height | `server/history.go` (`BroadcastVote`) |
