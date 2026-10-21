@@ -3,8 +3,12 @@ package main
 import (
 	"crypto/ed25519"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/CleveTok3125/V2V/lib/trip"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 func burnFixture() (seedHex, pubHex string, priv ed25519.PrivateKey) {
@@ -38,18 +42,77 @@ func TestCmdBurnWarnsFirst(t *testing.T) {
 	}
 }
 
-func TestCmdBurnConfirmShowsSeed(t *testing.T) {
+func TestCmdBurnConfirmRequiresArm(t *testing.T) {
 	sess, out := behaviorSession(t)
+	stub := &stubConn{}
+	sess.Conn = stub
+	seedHex, _, priv := burnFixture()
+	sess.TripPriv = priv
+	sess.TripPub = priv.Public().(ed25519.PublicKey)
+	if !sess.cmdBurn("/burn confirm") {
+		t.Fatal("/burn confirm must match")
+	}
+	got := out.String()
+	if strings.Contains(got, seedHex) {
+		t.Fatalf("confirm without /burn must not show the seed: %q", got)
+	}
+	if stub.wrote != nil {
+		t.Fatal("confirm without /burn must not notify the server")
+	}
+	if !sess.BurnArmed {
+		t.Fatal("confirm without /burn must arm the flow")
+	}
+}
+
+func TestCmdBurnConfirmShowsSeedAndNotifies(t *testing.T) {
+	sess, out := behaviorSession(t)
+	stub := &stubConn{}
+	sess.Conn = stub
 	seedHex, pubHex, priv := burnFixture()
 	sess.TripPriv = priv
 	sess.TripPub = priv.Public().(ed25519.PublicKey)
 	sess.TripBadge = "◆ deadbeef"
+	if !sess.cmdBurn("/burn") {
+		t.Fatal("/burn must match")
+	}
+	if stub.wrote != nil {
+		t.Fatal("/burn must not notify the server")
+	}
 	if !sess.cmdBurn("/burn confirm") {
 		t.Fatal("/burn confirm must match")
 	}
 	got := out.String()
 	if !strings.Contains(got, seedHex) || !strings.Contains(got, pubHex) {
 		t.Fatalf("confirm must show seed and pub: %q", got)
+	}
+	req, ok := stub.wrote.(wire.RevealRequest)
+	if !ok || req.Type != "trip_reveal" || req.Seed != seedHex {
+		t.Fatalf("confirm must send the reveal frame, wrote %#v", stub.wrote)
+	}
+	if !trip.VerifyReveal(pubHex, req.Sig) {
+		t.Fatalf("reveal frame must carry the identity's signature, wrote %#v", stub.wrote)
+	}
+	if !strings.Contains(got, "Server đã nhận") {
+		t.Fatalf("confirm must report the accepted notice: %q", got)
+	}
+	if sess.BurnArmed {
+		t.Fatal("confirm must disarm the flow")
+	}
+}
+
+// A failed send must say the room was not warned, so the seed does not
+// look published when it never reached the server.
+func TestCmdBurnConfirmReportsSendFailure(t *testing.T) {
+	sess, out := behaviorSession(t)
+	sess.Conn = &stubConn{writeErr: errors.New("boom")}
+	_, _, priv := burnFixture()
+	sess.TripPriv = priv
+	sess.TripPub = priv.Public().(ed25519.PublicKey)
+	if !sess.cmdBurn("/burn") || !sess.cmdBurn("/burn confirm") {
+		t.Fatal("burn confirm must match")
+	}
+	if got := out.String(); !strings.Contains(got, "Cả phòng chưa được cảnh báo") {
+		t.Fatalf("failed send must be reported: %q", got)
 	}
 }
 

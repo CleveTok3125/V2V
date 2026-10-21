@@ -40,6 +40,9 @@ type Session struct {
 	TripBadge string
 	TripSeq   uint32
 	TripPrev  []byte
+	// BurnArmed records that /burn warned earlier in this session, so
+	// /burn confirm cannot be the first command run.
+	BurnArmed bool
 	AuthType  string
 	Role      string
 	Unlimited bool

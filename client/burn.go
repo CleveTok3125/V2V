@@ -3,46 +3,51 @@ package main
 import (
 	"crypto/ed25519"
 	"encoding/hex"
+	"fmt"
 	"strings"
 
 	"github.com/CleveTok3125/V2V/lib/trip"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
-// cmdBurn starts the self-destruct flow. The seed is the private key of
-// this identity, so nothing is shown or copied yet: displaying it
-// exposes it (shoulder surfing, screenshots, scrollback), which is the
-// reveal itself. Local only, never sent.
+// cmdBurn runs the seed-reveal flow. /burn arms it; /burn confirm prints
+// the seed and tells the server, which warns the room. The seed is the
+// identity's private key, so nothing is shown before the warning.
 func (s *Session) cmdBurn(text string) bool {
-	if text == "/burn" {
-		s.Display.DisplayMu.Lock()
-		if len(s.TripPriv) != ed25519.PrivateKeySize {
-			s.emitLocalFeedback("[Local]: Phiên này không dùng tripcode, không có gì để hủy.\n")
-			s.Display.DisplayMu.Unlock()
-			s.refreshTerminal()
-			return true
-		}
-		s.emitLocalFeedback("[Local]: Seed là khóa bí mật của danh tính này — hiện ra màn hình là bắt đầu lộ (ai nhìn thấy cũng mạo danh được).\n" +
-			"  Gõ /burn confirm nếu chắc chắn muốn tự hủy. Sau khi lộ: gửi seed lên phòng chat, /quit ngay và không dùng lại passphrase/salt này.\n")
-		s.Display.DisplayMu.Unlock()
-		s.refreshTerminal()
-		return true
-	}
-	if text != "/burn confirm" {
+	if text != "/burn" && text != "/burn confirm" {
 		return false
 	}
 	s.Display.DisplayMu.Lock()
 	if len(s.TripPriv) != ed25519.PrivateKeySize {
-		s.emitLocalFeedback("[Local]: Phiên này không dùng tripcode, không có gì để hủy.\n")
+		s.emitLocalFeedback("[Local]: Phiên này không dùng tripcode, không có gì để công bố.\n")
+		s.Display.DisplayMu.Unlock()
+		s.refreshTerminal()
+		return true
+	}
+	if text == "/burn" || !s.BurnArmed {
+		s.BurnArmed = true
+		s.emitLocalFeedback("[Local]: Seed là khóa bí mật của danh tính này; hiện ra là bắt đầu lộ.\n" +
+			"  Gõ /burn confirm để hiện seed và báo server. Sau đó /quit và không dùng lại passphrase/salt.\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return true
 	}
 	seedHex := hex.EncodeToString(s.TripPriv[:ed25519.SeedSize])
 	pubHex := hex.EncodeToString(s.TripPub)
-	s.emitLocalFeedback("[Local]: Seed đã hiện — coi như danh tính đã lộ từ lúc này:\n" +
+	sigHex := trip.SignReveal(s.TripPriv, pubHex)
+	s.BurnArmed = false
+	s.emitLocalFeedback("[Local]: Seed đã hiện — danh tính coi như đã lộ:\n" +
 		"  seed: " + seedHex + "\n" +
 		"  pub:  " + pubHex + " (" + s.TripBadge + ")\n" +
-		"  Bôi đen dòng seed để copy, rồi gửi nguyên seed đó trong MỘT tin nhắn (không kèm chữ khác) để server thông báo hủy cho cả phòng. Sau đó /quit ngay và không dùng lại passphrase/salt này.\n")
+		"  /quit ngay và không dùng lại passphrase/salt này.\n")
+	s.Display.DisplayMu.Unlock()
+	sendErr := s.sendJSON(wire.RevealRequest{Type: "trip_reveal", Seed: seedHex, Sig: sigHex})
+	s.Display.DisplayMu.Lock()
+	if sendErr != nil {
+		s.emitStatusLocked(fmt.Sprintf("[Local]: Không gửi được thông báo lộ seed: %v. Cả phòng chưa được cảnh báo.\n", sendErr))
+	} else {
+		s.emitStatusLocked("[Local]: Server đã nhận thông báo lộ seed.\n")
+	}
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
 	return true
@@ -63,9 +68,9 @@ func (s *Session) cmdBurnVerify(text string) bool {
 		return true
 	}
 	if trip.VerifySeed(fields[0], fields[1]) {
-		s.emitLocalFeedback("[Local]: Seed khớp pub — danh tính này đã lộ (ai cũng mạo danh được).\n")
+		s.emitLocalFeedback("[Local]: Seed khớp pub — danh tính này đã lộ.\n")
 	} else {
-		s.emitLocalFeedback("[Local]: Seed không khớp pub — không phải bằng chứng hủy.\n")
+		s.emitLocalFeedback("[Local]: Seed không khớp pub.\n")
 	}
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()
