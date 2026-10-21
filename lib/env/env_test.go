@@ -14,6 +14,7 @@ func TestRegistry(t *testing.T) {
 		fn   func() string
 	}{
 		{"V2V_TRIPCODE", KeyTripcode, Tripcode},
+		{"V2V_TRIP_SALT", KeyTripSalt, TripSalt},
 		{"V2V_PASSPHRASE", KeyPassphrase, Passphrase},
 		{"V2V_PROXY", KeyProxy, Proxy},
 		{"WEBAUTHN_RPID", KeyWebauthnRPID, WebauthnRPID},

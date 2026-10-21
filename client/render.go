@@ -236,11 +236,17 @@ func (s *Session) badgeForWire(msg WireMessage, av bool) (colored, urlStr string
 		})
 		if err == nil && res != nil {
 			colored = badgeStyle(res.Badge).Render(res.Badge)
+			if msg.Trip.Exposed {
+				colored += " " + warnStyle.Render("(đã lộ)")
+			}
 		} else {
 			colored = warnStyle.Render(plain + " ✗")
 		}
 	} else {
 		colored = plain
+		if msg.Trip.Exposed {
+			colored += " " + warnStyle.Render("(đã lộ)")
+		}
 	}
 	if base := s.verifyLinkBase(); base != "" {
 		// No text= param: msg_hash suffices for verification, keeping
@@ -353,7 +359,12 @@ func (s *Session) buildChatBlock(msg WireMessage, av, withMeta bool) (e entry, t
 			colored, urlStr := s.badgeForWire(msg, av)
 			badge = colored
 			if urlStr != "" {
-				badge = linkText(urlStr, colored)
+				suffix := " " + warnStyle.Render("(đã lộ)")
+				if msg.Trip.Exposed && strings.HasSuffix(colored, suffix) {
+					badge = linkText(urlStr, strings.TrimSuffix(colored, suffix)) + suffix
+				} else {
+					badge = linkText(urlStr, colored)
+				}
 			}
 		}
 		header += " • " + metaLineFor(msg.ChainHeight, msg.ChainHash, badge)

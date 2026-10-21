@@ -629,6 +629,9 @@ func formatInfoBlock(msg WireMessage) []string {
 			detail = " (" + err.Error() + ")"
 		}
 		out = append(out, row("trip:", fmt.Sprintf("◆ %s %s%s", shortBadge(tm.Pub), verdict, detail)))
+		if tm.Exposed {
+			out = append(out, row("trip.exposed:", "đã lộ"))
+		}
 		out = append(out, row("trip.seq:", strconv.FormatUint(uint64(tm.Seq), 10)))
 		// List every signature input so the trip verdict is checkable by eye.
 		out = append(out, row("trip.pub:", hexField(tm.Pub)))

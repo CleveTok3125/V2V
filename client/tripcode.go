@@ -25,39 +25,56 @@ import (
 const TripcodeFileName = "tripcode.json"
 
 // tripcodeFile is the on-disk shape. Only the encrypted envelope is
-// accepted; a plaintext file is refused fail-closed.
+// accepted; a plaintext file is refused fail-closed. Salt travels with
+// the secret so the file stays self-contained: an empty salt means the
+// server default at derive time.
 type tripcodeFile struct {
 	Version  int    `json:"version"`
 	Tripcode string `json:"tripcode"`
+	Salt     string `json:"salt,omitempty"`
 }
 
-// resolveTripcode returns the tripcode string for this session.
-// Empty + nil error means "no tripcode requested" only when useFlag is
-// false; callers pass the -t state. WASM returns the JS-provided value.
-// username and serverHost feed the strength meter's personal-info
-// context; strength is only ever displayed on the interactive path.
-func resolveTripcode(useFlag bool, configDir, username, serverHost string) (string, error) {
+// resolveTripcode returns the tripcode passphrase, its custom salt and
+// the salt source for this session. Salt precedence: V2V_TRIP_SALT env >
+// tripcode.json salt > config salt; empty salt means the server default.
+// A passphrase from V2V_TRIPCODE env skips the file, so its salt resolves
+// env > config > server default.
+// Empty passphrase + empty salt + nil error means "no tripcode requested"
+// only when useFlag is false; callers pass the -t state. WASM returns the
+// JS-provided value. username and serverHost feed the strength meter's
+// personal-info context; strength is only ever displayed on the
+// interactive path.
+func resolveTripcode(useFlag bool, configDir, username, serverHost string) (passphrase, customSalt, saltSrc string, err error) {
 	if isWASMRuntime() {
-		return CLI.Tripcode, nil
+		salt, src := customSaltWithSource()
+		return CLI.Tripcode, salt, src, nil
 	}
 	if !useFlag {
-		return "", nil
+		return "", "", "", nil
 	}
 	ctx := userInputs(username, serverHost)
 	if v := env.Tripcode(); v != "" {
 		if rep := AssessPassphrase(v, ctx); rep.Weak {
 			fmt.Printf("⚠️ Tripcode trong env yếu, cân nhắc đổi.\n")
 		}
-		return v, nil
+		salt, src := customSaltWithSource()
+		return v, salt, src, nil
 	}
 	path := filepath.Join(configDir, TripcodeFileName)
-	if tc, found, err := loadTripcodeFile(path); err != nil {
-		return "", err
+	if tc, fileSalt, found, err := loadTripcodeFile(path); err != nil {
+		return "", "", "", err
 	} else if found {
 		if rep := AssessPassphrase(tc, ctx); rep.Weak {
 			fmt.Println(rep.WeakWarning())
 		}
-		return tc, nil
+		if v := env.TripSalt(); v != "" {
+			return tc, v, "env V2V_TRIP_SALT", nil
+		}
+		if fileSalt != "" {
+			return tc, fileSalt, "tripcode.json", nil
+		}
+		salt, src := customSaltWithSource()
+		return tc, salt, src, nil
 	}
 	fmt.Println(ReminderLine())
 	var tc string
@@ -65,22 +82,23 @@ func resolveTripcode(useFlag bool, configDir, username, serverHost string) (stri
 		var err error
 		tc, err = meteredTripcodeEntry(path, ctx)
 		if err != nil {
-			return "", err
+			return "", "", "", err
 		}
-		return tc, nil
+		salt, src := customSaltWithSource()
+		return tc, salt, src, nil
 	}
-	tc, err := readDoubleEntry(readPassphrase)
-	if err != nil {
-		return "", err
+	tc, terr := readDoubleEntry(readPassphrase)
+	if terr != nil {
+		return "", "", "", terr
 	}
 	if len(tc) > 64 {
-		return "", errors.New("tripcode quá dài (tối đa 64 byte, server sẽ từ chối)")
+		return "", "", "", errors.New("tripcode quá dài (tối đa 64 byte, server sẽ từ chối)")
 	}
 	rep := AssessPassphrase(tc, ctx)
 	if rep.Weak {
 		fmt.Println(rep.WeakWarning())
 		if !confirmUseWeak(os.Stdin) {
-			return "", errors.New("đã hủy tripcode yếu")
+			return "", "", "", errors.New("đã hủy tripcode yếu")
 		}
 	}
 	if offerTripcodeSave(os.Stdin) {
@@ -90,7 +108,36 @@ func resolveTripcode(useFlag bool, configDir, username, serverHost string) (stri
 			fmt.Println("💾 Đã lưu tripcode mã hóa.")
 		}
 	}
-	return tc, nil
+	salt, src := customSaltWithSource()
+	return tc, salt, src, nil
+}
+
+// tripCustomSalt is the user override: env beats config file. Empty
+// means the server default.
+func tripCustomSalt() string {
+	salt, _ := customSaltWithSource()
+	return salt
+}
+
+// customSaltWithSource pairs the override with where it came from, so
+// the session can name the effective salt when the badge changes.
+func customSaltWithSource() (salt, src string) {
+	if v := env.TripSalt(); v != "" {
+		return v, "env V2V_TRIP_SALT"
+	}
+	if s := tripConfigSalt(); s != "" {
+		return s, "config crypto.salt"
+	}
+	return "", "server default"
+}
+
+// tripConfigSalt is the config-file override. Empty means the server
+// default.
+func tripConfigSalt() string {
+	if ClientCfg != nil {
+		return ClientCfg.Crypto.Salt
+	}
+	return ""
 }
 
 // toAssessment maps a strength report to the shared prompt meter. Pure
@@ -169,16 +216,17 @@ func userInputs(username, serverHost string) []string {
 
 // loadTripcodeFile reads the secret file. found=false when absent.
 // Plaintext files are refused: tripcode at rest is always encrypted.
-func loadTripcodeFile(path string) (tc string, found bool, err error) {
+// Files written before salt support decode with an empty salt.
+func loadTripcodeFile(path string) (tc, salt string, found bool, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", false, nil
+			return "", "", false, nil
 		}
-		return "", false, err
+		return "", "", false, err
 	}
 	if !identity.IsEncryptedData(data) {
-		return "", false, errors.New("tripcode.json không được mã hóa — xóa file hoặc nhập tay để lưu lại bản mã hóa")
+		return "", "", false, errors.New("tripcode.json không được mã hóa — xóa file hoặc nhập tay để lưu lại bản mã hóa")
 	}
 	unlock := env.Passphrase()
 	if unlock == "" {
@@ -192,7 +240,7 @@ func loadTripcodeFile(path string) (tc string, found bool, err error) {
 			fmt.Println()
 		}
 		if err != nil {
-			return "", false, err
+			return "", "", false, err
 		}
 	}
 	if env.Passphrase() != "" && AssessPassphrase(unlock, nil).Weak {
@@ -203,25 +251,26 @@ func loadTripcodeFile(path string) (tc string, found bool, err error) {
 	defer identity.ZeroBytes(unlockPw)
 	plain, err := identity.DecryptData(data, unlockPw)
 	if err != nil {
-		return "", false, fmt.Errorf("không mở được tripcode.json: %w", err)
+		return "", "", false, fmt.Errorf("không mở được tripcode.json: %w", err)
 	}
 	var f tripcodeFile
 	if err := json.Unmarshal(plain, &f); err != nil {
-		return "", false, errors.New("tripcode.json hỏng")
+		return "", "", false, errors.New("tripcode.json hỏng")
 	}
 	if f.Tripcode == "" {
-		return "", false, errors.New("tripcode.json trống")
+		return "", "", false, errors.New("tripcode.json trống")
 	}
-	return f.Tripcode, true, nil
+	return f.Tripcode, f.Salt, true, nil
 }
 
 // saveTripcodeFile writes the secret encrypted. Empty unlock is refused:
-// tripcode at rest is never plaintext.
-func saveTripcodeFile(path, tripcode, unlock string) error {
+// tripcode at rest is never plaintext. Salt travels with the secret so
+// the file re-derives the same identity without config.
+func saveTripcodeFile(path, tripcode, salt, unlock string) error {
 	if unlock == "" {
 		return errors.New("cần unlock passphrase để mã hóa")
 	}
-	plain, err := json.Marshal(tripcodeFile{Version: 3, Tripcode: tripcode})
+	plain, err := json.Marshal(tripcodeFile{Version: 3, Tripcode: tripcode, Salt: salt})
 	if err != nil {
 		return err
 	}
@@ -275,7 +324,7 @@ func saveTripcodePrompt(path, tripcode string, ctx []string) error {
 		}); err != nil {
 			return err
 		}
-		return saveTripcodeFile(path, tripcode, unlock)
+		return saveTripcodeFile(path, tripcode, tripCustomSalt(), unlock)
 	}
 	fmt.Print("🔒 Đặt unlock passphrase cho file tripcode (trống = không lưu): ")
 	unlock, err = readPassphrase()
@@ -291,7 +340,7 @@ func saveTripcodePrompt(path, tripcode string, ctx []string) error {
 	if rep := AssessPassphrase(unlock, ctx); rep.Weak {
 		fmt.Println(rep.FileWeakWarning())
 	}
-	return saveTripcodeFile(path, tripcode, unlock)
+	return saveTripcodeFile(path, tripcode, tripCustomSalt(), unlock)
 }
 
 // offerTripcodeSave asks whether to persist a hand-entered tripcode.

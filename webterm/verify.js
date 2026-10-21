@@ -122,6 +122,9 @@ import { gateFetch } from "./pow_bridge.js";
             if (j.error)
                 addField("lỗi", String(j.error), false);
         }
+        else if (j.exposed) {
+            fail("⚠️ Chữ ký hợp lệ nhưng danh tính đã lộ seed");
+        }
         else {
             setPill("✅ Trip hợp lệ", "ok");
         }
@@ -188,6 +191,11 @@ import { gateFetch } from "./pow_bridge.js";
             // would paint a rejected trip as accepted.
             badgeEl.style.color = badgeCss(j.badgeColor, j.valid);
             badgeEl.style.fontWeight = "700";
+        }
+        if (j.exposed) {
+            var expEl = addField("Lộ seed (trip.exposed)", "đã lộ", false);
+            expEl.style.color = "#ff6b6b";
+            expEl.style.fontWeight = "700";
         }
         addFieldOrPlaceholder("Số thứ tự (trip.seq)", j.seq);
         addFieldOrPlaceholder("Khoá (trip.pub)", j.pub);

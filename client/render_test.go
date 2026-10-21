@@ -1,11 +1,15 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/CleveTok3125/V2V/lib/filter"
+	"github.com/CleveTok3125/V2V/lib/tripcolor"
 	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
@@ -186,6 +190,51 @@ func TestBadgeVerifyURLCarriesHeightAndSentAt(t *testing.T) {
 		if q.Get(k) == "" {
 			t.Fatalf("verify url lost signed param %q: %q", k, urlStr)
 		}
+	}
+}
+
+// A revealed identity keeps a valid signature but loses trust: the badge
+// renders with an exposure marker instead of the tamper cross.
+func TestExposedBadgeRendersMarker(t *testing.T) {
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 13)
+	}
+	priv := ed25519.NewKeyFromSeed(seed)
+	pub := priv.Public().(ed25519.PublicKey)
+	prev := make([]byte, 32)
+	msgHash := sha256.Sum256([]byte("hello"))
+	payload := tripcolor.CanonicalPayload("", 1, prev, msgHash[:], pub, "Bob#1234", 7, 0)
+	sig := ed25519.Sign(priv, payload)
+	s := &Session{WSURL: "wss://chat.example.com/ws"}
+	wire := WireMessage{
+		Text: "hello", DisplayName: "Bob#1234",
+		Trip: &TripMeta{
+			Pub: hex.EncodeToString(pub), Seq: 1,
+			Prev: hex.EncodeToString(prev), Sig: hex.EncodeToString(sig),
+			ServerPub: "", MsgHash: hex.EncodeToString(msgHash[:]),
+			DisplayName: "Bob#1234", TmpID: 7, Exposed: true,
+		},
+	}
+	colored, _ := s.badgeForWire(wire, true)
+	if !strings.Contains(colored, "(đã lộ)") {
+		t.Fatalf("exposed badge must mark: %q", colored)
+	}
+	if strings.Contains(colored, "✗") {
+		t.Fatalf("exposed valid sig must not cross: %q", colored)
+	}
+	unverifiedExposed, _ := s.badgeForWire(wire, false)
+	if !strings.Contains(unverifiedExposed, "(đã lộ)") {
+		t.Fatalf("exposed badge with autoverify off must still mark: %q", unverifiedExposed)
+	}
+	wire.Trip.Exposed = false
+	plain, _ := s.badgeForWire(wire, true)
+	if strings.Contains(plain, "(đã lộ)") {
+		t.Fatalf("clean badge must not mark: %q", plain)
+	}
+	unverifiedClean, _ := s.badgeForWire(wire, false)
+	if strings.Contains(unverifiedClean, "(đã lộ)") {
+		t.Fatalf("clean badge with autoverify off must not mark: %q", unverifiedClean)
 	}
 }
 

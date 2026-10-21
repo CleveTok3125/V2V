@@ -6,14 +6,18 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"github.com/CleveTok3125/V2V/lib/config"
 	"github.com/CleveTok3125/V2V/lib/tripcolor"
 )
 
 func TestDeriveTripKeyDeterministic(t *testing.T) {
-	priv1, pub1, badge1 := deriveTripKey("hello world", "deadbeef00112233445566778899aabbccddeeff00112233445566778899aabbcc")
-	priv2, pub2, badge2 := deriveTripKey("hello world", "deadbeef00112233445566778899aabbccddeeff00112233445566778899aabbcc")
+	clearTripSalt(t)
+	srv := AuthPacket{ServerPubKey: "deadbeef00112233445566778899aabbccddeeff00112233445566778899aabbcc"}
+	def := tripServerDefault(srv)
+	priv1, pub1, badge1 := deriveTripKey("hello world", resolveTripSalt("", def))
+	priv2, pub2, badge2 := deriveTripKey("hello world", resolveTripSalt("", def))
 	if hex.EncodeToString(pub1) != hex.EncodeToString(pub2) {
-		t.Fatalf("same passphrase+pub should give same pub: %x vs %x", pub1, pub2)
+		t.Fatalf("same passphrase+salt should give same pub: %x vs %x", pub1, pub2)
 	}
 	if badge1 != badge2 {
 		t.Fatalf("badge mismatch %s vs %s", badge1, badge2)
@@ -21,19 +25,74 @@ func TestDeriveTripKeyDeterministic(t *testing.T) {
 	if len(priv1) != ed25519.PrivateKeySize || len(priv2) != ed25519.PrivateKeySize {
 		t.Fatalf("priv size wrong")
 	}
-	// Different serverPub should give different key
-	_, pub3, _ := deriveTripKey("hello world", "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+	// Different server default gives different key.
+	other := tripServerDefault(AuthPacket{ServerPubKey: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"})
+	_, pub3, _ := deriveTripKey("hello world", resolveTripSalt("", other))
 	if hex.EncodeToString(pub1) == hex.EncodeToString(pub3) {
 		t.Fatalf("different serverPub should give different pub")
 	}
-	_, pub4, _ := deriveTripKey("different", "deadbeef00112233445566778899aabbccddeeff00112233445566778899aabbcc")
+	_, pub4, _ := deriveTripKey("different", resolveTripSalt("", def))
 	if hex.EncodeToString(pub1) == hex.EncodeToString(pub4) {
 		t.Fatalf("different passphrase should give different pub")
 	}
 }
 
+func TestDeriveTripKeyCustomSaltPortable(t *testing.T) {
+	clearTripSalt(t)
+	t.Setenv("V2V_TRIP_SALT", "my-fixed-domain")
+	defA := tripServerDefault(AuthPacket{ServerPubKey: "deadbeef00112233445566778899aabbccddeeff00112233445566778899aabbcc"})
+	defB := tripServerDefault(AuthPacket{ServerPubKey: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"})
+	_, pubA, _ := deriveTripKey("hello world", resolveTripSalt(tripCustomSalt(), defA))
+	_, pubB, _ := deriveTripKey("hello world", resolveTripSalt(tripCustomSalt(), defB))
+	if hex.EncodeToString(pubA) != hex.EncodeToString(pubB) {
+		t.Fatalf("custom salt should give same pub on every server")
+	}
+}
+
+// clearTripSalt pins the salt inputs to server-default for tests: no
+// env override and no config override (restored afterwards).
+func clearTripSalt(t *testing.T) {
+	t.Helper()
+	t.Setenv("V2V_TRIP_SALT", "")
+	old := ClientCfg
+	t.Cleanup(func() { ClientCfg = old })
+	if ClientCfg == nil {
+		ClientCfg = config.DefaultClientConfig()
+	}
+	ClientCfg.Crypto.Salt = ""
+}
+
+func TestResolveTripSalt(t *testing.T) {
+	serverPub := "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12"
+	server := tripServerDefault(AuthPacket{ServerPubKey: serverPub})
+	custom := resolveTripSalt("mine", server)
+	if string(custom) == string(server) {
+		t.Fatal("custom salt must differ from server default")
+	}
+	if string(resolveTripSalt("mine", server)) != string(resolveTripSalt("mine", tripServerDefault(AuthPacket{}))) {
+		t.Fatal("custom salt must ignore server default")
+	}
+	// Advertised TRIP_SALT wins over serverPub.
+	adv := tripServerDefault(AuthPacket{ServerPubKey: serverPub, TripSalt: "op-domain"})
+	if string(adv) == string(server) {
+		t.Fatal("advertised trip salt must differ from serverPub-derived")
+	}
+	if string(tripServerDefault(AuthPacket{ServerPubKey: "ff", TripSalt: "op-domain"})) != string(adv) {
+		t.Fatal("advertised trip salt must ignore serverPub")
+	}
+	def := tripServerDefault(AuthPacket{})
+	if len(def) != 16 {
+		t.Fatalf("fallback salt length = %d, want 16", len(def))
+	}
+	if string(tripServerDefault(AuthPacket{ServerPubKey: "zzzz"})) != string(def) {
+		t.Fatal("invalid serverPub hex must fall back to fixed salt")
+	}
+}
+
 func TestDeriveTripBadge(t *testing.T) {
-	_, pub, badge := deriveTripKey("test", "ab12")
+	clearTripSalt(t)
+	def := tripServerDefault(AuthPacket{ServerPubKey: "ab12"})
+	_, pub, badge := deriveTripKey("test", resolveTripSalt("", def))
 	h := sha256.Sum256(pub)
 	expect := hex.EncodeToString(h[:])[:8]
 	if badge != expect {
@@ -75,8 +134,10 @@ func TestCanonicalPayloadDeterministic(t *testing.T) {
 }
 
 func TestTripSigningRoundtrip(t *testing.T) {
-	priv, pub, _ := deriveTripKey("passphrase for signing", "serverpubhex00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233")
-	serverPub := "serverpubhex00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233"
+	clearTripSalt(t)
+	def := tripServerDefault(AuthPacket{})
+	priv, pub, _ := deriveTripKey("passphrase for signing", resolveTripSalt("sign-domain", def))
+	serverPub := "aa" + hex.EncodeToString(make([]byte, 31))
 	prev := make([]byte, 32)
 	msg := "hello world"
 	msgHash := sha256.Sum256([]byte(msg))
@@ -105,8 +166,10 @@ func TestTripSigningRoundtrip(t *testing.T) {
 }
 
 func TestTripHashChain(t *testing.T) {
-	priv, pub, _ := deriveTripKey("chain test", "server1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab")
-	serverPub := "server1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab"
+	clearTripSalt(t)
+	def := tripServerDefault(AuthPacket{})
+	priv, pub, _ := deriveTripKey("chain test", resolveTripSalt("chain-domain", def))
+	serverPub := "aa" + hex.EncodeToString(make([]byte, 31))
 	prev := make([]byte, 32)
 	seq := uint32(1)
 	displayName := "Tester#eff8"
@@ -138,7 +201,7 @@ func TestTripHashChain(t *testing.T) {
 func BenchmarkDeriveTripKey(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		priv, _, _ := deriveTripKey("con meo ngu trua", "deadbeef00112233445566778899aabbccddeeff00112233445566778899aabbcc")
+		priv, _, _ := deriveTripKey("con meo ngu trua", resolveTripSalt("", tripServerDefault(AuthPacket{})))
 		for j := range priv {
 			priv[j] = 0
 		}

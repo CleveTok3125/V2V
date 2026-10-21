@@ -528,6 +528,15 @@ func TestFormatInfoBlockTripDetail(t *testing.T) {
 	if !strings.Contains(joined, "✗") {
 		t.Fatalf("swapped reply_to must fail trip verdict:\n%s", joined)
 	}
+	// An exposed flag adds its own row without touching the verdict.
+	exposed := wire
+	exposed.Trip = &TripMeta{}
+	*exposed.Trip = *tm
+	exposed.Trip.Exposed = true
+	joined = strings.Join(formatInfoBlock(exposed), "")
+	if !strings.Contains(joined, "trip.exposed:") || !strings.Contains(joined, "✓") {
+		t.Fatalf("exposed block must flag and keep verdict:\n%s", joined)
+	}
 }
 
 func TestFormatQuoteRich(t *testing.T) {

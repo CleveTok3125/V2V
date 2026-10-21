@@ -136,6 +136,17 @@ func TestWireJSONKeySet(t *testing.T) {
 	if sys.SysDate != "2026-01-02" {
 		t.Fatalf("sys_date lost: %+v %v", sys.SysDate, err)
 	}
+
+	// TripSalt rides the challenge only when the operator sets TRIP_SALT;
+	// absent means the client derives from server_pubkey.
+	var ch AuthPacket
+	if err := json.Unmarshal([]byte(`{"type":"auth_challenge","server_pubkey":"ab","trip_salt":"op"}`), &ch); err != nil || ch.TripSalt != "op" {
+		t.Fatalf("trip_salt lost: %+v %v", ch, err)
+	}
+	raw, _ = json.Marshal(AuthPacket{Type: "auth_challenge"})
+	if strings.Contains(string(raw), "trip_salt") {
+		t.Fatalf("empty trip_salt must omit: %s", raw)
+	}
 }
 
 func keysOf(m map[string]any) []string {

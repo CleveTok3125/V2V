@@ -18,6 +18,7 @@ import (
 // accessor because kong resolves them.
 const (
 	KeyTripcode        = "V2V_TRIPCODE"
+	KeyTripSalt        = "V2V_TRIP_SALT"
 	KeyPassphrase      = "V2V_PASSPHRASE"
 	KeyProxy           = "V2V_PROXY"
 	KeyWebauthnRPID    = "WEBAUTHN_RPID"
@@ -37,6 +38,10 @@ const (
 
 // Tripcode feeds tripcode entry without prompting (CI).
 func Tripcode() string { return os.Getenv(KeyTripcode) }
+
+// TripSalt overrides the tripcode derivation salt. Empty means the
+// server default. The salt is a domain separator, not a secret.
+func TripSalt() string { return os.Getenv(KeyTripSalt) }
 
 // Passphrase unlocks sealed key, tripcode and config files.
 func Passphrase() string { return os.Getenv(KeyPassphrase) }

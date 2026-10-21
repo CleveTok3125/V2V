@@ -98,6 +98,7 @@ catalog, never a spelling invented at a call site.
 | `reload` | the hot-reloadable configuration was reloaded |
 | `replay` | a replay request was refused |
 | `request` | an HTTP request |
+| `reveal` | a tripcode seed was published, exposing the identity |
 | `security` | a security-relevant state |
 | `session` | a chat session |
 | `shutdown` | the server received a stop signal |

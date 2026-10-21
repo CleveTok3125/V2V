@@ -112,6 +112,24 @@ func TestLoadStaticConfigRejectsNonOnionHost(t *testing.T) {
 	}
 }
 
+func TestLoadStaticConfigTripSalt(t *testing.T) {
+	setStaticEnv(t)
+	t.Setenv("TRIP_SALT", "")
+	cfg, _, err := LoadStaticConfig(t.TempDir())
+	if err != nil || cfg.TripSalt != "" {
+		t.Fatalf("empty TRIP_SALT must load as default: %+v %v", cfg.TripSalt, err)
+	}
+	t.Setenv("TRIP_SALT", "  op-domain  ")
+	cfg, _, err = LoadStaticConfig(t.TempDir())
+	if err != nil || cfg.TripSalt != "op-domain" {
+		t.Fatalf("TRIP_SALT must trim: %+v %v", cfg.TripSalt, err)
+	}
+	t.Setenv("TRIP_SALT", strings.Repeat("x", 129))
+	if _, _, err := LoadStaticConfig(t.TempDir()); err == nil {
+		t.Fatal("overlong TRIP_SALT must fail")
+	}
+}
+
 func TestLoadStaticConfigBoolFallbackWarns(t *testing.T) {
 	setStaticEnv(t)
 	t.Setenv("WEB_ENABLED", "not-a-bool")

@@ -15,6 +15,8 @@ interface V2VConfig {
   serverUrl?: string;
   username?: string;
   tripcode?: string;
+  // Custom trip salt. Absent or empty means the server default.
+  tripSalt?: string;
   showJoin?: boolean;
   passkey?: boolean;
   passkeyRole?: string;

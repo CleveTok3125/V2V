@@ -14,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CleveTok3125/V2V/lib/config"
 	"github.com/CleveTok3125/V2V/lib/tripcolor"
+	"github.com/gorilla/websocket"
 )
 
 func TestHistoryTripChainPersistenceAndTamper(t *testing.T) {
@@ -125,14 +127,14 @@ func TestHistoryRestartRepopulation(t *testing.T) {
 		hash.Write(h[:])
 		newPrev := hash.Sum(nil)
 		wire2 := WireMessage{Type: "chat", Text: msg, DisplayName: "Tester#eff8", Trip: &TripMeta{
-				Pub:         pubHex,
-				Seq:         seq,
-				Prev:        hex.EncodeToString(prev),
-				Sig:         hex.EncodeToString(sig),
-				ServerPub:   serverPub,
-				MsgHash:     hex.EncodeToString(h[:]),
-				DisplayName: "Tester#eff8",
-			}}
+			Pub:         pubHex,
+			Seq:         seq,
+			Prev:        hex.EncodeToString(prev),
+			Sig:         hex.EncodeToString(sig),
+			ServerPub:   serverPub,
+			MsgHash:     hex.EncodeToString(h[:]),
+			DisplayName: "Tester#eff8",
+		}}
 		rec := historyRecord{
 			Timestamp: "2026-01-01T00:00:00Z",
 			Wire:      &wire2,
@@ -374,7 +376,7 @@ func signTripRecord(t *testing.T, priv ed25519.PrivateKey, pubHex string, seq ui
 		DisplayName: "Tester#eff8",
 		TmpID:       tmpID,
 	}}
-	return historyRecord{Timestamp: "2026-01-01T00:00:00Z", Wire: &wire}, next
+	return historyRecord{Timestamp: time.Now().UTC().Format(time.RFC3339Nano), Wire: &wire}, next
 }
 
 // A tampered trip line must not reach the replayed RAM history: it is
@@ -416,6 +418,340 @@ func TestInitHistoryStore_DropsTamperedTripFromReplay(t *testing.T) {
 	}
 	if !strings.Contains(history[0], "honest") {
 		t.Fatalf("valid line missing: %q", history[0])
+	}
+}
+
+// A seed reveal in history rebuilds the exposed registry at boot:
+// the announcement and later messages flag, earlier ones stay clean.
+func TestInitHistoryStore_RebuildsExposedRegistry(t *testing.T) {
+	testCfg(t)
+	seed := bytes.Repeat([]byte{0x0b}, 32)
+	priv := ed25519.NewKeyFromSeed(seed)
+	pubHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
+	seedHex := hex.EncodeToString(seed)
+
+	rec1, next1 := signTripRecord(t, priv, pubHex, 1, make([]byte, 32), "one")
+	rec2, next2 := signTripRecord(t, priv, pubHex, 2, next1, seedHex)
+	rec3, _ := signTripRecord(t, priv, pubHex, 3, next2, "three")
+
+	path := filepath.Join(t.TempDir(), "history.jsonl")
+	var sb bytes.Buffer
+	for _, rec := range []historyRecord{rec1, rec2, rec3} {
+		line, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sb.Write(line)
+		sb.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, sb.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewChatServer()
+	if err := s.InitHistoryStore(path, 1); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Chain.Store.Close()
+
+	if !s.isTripExposed(pubHex) {
+		t.Fatal("exposed registry must rebuild from history")
+	}
+	s.Chain.Mu.RLock()
+	history := append([]string(nil), s.Chain.History...)
+	s.Chain.Mu.RUnlock()
+	if len(history) != 3 {
+		t.Fatalf("replay history = %d lines, want 3", len(history))
+	}
+	for i, want := range []bool{false, true, true} {
+		var wm WireMessage
+		if err := json.Unmarshal([]byte(history[i]), &wm); err != nil {
+			t.Fatal(err)
+		}
+		if wm.Trip == nil || wm.Trip.Exposed != want {
+			t.Fatalf("line %d exposed = %v, want %v", i, wm.Trip.Exposed, want)
+		}
+	}
+}
+
+// A reveal record older than the 24h TTL still flags subsequent lines in
+// the replayed history window, without refreshing the live registry TTL.
+func TestInitHistoryStore_ExpiredRevealDoesNotRefreshLiveRegistry(t *testing.T) {
+	testCfg(t)
+	seed := bytes.Repeat([]byte{0x0c}, 32)
+	priv := ed25519.NewKeyFromSeed(seed)
+	pubHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
+	seedHex := hex.EncodeToString(seed)
+
+	oldTS := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339Nano)
+	rec1, next1 := signTripRecord(t, priv, pubHex, 1, make([]byte, 32), seedHex)
+	rec1.Timestamp = oldTS
+	rec2, _ := signTripRecord(t, priv, pubHex, 2, next1, "later")
+	rec2.Timestamp = oldTS
+
+	path := filepath.Join(t.TempDir(), "history.jsonl")
+	var sb bytes.Buffer
+	for _, rec := range []historyRecord{rec1, rec2} {
+		line, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sb.Write(line)
+		sb.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, sb.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewChatServer()
+	if err := s.InitHistoryStore(path, 1); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Chain.Store.Close()
+
+	if s.isTripExposed(pubHex) {
+		t.Fatal("reveal older than TTL must not populate live exposed registry")
+	}
+	s.Chain.Mu.RLock()
+	history := append([]string(nil), s.Chain.History...)
+	s.Chain.Mu.RUnlock()
+	for i := range history {
+		var wm WireMessage
+		if err := json.Unmarshal([]byte(history[i]), &wm); err != nil {
+			t.Fatal(err)
+		}
+		if wm.Trip == nil || !wm.Trip.Exposed {
+			t.Fatalf("line %d in replayed history must stay flagged: %+v", i, wm.Trip)
+		}
+	}
+}
+
+// A whole message containing only its own seed reveals it live:
+// the announcement and later messages flag, and a notice goes out.
+func TestReadPump_SeedReveal(t *testing.T) {
+	old := Cfg.Dynamic.Load()
+	if old == nil {
+		old = config.DefaultDynamic()
+	}
+	dyn := config.DefaultDynamic()
+	dyn.MessageCooldown = time.Millisecond
+	Cfg.Dynamic.Store(dyn)
+	defer Cfg.Dynamic.Store(old)
+	oldStatic := Cfg.Static
+	Cfg.Static.Timezone = time.UTC
+	defer func() { Cfg.Static = oldStatic }()
+
+	seed := bytes.Repeat([]byte{0x0d}, 32)
+	priv := ed25519.NewKeyFromSeed(seed)
+	pub := priv.Public().(ed25519.PublicKey)
+	pubHex := hex.EncodeToString(pub)
+	seedHex := hex.EncodeToString(seed)
+	displayName := "An#abcd"
+
+	s := NewChatServer()
+	client, server := dialAuthPair(t, s)
+	session := &ClientSession{
+		Conn:        server,
+		Send:        make(chan []byte, 256),
+		DisplayName: displayName,
+		Perms:       GetDefaultPermission(),
+		TripPub:     pubHex,
+	}
+	// Register so BroadcastWire echoes back to the sender.
+	s.Hub.ClientsMu.Lock()
+	s.Hub.Clients[server] = session
+	s.Hub.ClientsMu.Unlock()
+	go session.WritePump()
+	go s.ReadPump(session, "127.0.0.1")
+
+	sign := func(seq uint32, prev []byte, text string, tmpID uint64) (sigHex, prevHex string, next []byte) {
+		h := sha256.Sum256([]byte(text))
+		payload := tripcolor.CanonicalPayload("", seq, prev, h[:], pub, displayName, tmpID, 0)
+		sig := ed25519.Sign(priv, payload)
+		ch := sha256.New()
+		ch.Write(prev)
+		ch.Write(sig)
+		ch.Write(h[:])
+		return hex.EncodeToString(sig), hex.EncodeToString(prev), ch.Sum(nil)
+	}
+	sendTrip := func(seq uint32, prev []byte, text string, tmpID uint64) []byte {
+		sigHex, prevHex, next := sign(seq, prev, text, tmpID)
+		body, _ := json.Marshal(map[string]any{
+			"text": text, "pub": pubHex, "seq": seq, "prev": prevHex,
+			"sig": sigHex, "display_name": displayName, "tmp_id": tmpID,
+		})
+		if err := client.WriteMessage(websocket.TextMessage, body); err != nil {
+			t.Fatal(err)
+		}
+		return next
+	}
+	readWire := func() WireMessage {
+		t.Helper()
+		client.SetReadDeadline(time.Now().Add(10 * time.Second))
+		_, msg, err := client.ReadMessage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wm WireMessage
+		if err := json.Unmarshal(msg, &wm); err != nil {
+			t.Fatalf("not a wire: %q", msg)
+		}
+		return wm
+	}
+	// The first chat of the day also fans out a date banner; skip
+	// non-chat frames when waiting for an echo.
+	readChat := func() WireMessage {
+		t.Helper()
+		for {
+			wm := readWire()
+			if wm.Type == "chat" {
+				return wm
+			}
+		}
+	}
+
+	next := sendTrip(1, make([]byte, 32), seedHex, 1001)
+	echo := readChat()
+	if echo.Trip == nil || !echo.Trip.Exposed {
+		t.Fatalf("announcement echo must flag exposed: %+v", echo.Trip)
+	}
+	notice := readWire()
+	if notice.Type != "system" || !strings.Contains(notice.Text, "đã lộ seed") {
+		t.Fatalf("reveal must broadcast a notice: %+v", notice)
+	}
+	if !s.isTripExposed(pubHex) {
+		t.Fatal("server must record the reveal")
+	}
+	time.Sleep(10 * time.Millisecond)
+	sendTrip(2, next, "after", 1002)
+	echo2 := readChat()
+	if echo2.Trip == nil || !echo2.Trip.Exposed {
+		t.Fatalf("later messages must stay flagged: %+v", echo2.Trip)
+	}
+	// Drain the server side before restoring Cfg: the leave broadcast
+	// on unregister still needs the test config.
+	client.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.Hub.ClientsMu.RLock()
+		n := len(s.Hub.Clients)
+		s.Hub.ClientsMu.RUnlock()
+		if n == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("server did not unregister")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A rate-limited seed reveal must not mark the identity exposed before
+// the announcement actually broadcasts.
+func TestReadPump_SeedRevealRejectedByCooldownDoesNotExpose(t *testing.T) {
+	old := Cfg.Dynamic.Load()
+	if old == nil {
+		old = config.DefaultDynamic()
+	}
+	dyn := config.DefaultDynamic()
+	dyn.MessageCooldown = 5 * time.Second
+	Cfg.Dynamic.Store(dyn)
+	defer Cfg.Dynamic.Store(old)
+	oldStatic := Cfg.Static
+	Cfg.Static.Timezone = time.UTC
+	defer func() { Cfg.Static = oldStatic }()
+
+	seed := bytes.Repeat([]byte{0x0e}, 32)
+	priv := ed25519.NewKeyFromSeed(seed)
+	pub := priv.Public().(ed25519.PublicKey)
+	pubHex := hex.EncodeToString(pub)
+	seedHex := hex.EncodeToString(seed)
+	displayName := "An#abcd"
+
+	s := NewChatServer()
+	client, server := dialAuthPair(t, s)
+	session := &ClientSession{
+		Conn:        server,
+		Send:        make(chan []byte, 256),
+		DisplayName: displayName,
+		Perms:       GetDefaultPermission(),
+		TripPub:     pubHex,
+	}
+	s.Hub.ClientsMu.Lock()
+	s.Hub.Clients[server] = session
+	s.Hub.ClientsMu.Unlock()
+	go session.WritePump()
+	go s.ReadPump(session, "127.0.0.1")
+
+	sign := func(seq uint32, prev []byte, text string, tmpID uint64) (sigHex, prevHex string, next []byte) {
+		h := sha256.Sum256([]byte(text))
+		payload := tripcolor.CanonicalPayload("", seq, prev, h[:], pub, displayName, tmpID, 0)
+		sig := ed25519.Sign(priv, payload)
+		ch := sha256.New()
+		ch.Write(prev)
+		ch.Write(sig)
+		ch.Write(h[:])
+		return hex.EncodeToString(sig), hex.EncodeToString(prev), ch.Sum(nil)
+	}
+	sendTrip := func(seq uint32, prev []byte, text string, tmpID uint64) []byte {
+		sigHex, prevHex, next := sign(seq, prev, text, tmpID)
+		body, _ := json.Marshal(map[string]any{
+			"text": text, "pub": pubHex, "seq": seq, "prev": prevHex,
+			"sig": sigHex, "display_name": displayName, "tmp_id": tmpID,
+		})
+		if err := client.WriteMessage(websocket.TextMessage, body); err != nil {
+			t.Fatal(err)
+		}
+		return next
+	}
+	readWire := func() WireMessage {
+		t.Helper()
+		client.SetReadDeadline(time.Now().Add(10 * time.Second))
+		_, msg, err := client.ReadMessage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wm WireMessage
+		if err := json.Unmarshal(msg, &wm); err != nil {
+			t.Fatalf("not a wire: %q", msg)
+		}
+		return wm
+	}
+	readChat := func() WireMessage {
+		t.Helper()
+		for {
+			wm := readWire()
+			if wm.Type == "chat" {
+				return wm
+			}
+		}
+	}
+
+	next := sendTrip(1, make([]byte, 32), "first", 2001)
+	_ = readChat()
+	// Immediate reveal hits MessageCooldown and is rejected.
+	_ = sendTrip(2, next, seedHex, 2002)
+	warn := readWire()
+	if warn.Type != "system" || !strings.Contains(warn.Text, "quá nhanh") {
+		t.Fatalf("expected cooldown notice, got %+v", warn)
+	}
+	if s.isTripExposed(pubHex) {
+		t.Fatal("rejected reveal must not mark identity exposed")
+	}
+
+	client.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.Hub.ClientsMu.RLock()
+		n := len(s.Hub.Clients)
+		s.Hub.ClientsMu.RUnlock()
+		if n == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("server did not unregister")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -461,4 +797,3 @@ func TestInitHistoryStore_GapAdoptsHigherSeq(t *testing.T) {
 		t.Fatalf("recovered seq = %d, want 5 (adopt across gap)", got)
 	}
 }
-

@@ -21,6 +21,7 @@ import { gateFetch } from "./pow_bridge.js";
     var serverInput = document.getElementById("server-url");
     var userInput = document.getElementById("username");
     var tripInput = document.getElementById("tripcode");
+    var tripSaltInput = document.getElementById("tripsalt");
     var connectBtn = document.getElementById("connect-btn");
     var passkeyBtn = document.getElementById("passkey-btn");
     var passkeyRoleInput = document.getElementById("passkey-role");
@@ -845,6 +846,7 @@ import { gateFetch } from "./pow_bridge.js";
             serverUrl: server,
             username: userInput.value.trim(),
             tripcode: tripInput.value.trim(),
+            tripSalt: tripSaltInput ? tripSaltInput.value.trim() : "",
             showJoin: opts.showJoin,
             showMeta: opts.meta,
             autoVerify: opts.autoVerify,
@@ -853,6 +855,8 @@ import { gateFetch } from "./pow_bridge.js";
         };
         // Scrub the passphrase from the DOM once copied.
         tripInput.value = "";
+        if (tripSaltInput)
+            tripSaltInput.value = "";
         if (usePasskey) {
             var pkRole = passkeyRoleInput.value.trim();
             if (!pkRole) {

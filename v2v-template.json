@@ -31,6 +31,7 @@
         "MAX_MESSAGE_LINE",
         "MAX_USERNAME_LENGTH",
         "MAX_TRIPCODE_LENGTH",
+        "TRIP_SALT",
         "MAX_HISTORY_BYTES",
         "MAX_HISTORY_SEND",
         "HISTORY_REPLAY_BATCH_LINES",

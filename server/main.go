@@ -217,6 +217,7 @@ func (s *ChatServer) StartCleanupTasks() {
 			s.AuthFailsMu.Unlock()
 
 			s.pruneTripChains(now)
+			s.pruneExposedTrips(now)
 
 			s.LastConnectMu.Lock()
 			for ip, lastTime := range s.LastConnectTime {

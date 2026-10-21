@@ -20,8 +20,11 @@ type TripMeta struct {
 	ServerPub   string `json:"server_pub"`
 	MsgHash     string `json:"msg_hash,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
-	TmpID       uint64 `json:"tmp_id,omitempty"`
-	ReplyTo     uint64 `json:"reply_to,omitempty"`
+	// Exposed marks a message whose sender published its seed. The
+	// signature still verifies; only future trust ends.
+	Exposed bool   `json:"exposed,omitempty"`
+	TmpID   uint64 `json:"tmp_id,omitempty"`
+	ReplyTo uint64 `json:"reply_to,omitempty"`
 }
 
 type WireMessage struct {
@@ -97,6 +100,9 @@ type AuthPacket struct {
 	ServerPubKey string `json:"server_pubkey,omitempty"`
 	ServerSig    string `json:"server_sig,omitempty"`
 	ServerHost   string `json:"server_host,omitempty"`
+	// TripSalt is the operator trip domain (TRIP_SALT). Present only
+	// when set; absent means derive from ServerPubKey.
+	TripSalt string `json:"trip_salt,omitempty"`
 
 	// Error carries the rejection reason in type=="auth_failed" packets so
 	// clients can show why authentication was refused.

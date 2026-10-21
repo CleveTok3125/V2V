@@ -89,6 +89,14 @@ func LoadStaticConfig(root string) (StaticConfig, []string, error) {
 		return StaticConfig{}, w.list, fmt.Errorf("thiếu biến môi trường bắt buộc: BLOCKLIST_FILE")
 	}
 
+	// TRIP_SALT is the operator trip domain. Empty (default) keeps the
+	// serverPub-derived salt; overlong values fail the boot so a typo
+	// cannot bloat every auth challenge.
+	tripSalt := strings.TrimSpace(os.Getenv("TRIP_SALT"))
+	if len(tripSalt) > 128 {
+		return StaticConfig{}, w.list, fmt.Errorf("TRIP_SALT quá dài (tối đa 128 ký tự)")
+	}
+
 	behaviorOn := true
 	if raw, ok := os.LookupEnv("BEHAVIOR_ENABLED"); ok && strings.TrimSpace(raw) != "" {
 		parsed, err := strconv.ParseBool(strings.TrimSpace(raw))
@@ -127,6 +135,7 @@ func LoadStaticConfig(root string) (StaticConfig, []string, error) {
 		BlocklistFile:        ResolveUnderRoot(root, blocklistRaw),
 		BehaviorGeoIPDir:     geoIPDir,
 		BehaviorFilePath:     behaviorFile,
+		TripSalt:             tripSalt,
 		WebEnabled:           getEnvAsBoolFallback(&w, "WEB_ENABLED", true),
 		Onion: OnionConfig{
 			Hosts:        onionHosts,

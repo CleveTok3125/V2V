@@ -53,11 +53,15 @@
     "wasmLines": 4
   },
   // Tripcode key derivation (argon2id presets per platform).
+  // salt empty = server default (identity differs per server);
+  // set = fixed domain (same identity everywhere). Not a secret.
+  // saltFallback feeds the no-serverPub derivation only.
   "crypto": {
     "argon2": {
       "wasm": {"t": 1, "m": 32768, "p": 1},
       "native": {"t":3, "m": 65536, "p": 4}
     },
+    "salt": "",
     "saltFallback": "V2V-trip-v1",
     "badgeLen": 8
   },

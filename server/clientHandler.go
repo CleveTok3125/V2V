@@ -376,6 +376,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			ReplyTo     uint64 `json:"reply_to"`
 		}
 		var tripMeta *TripMeta
+		var tripBadge string
 		var msgTmpID uint64
 		var msgReplyTo uint64
 		text := raw
@@ -516,6 +517,7 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			// Success — update chain via helper in trip package result
 			s.TripChains.Store(pubHex, TripChain{Seq: tripMsg.Seq, PrevHash: res.NewPrev, LastSeen: time.Now()})
 			s.TripChainsMu.Unlock()
+			tripBadge = res.Badge
 			// Build trip meta for history — store displayName as well for verification
 			// Use res fields (already hex) but keep consistent with verified data
 			tripMeta = &TripMeta{
@@ -595,6 +597,24 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 		now := time.Now().In(serverLocation())
 		s.Hub.CheckAndBroadcastDate(now)
 
+		var seedRevealed bool
+		var revealText string
+		var revealTags []string
+		if tripMeta != nil {
+			// A whole message containing only the identity's own seed is a
+			// seed reveal: only a key holder could have produced it.
+			// Recorded only after rate-limit and slowmode gates pass so a
+			// dropped send never marks the identity without broadcasting.
+			seedRevealed = trip.IsSeedReveal(text, tripMeta.Pub)
+			if seedRevealed {
+				s.markTripExposed(tripMeta.Pub)
+				revealText = fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: Danh tính %s đã lộ seed, đừng tin badge này nữa.", now.Format("15:04"), tripBadge)
+				revealTags = []string{wire.TagTrip}
+				logInfof("👁 (reveal) Danh tính %s đã lộ seed (đăng bởi %s)", tripBadge, session.DisplayName)
+			}
+			tripMeta.Exposed = s.isTripExposed(tripMeta.Pub)
+		}
+
 		wire := WireMessage{
 			Type:        "chat",
 			Time:        now.Format("15:04"),
@@ -608,5 +628,8 @@ func (s *ChatServer) ReadPump(session *ClientSession, clientIP string) {
 			SentAt: now.Format(time.RFC3339),
 		}
 		s.Hub.BroadcastWire(wire, session.Conn, s.serverPub())
+		if seedRevealed {
+			s.Hub.BroadcastNotice(revealText, revealTags, nil)
+		}
 	}
 }

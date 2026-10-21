@@ -213,6 +213,12 @@ type ChatServer struct {
 	TripChains   sync.Map // pub hex -> TripChain
 	TripChainsMu sync.Mutex
 
+	// ExposedTrips holds pubs whose seed was published, by pub hex.
+	// RAM-only like TripChains: restarts rebuild it from history, which
+	// carries the reveal announcements themselves.
+	ExposedTrips   sync.Map // pub hex -> exposedEntry
+	ExposedTripsMu sync.Mutex
+
 	// VoteScores holds cumulative vote totals by chain height. No voter
 	// identity is kept: one height maps to one score. VoteDedup is the
 	// short-term duplicate memory (IP+height -> last dir), expiring

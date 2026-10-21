@@ -165,5 +165,6 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 		"pub":        pubHex,
 		"seq":        seq,
 		"server_pub": serverPub,
+		"exposed":    s.isTripExposed(pubHex),
 	})
 }

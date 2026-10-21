@@ -235,7 +235,7 @@ Every chat and audit message links to the previous one (`lib/chain`, `server/cha
 ### Ed25519 (key file)
 - Key file `key.json` (`lib/identity/identity.go`) is a versioned container (`version:3`) with one `ed25519` slot.
 - `Ed25519Identity` stores `role`, `private_key` (hex 128), `hmac_shield` (hex 32), `server_pubkey` (hex 64, from `data/server_identity.json`).
-- Handshake: server sends `auth_challenge {nonce, serverPubkey, serverSig}` where `serverSig = ed25519.Sign(serverPriv, "V2V-SERVER-v1\x00"+nonce+"\x00"+host)`.
+- Handshake: server sends `auth_challenge {nonce, serverPubkey, serverSig, trip_salt?}` where `serverSig = ed25519.Sign(serverPriv, "V2V-SERVER-v1\x00"+nonce+"\x00"+host)` and `trip_salt` is present only when the operator sets `TRIP_SALT`.
 - Client verifies `serverSig` against `serverPubkey` pin (or `server_pubkey` in `key.json`), warns on mismatch, then signs `dataToSign = nonce|role|username|serverPub` with its private key.
 - Client sends `signature` + `hmac = HMAC-SHA512(signature + nonce, hmac_shield)`. Server verifies `ed25519` and `hmac.Equal`, checks `ServerPubKey` pin, and enforces `TripChains` for trip users.
 - `HMAC` with `bytes(signature)` prevents replay without the shield even if private key is exposed.
@@ -306,10 +306,15 @@ Performance: one `HMAC` per login (`µs`), `hashLen` calc is `O(1)` with `RLock`
 
 ## Tripcode
 
-Tripcode is a per-user pseudonym independent from roles, derived from a passphrase.
+Tripcode tells one speaker apart from another; it is not an ID for
+managing identities. Its job is to keep the thread of conversation
+going: a stable mark that lets others recognize the same speaker, and
+nothing more. No claim is proven, only repeated under one badge.
+Acting under it is the statement.
 
 ### Secret resolution
-- `-t` takes no value. Resolution order: `V2V_TRIPCODE` env (CI only) > `tripcode.json` in the config dir > hidden interactive prompt.
+- `-t` takes no value. Passphrase resolution: `V2V_TRIPCODE` env (CI only) > `tripcode.json` in the config dir > hidden interactive prompt.
+- Salt resolution for the file-secret and interactive paths: `V2V_TRIP_SALT` env > `tripcode.json` salt > `crypto.salt` in the client config (desktop) / `tripSalt` in `v2vConfig` (web) > server default. Empty means the server default. A passphrase from `V2V_TRIPCODE` env skips the file, so its salt resolves env > config > server default.
 - TTY prompts: `internal/passprompt` for masked password entry, `internal/tui` for huh confirms and selects defaulting to No; piped stdin keeps the plain-line fallback.
 
 ### Interactive entry
@@ -330,7 +335,7 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - Gate rationale: native derive costs ~30ms/guess (measured), so score≤1 (<1e6 guesses) falls in days of single CPU — opportunistic-attacker territory.
 
 ### File format and memory
-- The file holds `{"version":3,"tripcode":"..."}` in the same encrypted v3 envelope (argon2id + XChaCha20Poly1305) as `key.json`, unlocked via `V2V_PASSPHRASE` env or hidden prompt.
+- The file holds `{"version":3,"tripcode":"...","salt":"..."}` in the same encrypted v3 envelope (argon2id + XChaCha20Poly1305) as `key.json`, unlocked via `V2V_PASSPHRASE` env or hidden prompt. The salt travels with the secret so the file re-derives the same identity without config; files written before salt support decode with an empty salt (server default).
 - Plaintext files are refused fail-closed and nothing is ever saved unencrypted (empty unlock skips saving).
 - File loads evaluate silently and print only a warn line when weak (no entropy); env path log-warns and proceeds.
 - Env secrets never touch UI: every env path only log-warns when weak and proceeds, whether it unlocks, saves, or feeds a session tripcode.
@@ -338,9 +343,17 @@ Tripcode is a per-user pseudonym independent from roles, derived from a passphra
 - Prompt/URL/TTY strings and the session unlock cache await GC and are documented as residual.
 
 ### Derivation
-- `salt = sha256(serverPub)[:16]` (or `sha256("V2V-trip-v1")[:16]` if no serverPub), `seed = argon2id(passphrase, salt, t=1/m=32MB WASM or t=3/m=64MB native)`, `ed25519.NewKeyFromSeed(seed)`, `badge = "◆ " + hex(sha256(pub))[:8]`.
+- `seed = argon2id(passphrase, salt, t=1/m=32MB WASM or t=3/m=64MB native)`, `ed25519.NewKeyFromSeed(seed)`, `badge = "◆ " + hex(sha256(pub))[:8]`.
+- `salt` is the custom value when set, else the server default: the challenge's advertised `TRIP_SALT` domain when the operator sets one, else `sha256(serverPub)[:16]` (or `sha256("V2V-trip-v1")[:16]` if the server has no identity).
+- The default salt binds the identity to one server deployment; a custom salt makes the same passphrase yield the same identity on every server; an operator `TRIP_SALT` keeps the default portable across that operator's identity rotations. Old clients ignore `trip_salt` and keep deriving from `serverPub`, so they see a different identity wherever `TRIP_SALT` is set — upgrade clients to match. The salt is a domain separator, not a secret — losing it loses the identity the same way losing the passphrase does.
 - The passphrase is zeroed after derive; private key is kept in RAM until `/quit` then zeroed.
 - Colors come from a fixed 10-color `38;2` palette rotated by `sha256(badge)[0]`.
+
+### Seed reveal
+- Revealing the 32-byte seed exposes the identity: anyone holding it can sign as the badge, so continuity ends. No revocation list is involved; imitability is the invalidation.
+- `/burn` warns first and shows nothing: the seed is the identity's private key, so displaying it is already the reveal (screen, screenshots, scrollback). `/burn confirm` reveals the seed once for manual copy; the app never moves it anywhere by itself. `/burn-verify <seedHex> <pubHex>` checks a published seed against a pub (`lib/trip.VerifySeed`).
+- Owner-signed announcement: a trip-signed message containing only the seed proves ownership at reveal time, so the server detects it (`lib/trip.IsSeedReveal`), records the pub in a RAM registry (TTL 24h, cap 10000, rebuilt from history at boot), broadcasts a `system.trip` notice, and flags the announcement plus every later message from that pub (`TripMeta.exposed`). The server never censors: revealed messages still deliver and verify, only marked — clients render `(đã lộ)`, `/info` shows `trip.exposed`, and `/api/trip/verify` answers `exposed`.
+- To reveal, post the seed alone in one message (no extra text, or the server will not recognize it), then quit and never reuse the passphrase/salt.
 
 ### Per-message
 - `msgHash = sha256(text)`, `payload = serverPub\x00seq\x00prev\x00msgHash\x00pub\x00displayName\x00tmpID\x00replyTo` (`lib/tripcolor.CanonicalPayload`), `sig = ed25519.Sign(priv, payload)`, `prev' = sha256(prev|sig|msgHash)`, `seq` strictly increasing per `pub` (enforced via `TripChains` per-pub mutex `TripChainsMu`).

@@ -123,7 +123,11 @@ type ClientConfig struct {
 			} `json:"native"`
 		} `json:"argon2"`
 		SaltFallback string `json:"saltFallback"`
-		BadgeLen     int    `json:"badgeLen"`
+		// Salt overrides the tripcode derivation salt. Empty means the
+		// server default (per-server identity); set means the same
+		// identity on every server. Not a secret.
+		Salt     string `json:"salt"`
+		BadgeLen int    `json:"badgeLen"`
 	} `json:"crypto"`
 	UI struct {
 		Prompts struct {

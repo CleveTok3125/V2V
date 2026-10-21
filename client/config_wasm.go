@@ -34,6 +34,9 @@ func parseFlags() {
 	CLI.Server = cfg.Get("serverUrl").String()
 	CLI.Username = cfg.Get("username").String()
 	CLI.Tripcode = cfg.Get("tripcode").String()
+	if v := cfg.Get("tripSalt"); v.Type() == js.TypeString {
+		ClientCfg.Crypto.Salt = v.String()
+	}
 	if v := cfg.Get("showJoin"); v.Truthy() {
 		CLI.ShowJoin = v.Bool()
 	}

@@ -63,6 +63,7 @@ func (s *ChatServer) HandleAuth(conn *websocket.Conn, clientIP, expectedHost str
 		ServerPubKey: serverPub,
 		ServerSig:    serverSig,
 		ServerHost:   serverHost,
+		TripSalt:     Cfg.Static.TripSalt,
 	}); err != nil {
 		return GetDefaultPermission(), AuthPacket{}, err
 	}

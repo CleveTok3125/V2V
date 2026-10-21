@@ -130,6 +130,36 @@ func TestHandleAuth_GuestOK(t *testing.T) {
 	}
 }
 
+// TestHandleAuth_ChallengeCarriesTripSalt pins the operator trip domain
+// on the wire: present only when TRIP_SALT is set, so clients fall back
+// to serverPub derivation otherwise.
+func TestHandleAuth_ChallengeCarriesTripSalt(t *testing.T) {
+	testCfg(t)
+	Cfg.Static.TripSalt = "op-domain"
+	s := NewChatServer()
+	client, server := dialAuthPair(t, s)
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := s.HandleAuth(server, "127.0.0.1", "localhost", false)
+		done <- err
+	}()
+	ch := readChallenge(t, client)
+	if ch.TripSalt != "op-domain" {
+		t.Fatalf("challenge trip_salt = %q, want op-domain", ch.TripSalt)
+	}
+	if err := client.WriteJSON(AuthPacket{Type: "auth", Username: "Alice", Nonce: ch.Nonce}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("guest auth failed: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("HandleAuth hung")
+	}
+}
+
 // TestHandleAuth_Rejections pins the failure matrix: replayed nonce,
 // oversized username, unknown role, malformed signature.
 func TestHandleAuth_Rejections(t *testing.T) {

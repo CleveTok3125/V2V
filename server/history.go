@@ -99,6 +99,7 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 	}
 
 	var lastSeq uint64
+	exposedInHistory := make(map[string]bool)
 	for i := range records {
 		rec := &records[i]
 		// Backfill the history cursor for records written before seq
@@ -194,6 +195,21 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 			if status != tripChainStale {
 				next.LastSeen = time.Now()
 				s.TripChains.Store(tripForChain.Pub, next)
+			}
+			// Rebuild the exposed registry from the announcements the
+			// disk carries, and mark the replayed wires: history before
+			// the announcement stays clean, everything from it on is
+			// flagged.
+			recTime, _ := time.Parse(time.RFC3339Nano, rec.Timestamp)
+			if trip.IsSeedReveal(wireForVerify.Text, tripForChain.Pub) {
+				exposedInHistory[tripForChain.Pub] = true
+				s.markTripExposedAt(tripForChain.Pub, recTime)
+			}
+			if exposedInHistory[tripForChain.Pub] || s.isTripExposedAt(tripForChain.Pub, recTime) {
+				tripForChain.Exposed = true
+				if msgForHistory, ok = recordLine(*rec); !ok {
+					continue
+				}
 			}
 		}
 		s.Chain.appendMessageToHistory(msgForHistory)

@@ -348,15 +348,21 @@ func (s *Session) connect() bool {
 	// dialing: the prompts (secret, save offer, unlock) are interactive
 	// and would blow the server's 12s auth-response deadline if they ran
 	// after the s.Challenge. Key derivation still happens after the
-	// s.Challenge so serverPub stays salt-bound.
+	// s.Challenge so the server default salt is known.
+	tripSalt := ""
+	tripSaltSrc := "server default"
 	if CLI.UseTripcode && CLI.Tripcode == "" {
-		tc, terr := resolveTripcode(true, CLI.ConfigDir, s.Username, CLI.Server)
+		tc, salt, src, terr := resolveTripcode(true, CLI.ConfigDir, s.Username, CLI.Server)
 		if terr != nil {
 			fmt.Printf("❌ Tripcode: %v\n", terr)
 			notifyQuit()
 			return false
 		}
 		CLI.Tripcode = tc
+		tripSalt = salt
+		tripSaltSrc = src
+	} else if CLI.Tripcode != "" {
+		tripSalt, tripSaltSrc = customSaltWithSource()
 	}
 
 	var err error
@@ -372,7 +378,8 @@ func (s *Session) connect() bool {
 		return false
 	}
 
-	// Derive trip key after s.Challenge so serverPub is known for salt binding
+	// Trip key defaults to the server salt; a custom salt makes the
+	// identity portable across servers.
 	// s.Pending.TmpSeq numbers every outgoing message in this session (trip and
 	// plain alike). The server relays it verbatim but never assigns it.
 	// The base is random per connection (upper 32 bits) so a reconnect
@@ -386,7 +393,9 @@ func (s *Session) connect() bool {
 	}
 	passphraseBytes := []byte(CLI.Tripcode)
 	if len(passphraseBytes) > 0 {
-		priv, pub, badge := deriveTripKey(CLI.Tripcode, s.Challenge.ServerPubKey)
+		fmt.Printf("🔑 Nguồn salt: %s.\n", formatSaltSource(tripSaltSrc, s.Challenge))
+		salt := resolveTripSalt(tripSalt, tripServerDefault(s.Challenge))
+		priv, pub, badge := deriveTripKey(CLI.Tripcode, salt)
 		s.TripPriv = priv
 		s.TripPub = pub
 		s.TripBadge = badge

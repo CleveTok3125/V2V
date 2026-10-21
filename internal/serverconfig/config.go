@@ -58,6 +58,9 @@ type StaticConfig struct {
 	TrustedProxyDir string
 	// RequireIPv4 rejects non-IPv4 client addresses (IPv6) with 403.
 	RequireIPv4 bool
+	// TripSalt is the operator trip domain (TRIP_SALT). Empty means the
+	// default: derive from the server identity (serverPub).
+	TripSalt string
 	// BlocklistFile is an optional operator list (one IP/CIDR per line,
 	// same format as trust files) matched before any rate limit: hits
 	// get 403. A missing file only warns; malformed fails the boot.
