@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/CleveTok3125/V2V/lib/filter"
+	"github.com/CleveTok3125/V2V/lib/guard"
 	"github.com/CleveTok3125/V2V/lib/markup"
 	"github.com/CleveTok3125/V2V/lib/trip"
 	"github.com/CleveTok3125/V2V/lib/wire"
@@ -222,9 +223,18 @@ func (s *Session) absoluteVerifyURL(urlStr string) string {
 //
 // av selects verified versus plain rendering.
 func (s *Session) badgeForWire(msg WireMessage, av bool) (colored, urlStr string) {
-	h := sha256.Sum256([]byte(msg.Trip.Pub))
-	plain := "◆ " + hex.EncodeToString(h[:])[:8]
-	if av {
+	plain := guard.TripBadgeFromPubHex(msg.Trip.Pub)
+	if plain == "" {
+		// Malformed pub: keep a stable badge instead of an empty one.
+		h := sha256.Sum256([]byte(msg.Trip.Pub))
+		plain = "◆ " + hex.EncodeToString(h[:])[:8]
+	}
+	switch {
+	case msg.Trip.Exposed:
+		// A revealed identity is no longer one speaker: the badge fails
+		// even though the signature checks out.
+		colored = warnStyle.Render(plain+" ✗") + " " + warnStyle.Render("(đã lộ)")
+	case av:
 		res, err := trip.Verify(trip.VerifyParams{
 			Text:        msg.Text,
 			DisplayName: msg.DisplayName,
@@ -239,17 +249,11 @@ func (s *Session) badgeForWire(msg WireMessage, av bool) (colored, urlStr string
 		})
 		if err == nil && res != nil {
 			colored = badgeStyle(res.Badge).Render(res.Badge)
-			if msg.Trip.Exposed {
-				colored += " " + warnStyle.Render("(đã lộ)")
-			}
 		} else {
 			colored = warnStyle.Render(plain + " ✗")
 		}
-	} else {
+	default:
 		colored = plain
-		if msg.Trip.Exposed {
-			colored += " " + warnStyle.Render("(đã lộ)")
-		}
 	}
 	if base := s.verifyLinkBase(); base != "" {
 		// No text= param: msg_hash suffices for verification, keeping

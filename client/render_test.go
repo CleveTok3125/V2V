@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/CleveTok3125/V2V/lib/filter"
+	"github.com/CleveTok3125/V2V/lib/guard"
 	"github.com/CleveTok3125/V2V/lib/tripcolor"
 	"github.com/CleveTok3125/V2V/lib/wire"
 )
@@ -197,8 +198,8 @@ func TestBadgeVerifyURLCarriesHeightAndSentAt(t *testing.T) {
 	}
 }
 
-// A revealed identity keeps a valid signature but loses trust: the badge
-// renders with an exposure marker instead of the tamper cross.
+// A revealed identity keeps a valid signature but fails anyway: the badge
+// renders as a failure with an exposure marker, not as a trusted badge.
 func TestExposedBadgeRendersMarker(t *testing.T) {
 	seed := make([]byte, 32)
 	for i := range seed {
@@ -221,11 +222,13 @@ func TestExposedBadgeRendersMarker(t *testing.T) {
 		},
 	}
 	colored, _ := s.badgeForWire(wire, true)
-	if !strings.Contains(colored, "(đã lộ)") {
-		t.Fatalf("exposed badge must mark: %q", colored)
+	if !strings.Contains(colored, "(đã lộ)") || !strings.Contains(colored, "✗") {
+		t.Fatalf("exposed badge must fail with a marker: %q", colored)
 	}
-	if strings.Contains(colored, "✗") {
-		t.Fatalf("exposed valid sig must not cross: %q", colored)
+	// The badge must hash the decoded pub, matching the notice, the verify
+	// page and /info; hashing the hex string yields a different name.
+	if want := guard.TripBadgeFromPubHex(hex.EncodeToString(pub)); want == "" || !strings.Contains(colored, want) {
+		t.Fatalf("badge %q must carry %q", colored, want)
 	}
 	unverifiedExposed, _ := s.badgeForWire(wire, false)
 	if !strings.Contains(unverifiedExposed, "(đã lộ)") {

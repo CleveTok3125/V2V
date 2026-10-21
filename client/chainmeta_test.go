@@ -528,14 +528,28 @@ func TestFormatInfoBlockTripDetail(t *testing.T) {
 	if !strings.Contains(joined, "✗") {
 		t.Fatalf("swapped reply_to must fail trip verdict:\n%s", joined)
 	}
-	// An exposed flag adds its own row without touching the verdict.
+	// An exposed identity fails its own row even though the signature
+	// still matches: the badge no longer identifies one speaker.
 	exposed := wire
 	exposed.Trip = &TripMeta{}
 	*exposed.Trip = *tm
 	exposed.Trip.Exposed = true
 	joined = strings.Join(formatInfoBlock(exposed), "")
-	if !strings.Contains(joined, "trip.exposed:") || !strings.Contains(joined, "✓") {
-		t.Fatalf("exposed block must flag and keep verdict:\n%s", joined)
+	if !strings.Contains(joined, "đã lộ") || !strings.Contains(joined, "✗") {
+		t.Fatalf("exposed block must fail with a reason:\n%s", joined)
+	}
+	if strings.Contains(joined, "trip.exposed:") {
+		t.Fatalf("exposed flag must ride the trip row:\n%s", joined)
+	}
+	// Exposed with a broken signature must report the real failure, not
+	// claim the signature still checks out.
+	brokenSig := exposed
+	brokenSig.Trip = &TripMeta{}
+	*brokenSig.Trip = *exposed.Trip
+	brokenSig.Trip.ReplyTo = 4
+	joined = strings.Join(formatInfoBlock(brokenSig), "")
+	if !strings.Contains(joined, "đã lộ") || strings.Contains(joined, "chữ ký đúng") {
+		t.Fatalf("exposed with a broken signature must report it:\n%s", joined)
 	}
 }
 

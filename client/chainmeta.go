@@ -610,9 +610,7 @@ func formatInfoBlock(msg WireMessage) []string {
 	out = append(out, row("from:", authorField(msg.DisplayName)))
 	if msg.Trip != nil {
 		tm := msg.Trip
-		verdict := "✗"
-		detail := ""
-		if _, err := trip.Verify(trip.VerifyParams{
+		_, verr := trip.Verify(trip.VerifyParams{
 			Text:        msg.Text,
 			DisplayName: msg.DisplayName,
 			ServerPub:   tm.ServerPub,
@@ -623,15 +621,22 @@ func formatInfoBlock(msg WireMessage) []string {
 			MsgHashHex:  tm.MsgHash,
 			TmpID:       tm.TmpID,
 			ReplyTo:     tm.ReplyTo,
-		}); err == nil {
+		})
+		verdict := "✗"
+		detail := ""
+		switch {
+		case tm.Exposed && verr == nil:
+			// The signature checks out; the identity fails because the
+			// seed is public, so anyone can sign as it.
+			detail = " (đã lộ — chữ ký đúng, seed đã công khai)"
+		case tm.Exposed:
+			detail = " (đã lộ — " + verr.Error() + ")"
+		case verr == nil:
 			verdict = "✓"
-		} else {
-			detail = " (" + err.Error() + ")"
+		default:
+			detail = " (" + verr.Error() + ")"
 		}
 		out = append(out, row("trip:", fmt.Sprintf("◆ %s %s%s", shortBadge(tm.Pub), verdict, detail)))
-		if tm.Exposed {
-			out = append(out, row("trip.exposed:", "đã lộ"))
-		}
 		out = append(out, row("trip.seq:", strconv.FormatUint(uint64(tm.Seq), 10)))
 		// List every signature input so the trip verdict is checkable by eye.
 		out = append(out, row("trip.pub:", hexField(tm.Pub)))
