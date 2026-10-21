@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -101,6 +104,59 @@ func TestServeAuthenticated_HistoryInfoThenJoin(t *testing.T) {
 	}
 
 	_ = clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("serveAuthenticated did not return after client close")
+	}
+}
+
+// An exposed identity that joins again gets a unicast warning, so the
+// client learns the badge is burned without waiting for a later message.
+func TestServeAuthenticated_WarnsExposedIdentity(t *testing.T) {
+	testCfg(t)
+	seed := bytes.Repeat([]byte{0x51}, 32)
+	priv := ed25519.NewKeyFromSeed(seed)
+	pubHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
+
+	s := NewChatServer()
+	s.markTripExposed(pubHex)
+	client, server := dialAuthPair(t, s)
+	session := &ClientSession{
+		Conn:        server,
+		Send:        make(chan []byte, 256),
+		DisplayName: "An#abcd",
+		Perms:       GetDefaultPermission(),
+		TripPub:     pubHex,
+	}
+	done := make(chan struct{})
+	go func() {
+		s.serveAuthenticated(session, "127.0.0.1")
+		close(done)
+	}()
+
+	var warn WireMessage
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		client.SetReadDeadline(deadline)
+		_, msg, err := client.ReadMessage()
+		if err != nil {
+			t.Fatalf("read failed before the join warning: %v", err)
+		}
+		var wm WireMessage
+		if json.Unmarshal(msg, &wm) != nil {
+			continue
+		}
+		if wire.HasTag(wm.Tags, wire.TagTripReveal) {
+			warn = wm
+			break
+		}
+	}
+	if !strings.Contains(warn.Text, "đã lộ seed") {
+		t.Fatalf("join warning must mention the exposed seed: %+v", warn)
+	}
+
+	client.Close()
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):

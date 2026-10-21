@@ -3,6 +3,7 @@ package trip
 import (
 	"crypto/ed25519"
 	"encoding/hex"
+	"strings"
 	"testing"
 )
 
@@ -47,33 +48,34 @@ func TestVerifySeedRejects(t *testing.T) {
 	}
 }
 
-func TestIsSeedReveal(t *testing.T) {
-	seed := make([]byte, 32)
+func TestRevealSignature(t *testing.T) {
+	seed := make([]byte, ed25519.SeedSize)
 	for i := range seed {
-		seed[i] = byte(i + 11)
+		seed[i] = byte(i + 3)
 	}
 	priv := ed25519.NewKeyFromSeed(seed)
 	pubHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
-	seedHex := hex.EncodeToString(seed)
-	if !IsSeedReveal(seedHex, pubHex) {
-		t.Fatal("exact seed text must announce")
+	sig := SignReveal(priv, pubHex)
+	if !VerifyReveal(pubHex, sig) {
+		t.Fatal("own reveal signature must verify")
 	}
-	if !IsSeedReveal("  "+seedHex+"\n", pubHex) {
-		t.Fatal("surrounding whitespace must announce")
+	// Uppercase hex is the same pub.
+	if !VerifyReveal(strings.ToUpper(pubHex), sig) {
+		t.Fatal("uppercase pub must verify")
 	}
-	for _, text := range []string{
-		"",
-		"hello",
-		"seed: " + seedHex,
-		seedHex + " extra",
-		seedHex[:60],
-		hex.EncodeToString(make([]byte, 32)),
-	} {
-		if IsSeedReveal(text, pubHex) {
-			t.Fatalf("must not announce: %q", text)
-		}
+	other := make([]byte, ed25519.SeedSize)
+	for i := range other {
+		other[i] = byte(200 - i)
 	}
-	if IsSeedReveal(seedHex, "zz") {
-		t.Fatal("bad pub must not announce")
+	otherPub := hex.EncodeToString(ed25519.NewKeyFromSeed(other).Public().(ed25519.PublicKey))
+	if VerifyReveal(otherPub, sig) {
+		t.Fatal("a signature over one pub must not verify for another")
+	}
+	if VerifyReveal(pubHex, "") || VerifyReveal(pubHex, "zz") || VerifyReveal("zz", sig) {
+		t.Fatal("malformed input must not verify")
+	}
+	// A message signature is not a reveal signature.
+	if VerifyReveal(pubHex, hex.EncodeToString(ed25519.Sign(priv, []byte(pubHex)))) {
+		t.Fatal("message signature must not pass as a reveal")
 	}
 }

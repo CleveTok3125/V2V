@@ -248,3 +248,49 @@ func TestEnroll_NilStoreNoPanic(t *testing.T) {
 		t.Fatalf("nil store: code=%d, want 503", rec.Code)
 	}
 }
+
+// A revealed identity fails the verify API even though the signature
+// checks out: anyone holding the published seed can sign as the badge.
+func TestTripVerifyAPIExposedFails(t *testing.T) {
+	testCfg(t)
+	srv := testServerWithID(t)
+	target := signedVerifyURL(t, srv, nil)
+	u, err := url.Parse(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubHex := u.Query().Get("pub")
+	srv.markTripExposed(pubHex)
+
+	rec := doVerify(t, srv, "10.99.7.7", "", target)
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("not JSON: %q", rec.Body.String())
+	}
+	if body["valid"] != false || body["signature_valid"] != true || body["exposed"] != true {
+		t.Fatalf("exposed verdict = %v", body)
+	}
+	if body["error"] != "tripcode seed exposed" {
+		t.Fatalf("error = %v", body["error"])
+	}
+
+	// A broken signature keeps its own verdict: exposed does not hide it.
+	broken, err := url.Parse(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := broken.Query()
+	q.Set("sig", strings.Repeat("00", ed25519.SignatureSize))
+	broken.RawQuery = q.Encode()
+	rec2 := doVerify(t, srv, "10.99.7.8", "", broken.String())
+	var body2 map[string]any
+	if err := json.Unmarshal(rec2.Body.Bytes(), &body2); err != nil {
+		t.Fatalf("not JSON: %q", rec2.Body.String())
+	}
+	if body2["valid"] != false || body2["signature_valid"] != false || body2["exposed"] != true {
+		t.Fatalf("broken signature verdict = %v", body2)
+	}
+	if _, ok := body2["error"]; ok {
+		t.Fatalf("broken signature must not claim an exposed verdict: %v", body2)
+	}
+}

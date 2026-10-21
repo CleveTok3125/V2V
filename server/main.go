@@ -16,6 +16,7 @@ import (
 	"github.com/CleveTok3125/V2V/internal/serverconfig"
 	"github.com/CleveTok3125/V2V/internal/trustedproxy"
 	"github.com/CleveTok3125/V2V/lib/guard"
+	"github.com/CleveTok3125/V2V/lib/wire"
 	"github.com/joho/godotenv"
 )
 
@@ -185,6 +186,12 @@ func (s *ChatServer) serveAuthenticated(session *ClientSession, clientIP string)
 	s.Hub.registerClient(session, clientIP)
 	s.releaseInflight()
 	s.observeConnect(clientIP, session.DisplayName, sessionIdentityKind(session))
+
+	// A returning identity whose seed is public must hear it before it
+	// posts: the badge no longer separates it from anyone holding the seed.
+	if session.TripPub != "" && s.isTripExposed(session.TripPub) {
+		s.unicastNotice(session, "[Hệ thống]: Danh tính này đã lộ seed, đừng tin badge này nữa.", wire.TagTripReveal)
+	}
 
 	// Anti-race re-check: a burst that passed the pre-upgrade cap
 	// together must not all stay registered.

@@ -36,13 +36,33 @@ func VerifySeed(seedHex, pubHex string) bool {
 	return got == pubHex
 }
 
-// IsSeedReveal reports whether text is exactly the seed for pubHex: a
-// whole message containing only its own seed. Only a key holder can
-// produce it, so it proves ownership at reveal time.
-func IsSeedReveal(text, pubHex string) bool {
-	seedHex := strings.TrimSpace(text)
-	if len(seedHex) != ed25519.SeedSize*2 {
+// revealDomain separates a reveal signature from any other signature made
+// by the same key, so a message signature cannot pass as a reveal.
+const revealDomain = "v2v.trip.reveal.v1"
+
+// RevealPayload returns the bytes a reveal signature covers.
+func RevealPayload(pubHex string) []byte {
+	return []byte(revealDomain + "\x00" + strings.ToLower(strings.TrimSpace(pubHex)))
+}
+
+// SignReveal signs the pub the reveal exposes, so the stored announcement
+// proves a key holder authored it.
+func SignReveal(priv ed25519.PrivateKey, pubHex string) string {
+	if len(priv) != ed25519.PrivateKeySize {
+		return ""
+	}
+	return hex.EncodeToString(ed25519.Sign(priv, RevealPayload(pubHex)))
+}
+
+// VerifyReveal reports whether sigHex is a reveal signature for pubHex.
+func VerifyReveal(pubHex, sigHex string) bool {
+	pub, err := hex.DecodeString(strings.TrimSpace(pubHex))
+	if err != nil || len(pub) != ed25519.PublicKeySize {
 		return false
 	}
-	return VerifySeed(seedHex, pubHex)
+	sig, err := hex.DecodeString(strings.TrimSpace(sigHex))
+	if err != nil || len(sig) != ed25519.SignatureSize {
+		return false
+	}
+	return ed25519.Verify(pub, RevealPayload(pubHex), sig)
 }

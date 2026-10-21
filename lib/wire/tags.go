@@ -44,8 +44,11 @@ const (
 	TagLimit    = "system.limit"
 	TagEnvelope = "system.envelope"
 	TagTrip     = "system.trip"
-	TagFilter   = "system.filter"
-	TagAuth     = "system.auth"
+	// TagTripReveal marks the room-wide seed-reveal announcement: a child
+	// of TagTrip, so it mutes without hiding the trip warnings.
+	TagTripReveal = "system.trip.reveal"
+	TagFilter     = "system.filter"
+	TagAuth       = "system.auth"
 
 	// TagVote marks a vote total broadcast: an unchained system line
 	// carrying the cumulative up/down for one chain height. Clients
@@ -72,6 +75,7 @@ var tagTree = []string{
 	TagLimit,
 	TagEnvelope,
 	TagTrip,
+	TagTripReveal,
 	TagFilter,
 	TagAuth,
 	TagVote,

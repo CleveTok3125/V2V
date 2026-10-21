@@ -146,7 +146,11 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload := tripcolor.CanonicalPayload(serverPub, seq, prevBytes, msgHashBytes, pubBytes, displayName, tmpID, replyTo)
-	valid := ed25519.Verify(pubBytes, payload, sigBytes)
+	signatureValid := ed25519.Verify(pubBytes, payload, sigBytes)
+	// A revealed identity fails even when the signature checks out: the
+	// badge no longer identifies one speaker. signature_valid keeps the
+	// two failures apart.
+	exposed := s.isTripExposed(pubHex)
 	badge := ""
 	if pubHex != "" {
 		h := sha256.Sum256(pubBytes)
@@ -156,15 +160,20 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 	if badge != "" {
 		color = tripcolor.BadgeColor(badge)
 	}
+	resp := map[string]any{
+		"valid":           signatureValid && !exposed,
+		"signature_valid": signatureValid,
+		"badge":           badge,
+		"badgeColor":      color,
+		"pub":             pubHex,
+		"seq":             seq,
+		"server_pub":      serverPub,
+		"exposed":         exposed,
+	}
+	if exposed && signatureValid {
+		resp["error"] = "tripcode seed exposed"
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	json.NewEncoder(w).Encode(map[string]any{
-		"valid":      valid,
-		"badge":      badge,
-		"badgeColor": color,
-		"pub":        pubHex,
-		"seq":        seq,
-		"server_pub": serverPub,
-		"exposed":    s.isTripExposed(pubHex),
-	})
+	json.NewEncoder(w).Encode(resp)
 }

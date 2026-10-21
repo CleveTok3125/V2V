@@ -53,11 +53,17 @@ type WireMessage struct {
 	// VoteUpvotes and VoteDownvotes are the cumulative totals for that
 	// height. Display metadata only: vote lines are unchained and stay
 	// outside the chain hash, like SysDate and SysPowTier.
-	VoteTarget    uint64    `json:"vote_target,omitempty"`
-	VoteUpvotes   int       `json:"vote_up,omitempty"`
-	VoteDownvotes int       `json:"vote_down,omitempty"`
-	Text          string    `json:"text,omitempty"`
-	Trip          *TripMeta `json:"trip,omitempty"`
+	VoteTarget    uint64 `json:"vote_target,omitempty"`
+	VoteUpvotes   int    `json:"vote_up,omitempty"`
+	VoteDownvotes int    `json:"vote_down,omitempty"`
+	// ExposedPub names the identity a seed-reveal notice reports, so a
+	// restart rebuilds the registry without scanning content.
+	ExposedPub string `json:"exposed_pub,omitempty"`
+	// ExposedSig is the identity's signature over its own pub, so boot
+	// only trusts a reveal the key holder authored.
+	ExposedSig string    `json:"exposed_sig,omitempty"`
+	Text       string    `json:"text,omitempty"`
+	Trip       *TripMeta `json:"trip,omitempty"`
 	// TmpID is the sender's per-session counter, relayed verbatim and
 	// never assigned by the server. ReplyTo quotes a chain height,
 	// relayed verbatim and covered by the link (v2+).
@@ -229,6 +235,16 @@ type VoteRequest struct {
 	Type      string `json:"type"` // "vote"
 	Target    uint64 `json:"target,omitempty"`
 	Direction int    `json:"dir,omitempty"`
+}
+
+// RevealRequest publishes an identity's seed so the server can warn the
+// room. A dedicated frame keeps the server from scanning chat text, and
+// the seed must derive to the session's trip pub. Sig is the identity's
+// signature over that pub, carried into the stored notice.
+type RevealRequest struct {
+	Type string `json:"type"` // "trip_reveal"
+	Seed string `json:"seed,omitempty"`
+	Sig  string `json:"sig,omitempty"`
 }
 
 // Vote directions for VoteRequest.Direction.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/CleveTok3125/V2V/lib/strutil"
 	"time"
@@ -120,6 +121,19 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 		if !ok {
 			continue
 		}
+		recTime, _ := time.Parse(time.RFC3339Nano, rec.Timestamp)
+		// The reveal announcement names its pub and carries the identity's
+		// signature, so boot rebuilds the registry without scanning
+		// content and refuses a hand-edited notice.
+		if rec.Wire != nil && rec.Wire.ExposedPub != "" && wire.HasTag(rec.Wire.Tags, wire.TagTripReveal) {
+			pubHex := strings.ToLower(rec.Wire.ExposedPub)
+			if trip.VerifyReveal(pubHex, rec.Wire.ExposedSig) {
+				exposedInHistory[pubHex] = true
+				s.markTripExposedAt(pubHex, recTime)
+			} else {
+				logWarnf("⚠️ (history,reveal) %s: chữ ký công bố không hợp lệ, bỏ qua", strutil.Short(pubHex))
+			}
+		}
 		if rec.Wire != nil {
 			tripForChain = rec.Wire.Trip
 			wireForVerify = rec.Wire
@@ -196,15 +210,8 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 				next.LastSeen = time.Now()
 				s.TripChains.Store(tripForChain.Pub, next)
 			}
-			// Rebuild the exposed registry from the announcements the
-			// disk carries, and mark the replayed wires: history before
-			// the announcement stays clean, everything from it on is
-			// flagged.
-			recTime, _ := time.Parse(time.RFC3339Nano, rec.Timestamp)
-			if trip.IsSeedReveal(wireForVerify.Text, tripForChain.Pub) {
-				exposedInHistory[tripForChain.Pub] = true
-				s.markTripExposedAt(tripForChain.Pub, recTime)
-			}
+			// Replayed wires carry the flag for every line at or after
+			// the announcement: earlier history stays clean.
 			if exposedInHistory[tripForChain.Pub] || s.isTripExposedAt(tripForChain.Pub, recTime) {
 				tripForChain.Exposed = true
 				if msgForHistory, ok = recordLine(*rec); !ok {

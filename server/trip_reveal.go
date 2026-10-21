@@ -1,8 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 	"time"
+
+	"github.com/CleveTok3125/V2V/lib/guard"
+	"github.com/CleveTok3125/V2V/lib/trip"
+	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
 // Exposed-trip registry bounds. Publishing a seed costs its publisher
@@ -101,4 +107,58 @@ func (s *ChatServer) pruneExposedTrips(now time.Time) {
 	for _, e := range kept[:len(kept)-maxExposedTrips] {
 		s.ExposedTrips.Delete(e.key)
 	}
+}
+
+// handleTripReveal records a seed the session publishes for its own
+// identity and warns the room. The seed must derive to the session's
+// trip pub, so a client cannot expose someone else, and the frame must
+// carry the identity's signature over that pub: the stored notice proves
+// itself at boot, so a hand-edited history line marks nothing.
+func (s *ChatServer) handleTripReveal(session *ClientSession, clientIP, seedHex, sigHex string) {
+	if session.TripPub == "" {
+		s.unicastNotice(session, "[Hệ thống]: Phiên này không dùng tripcode.", wire.TagTripReveal)
+		return
+	}
+	pubHex := strings.ToLower(session.TripPub)
+	if !trip.VerifySeed(seedHex, pubHex) {
+		s.observeErr(clientIP, "reveal:seed")
+		s.unicastNotice(session, "[Hệ thống]: Seed không khớp danh tính của phiên này.", wire.TagTripReveal)
+		return
+	}
+	if !trip.VerifyReveal(pubHex, sigHex) {
+		s.observeErr(clientIP, "reveal:sig")
+		s.unicastNotice(session, "[Hệ thống]: Chữ ký công bố không hợp lệ.", wire.TagTripReveal)
+		return
+	}
+	if s.isTripExposed(pubHex) {
+		s.unicastNotice(session, "[Hệ thống]: Danh tính này đã được ghi nhận là lộ seed.", wire.TagTripReveal)
+		return
+	}
+	if s.Screener != nil && s.Screener.IsMuted(session.Conn) {
+		s.unicastNotice(session, "[Hệ thống]: Chat của bạn tạm dừng chờ xác minh. Hoàn thành thử thách PoW để tiếp tục.", wire.TagPowGate)
+		return
+	}
+	if !s.allowHistoryRequest(clientIP, 1) {
+		s.unicastNotice(session, "[Hệ thống]: Thao tác quá nhanh, thử lại sau.", wire.TagLimit)
+		return
+	}
+	s.observeMessage(clientIP)
+	badge := session.TripBadge
+	if badge == "" {
+		badge = guard.TripBadgeFromPubHex(pubHex)
+	}
+	s.markTripExposed(pubHex)
+	s.Hub.BroadcastTripReveal(pubHex, badge, sigHex)
+	logInfof("👁 (reveal) Danh tính %s đã lộ seed (công bố bởi %s)", badge, session.DisplayName)
+}
+
+// BroadcastTripReveal publishes the room-wide seed-reveal announcement
+// and stores it, so a restart rebuilds the registry from the notice. The
+// notice carries the identity's signature, which boot re-verifies.
+func (h *Hub) BroadcastTripReveal(pubHex, badge, sigHex string) {
+	now := time.Now().In(serverLocation())
+	notice := noticeWire(now, fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: Danh tính %s đã lộ seed, đừng tin badge này nữa.", now.Format("15:04"), badge), wire.TagTripReveal)
+	notice.ExposedPub = pubHex
+	notice.ExposedSig = strings.ToLower(sigHex)
+	h.storeSystem(notice, now, nil)
 }
