@@ -150,7 +150,10 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 	// A revealed identity fails even when the signature checks out: the
 	// badge no longer identifies one speaker. signature_valid keeps the
 	// two failures apart.
-	exposed := s.isTripExposed(pubHex)
+	// Only a registry entry carrying the published seed counts: an
+	// exposed flag without public proof must not fail the badge.
+	proofSeed := s.exposedSeedHex(pubHex)
+	exposed := proofSeed != ""
 	badge := ""
 	if pubHex != "" {
 		h := sha256.Sum256(pubBytes)
@@ -169,6 +172,9 @@ func (s *ChatServer) handleTripVerify(w http.ResponseWriter, r *http.Request) {
 		"seq":             seq,
 		"server_pub":      serverPub,
 		"exposed":         exposed,
+	}
+	if exposed {
+		resp["exposed_seed"] = proofSeed
 	}
 	if exposed && signatureValid {
 		resp["error"] = "tripcode seed exposed"

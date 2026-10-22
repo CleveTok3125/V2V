@@ -430,6 +430,7 @@ func TestInitHistoryStore_RebuildsExposedRegistry(t *testing.T) {
 	seed := bytes.Repeat([]byte{0x0b}, 32)
 	priv := ed25519.NewKeyFromSeed(seed)
 	pubHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
+	seedHex := hex.EncodeToString(seed)
 
 	rec1, next1 := signTripRecord(t, priv, pubHex, 1, make([]byte, 32), "one")
 	notice := historyRecord{
@@ -437,7 +438,8 @@ func TestInitHistoryStore_RebuildsExposedRegistry(t *testing.T) {
 		Wire: &WireMessage{
 			Type: "system", Tags: wire.WithTags(wire.TagTripReveal),
 			Text: "Danh tính đã lộ seed", ExposedPub: pubHex,
-			ExposedSig: trip.SignReveal(priv, pubHex),
+			ExposedSig:  trip.SignReveal(priv, pubHex),
+			ExposedSeed: seedHex,
 		},
 	}
 	rec2, _ := signTripRecord(t, priv, pubHex, 2, next1, "two")
@@ -485,8 +487,8 @@ func TestInitHistoryStore_RebuildsExposedRegistry(t *testing.T) {
 	if err := json.Unmarshal([]byte(history[1]), &noticeWireMsg); err != nil {
 		t.Fatal(err)
 	}
-	if noticeWireMsg.ExposedPub != pubHex || !wire.HasTag(noticeWireMsg.Tags, wire.TagTripReveal) {
-		t.Fatalf("replayed notice must name its pub: %+v", noticeWireMsg)
+	if noticeWireMsg.ExposedPub != pubHex || noticeWireMsg.ExposedSeed != seedHex || !wire.HasTag(noticeWireMsg.Tags, wire.TagTripReveal) {
+		t.Fatalf("replayed notice must carry the public proof seed: %+v", noticeWireMsg)
 	}
 }
 
@@ -497,6 +499,7 @@ func TestInitHistoryStore_ExpiredRevealDoesNotRefreshLiveRegistry(t *testing.T) 
 	seed := bytes.Repeat([]byte{0x0c}, 32)
 	priv := ed25519.NewKeyFromSeed(seed)
 	pubHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
+	seedHex := hex.EncodeToString(seed)
 
 	oldTS := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339Nano)
 	notice := historyRecord{
@@ -504,7 +507,8 @@ func TestInitHistoryStore_ExpiredRevealDoesNotRefreshLiveRegistry(t *testing.T) 
 		Wire: &WireMessage{
 			Type: "system", Tags: wire.WithTags(wire.TagTripReveal),
 			Text: "Danh tính đã lộ seed", ExposedPub: pubHex,
-			ExposedSig: trip.SignReveal(priv, pubHex),
+			ExposedSig:  trip.SignReveal(priv, pubHex),
+			ExposedSeed: seedHex,
 		},
 	}
 	rec2, _ := signTripRecord(t, priv, pubHex, 1, make([]byte, 32), "later")
@@ -634,8 +638,8 @@ func TestReadPump_TripRevealFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	notice := readWire()
-	if notice.Type != "system" || notice.ExposedPub != pubHex || !wire.HasTag(notice.Tags, wire.TagTripReveal) {
-		t.Fatalf("reveal must broadcast a tagged notice naming the pub: %+v", notice)
+	if notice.Type != "system" || notice.ExposedPub != pubHex || notice.ExposedSeed != seedHex || !strings.Contains(notice.Text, seedHex) || !wire.HasTag(notice.Tags, wire.TagTripReveal) {
+		t.Fatalf("reveal must broadcast a tagged notice with the public proof seed: %+v", notice)
 	}
 	if !s.isTripExposed(pubHex) {
 		t.Fatal("server must record the reveal")
@@ -857,8 +861,8 @@ func TestReadPump_TripRevealIsIdempotent(t *testing.T) {
 	}
 }
 
-// A history reveal notice without a valid identity signature is skipped,
-// so editing the history file cannot mark an identity as exposed.
+// A history reveal notice without the published seed is skipped, even with
+// a valid identity signature: a signature alone is authorship, not proof.
 func TestInitHistoryStore_IgnoresForgedRevealNotice(t *testing.T) {
 	testCfg(t)
 	seed := bytes.Repeat([]byte{0x0b}, 32)
@@ -871,7 +875,7 @@ func TestInitHistoryStore_IgnoresForgedRevealNotice(t *testing.T) {
 		Wire: &WireMessage{
 			Type: "system", Tags: wire.WithTags(wire.TagTripReveal),
 			Text: "Danh tính đã lộ seed", ExposedPub: pubHex,
-			ExposedSig: strings.Repeat("00", ed25519.SignatureSize),
+			ExposedSig: trip.SignReveal(priv, pubHex),
 		},
 	}
 	rec2, _ := signTripRecord(t, priv, pubHex, 2, make([]byte, 32), "two")

@@ -59,11 +59,15 @@ type WireMessage struct {
 	// ExposedPub names the identity a seed-reveal notice reports, so a
 	// restart rebuilds the registry without scanning content.
 	ExposedPub string `json:"exposed_pub,omitempty"`
-	// ExposedSig is the identity's signature over its own pub, so boot
-	// only trusts a reveal the key holder authored.
-	ExposedSig string    `json:"exposed_sig,omitempty"`
-	Text       string    `json:"text,omitempty"`
-	Trip       *TripMeta `json:"trip,omitempty"`
+	// ExposedSig is the identity's signature over its own pub, so the
+	// announcement keeps its author even though the seed is the proof.
+	ExposedSig string `json:"exposed_sig,omitempty"`
+	// ExposedSeed is the published seed itself: anyone can derive the pub
+	// from it, so it is the public proof of exposure. It stays in room
+	// history, logs and backups once broadcast; revealing is permanent.
+	ExposedSeed string    `json:"exposed_seed,omitempty"`
+	Text        string    `json:"text,omitempty"`
+	Trip        *TripMeta `json:"trip,omitempty"`
 	// TmpID is the sender's per-session counter, relayed verbatim and
 	// never assigned by the server. ReplyTo quotes a chain height,
 	// relayed verbatim and covered by the link (v2+).
@@ -237,10 +241,11 @@ type VoteRequest struct {
 	Direction int    `json:"dir,omitempty"`
 }
 
-// RevealRequest publishes an identity's seed so the server can warn the
-// room. A dedicated frame keeps the server from scanning chat text, and
-// the seed must derive to the session's trip pub. Sig is the identity's
-// signature over that pub, carried into the stored notice.
+// RevealRequest publishes an identity's seed to the room so the server
+// can warn everyone with public proof. A dedicated frame keeps the
+// server from scanning chat text, and the seed must derive to the
+// session's trip pub. Sig is the identity's signature over that pub,
+// carried into the stored notice as authorship alongside the seed proof.
 type RevealRequest struct {
 	Type string `json:"type"` // "trip_reveal"
 	Seed string `json:"seed,omitempty"`

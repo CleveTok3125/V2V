@@ -92,8 +92,8 @@ func TestCmdBurnConfirmShowsSeedAndNotifies(t *testing.T) {
 	if !trip.VerifyReveal(pubHex, req.Sig) {
 		t.Fatalf("reveal frame must carry the identity's signature, wrote %#v", stub.wrote)
 	}
-	if !strings.Contains(got, "Server đã nhận") {
-		t.Fatalf("confirm must report the accepted notice: %q", got)
+	if !strings.Contains(got, "Server đã công bố seed cho cả phòng") {
+		t.Fatalf("confirm must report the published proof: %q", got)
 	}
 	if sess.BurnArmed {
 		t.Fatal("confirm must disarm the flow")
@@ -111,7 +111,7 @@ func TestCmdBurnConfirmReportsSendFailure(t *testing.T) {
 	if !sess.cmdBurn("/burn") || !sess.cmdBurn("/burn confirm") {
 		t.Fatal("burn confirm must match")
 	}
-	if got := out.String(); !strings.Contains(got, "Cả phòng chưa được cảnh báo") {
+	if got := out.String(); !strings.Contains(got, "Cả phòng chưa nhận được minh chứng") {
 		t.Fatalf("failed send must be reported: %q", got)
 	}
 }

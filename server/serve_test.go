@@ -118,9 +118,10 @@ func TestServeAuthenticated_WarnsExposedIdentity(t *testing.T) {
 	seed := bytes.Repeat([]byte{0x51}, 32)
 	priv := ed25519.NewKeyFromSeed(seed)
 	pubHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
+	seedHex := hex.EncodeToString(seed)
 
 	s := NewChatServer()
-	s.markTripExposed(pubHex)
+	s.markTripExposed(pubHex, seedHex)
 	client, server := dialAuthPair(t, s)
 	session := &ClientSession{
 		Conn:        server,
@@ -152,8 +153,8 @@ func TestServeAuthenticated_WarnsExposedIdentity(t *testing.T) {
 			break
 		}
 	}
-	if !strings.Contains(warn.Text, "đã lộ seed") {
-		t.Fatalf("join warning must mention the exposed seed: %+v", warn)
+	if !strings.Contains(warn.Text, "đã lộ seed "+seedHex) {
+		t.Fatalf("join warning must carry the public proof seed: %+v", warn)
 	}
 
 	client.Close()

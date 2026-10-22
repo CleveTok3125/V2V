@@ -122,16 +122,17 @@ func (s *ChatServer) InitHistoryStore(path string, maxSizeMB int) error {
 			continue
 		}
 		recTime, _ := time.Parse(time.RFC3339Nano, rec.Timestamp)
-		// The reveal announcement names its pub and carries the identity's
-		// signature, so boot rebuilds the registry without scanning
-		// content and refuses a hand-edited notice.
+		// The reveal announcement carries the published seed itself, so boot
+		// rebuilds the registry from public proof without scanning content
+		// and refuses a notice without a seed that derives to the pub.
 		if rec.Wire != nil && rec.Wire.ExposedPub != "" && wire.HasTag(rec.Wire.Tags, wire.TagTripReveal) {
 			pubHex := strings.ToLower(rec.Wire.ExposedPub)
-			if trip.VerifyReveal(pubHex, rec.Wire.ExposedSig) {
+			seedHex := strings.ToLower(strings.TrimSpace(rec.Wire.ExposedSeed))
+			if seedHex != "" && trip.VerifySeed(seedHex, pubHex) {
 				exposedInHistory[pubHex] = true
-				s.markTripExposedAt(pubHex, recTime)
+				s.markTripExposedAt(pubHex, recTime, seedHex)
 			} else {
-				logWarnf("⚠️ (history,reveal) %s: chữ ký công bố không hợp lệ, bỏ qua", strutil.Short(pubHex))
+				logWarnf("⚠️ (history,reveal) %s: thiếu seed công khai hợp lệ, bỏ qua", strutil.Short(pubHex))
 			}
 		}
 		if rec.Wire != nil {

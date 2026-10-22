@@ -189,8 +189,10 @@ func (s *ChatServer) serveAuthenticated(session *ClientSession, clientIP string)
 
 	// A returning identity whose seed is public must hear it before it
 	// posts: the badge no longer separates it from anyone holding the seed.
-	if session.TripPub != "" && s.isTripExposed(session.TripPub) {
-		s.unicastNotice(session, "[Hệ thống]: Danh tính này đã lộ seed, đừng tin badge này nữa.", wire.TagTripReveal)
+	// The warning carries the published seed itself; without public proof
+	// there is nothing verifiable to announce.
+	if proof := s.exposedSeedHex(session.TripPub); session.TripPub != "" && proof != "" {
+		s.unicastNotice(session, fmt.Sprintf("[Hệ thống]: Danh tính này đã lộ seed %s, đừng tin badge này nữa.", proof), wire.TagTripReveal)
 	}
 
 	// Anti-race re-check: a burst that passed the pre-upgrade cap

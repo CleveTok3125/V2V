@@ -19,22 +19,23 @@ const (
 	maxExposedTrips = 10000
 )
 
-// exposedEntry remembers when a seed was revealed. Touch-on-use keeps an
-// active exposed identity flagged while idle entries age out.
+// exposedEntry remembers when a seed was revealed and keeps the
+// published seed itself, so the verify API can return the public proof.
+// Touch-on-use keeps an active exposed identity flagged while idle
+// entries age out.
 type exposedEntry struct {
-	At time.Time
+	At   time.Time
+	Seed string
 }
 
-// markTripExposed records a published seed at the current time. Only a
-// key holder could have produced the announcement, so recording needs
-// no further proof.
-func (s *ChatServer) markTripExposed(pubHex string) {
-	s.markTripExposedAt(pubHex, time.Now())
+// markTripExposed records a published seed at the current time.
+func (s *ChatServer) markTripExposed(pubHex, seedHex string) {
+	s.markTripExposedAt(pubHex, time.Now(), seedHex)
 }
 
 // markTripExposedAt records a published seed at the given timestamp,
 // skipping entries that have already aged past the TTL.
-func (s *ChatServer) markTripExposedAt(pubHex string, at time.Time) {
+func (s *ChatServer) markTripExposedAt(pubHex string, at time.Time, seedHex string) {
 	now := time.Now()
 	if at.IsZero() {
 		at = now
@@ -42,7 +43,7 @@ func (s *ChatServer) markTripExposedAt(pubHex string, at time.Time) {
 	if now.Sub(at) > exposedTripsTTL {
 		return
 	}
-	s.ExposedTrips.Store(pubHex, exposedEntry{At: at})
+	s.ExposedTrips.Store(pubHex, exposedEntry{At: at, Seed: strings.ToLower(seedHex)})
 	s.pruneExposedTrips(now)
 }
 
@@ -53,27 +54,48 @@ func (s *ChatServer) isTripExposed(pubHex string) bool {
 }
 
 func (s *ChatServer) isTripExposedAt(pubHex string, at time.Time) bool {
+	_, ok := s.loadExposedEntry(pubHex, at)
+	return ok
+}
+
+// exposedSeedHex returns the published proof seed for an active entry.
+func (s *ChatServer) exposedSeedHex(pubHex string) string {
+	e, ok := s.loadExposedEntry(pubHex, time.Now())
+	if !ok {
+		return ""
+	}
+	return e.Seed
+}
+
+func (s *ChatServer) loadExposedEntry(pubHex string, at time.Time) (exposedEntry, bool) {
 	v, ok := s.ExposedTrips.Load(pubHex)
 	if !ok {
-		return false
+		return exposedEntry{}, false
 	}
 	e, ok := v.(exposedEntry)
 	if !ok {
 		s.ExposedTrips.Delete(pubHex)
-		return false
+		return exposedEntry{}, false
+	}
+	// An exposed flag without the published seed is not public proof:
+	// drop it instead of warning on an unverifiable claim.
+	if e.Seed == "" {
+		s.ExposedTrips.Delete(pubHex)
+		return exposedEntry{}, false
 	}
 	now := time.Now()
 	if now.Sub(e.At) > exposedTripsTTL {
 		s.ExposedTrips.Delete(pubHex)
-		return false
+		return exposedEntry{}, false
 	}
 	if at.IsZero() {
 		at = now
 	}
 	if at.After(e.At) && now.Sub(at) <= exposedTripsTTL {
-		s.ExposedTrips.Store(pubHex, exposedEntry{At: at})
+		e.At = at
+		s.ExposedTrips.Store(pubHex, e)
 	}
-	return true
+	return e, true
 }
 
 // pruneExposedTrips drops idle entries and enforces the hard cap,
@@ -111,9 +133,9 @@ func (s *ChatServer) pruneExposedTrips(now time.Time) {
 
 // handleTripReveal records a seed the session publishes for its own
 // identity and warns the room. The seed must derive to the session's
-// trip pub, so a client cannot expose someone else, and the frame must
-// carry the identity's signature over that pub: the stored notice proves
-// itself at boot, so a hand-edited history line marks nothing.
+// trip pub, so a client cannot expose someone else. The published seed
+// itself is the public proof: it is broadcast and stored, so revealing
+// is permanent.
 func (s *ChatServer) handleTripReveal(session *ClientSession, clientIP, seedHex, sigHex string) {
 	if session.TripPub == "" {
 		s.unicastNotice(session, "[Hệ thống]: Phiên này không dùng tripcode.", wire.TagTripReveal)
@@ -147,18 +169,21 @@ func (s *ChatServer) handleTripReveal(session *ClientSession, clientIP, seedHex,
 	if badge == "" {
 		badge = guard.TripBadgeFromPubHex(pubHex)
 	}
-	s.markTripExposed(pubHex)
-	s.Hub.BroadcastTripReveal(pubHex, badge, sigHex)
+	s.markTripExposed(pubHex, seedHex)
+	s.Hub.BroadcastTripReveal(pubHex, badge, sigHex, seedHex)
 	logInfof("👁 (reveal) Danh tính %s đã lộ seed (công bố bởi %s)", badge, session.DisplayName)
 }
 
 // BroadcastTripReveal publishes the room-wide seed-reveal announcement
 // and stores it, so a restart rebuilds the registry from the notice. The
-// notice carries the identity's signature, which boot re-verifies.
-func (h *Hub) BroadcastTripReveal(pubHex, badge, sigHex string) {
+// notice carries the published seed itself: anyone can derive the pub
+// from it, which is the public proof of exposure.
+func (h *Hub) BroadcastTripReveal(pubHex, badge, sigHex, seedHex string) {
 	now := time.Now().In(serverLocation())
-	notice := noticeWire(now, fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: Danh tính %s đã lộ seed, đừng tin badge này nữa.", now.Format("15:04"), badge), wire.TagTripReveal)
+	seedHex = strings.ToLower(strings.TrimSpace(seedHex))
+	notice := noticeWire(now, fmt.Sprintf("\x1b[90m%s\x1b[0m [Hệ thống]: Danh tính %s đã lộ seed %s, đừng tin badge này nữa.", now.Format("15:04"), badge, seedHex), wire.TagTripReveal)
 	notice.ExposedPub = pubHex
 	notice.ExposedSig = strings.ToLower(sigHex)
+	notice.ExposedSeed = seedHex
 	h.storeSystem(notice, now, nil)
 }

@@ -27,7 +27,7 @@ func (s *Session) cmdBurn(text string) bool {
 	if text == "/burn" || !s.BurnArmed {
 		s.BurnArmed = true
 		s.emitLocalFeedback("[Local]: Seed là khóa bí mật của danh tính này; hiện ra là bắt đầu lộ.\n" +
-			"  Gõ /burn confirm để hiện seed và báo server. Sau đó /quit và không dùng lại passphrase/salt.\n")
+			"  Gõ /burn confirm để hiện và công bố seed cho cả phòng; seed sẽ lưu trong lịch sử server. Sau đó /quit và không dùng lại passphrase/salt.\n")
 		s.Display.DisplayMu.Unlock()
 		s.refreshTerminal()
 		return true
@@ -44,9 +44,9 @@ func (s *Session) cmdBurn(text string) bool {
 	sendErr := s.sendJSON(wire.RevealRequest{Type: "trip_reveal", Seed: seedHex, Sig: sigHex})
 	s.Display.DisplayMu.Lock()
 	if sendErr != nil {
-		s.emitStatusLocked(fmt.Sprintf("[Local]: Không gửi được thông báo lộ seed: %v. Cả phòng chưa được cảnh báo.\n", sendErr))
+		s.emitStatusLocked(fmt.Sprintf("[Local]: Không gửi được thông báo lộ seed: %v. Cả phòng chưa nhận được minh chứng.\n", sendErr))
 	} else {
-		s.emitStatusLocked("[Local]: Server đã nhận thông báo lộ seed.\n")
+		s.emitStatusLocked("[Local]: Server đã công bố seed cho cả phòng.\n")
 	}
 	s.Display.DisplayMu.Unlock()
 	s.refreshTerminal()

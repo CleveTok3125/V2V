@@ -260,7 +260,12 @@ func TestTripVerifyAPIExposedFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	pubHex := u.Query().Get("pub")
-	srv.markTripExposed(pubHex)
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 7)
+	}
+	seedHex := hex.EncodeToString(seed)
+	srv.markTripExposed(pubHex, seedHex)
 
 	rec := doVerify(t, srv, "10.99.7.7", "", target)
 	var body map[string]any
@@ -269,6 +274,9 @@ func TestTripVerifyAPIExposedFails(t *testing.T) {
 	}
 	if body["valid"] != false || body["signature_valid"] != true || body["exposed"] != true {
 		t.Fatalf("exposed verdict = %v", body)
+	}
+	if body["exposed_seed"] != seedHex {
+		t.Fatalf("exposed proof seed = %v", body)
 	}
 	if body["error"] != "tripcode seed exposed" {
 		t.Fatalf("error = %v", body["error"])

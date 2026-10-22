@@ -205,6 +205,9 @@ import { gateFetch } from "./pow_bridge.js";
             var expEl = addField("Lộ seed (trip.exposed)", "đã lộ", false);
             expEl.style.color = "#ff6b6b";
             expEl.style.fontWeight = "700";
+            var proofEl = addFieldOrPlaceholder("Minh chứng seed (trip.exposed_seed)", j.exposed_seed);
+            proofEl.style.color = "#ff6b6b";
+            proofEl.style.fontWeight = "700";
         }
         addFieldOrPlaceholder("Số thứ tự (trip.seq)", j.seq);
         addFieldOrPlaceholder("Khoá (trip.pub)", j.pub);
