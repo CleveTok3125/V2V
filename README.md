@@ -135,6 +135,7 @@ Open `http://localhost:10000/web/` for the browser client.
 ## Learn more
 
 - **How it works:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — architecture, wire protocol, tripcode crypto, storage, and security model.
+- **Independent verification:** [`docs/VERIFY.md`](docs/VERIFY.md) — recheck any verdict with standard crypto, no project tooling.
 - **Configuration:** `template/server/instances/default/.env` holds every variable with comments.
 - **Management tool:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`, `config sync/diff/check/manifest/take`, `instance init/list/status/up/down/restart/logs`). Run `v2vctl <command> --help` for the full set.
 

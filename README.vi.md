@@ -135,6 +135,7 @@ Mở `http://localhost:10000/web/` cho bản web.
 ## Tìm hiểu thêm
 
 - **Chi tiết kỹ thuật:** [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — kiến trúc, giao thức wire, tripcode, lưu trữ, bảo mật.
+- **Kiểm chứng độc lập:** [`docs/VERIFY.md`](docs/VERIFY.md) — kiểm lại mọi verdict bằng crypto chuẩn, không cần tool của app.
 - **Cấu hình:** `template/server/instances/default/.env` có đủ biến môi trường với comment.
 - **Công cụ quản trị:** `v2vctl --help` (`role create/list/show/update/delete/add-identity/import`, `keygen ed25519`, `enroll`, `migrate --preset native|wasm|custom`, `list`, `config sync/diff/check/manifest/take`, `instance init/list/status/up/down/restart/logs`). Chạy `v2vctl <command> --help` để xem đầy đủ.
 
