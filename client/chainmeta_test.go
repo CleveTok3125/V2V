@@ -535,11 +535,10 @@ func TestFormatInfoBlockTripDetail(t *testing.T) {
 	*exposed.Trip = *tm
 	exposed.Trip.Exposed = true
 	joined = strings.Join(formatInfoBlock(exposed), "")
-	if !strings.Contains(joined, "đã lộ") || !strings.Contains(joined, "✗") {
-		t.Fatalf("exposed block must fail with a reason:\n%s", joined)
-	}
-	if strings.Contains(joined, "trip.exposed:") {
-		t.Fatalf("exposed flag must ride the trip row:\n%s", joined)
+	for _, want := range []string{"đã lộ seed", "✗", "trip.exposed:", "trip.exposed_seed:"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("exposed block must mirror the verify page (%q missing):\n%s", want, joined)
+		}
 	}
 	// Exposed with a broken signature must report the real failure, not
 	// claim the signature still checks out.
@@ -548,7 +547,7 @@ func TestFormatInfoBlockTripDetail(t *testing.T) {
 	*brokenSig.Trip = *exposed.Trip
 	brokenSig.Trip.ReplyTo = 4
 	joined = strings.Join(formatInfoBlock(brokenSig), "")
-	if !strings.Contains(joined, "đã lộ") || strings.Contains(joined, "chữ ký đúng") {
+	if !strings.Contains(joined, "đã lộ seed") || !strings.Contains(joined, "không khớp") {
 		t.Fatalf("exposed with a broken signature must report it:\n%s", joined)
 	}
 }
@@ -1071,13 +1070,13 @@ func TestFormatInfoBlockWithProof(t *testing.T) {
 		w.Trip.Exposed = true
 		return w
 	}
-	if joined := strings.Join(formatInfoBlockWithProof(mk(), seedHex), ""); !strings.Contains(joined, seedHex) || !strings.Contains(joined, "/burn-verify") {
-		t.Fatalf("info must show the proof seed and how to check it:\n%s", joined)
+	if joined := strings.Join(formatInfoBlockWithProof(mk(), seedHex), ""); !strings.Contains(joined, "trip.exposed_seed:") || !strings.Contains(joined, seedHex) || !strings.Contains(joined, "suy ra trip.pub") {
+		t.Fatalf("info must mirror the verify page proof rows:\n%s", joined)
 	}
 	if joined := strings.Join(formatInfoBlockWithProof(mk(), ""), ""); !strings.Contains(joined, "trang verify") {
 		t.Fatalf("info without proof must point at the proof:\n%s", joined)
 	}
-	if joined := strings.Join(formatInfoBlock(chainedTripWire(mustTestTrip(t), "hello base msg")), ""); strings.Contains(joined, "trip.proof:") {
-		t.Fatalf("unexposed info must not gain a proof row:\n%s", joined)
+	if joined := strings.Join(formatInfoBlock(chainedTripWire(mustTestTrip(t), "hello base msg")), ""); strings.Contains(joined, "trip.exposed") {
+		t.Fatalf("unexposed info must not gain proof rows:\n%s", joined)
 	}
 }

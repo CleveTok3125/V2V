@@ -634,11 +634,11 @@ func formatInfoBlockWithProof(msg WireMessage, proofSeed string) []string {
 		detail := ""
 		switch {
 		case tm.Exposed && verr == nil:
-			// The signature checks out; the identity fails because the
-			// seed is public, so anyone can sign as it.
-			detail = " (đã lộ — chữ ký đúng, seed đã công khai)"
+			// Mirrors the verify page pill: the signature checks out,
+			// but the seed is public, so anyone can sign as it.
+			detail = " (đã lộ seed — chữ ký khớp)"
 		case tm.Exposed:
-			detail = " (đã lộ — " + verr.Error() + ")"
+			detail = " (đã lộ seed — chữ ký không khớp: " + verr.Error() + ")"
 		case verr == nil:
 			verdict = "✓"
 		default:
@@ -646,12 +646,13 @@ func formatInfoBlockWithProof(msg WireMessage, proofSeed string) []string {
 		}
 		out = append(out, row("trip:", fmt.Sprintf("◆ %s %s%s", shortBadge(tm.Pub), verdict, detail)))
 		if tm.Exposed {
+			// Same rows as the verify page, same order: exposure marker
+			// plus the public proof seed, which derives trip.pub.
+			out = append(out, row("trip.exposed:", "đã lộ"))
 			if proofSeed != "" {
-				// Say how to check it: the seed derives to trip.pub, so
-				// the claim is verifiable without trusting this client.
-				out = append(out, row("trip.proof:", proofSeed+" (seed công khai — kiểm bằng /burn-verify <seed> <pub>)"))
+				out = append(out, row("trip.exposed_seed:", proofSeed+" (suy ra trip.pub)"))
 			} else {
-				out = append(out, row("trip.proof:", "chưa thấy thông báo reveal trong phiên này — xem tab 2 / trang verify"))
+				out = append(out, row("trip.exposed_seed:", "chưa thấy trong phiên này — xem tab 2 / trang verify"))
 			}
 		}
 		out = append(out, row("trip.seq:", strconv.FormatUint(uint64(tm.Seq), 10)))
