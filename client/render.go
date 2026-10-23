@@ -420,6 +420,18 @@ func (s *Session) isMine(msg WireMessage) bool {
 
 func (s *Session) renderChatBlock(msg WireMessage) {
 	s.Chain.WireIdx.put(msg)
+	// A reveal notice is public proof: remember the seed by pub so /info
+	// can show it for later exposed messages. Runs on every render path,
+	// replay and muted lines included. Caller holds DisplayMu.
+	if msg.Type == "system" && wire.HasTag(msg.Tags, wire.TagTripReveal) {
+		if seed := strings.ToLower(strings.TrimSpace(msg.ExposedSeed)); seed != "" &&
+			trip.VerifySeed(seed, msg.ExposedPub) {
+			if s.Display.RevealProof == nil {
+				s.Display.RevealProof = map[string]string{}
+			}
+			s.Display.RevealProof[strings.ToLower(msg.ExposedPub)] = seed
+		}
+	}
 	s.Verify.AutoVerifyMu.RLock()
 	av := s.Verify.AutoVerify
 	s.Verify.AutoVerifyMu.RUnlock()

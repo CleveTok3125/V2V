@@ -1054,3 +1054,30 @@ func TestQuoteMarksMoreLines(t *testing.T) {
 		t.Fatalf("a one-line quote must not carry ...: %q", one)
 	}
 }
+
+// /info shows the published seed when the session saw the reveal, and
+// otherwise says where the proof lives instead of implying it is known.
+func TestFormatInfoBlockWithProof(t *testing.T) {
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 33)
+	}
+	priv := ed25519.NewKeyFromSeed(seed)
+	pubHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
+	seedHex := hex.EncodeToString(seed)
+	mk := func() WireMessage {
+		w := chainedTripWire(mustTestTrip(t), "hello base msg")
+		w.Trip.Pub = pubHex
+		w.Trip.Exposed = true
+		return w
+	}
+	if joined := strings.Join(formatInfoBlockWithProof(mk(), seedHex), ""); !strings.Contains(joined, seedHex) || !strings.Contains(joined, "/burn-verify") {
+		t.Fatalf("info must show the proof seed and how to check it:\n%s", joined)
+	}
+	if joined := strings.Join(formatInfoBlockWithProof(mk(), ""), ""); !strings.Contains(joined, "trang verify") {
+		t.Fatalf("info without proof must point at the proof:\n%s", joined)
+	}
+	if joined := strings.Join(formatInfoBlock(chainedTripWire(mustTestTrip(t), "hello base msg")), ""); strings.Contains(joined, "trip.proof:") {
+		t.Fatalf("unexposed info must not gain a proof row:\n%s", joined)
+	}
+}

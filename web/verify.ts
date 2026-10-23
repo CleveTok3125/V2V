@@ -208,9 +208,10 @@ import { gateFetch } from "./pow_bridge.js";
             var expEl = addField("Lộ seed (trip.exposed)", "đã lộ", false);
             expEl.style.color = "#ff6b6b";
             expEl.style.fontWeight = "700";
-            var proofEl = addFieldOrPlaceholder("Minh chứng seed (trip.exposed_seed)", j.exposed_seed);
+            var proofEl = addFieldOrPlaceholder("Seed công khai (trip.exposed_seed)", j.exposed_seed);
             proofEl.style.color = "#ff6b6b";
             proofEl.style.fontWeight = "700";
+            addField("Cách kiểm (verify)", "seed này dẫn xuất ra đúng pub ở trên (/burn-verify <seed> <pub>)", false);
           }
           addFieldOrPlaceholder("Số thứ tự (trip.seq)", j.seq);
           addFieldOrPlaceholder("Khoá (trip.pub)", j.pub);

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +64,33 @@ func TestCmdStatusShowsConnection(t *testing.T) {
 	}
 	if got := out.String(); !strings.Contains(got, "ws://example.com") {
 		t.Fatalf("status must show server URL: %q", got)
+	}
+}
+
+func TestCmdStatusReportsOwnExposure(t *testing.T) {
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 55)
+	}
+	priv := ed25519.NewKeyFromSeed(seed)
+	pub := priv.Public().(ed25519.PublicKey)
+	seedHex := hex.EncodeToString(seed)
+	pubHex := hex.EncodeToString(pub)
+	sess, out := behaviorSession(t)
+	sess.TripPub = pub
+	sess.Display.RevealProof = map[string]string{pubHex: seedHex}
+	if !sess.cmdStatus("/status") {
+		t.Fatal("/status must match")
+	}
+	if got := out.String(); !strings.Contains(got, "đã lộ") || !strings.Contains(got, seedHex) {
+		t.Fatalf("status must report the exposure with its proof: %q", got)
+	}
+	sess, out = behaviorSession(t)
+	if !sess.cmdStatus("/status") {
+		t.Fatal("/status must match")
+	}
+	if got := out.String(); !strings.Contains(got, "không dùng tripcode") {
+		t.Fatalf("status without trip must say so: %q", got)
 	}
 }
 

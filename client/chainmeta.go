@@ -591,6 +591,14 @@ func (s *Session) isLoadHistoryWire(msg WireMessage) bool {
 // starts at the same column; trip inputs carry an explicit trip prefix
 // to never collide with chain-level labels.
 func formatInfoBlock(msg WireMessage) []string {
+	return formatInfoBlockWithProof(msg, "")
+}
+
+// formatInfoBlockWithProof adds the public proof seed for an exposed
+// identity when the client has seen its reveal notice; otherwise it
+// points at the notice and the verify page instead of implying the
+// seed is on hand.
+func formatInfoBlockWithProof(msg WireMessage, proofSeed string) []string {
 	row := func(label, value string) string {
 		return fmt.Sprintf("  %-13s %s\n", label, value)
 	}
@@ -637,6 +645,15 @@ func formatInfoBlock(msg WireMessage) []string {
 			detail = " (" + verr.Error() + ")"
 		}
 		out = append(out, row("trip:", fmt.Sprintf("◆ %s %s%s", shortBadge(tm.Pub), verdict, detail)))
+		if tm.Exposed {
+			if proofSeed != "" {
+				// Say how to check it: the seed derives to trip.pub, so
+				// the claim is verifiable without trusting this client.
+				out = append(out, row("trip.proof:", proofSeed+" (seed công khai — kiểm bằng /burn-verify <seed> <pub>)"))
+			} else {
+				out = append(out, row("trip.proof:", "chưa thấy thông báo reveal trong phiên này — xem tab 2 / trang verify"))
+			}
+		}
 		out = append(out, row("trip.seq:", strconv.FormatUint(uint64(tm.Seq), 10)))
 		// List every signature input so the trip verdict is checkable by eye.
 		out = append(out, row("trip.pub:", hexField(tm.Pub)))

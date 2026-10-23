@@ -454,3 +454,33 @@ func TestLoneFenceRendersLiteral(t *testing.T) {
 		t.Fatalf("empty body = %q, want the raw text", got)
 	}
 }
+
+// A reveal notice teaches the session the public proof seed, so /info
+// can show it for later exposed messages. A notice whose seed does not
+// derive to the pub teaches nothing.
+func TestRenderChatBlockCachesRevealProof(t *testing.T) {
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 21)
+	}
+	priv := ed25519.NewKeyFromSeed(seed)
+	pubHex := hex.EncodeToString(priv.Public().(ed25519.PublicKey))
+	seedHex := hex.EncodeToString(seed)
+	sess, _ := behaviorSession(t)
+	sess.renderChatBlock(WireMessage{
+		Type: "system", Tags: wire.WithTags(wire.TagTripReveal),
+		Text:       "Danh tính đã lộ seed " + seedHex,
+		ExposedPub: pubHex, ExposedSeed: seedHex,
+	})
+	if got := sess.Display.RevealProof[pubHex]; got != seedHex {
+		t.Fatalf("proof cache = %q, want %q", got, seedHex)
+	}
+	sess.renderChatBlock(WireMessage{
+		Type: "system", Tags: wire.WithTags(wire.TagTripReveal),
+		Text:       "Danh tính đã lộ seed",
+		ExposedPub: pubHex, ExposedSeed: strings.Repeat("00", 32),
+	})
+	if got := sess.Display.RevealProof[pubHex]; got != seedHex {
+		t.Fatalf("bad seed must not overwrite the proof: %q", got)
+	}
+}

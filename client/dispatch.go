@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/CleveTok3125/V2V/lib/guard"
 	"github.com/CleveTok3125/V2V/lib/wire"
 )
 
@@ -183,8 +186,16 @@ func (s *Session) cmdStatus(text string) bool {
 	}
 	s.Display.ShowJoinMu.RUnlock()
 	s.Display.DisplayMu.Lock()
-	s.emitLocalFeedback(fmt.Sprintf("[Local]: Server: %s | Đã kết nối: %s | Phiên bản: %s | Show-join: %s\n",
-		s.WSURL, time.Since(s.Connected).Round(time.Second), Version, sj))
+	tripInfo := "không dùng tripcode"
+	if len(s.TripPub) == ed25519.PublicKeySize {
+		pubHex := hex.EncodeToString(s.TripPub)
+		tripInfo = guard.TripBadgeFromPubHex(pubHex)
+		if proof := s.Display.RevealProof[strings.ToLower(pubHex)]; proof != "" {
+			tripInfo += fmt.Sprintf(" ✗ (đã lộ — seed công khai: %s)", proof)
+		}
+	}
+	s.emitLocalFeedback(fmt.Sprintf("[Local]: Server: %s\n  Đã kết nối: %s\n  Phiên bản: %s\n  Show-join: %s\n  Trip: %s\n",
+		s.WSURL, time.Since(s.Connected).Round(time.Second), Version, sj, tripInfo))
 	s.Display.DisplayMu.Unlock()
 	return true
 }
@@ -210,7 +221,7 @@ func helpLines() []helpLine {
 		{"/quit, /q", "Rời phòng chat và tắt ứng dụng"},
 		{"/showjoin, /sj", "Bật/tắt hiện thông báo người khác ra vào phòng cho các tin kế tiếp"},
 		{"/whoami, /w", "Thông tin danh tính và quyền hiện tại"},
-		{"/status", "Trạng thái kết nối và phiên bản client"},
+		{"/status", "Trạng thái kết nối, phiên bản và tripcode"},
 		{"/autoverify, /av", "Bật/tắt auto-verify trip (mặc định BẬT, queue FIFO, verify song song)"},
 		{"/notify, /nt [<tag> on|off | all on|off | powmin <N>]", "Ẩn/hiện thông báo theo tag"},
 		{"/info <n>[:hash]", "Xem đầy đủ metadata tin nhắn (verify lại tại local)"},
@@ -658,6 +669,16 @@ func (s *Session) expandInPlace(height uint64) {
 	s.refreshTerminal()
 }
 
+// revealProofLocked returns the published seed the client saw for an
+// exposed chat message's pub, or "" when no reveal notice reached this
+// session. Caller holds DisplayMu.
+func (s *Session) revealProofLocked(msg WireMessage) string {
+	if msg.Trip == nil || !msg.Trip.Exposed {
+		return ""
+	}
+	return s.Display.RevealProof[strings.ToLower(msg.Trip.Pub)]
+}
+
 func (s *Session) cmdInfo(text string) bool {
 	if !(text == "/info" || strings.HasPrefix(text, "/info ")) {
 		return false
@@ -687,7 +708,7 @@ func (s *Session) cmdInfo(text string) bool {
 	}
 	// One entry: the rows already end with a newline, so joining them empty
 	// keeps the block together and trimming drops the last one.
-	rows := formatInfoBlock(wire)
+	rows := formatInfoBlockWithProof(wire, s.revealProofLocked(wire))
 	if vote, ok := s.Chain.Votes[height]; ok {
 		rows = append(rows, fmt.Sprintf("  %-13s %d upvotes, %d downvotes (%+d)\n", "votes:", vote.Upvotes, vote.Downvotes, vote.score()))
 	}

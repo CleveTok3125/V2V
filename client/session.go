@@ -122,6 +122,10 @@ type DisplayState struct {
 	// Under DisplayMu.
 	PendingGreeting string
 
+	// RevealProof remembers published seeds by lowercase pub hex, so /info
+	// can show the public proof for an exposed identity. Populated from
+	// reveal notices on every render path, muted or not. Under DisplayMu.
+	RevealProof map[string]string
 	// StatusMsg is a transient footer notice (history sync results).
 	// Shown in the status bar until StatusUntil, then cleared. Under
 	// DisplayMu like the other display state.
