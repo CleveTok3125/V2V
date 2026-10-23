@@ -584,8 +584,12 @@ func TestReadPump_TripRevealFrame(t *testing.T) {
 	s.Hub.ClientsMu.Lock()
 	s.Hub.Clients[server] = session
 	s.Hub.ClientsMu.Unlock()
+	readDone := make(chan struct{})
 	go session.WritePump()
-	go s.ReadPump(session, "127.0.0.1")
+	go func() {
+		s.ReadPump(session, "127.0.0.1")
+		close(readDone)
+	}()
 
 	sign := func(seq uint32, prev []byte, text string, tmpID uint64) (sigHex, prevHex string, next []byte) {
 		h := sha256.Sum256([]byte(text))
@@ -649,21 +653,13 @@ func TestReadPump_TripRevealFrame(t *testing.T) {
 	if echo.Trip == nil || !echo.Trip.Exposed {
 		t.Fatalf("later messages must stay flagged: %+v", echo.Trip)
 	}
-	// Drain the server side before restoring Cfg: the leave broadcast
-	// on unregister still needs the test config.
+	// Wait for ReadPump to exit before restoring Cfg: unregister (and its
+	// leave broadcast, which reads the test config) runs on its return path.
 	client.Close()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		s.Hub.ClientsMu.RLock()
-		n := len(s.Hub.Clients)
-		s.Hub.ClientsMu.RUnlock()
-		if n == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("server did not unregister")
-		}
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-readDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("ReadPump did not exit after client close")
 	}
 }
 
@@ -679,19 +675,8 @@ func TestReadPump_TripRevealRejectsForeignSeed(t *testing.T) {
 	displayName := "An#abcd"
 
 	s := NewChatServer()
-	client, server := dialAuthPair(t, s)
-	session := &ClientSession{
-		Conn:        server,
-		Send:        make(chan []byte, 256),
-		DisplayName: displayName,
-		Perms:       GetDefaultPermission(),
-		TripPub:     pubHex,
-	}
-	s.Hub.ClientsMu.Lock()
-	s.Hub.Clients[server] = session
-	s.Hub.ClientsMu.Unlock()
-	go session.WritePump()
-	go s.ReadPump(session, "127.0.0.1")
+	client, readDone := liveRevealSession(t, s, pubHex, displayName)
+	defer closeRevealSession(t, s, client, readDone)
 
 	foreign := hex.EncodeToString(bytes.Repeat([]byte{0x12}, 32))
 	body, _ := json.Marshal(map[string]any{"type": "trip_reveal", "seed": foreign})
@@ -713,27 +698,14 @@ func TestReadPump_TripRevealRejectsForeignSeed(t *testing.T) {
 	if s.isTripExposed(pubHex) {
 		t.Fatal("refused reveal must not mark the identity")
 	}
-
-	client.Close()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		s.Hub.ClientsMu.RLock()
-		n := len(s.Hub.Clients)
-		s.Hub.ClientsMu.RUnlock()
-		if n == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("server did not unregister")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 }
 
 // liveRevealSession registers a session carrying pubHex and starts its
-// pumps. closeRevealSession waits for the unregister so later broadcasts
-// do not target a dead hub entry.
-func liveRevealSession(t *testing.T, s *ChatServer, pubHex, displayName string) *websocket.Conn {
+// pumps, reporting when ReadPump exits. closeRevealSession waits for that
+// exit: unregister (and its leave broadcast, which reads test-mutated
+// globals like Cfg.Static) runs on ReadPump's return path, so waiting for
+// the Clients map alone would still race the test's deferred restore.
+func liveRevealSession(t *testing.T, s *ChatServer, pubHex, displayName string) (*websocket.Conn, <-chan struct{}) {
 	t.Helper()
 	client, server := dialAuthPair(t, s)
 	session := &ClientSession{
@@ -746,26 +718,23 @@ func liveRevealSession(t *testing.T, s *ChatServer, pubHex, displayName string) 
 	s.Hub.ClientsMu.Lock()
 	s.Hub.Clients[server] = session
 	s.Hub.ClientsMu.Unlock()
+	readDone := make(chan struct{})
 	go session.WritePump()
-	go s.ReadPump(session, "127.0.0.1")
-	return client
+	go func() {
+		s.ReadPump(session, "127.0.0.1")
+		close(readDone)
+	}()
+	return client, readDone
 }
 
-func closeRevealSession(t *testing.T, s *ChatServer, client *websocket.Conn) {
+func closeRevealSession(t *testing.T, s *ChatServer, client *websocket.Conn, readDone <-chan struct{}) {
 	t.Helper()
+	_ = s
 	client.Close()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		s.Hub.ClientsMu.RLock()
-		n := len(s.Hub.Clients)
-		s.Hub.ClientsMu.RUnlock()
-		if n == 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("server did not unregister")
-		}
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-readDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("ReadPump did not exit after client close")
 	}
 }
 
@@ -781,8 +750,8 @@ func TestReadPump_TripRevealRejectsBadSignature(t *testing.T) {
 	otherPub := hex.EncodeToString(otherPriv.Public().(ed25519.PublicKey))
 
 	s := NewChatServer()
-	client := liveRevealSession(t, s, pubHex, "An#abcd")
-	defer closeRevealSession(t, s, client)
+	client, readDone := liveRevealSession(t, s, pubHex, "An#abcd")
+	defer closeRevealSession(t, s, client, readDone)
 
 	body, _ := json.Marshal(map[string]any{
 		"type": "trip_reveal", "seed": hex.EncodeToString(seed),
@@ -822,8 +791,8 @@ func TestReadPump_TripRevealIsIdempotent(t *testing.T) {
 	})
 
 	s := NewChatServer()
-	client := liveRevealSession(t, s, pubHex, "An#abcd")
-	defer closeRevealSession(t, s, client)
+	client, readDone := liveRevealSession(t, s, pubHex, "An#abcd")
+	defer closeRevealSession(t, s, client, readDone)
 
 	readWire := func() WireMessage {
 		t.Helper()
